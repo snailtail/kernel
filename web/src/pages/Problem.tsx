@@ -1,0 +1,439 @@
+import { useState, type FormEvent, type ReactNode } from 'react';
+import { Link, useParams } from 'react-router';
+import { api, type Activity, type LinkKind, type ProblemDetail, type Status } from '../api';
+import { MajorBadge, PriorityBadge, StatusBadge } from '../components/Badges';
+import { Modal } from '../components/Modal';
+import {
+  CLOSURE_LABEL, FIELD_LABEL, formatDate, LEVEL_LABEL, LINK_LABEL, PRIORITY_LABEL, relativeTime,
+  STATUS_LABEL, STATUS_PHASE, TRANSITION_LABEL,
+} from '../format';
+import { useApi } from '../hooks';
+import { canEdit, isManager, useSession } from '../session';
+
+const LIFECYCLE: Status[] = ['new', 'analysis', 'known_error', 'resolved', 'closed'];
+
+export function ProblemPage() {
+  const { ref } = useParams();
+  const { user, meta } = useSession();
+  const { data: p, setData, error } = useApi<ProblemDetail>(`/api/problems/${ref}`);
+  const [transition, setTransition] = useState<Status | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  if (error) return <div className="error">{error}</div>;
+  if (!p) return null;
+
+  const editable = canEdit(user) && p.status !== 'closed';
+  const save = async (fields: Record<string, unknown>) => {
+    setActionError(null);
+    try {
+      setData(await api.patch<ProblemDetail>(`/api/problems/${p.ref}`, fields));
+    } catch (err) {
+      setActionError((err as Error).message);
+      throw err;
+    }
+  };
+
+  const allowed = meta.transitions[p.status].filter((to) => {
+    if (!canEdit(user)) return false;
+    if ((to === 'closed' || p.status === 'closed') && !isManager(user)) return false;
+    return true;
+  });
+
+  return (
+    <>
+      <header className="problem-head">
+        <div className="crumbs"><Link to="/problems">Problems</Link> / <span className="mono">{p.ref}</span></div>
+        <EditableTitle value={p.title} editable={editable} onSave={(title) => save({ title })} />
+        <div className="badges">
+          <StatusBadge status={p.status} />
+          <PriorityBadge priority={p.priority} />
+          {p.is_major && <MajorBadge />}
+          <span className="muted">
+            Logged by {p.created_by_name} {relativeTime(p.created_at)} · {p.detection === 'proactive' ? 'Proactive' : 'Reactive'}
+          </span>
+        </div>
+        <ol className="lifecycle">
+          {LIFECYCLE.map((s) => (
+            <li key={s} className={s === p.status ? 'current' : LIFECYCLE.indexOf(s) < LIFECYCLE.indexOf(p.status) ? 'done' : ''}>
+              <span className="step-name">{STATUS_LABEL[s]}</span>
+              <span className="step-phase">{STATUS_PHASE[s]}</span>
+            </li>
+          ))}
+        </ol>
+        {allowed.length > 0 && (
+          <div className="transitions">
+            {allowed.map((to) => (
+              <button key={to} className={`btn ${LIFECYCLE.indexOf(to) > LIFECYCLE.indexOf(p.status) ? 'primary' : ''}`} onClick={() => setTransition(to)}>
+                {LIFECYCLE.indexOf(to) < LIFECYCLE.indexOf(p.status) ? 'Reopen analysis' : TRANSITION_LABEL[to]}
+              </button>
+            ))}
+          </div>
+        )}
+        {actionError && <div className="error">{actionError}</div>}
+      </header>
+
+      <div className="problem-grid">
+        <div className="problem-main">
+          <TextSection title="Description" hint="Symptoms, scope and business impact" value={p.description} editable={editable} onSave={(v) => save({ description: v })} />
+          <TextSection title="Root cause" hint="Findings from problem analysis" value={p.root_cause} editable={editable} onSave={(v) => save({ root_cause: v })} />
+          <TextSection title="Workaround" hint="How to reduce or eliminate the impact until resolved" value={p.workaround} editable={editable} onSave={(v) => save({ workaround: v })} />
+          <TextSection title="Resolution" hint="The permanent solution, usually implemented through a change" value={p.resolution} editable={editable} onSave={(v) => save({ resolution: v })} />
+          {p.is_major && (
+            <TextSection title="Major problem review" hint="What went well, what could be improved, how to prevent recurrence, follow-up actions"
+              value={p.major_review} editable={editable} onSave={(v) => save({ major_review: v })} />
+          )}
+          <ActivitySection problem={p} onChange={setData} />
+        </div>
+        <aside className="problem-side">
+          <DetailsPanel problem={p} editable={editable} onSave={save} />
+          <LinksPanel problem={p} editable={canEdit(user)} onChange={setData} />
+        </aside>
+      </div>
+
+      {transition && (
+        <TransitionModal problem={p} to={transition} onClose={() => setTransition(null)} onDone={(np) => { setData(np); setTransition(null); }} />
+      )}
+    </>
+  );
+}
+
+function EditableTitle({ value, editable, onSave }: { value: string; editable: boolean; onSave: (v: string) => Promise<void> }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  if (draft === null) {
+    return (
+      <h1 className={editable ? 'editable' : ''} onClick={() => editable && setDraft(value)} title={editable ? 'Click to edit' : undefined}>
+        {value}
+      </h1>
+    );
+  }
+  const commit = async () => {
+    if (draft.trim() && draft !== value) await onSave(draft.trim()).catch(() => {});
+    setDraft(null);
+  };
+  return (
+    <input className="title-input" autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={commit}
+      onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setDraft(null); }} />
+  );
+}
+
+function TextSection(props: { title: string; hint: string; value: string; editable: boolean; onSave: (v: string) => Promise<void> }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const commit = async () => {
+    setBusy(true);
+    try {
+      await props.onSave(draft ?? '');
+      setDraft(null);
+    } catch {
+      /* error shown in page header */
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="card text-section">
+      <div className="section-head">
+        <h2>{props.title}</h2>
+        {props.editable && draft === null && <button className="btn-link" onClick={() => setDraft(props.value)}>Edit</button>}
+      </div>
+      {draft !== null ? (
+        <>
+          <textarea autoFocus rows={Math.max(5, draft.split('\n').length + 1)} value={draft} placeholder={props.hint} onChange={(e) => setDraft(e.target.value)} />
+          <div className="actions">
+            <button className="btn" onClick={() => setDraft(null)} disabled={busy}>Cancel</button>
+            <button className="btn primary" onClick={commit} disabled={busy}>Save</button>
+          </div>
+        </>
+      ) : props.value ? (
+        <p className="prose">{props.value}</p>
+      ) : (
+        <p className="placeholder">{props.hint}</p>
+      )}
+    </section>
+  );
+}
+
+function DetailsPanel({ problem: p, editable, onSave }: { problem: ProblemDetail; editable: boolean; onSave: (f: Record<string, unknown>) => Promise<void> }) {
+  const { user, meta } = useSession();
+  const [service, setService] = useState<string | null>(null);
+  const field = (label: string, content: ReactNode) => (
+    <>
+      <dt>{label}</dt>
+      <dd>{content}</dd>
+    </>
+  );
+  const select = (key: string, value: string | number | null, options: [string | number, string][], allowEmpty?: string) =>
+    editable ? (
+      <select value={value ?? ''} onChange={(e) => onSave({ [key]: e.target.value === '' ? null : typeof value === 'number' || key.endsWith('_id') || key === 'impact' || key === 'urgency' ? Number(e.target.value) : e.target.value }).catch(() => {})}>
+        {allowEmpty !== undefined && <option value="">{allowEmpty}</option>}
+        {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+      </select>
+    ) : (
+      options.find(([v]) => v === value)?.[1] ?? allowEmpty ?? '–'
+    );
+
+  return (
+    <section className="card details">
+      <h2>Details</h2>
+      <dl>
+        {field('Assignee', select('assignee_id', p.assignee_id, meta.assignees.map((a) => [a.id, a.display_name]), 'Unassigned'))}
+        {field('Category', select('category_id', p.category_id, meta.categories.filter((c) => c.active || c.id === p.category_id).map((c) => [c.id, c.name]), '–'))}
+        {field('Service / CI', editable ? (
+          <input value={service ?? p.affected_service} placeholder="–" onChange={(e) => setService(e.target.value)}
+            onBlur={() => { if (service !== null && service !== p.affected_service) onSave({ affected_service: service }).catch(() => {}); setService(null); }} />
+        ) : p.affected_service || '–')}
+        {field('Detection', select('detection', p.detection, [['reactive', 'Reactive (incidents)'], ['proactive', 'Proactive (events, trends)']]))}
+        {field('Impact', select('impact', p.impact, [1, 2, 3].map((l) => [l, `${l} – ${LEVEL_LABEL[l]}`])))}
+        {field('Urgency', select('urgency', p.urgency, [1, 2, 3].map((l) => [l, `${l} – ${LEVEL_LABEL[l]}`])))}
+        {field('Priority', <strong>P{p.priority} {PRIORITY_LABEL[p.priority]}</strong>)}
+        {field('Major problem', editable && isManager(user) ? (
+          <label className="check"><input type="checkbox" checked={p.is_major} onChange={(e) => onSave({ is_major: e.target.checked }).catch(() => {})} /> {p.is_major ? 'Yes' : 'No'}</label>
+        ) : p.is_major ? 'Yes' : 'No')}
+        {p.closure_code && field('Closure code', CLOSURE_LABEL[p.closure_code])}
+      </dl>
+      <dl className="dates">
+        {field('Logged', formatDate(p.created_at))}
+        {p.known_error_at && field('Known error', formatDate(p.known_error_at))}
+        {p.resolved_at && field('Resolved', formatDate(p.resolved_at))}
+        {p.closed_at && field('Closed', formatDate(p.closed_at))}
+        {field('Updated', formatDate(p.updated_at))}
+      </dl>
+    </section>
+  );
+}
+
+function LinksPanel({ problem: p, editable, onChange }: { problem: ProblemDetail; editable: boolean; onChange: (p: ProblemDetail) => void }) {
+  const { meta } = useSession();
+  const [adding, setAdding] = useState(false);
+  const [form, setForm] = useState({ kind: (p.detection === 'proactive' ? 'event' : 'incident') as LinkKind, reference: '', system: '', url: '', note: '' });
+  const [error, setError] = useState<string | null>(null);
+
+  const add = async (e: FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    try {
+      onChange(await api.post<ProblemDetail>(`/api/problems/${p.ref}/links`, form));
+      setForm((f) => ({ ...f, reference: '', url: '', note: '' }));
+      setAdding(false);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+  const remove = async (id: number) => {
+    if (!confirm('Remove this link?')) return;
+    try {
+      onChange(await api.del<ProblemDetail>(`/api/problems/${p.ref}/links/${id}`));
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
+  return (
+    <section className="card links">
+      <div className="section-head">
+        <h2>Linked records</h2>
+        {editable && !adding && <button className="btn-link" onClick={() => setAdding(true)}>+ Link</button>}
+      </div>
+      {adding && (
+        <form className="link-form" onSubmit={add}>
+          <div className="row">
+            <select value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value as LinkKind })}>
+              {meta.link_kinds.map((k) => <option key={k} value={k}>{LINK_LABEL[k]}</option>)}
+            </select>
+            <input required autoFocus placeholder="Reference, e.g. INC0012345" value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} />
+          </div>
+          <input placeholder="System (ServiceNow, Jira, Zabbix…)" value={form.system} onChange={(e) => setForm({ ...form, system: e.target.value })} />
+          <input type="url" placeholder="https://… (link to the record)" value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} />
+          <input placeholder="Note" value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} />
+          <div className="actions">
+            <button type="button" className="btn" onClick={() => setAdding(false)}>Cancel</button>
+            <button className="btn primary">Add link</button>
+          </div>
+        </form>
+      )}
+      {error && <div className="error">{error}</div>}
+      {p.links.length === 0 && !adding && <p className="placeholder">No incidents, events or changes linked.</p>}
+      {meta.link_kinds.map((kind) => {
+        const items = p.links.filter((l) => l.kind === kind);
+        if (!items.length) return null;
+        return (
+          <div key={kind} className="link-group">
+            <h3>{LINK_LABEL[kind]}s <span className="count">{items.length}</span></h3>
+            <ul>
+              {items.map((l) => (
+                <li key={l.id}>
+                  <div className="link-main">
+                    {l.url ? <a href={l.url} target="_blank" rel="noreferrer noopener" className="mono">{l.reference} ↗</a> : <span className="mono">{l.reference}</span>}
+                    {l.system && <span className="tag">{l.system}</span>}
+                    {editable && <button className="btn-icon small" onClick={() => remove(l.id)} aria-label="Remove link">×</button>}
+                  </div>
+                  {l.note && <div className="muted small">{l.note}</div>}
+                </li>
+              ))}
+            </ul>
+          </div>
+        );
+      })}
+    </section>
+  );
+}
+
+function ActivitySection({ problem: p, onChange }: { problem: ProblemDetail; onChange: (p: ProblemDetail) => void }) {
+  const { user } = useSession();
+  const [body, setBody] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<'all' | 'comments'>('all');
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      onChange(await api.post<ProblemDetail>(`/api/problems/${p.ref}/comments`, { body }));
+      setBody('');
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const items = filter === 'comments' ? p.activity.filter((a) => a.kind === 'comment' || (a.kind === 'status' && a.body)) : p.activity;
+
+  return (
+    <section className="card">
+      <div className="section-head">
+        <h2>Work notes &amp; history</h2>
+        <div className="toggle">
+          <button className={filter === 'all' ? 'on' : ''} onClick={() => setFilter('all')}>All</button>
+          <button className={filter === 'comments' ? 'on' : ''} onClick={() => setFilter('comments')}>Notes</button>
+        </div>
+      </div>
+      {canEdit(user) && (
+        <form onSubmit={submit} className="comment-form">
+          <textarea rows={3} placeholder="Add a work note: findings, analysis steps, decisions…" value={body} onChange={(e) => setBody(e.target.value)} />
+          {error && <div className="error">{error}</div>}
+          <div className="actions">
+            <button className="btn primary" disabled={busy || !body.trim()}>Add note</button>
+          </div>
+        </form>
+      )}
+      <ul className="activity">
+        {items.map((a) => <li key={a.id}><ActivityLine activity={a} /></li>)}
+      </ul>
+    </section>
+  );
+}
+
+export function ActivityLine({ activity: a }: { activity: Activity }) {
+  let text: ReactNode;
+  switch (a.kind) {
+    case 'created':
+      text = 'logged the problem';
+      break;
+    case 'comment':
+      text = 'added a note';
+      break;
+    case 'status':
+      text = (
+        <>
+          moved it from <strong>{STATUS_LABEL[a.data.from as Status]}</strong> to <strong>{STATUS_LABEL[a.data.to as Status]}</strong>
+          {a.data.closure_code && <> ({CLOSURE_LABEL[a.data.closure_code]})</>}
+        </>
+      );
+      break;
+    case 'update':
+      text = `updated ${Object.keys(a.data).map((k) => FIELD_LABEL[k] ?? k).join(', ')}`;
+      break;
+    case 'link':
+      text = a.body.charAt(0).toLowerCase() + a.body.slice(1);
+      break;
+  }
+  return (
+    <div className={`activity-item kind-${a.kind}`}>
+      <div className="activity-head">
+        <strong>{a.user_name ?? 'System'}</strong> {text}
+        <time title={formatDate(a.created_at)}>{relativeTime(a.created_at)}</time>
+      </div>
+      {(a.kind === 'comment' || (a.kind === 'status' && a.body)) && <p className="prose activity-body">{a.body}</p>}
+    </div>
+  );
+}
+
+function TransitionModal({ problem: p, to, onClose, onDone }: { problem: ProblemDetail; to: Status; onClose: () => void; onDone: (p: ProblemDetail) => void }) {
+  const { meta } = useSession();
+  const [form, setForm] = useState({
+    root_cause: p.root_cause,
+    workaround: p.workaround,
+    resolution: p.resolution,
+    major_review: p.major_review,
+    closure_code: to === 'closed' ? (p.status === 'resolved' ? 'resolved' : p.status === 'new' ? 'duplicate' : '') : '',
+    comment: '',
+  });
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const set = (k: keyof typeof form) => (e: { target: { value: string } }) => setForm({ ...form, [k]: e.target.value });
+  const reopen = LIFECYCLE.indexOf(to) < LIFECYCLE.indexOf(p.status);
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    const body: Record<string, unknown> = { to, comment: form.comment || undefined };
+    if (to === 'known_error') Object.assign(body, { root_cause: form.root_cause, workaround: form.workaround });
+    if (to === 'resolved') Object.assign(body, { resolution: form.resolution });
+    if (to === 'closed') Object.assign(body, { closure_code: form.closure_code || undefined, ...(p.is_major ? { major_review: form.major_review } : {}) });
+    try {
+      onDone(await api.post<ProblemDetail>(`/api/problems/${p.ref}/transition`, body));
+    } catch (err) {
+      setError((err as Error).message);
+      setBusy(false);
+    }
+  };
+
+  const title = reopen ? 'Reopen analysis' : TRANSITION_LABEL[to];
+  return (
+    <Modal title={`${title} – ${p.ref}`} onClose={onClose}>
+      <form className="form" onSubmit={submit}>
+        {to === 'known_error' && (
+          <>
+            <p className="hint full">Error control: the problem has been analysed. Document the root cause and any workaround so it is available in the known error database.</p>
+            <label className="full">Root cause <span className="req">required</span><textarea required rows={5} value={form.root_cause} onChange={set('root_cause')} /></label>
+            <label className="full">Workaround<textarea rows={4} value={form.workaround} onChange={set('workaround')} /></label>
+          </>
+        )}
+        {to === 'resolved' && (
+          <label className="full">Resolution <span className="req">required</span>
+            <textarea required rows={5} value={form.resolution} onChange={set('resolution')} placeholder="The permanent solution. Link the implementing change under Linked records." />
+          </label>
+        )}
+        {to === 'closed' && (
+          <>
+            <label className="full">Closure code <span className="req">required</span>
+              <select required value={form.closure_code} onChange={set('closure_code')}>
+                <option value="">Choose…</option>
+                {meta.closure_codes.map((c) => <option key={c} value={c}>{CLOSURE_LABEL[c]}</option>)}
+              </select>
+            </label>
+            {p.is_major && form.closure_code !== 'duplicate' && form.closure_code !== 'cancelled' && (
+              <label className="full">Major problem review <span className="req">required</span>
+                <textarea required rows={6} value={form.major_review} onChange={set('major_review')}
+                  placeholder="What went well, what could be improved, how to prevent recurrence, follow-up actions" />
+              </label>
+            )}
+          </>
+        )}
+        <label className="full">
+          {reopen ? 'Reason for reopening' : 'Comment'}
+          <textarea rows={3} value={form.comment} onChange={set('comment')} required={reopen} />
+        </label>
+        {error && <div className="error full">{error}</div>}
+        <div className="actions full">
+          <button type="button" className="btn" onClick={onClose}>Cancel</button>
+          <button className="btn primary" disabled={busy}>{title}</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}

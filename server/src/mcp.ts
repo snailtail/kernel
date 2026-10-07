@@ -1,0 +1,263 @@
+// MCP server (Streamable HTTP, stateless) exposing Kernel to Claude and other MCP clients.
+// Each request authenticates with a personal API token and acts as that user.
+import type { FastifyInstance } from 'fastify';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { z } from 'zod';
+import type { User } from './auth.js';
+import { query } from './db.js';
+import { badRequest, HttpError } from './errors.js';
+import * as problems from './problems.js';
+import { CLOSURE_CODES, STATUSES, TRANSITIONS } from './workflow.js';
+
+const INSTRUCTIONS = `Kernel is a problem management system following the ITIL 4 problem management practice.
+Lifecycle: new (problem identification) -> analysis (problem control) -> known_error (error control) -> resolved -> closed.
+A known error requires a documented root cause; resolving requires a resolution; closing requires a closure code
+and, for major problems, a major problem review. Problems are identified reactively (from incidents) or proactively
+(from events, trends). Link incidents, events and changes in external systems with link_record.
+Impact and urgency are 1 (high) to 3 (low); priority = impact + urgency - 1 (1 critical .. 5 planning).
+Before creating a problem, search existing problems and the known error database to avoid duplicates.`;
+
+const json = (value: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(value, null, 2) }] });
+
+async function resolveCategory(name?: string | null) {
+  if (name === undefined) return undefined;
+  if (name === null || name === '') return null;
+  const { rows } = await query('SELECT id FROM categories WHERE lower(name) = lower($1)', [name]);
+  if (!rows[0]) throw badRequest(`Unknown category "${name}". Use list_reference_data to see categories.`);
+  return rows[0].id as number;
+}
+
+async function resolveAssignee(username?: string | null) {
+  if (username === undefined) return undefined;
+  if (username === null || username === '') return null;
+  const { rows } = await query('SELECT id FROM users WHERE lower(username) = lower($1) AND active', [username]);
+  if (!rows[0]) throw badRequest(`Unknown user "${username}". Use list_reference_data to see assignees.`);
+  return rows[0].id as number;
+}
+
+/** Strips the activity log down for get_problem so responses stay compact. */
+function compactProblem(p: Awaited<ReturnType<typeof problems.getProblem>>, activityLimit: number) {
+  const { activity, ...rest } = p;
+  return { ...rest, activity: activity.slice(0, activityLimit), activity_total: activity.length };
+}
+
+const editable = {
+  title: z.string().describe('Short summary of the problem'),
+  description: z.string().describe('Symptoms, scope and business impact'),
+  category: z.string().nullable().describe('Category name, see list_reference_data'),
+  affected_service: z.string().describe('Affected service or configuration item'),
+  detection: z.enum(['reactive', 'proactive']).describe('reactive = from incidents, proactive = from events/trends'),
+  impact: z.number().int().min(1).max(3).describe('1 high, 2 medium, 3 low'),
+  urgency: z.number().int().min(1).max(3).describe('1 high, 2 medium, 3 low'),
+  is_major: z.boolean().describe('Major problem (problem managers only)'),
+  assignee: z.string().nullable().describe('Username of the problem owner/analyst'),
+  root_cause: z.string().describe('Root cause analysis findings'),
+  workaround: z.string().describe('Workaround that reduces or eliminates the impact'),
+  resolution: z.string().describe('Permanent solution'),
+  major_review: z.string().describe('Major problem review: what went well, what to improve, follow-ups'),
+};
+
+const optionalEditable = Object.fromEntries(Object.entries(editable).map(([k, v]) => [k, v.optional()])) as {
+  [K in keyof typeof editable]: z.ZodOptional<(typeof editable)[K]>;
+};
+
+async function toInput(args: Partial<Record<keyof typeof editable, unknown>>) {
+  const { category, assignee, ...rest } = args as any;
+  const input: any = { ...rest };
+  const category_id = await resolveCategory(category);
+  const assignee_id = await resolveAssignee(assignee);
+  if (category_id !== undefined) input.category_id = category_id;
+  if (assignee_id !== undefined) input.assignee_id = assignee_id;
+  return input;
+}
+
+function buildServer(user: User) {
+  const server = new McpServer({ name: 'kernel', version: '0.1.0' }, { instructions: INSTRUCTIONS });
+
+  const tool = <S extends z.ZodRawShape>(
+    name: string,
+    description: string,
+    inputSchema: S,
+    readOnly: boolean,
+    run: (args: z.infer<z.ZodObject<S>>) => Promise<unknown>,
+  ) =>
+    server.registerTool(
+      name,
+      { description, inputSchema, annotations: { readOnlyHint: readOnly, destructiveHint: false } },
+      (async (args: any) => {
+        try {
+          return json(await run(args));
+        } catch (err) {
+          const message =
+            err instanceof z.ZodError ? err.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ') : (err as Error).message;
+          return { isError: true, content: [{ type: 'text' as const, text: message }] };
+        }
+      }) as any,
+    );
+
+  tool('whoami', 'Show the Kernel user this connection acts as, and its role.', {}, true, async () => user);
+
+  tool(
+    'list_reference_data',
+    'List statuses, allowed transitions, closure codes, link kinds, categories and assignable users.',
+    {},
+    true,
+    async () => {
+      const [categories, users] = await Promise.all([
+        query('SELECT name FROM categories WHERE active ORDER BY name'),
+        query("SELECT username, display_name, role FROM users WHERE active AND role <> 'viewer' ORDER BY username"),
+      ]);
+      return {
+        statuses: STATUSES,
+        transitions: TRANSITIONS,
+        closure_codes: CLOSURE_CODES,
+        link_kinds: problems.LINK_KINDS,
+        categories: categories.rows.map((r) => r.name),
+        assignees: users.rows,
+      };
+    },
+  );
+
+  tool(
+    'search_problems',
+    'Search problem records. Free text matches ref, title, description, service, root cause, workaround and resolution.',
+    {
+      q: z.string().optional().describe('Free text search'),
+      status: z.enum([...STATUSES, 'open', 'all']).optional().describe('Default "open" (not resolved/closed)'),
+      assignee: z.string().optional().describe('Username'),
+      priority: z.number().int().min(1).max(5).optional(),
+      is_major: z.boolean().optional(),
+      sort: z.enum(['priority', 'updated', 'created', 'ref']).optional(),
+      limit: z.number().int().min(1).max(100).optional().describe('Default 25'),
+    },
+    true,
+    async ({ assignee, ...args }) => {
+      const rows = await problems.listProblems(
+        problems.listSchema.parse({ ...args, limit: args.limit ?? 25, assignee_id: (await resolveAssignee(assignee)) ?? undefined }),
+      );
+      return rows.map((p) => ({
+        ref: p.ref, title: p.title, status: p.status, priority: p.priority, is_major: p.is_major,
+        category: p.category, affected_service: p.affected_service, assignee: p.assignee, updated_at: p.updated_at,
+      }));
+    },
+  );
+
+  tool(
+    'get_problem',
+    'Get a problem record with all fields, linked incidents/events/changes and recent activity.',
+    { ref: z.string().describe('Problem reference, e.g. PRB000012'), activity_limit: z.number().int().min(0).max(500).optional() },
+    true,
+    async ({ ref, activity_limit }) => compactProblem(await problems.getProblem(ref), activity_limit ?? 20),
+  );
+
+  tool(
+    'search_known_errors',
+    'Search the known error database (KEDB) for known errors and their workarounds.',
+    { q: z.string().optional(), include_resolved: z.boolean().optional().describe('Also include resolved/closed former known errors') },
+    true,
+    async ({ q, include_resolved }) =>
+      (await problems.searchKnownErrors(q, include_resolved)).map((p) => ({
+        ref: p.ref, title: p.title, status: p.status, priority: p.priority, affected_service: p.affected_service,
+        root_cause: p.root_cause, workaround: p.workaround, known_error_at: p.known_error_at,
+      })),
+  );
+
+  tool('get_dashboard', 'Summary of the problem backlog: counts by status and priority, aging, my open problems and recent activity.', {}, true, () =>
+    problems.dashboard(user),
+  );
+
+  tool(
+    'create_problem',
+    'Log a new problem record. Search first to avoid duplicates. Link the triggering incidents or events afterwards with link_record.',
+    { ...optionalEditable, title: editable.title },
+    false,
+    async (args) => compactProblem(await problems.createProblem(user, problems.createProblemSchema.parse(await toInput(args))), 5),
+  );
+
+  tool(
+    'update_problem',
+    'Update fields on a problem record. Only the fields given are changed. Use transition_problem to change status.',
+    { ref: z.string(), ...optionalEditable },
+    false,
+    async ({ ref, ...args }) =>
+      compactProblem(await problems.updateProblem(user, ref, problems.updateProblemSchema.parse(await toInput(args))), 5),
+  );
+
+  tool(
+    'transition_problem',
+    'Move a problem through its lifecycle. Required fields (root_cause, resolution, closure_code, major_review) can be supplied in the same call.',
+    {
+      ref: z.string(),
+      to: z.enum(STATUSES),
+      comment: z.string().optional().describe('Why the status changes'),
+      closure_code: z.enum(CLOSURE_CODES).optional().describe('Required when closing'),
+      root_cause: z.string().optional(),
+      workaround: z.string().optional(),
+      resolution: z.string().optional(),
+      major_review: z.string().optional(),
+    },
+    false,
+    async ({ ref, ...args }) => compactProblem(await problems.transitionProblem(user, ref, problems.transitionSchema.parse(args)), 5),
+  );
+
+  tool(
+    'add_comment',
+    'Add a work note to the problem activity log (findings, analysis steps, decisions).',
+    { ref: z.string(), body: z.string() },
+    false,
+    async ({ ref, body }) => {
+      await problems.addComment(user, ref, body);
+      return { ok: true };
+    },
+  );
+
+  tool(
+    'link_record',
+    'Link a related record, usually in an external system: an incident (reactive), event (proactive), change (implementing the fix) or another problem.',
+    {
+      ref: z.string().describe('Problem reference'),
+      kind: z.enum(problems.LINK_KINDS),
+      reference: z.string().describe('ID in the external system, e.g. INC0012345'),
+      system: z.string().optional().describe('External system name, e.g. ServiceNow, Jira, Zabbix'),
+      url: z.string().optional().describe('http(s) link to the record'),
+      note: z.string().optional(),
+    },
+    false,
+    async ({ ref, ...link }) => (await problems.addLink(user, ref, problems.linkSchema.parse(link))).links,
+  );
+
+  tool(
+    'unlink_record',
+    'Remove a linked record from a problem. Get the link id from get_problem.',
+    { ref: z.string(), link_id: z.number().int() },
+    false,
+    async ({ ref, link_id }) => (await problems.removeLink(user, ref, link_id)).links,
+  );
+
+  return server;
+}
+
+export async function mcpRoutes(app: FastifyInstance) {
+  app.post('/mcp', async (req, reply) => {
+    if (!req.user || !req.headers.authorization) {
+      reply.header('WWW-Authenticate', 'Bearer realm="kernel"');
+      throw new HttpError(401, 'Send a Kernel API token as "Authorization: Bearer krn_..."');
+    }
+    const server = buildServer(req.user);
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+    reply.raw.on('close', () => {
+      transport.close();
+      server.close();
+    });
+    await server.connect(transport);
+    reply.hijack();
+    await transport.handleRequest(req.raw, reply.raw, req.body);
+  });
+
+  // Stateless server: no server-initiated streams or sessions to delete.
+  const notAllowed = async (_req: unknown, reply: any) =>
+    reply.code(405).header('Allow', 'POST').send({ jsonrpc: '2.0', error: { code: -32000, message: 'Method not allowed' }, id: null });
+  app.get('/mcp', notAllowed);
+  app.delete('/mcp', notAllowed);
+}

@@ -1,0 +1,102 @@
+import type { LinkKind, Role, Status } from './api';
+
+export const STATUS_LABEL: Record<Status, string> = {
+  new: 'New',
+  analysis: 'Under Analysis',
+  known_error: 'Known Error',
+  resolved: 'Resolved',
+  closed: 'Closed',
+};
+
+// ITIL 4 problem management phases
+export const STATUS_PHASE: Record<Status, string> = {
+  new: 'Problem identification',
+  analysis: 'Problem control',
+  known_error: 'Error control',
+  resolved: 'Resolved',
+  closed: 'Closed',
+};
+
+export const TRANSITION_LABEL: Record<Status, string> = {
+  new: 'New',
+  analysis: 'Start analysis',
+  known_error: 'Raise known error',
+  resolved: 'Resolve',
+  closed: 'Close',
+};
+
+export const PRIORITY_LABEL: Record<number, string> = {
+  1: 'Critical',
+  2: 'High',
+  3: 'Medium',
+  4: 'Low',
+  5: 'Planning',
+};
+
+export const LEVEL_LABEL: Record<number, string> = { 1: 'High', 2: 'Medium', 3: 'Low' };
+
+export const ROLE_LABEL: Record<Role, string> = {
+  admin: 'Administrator',
+  problem_manager: 'Problem Manager',
+  analyst: 'Problem Analyst',
+  viewer: 'Viewer',
+};
+
+export const LINK_LABEL: Record<LinkKind, string> = {
+  incident: 'Incident',
+  event: 'Event',
+  change: 'Change',
+  problem: 'Problem',
+};
+
+export const CLOSURE_LABEL: Record<string, string> = {
+  resolved: 'Resolved – permanent fix',
+  workaround_accepted: 'Workaround accepted',
+  duplicate: 'Duplicate',
+  cancelled: 'Cancelled',
+  no_fix: 'No fix – risk accepted',
+};
+
+export const FIELD_LABEL: Record<string, string> = {
+  title: 'title',
+  description: 'description',
+  category_id: 'category',
+  affected_service: 'affected service',
+  detection: 'detection',
+  impact: 'impact',
+  urgency: 'urgency',
+  is_major: 'major flag',
+  assignee_id: 'assignee',
+  root_cause: 'root cause',
+  workaround: 'workaround',
+  resolution: 'resolution',
+  major_review: 'major problem review',
+};
+
+export function formatDate(value: string | null | undefined) {
+  if (!value) return '–';
+  return new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+export function relativeTime(value: string) {
+  const diff = (Date.now() - new Date(value).getTime()) / 1000;
+  const units: [number, Intl.RelativeTimeFormatUnit][] = [
+    [60, 'second'],
+    [3600, 'minute'],
+    [86400, 'hour'],
+    [86400 * 30, 'day'],
+    [86400 * 365, 'month'],
+    [Infinity, 'year'],
+  ];
+  const fmt = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
+  let prev = 1;
+  for (const [limit, unit] of units) {
+    if (diff < limit) return fmt.format(-Math.round(diff / prev), unit);
+    prev = limit;
+  }
+  return value;
+}
+
+export function ageDays(value: string) {
+  return Math.floor((Date.now() - new Date(value).getTime()) / 86400000);
+}
