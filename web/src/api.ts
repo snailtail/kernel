@@ -72,6 +72,7 @@ export interface Meta {
   closure_codes: string[];
   roles: Role[];
   link_kinds: LinkKind[];
+  mcp_url: string | null;
   categories: { id: number; name: string; active: boolean }[];
   assignees: { id: number; display_name: string; role: Role }[];
 }

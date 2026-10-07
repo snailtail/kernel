@@ -52,7 +52,11 @@ Open http://localhost:8080 and sign in as `admin`. Database migrations run autom
 | `KERNEL_SESSION_DAYS` | `7` | Web session lifetime |
 | `KERNEL_SECURE_COOKIES` | `false` | Always mark the session cookie Secure. Without it, the cookie is Secure whenever the request arrived over HTTPS (needs `KERNEL_TRUST_PROXY` behind a proxy) |
 | `KERNEL_TRUST_PROXY` | `false` | Set `true` behind a reverse proxy or Cloudflare Tunnel, so `X-Forwarded-*` headers give the client IP and protocol |
+| `KERNEL_MCP_URL` | UI origin + `/mcp` | MCP endpoint shown in Settings, e.g. a LAN address when the public hostname is behind Cloudflare Access |
 | `PORT` | `8080` | Listen port inside the container |
+
+To deploy to the test server, push your commits and run `scripts/deploy.sh`. It pulls `main` in `~/kernel` on
+`dockerhost` (a clone using a read-only deploy key), rebuilds the containers and waits until the app is healthy.
 
 `GET /healthz` checks the app and its database connection, for container health checks and Kubernetes probes.
 

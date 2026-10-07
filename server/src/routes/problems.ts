@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireUser } from '../auth.js';
+import { config } from '../config.js';
 import { query } from '../db.js';
 import * as problems from '../problems.js';
 import { CLOSURE_CODES, ROLES, STATUSES, TRANSITIONS } from '../workflow.js';
@@ -20,6 +21,7 @@ export async function problemRoutes(app: FastifyInstance) {
       closure_codes: CLOSURE_CODES,
       roles: ROLES,
       link_kinds: problems.LINK_KINDS,
+      mcp_url: config.mcpUrl,
       categories: categories.rows,
       assignees: users.rows,
     };

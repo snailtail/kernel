@@ -12,6 +12,7 @@ services:
       KERNEL_ADMIN_PASSWORD: ${KERNEL_ADMIN_PASSWORD:-}
       KERNEL_SECURE_COOKIES: ${KERNEL_SECURE_COOKIES:-false}
       KERNEL_TRUST_PROXY: ${KERNEL_TRUST_PROXY:-false}
+      KERNEL_MCP_URL: ${KERNEL_MCP_URL:-}
     depends_on:
       db:
         condition: service_healthy

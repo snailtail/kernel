@@ -12,5 +12,7 @@ export const config = {
   adminPassword: process.env.KERNEL_ADMIN_PASSWORD,
   sessionDays: Number(env('KERNEL_SESSION_DAYS', '7')),
   secureCookies: env('KERNEL_SECURE_COOKIES', 'false') === 'true',
+  // MCP endpoint shown to users in Settings; defaults to the URL the UI is opened on.
+  mcpUrl: process.env.KERNEL_MCP_URL || null,
   webDist: env('KERNEL_WEB_DIST', new URL('../../web/dist', import.meta.url).pathname),
 };

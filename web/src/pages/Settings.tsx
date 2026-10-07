@@ -61,12 +61,13 @@ function PasswordCard() {
 }
 
 function TokensCard() {
+  const { meta } = useSession();
   const { data: tokens, reload } = useApi<Token[]>('/api/tokens');
   const [name, setName] = useState('');
   const [expires, setExpires] = useState('90');
   const [created, setCreated] = useState<Token | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const mcpUrl = `${window.location.origin}/mcp`;
+  const mcpUrl = meta.mcp_url ?? `${window.location.origin}/mcp`;
 
   const create = async (e: FormEvent) => {
     e.preventDefault();
