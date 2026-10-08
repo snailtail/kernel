@@ -11,14 +11,35 @@ export async function query<T extends pg.QueryResultRow = any>(sql: string, para
   return pool.query<T>(sql, params);
 }
 
+const AFTER_COMMIT = Symbol('afterCommit');
+type Hooked = { [AFTER_COMMIT]?: (() => void)[] };
+
+/** Runs fn after the surrounding transaction commits (immediately when not in a transaction). */
+export function afterCommit(db: unknown, fn: () => void) {
+  const hooks = (db as Hooked)[AFTER_COMMIT];
+  if (hooks) hooks.push(fn);
+  else fn();
+}
+
 export async function tx<T>(fn: (client: pg.PoolClient) => Promise<T>): Promise<T> {
   const client = await pool.connect();
+  const hooks: (() => void)[] = [];
+  (client as Hooked)[AFTER_COMMIT] = hooks;
   try {
     await client.query('BEGIN');
     const result = await fn(client);
     await client.query('COMMIT');
+    delete (client as Hooked)[AFTER_COMMIT];
+    for (const hook of hooks) {
+      try {
+        hook();
+      } catch {
+        // after-commit work (logging, metrics) must never fail the request
+      }
+    }
     return result;
   } catch (err) {
+    delete (client as Hooked)[AFTER_COMMIT];
     await client.query('ROLLBACK');
     throw err;
   } finally {

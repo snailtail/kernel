@@ -7,6 +7,7 @@ import { authenticate } from './auth.js';
 import { config } from './config.js';
 import { query } from './db.js';
 import { HttpError } from './errors.js';
+import { createLogger, logger } from './log.js';
 import { mcpRoutes } from './mcp.js';
 import { openApiDocument } from './openapi.js';
 import { adminRoutes } from './routes/admin.js';
@@ -23,7 +24,7 @@ declare module 'fastify' {
 /** Builds the HTTP application: API, MCP endpoint and (if built) the web UI. */
 export async function buildApp(options: { logLevel?: string; serveWeb?: boolean } = {}) {
   const app = Fastify({
-    logger: { level: options.logLevel ?? process.env.LOG_LEVEL ?? 'info' },
+    loggerInstance: options.logLevel ? createLogger({ level: options.logLevel }) : logger,
     trustProxy: process.env.KERNEL_TRUST_PROXY === 'true',
   });
 

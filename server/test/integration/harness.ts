@@ -60,6 +60,7 @@ export interface Harness {
 
 export async function startKernel(): Promise<Harness> {
   process.env.DATABASE_URL = TEST_DATABASE_URL;
+  process.env.LOG_LEVEL ??= 'warn';
   const { pool, migrate } = await import('../../src/db.js');
   const { hashPassword } = await import('../../src/auth.js');
   const { buildApp } = await import('../../src/app.js');

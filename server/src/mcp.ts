@@ -12,6 +12,7 @@ import * as analyses from './analyses.js';
 import * as integrations from './integrations.js';
 import * as problems from './problems.js';
 import * as reports from './reports.js';
+import { traceTool } from './metrics.js';
 import { problemMarkdown } from './export.js';
 import * as review from './review.js';
 import { CLOSURE_CODES, EC_DECISIONS, STATUSES, TRANSITIONS, WORKAROUND_EFFECTIVENESS } from './workflow.js';
@@ -103,7 +104,7 @@ function buildServer(user: User) {
       { description, inputSchema, annotations: { readOnlyHint: readOnly, destructiveHint: false } },
       (async (args: any) => {
         try {
-          return json(await run(args));
+          return json(await traceTool(name, () => run(args)));
         } catch (err) {
           const message =
             err instanceof z.ZodError ? err.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ') : (err as Error).message;

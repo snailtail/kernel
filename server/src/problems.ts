@@ -3,7 +3,9 @@
 import { z } from 'zod';
 import type pg from 'pg';
 import type { User } from './auth.js';
-import { query, tx } from './db.js';
+import { afterCommit, query, tx } from './db.js';
+import { logDomainEvent } from './log.js';
+import { recordActivity } from './metrics.js';
 import { badRequest, conflict, forbidden, notFound } from './errors.js';
 import { guidanceFor } from './guidance.js';
 import { enqueue as enqueueWebhooks, eventFor } from './webhooks.js';
@@ -118,7 +120,27 @@ export async function logActivity(db: Db, problemId: number, userId: number, kin
     body,
     JSON.stringify(data),
   ]);
-  await enqueueWebhooks(db, eventFor(kind, data), problemId, userId, body || defaultSummary(kind, data), data);
+  const event = eventFor(kind, data);
+  const summary = body || defaultSummary(kind, data);
+  await enqueueWebhooks(db, event, problemId, userId, summary, data);
+  const { rows } = await db.query(
+    `SELECT p.ref, p.status, p.priority, p.is_major, p.detection, p.affected_service, c.name AS category, u.username
+     FROM problems p LEFT JOIN categories c ON c.id = p.category_id LEFT JOIN users u ON u.id = $2 WHERE p.id = $1`,
+    [problemId, userId],
+  );
+  const p = rows[0];
+  if (p) {
+    afterCommit(db, () => {
+      logDomainEvent({
+        action: event,
+        problem: { ref: p.ref, status: p.status, priority: p.priority, is_major: p.is_major, category: p.category, service: p.affected_service },
+        actor: p.username,
+        summary,
+        data: kind === 'comment' ? undefined : (data as Record<string, unknown>),
+      });
+      recordActivity(kind, data, { priority: p.priority, detection: p.detection });
+    });
+  }
 }
 
 function defaultSummary(kind: string, data: any) {

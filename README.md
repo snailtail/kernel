@@ -101,12 +101,60 @@ Open http://localhost:8080 and sign in as `admin`. Database migrations run autom
 | `KERNEL_TRUST_PROXY` | `false` | Set `true` behind a reverse proxy or Cloudflare Tunnel, so `X-Forwarded-*` headers give the client IP and protocol |
 | `KERNEL_MCP_URL` | UI origin + `/mcp` | MCP endpoint shown in Settings, e.g. a LAN address when the public hostname is behind Cloudflare Access |
 | `KERNEL_PUBLIC_URL` | – | Public URL of the UI, used for links in webhook messages |
+| `KERNEL_LOG_FORMAT` | `json` | `ecs` writes Elastic Common Schema JSON logs |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | – | Enables OpenTelemetry traces and metrics over OTLP (standard `OTEL_*` variables apply) |
 | `PORT` | `8080` | Listen port inside the container |
 
 To deploy to the test server, push your commits and run `scripts/deploy.sh`. It pulls `main` in `~/kernel` on
 `dockerhost` (a clone using a read-only deploy key), rebuilds the containers and waits until the app is healthy.
 
 `GET /healthz` checks the app and its database connection, for container health checks and Kubernetes probes.
+
+## Observability (Elasticsearch)
+
+Kernel can be observed with the Elastic stack, or any OpenTelemetry backend:
+
+- **Logs** – set `KERNEL_LOG_FORMAT=ecs` and the container writes [ECS](https://www.elastic.co/guide/en/ecs/current/index.html)
+  JSON to stdout, ready for Filebeat or Elastic Agent without custom parsing (`event.dataset: kernel`). Requests are
+  logged with method, path, client address and status only; cookies, bearer tokens, `Set-Cookie`, passwords and
+  secrets are always redacted.
+- **Problem management events** – every change to a problem (logged, status changed, assigned, commented, linked,
+  assessed, actions…) is also written as a domain event with `event.dataset: kernel.problem`, `event.action`
+  (e.g. `problem.status_changed`), `problem.ref`, `problem.status`, `problem.priority`, `problem.category`,
+  `problem.service` and `user.name`. Route that dataset to its own data stream and chart the process itself in
+  Kibana: flow per status, lead times, hotspots.
+- **Traces and metrics** – set `OTEL_EXPORTER_OTLP_ENDPOINT` (and `OTEL_EXPORTER_OTLP_HEADERS` for authentication) to
+  send OpenTelemetry data over OTLP/HTTP to Elastic APM Server, an EDOT collector or any OTLP collector. HTTP requests,
+  Fastify routes, PostgreSQL queries and MCP tool calls become spans; metrics include `kernel.problem.created`,
+  `kernel.problem.transitions` and `kernel.mcp.tool_calls`.
+
+Example `.env` for Elastic Cloud / APM and ECS logs:
+
+```sh
+KERNEL_LOG_FORMAT=ecs
+OTEL_EXPORTER_OTLP_ENDPOINT=https://<deployment>.apm.<region>.cloud.es.io:443
+OTEL_EXPORTER_OTLP_HEADERS=Authorization=ApiKey <base64 api key>
+OTEL_RESOURCE_ATTRIBUTES=deployment.environment=production
+```
+
+Example Filebeat input for the container logs (Elastic Agent's Docker integration works the same way):
+
+```yaml
+filebeat.inputs:
+  - type: filestream
+    id: kernel
+    paths: ["/var/lib/docker/containers/*/*.log"]
+    parsers:
+      - container: ~
+      - ndjson:
+          target: ""
+          overwrite_keys: true
+          expand_keys: true
+    processors:
+      - add_docker_metadata: ~
+      - drop_event:
+          when.not.equals.container.labels.com_docker_compose_service: app
+```
 
 ## MCP
 
