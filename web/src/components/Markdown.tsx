@@ -3,7 +3,8 @@
 // http(s)/mailto links — enough for problem records and work notes.
 import type { ReactNode } from 'react';
 
-const SAFE_URL = /^(https?:\/\/|mailto:|\/)/i;
+// http(s), mailto and app-relative paths; not protocol-relative (//host) or backslash tricks (/\host).
+const SAFE_URL = /^(https?:\/\/|mailto:|\/(?![\/\\]))/i;
 
 function inline(text: string, keyPrefix = ''): ReactNode[] {
   const out: ReactNode[] = [];

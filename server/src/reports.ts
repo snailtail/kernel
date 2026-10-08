@@ -167,9 +167,11 @@ export async function report({ from, to, bucket }: ReportParams) {
   };
 }
 
-const csvCell = (v: unknown) => {
+export const csvCell = (v: unknown) => {
   if (v === null || v === undefined) return '';
-  const s = v instanceof Date ? v.toISOString() : String(v);
+  let s = v instanceof Date ? v.toISOString() : String(v);
+  // Neutralise spreadsheet formulas (CSV injection): text starting with = + - @ tab or CR is prefixed with '.
+  if (typeof v === 'string' && /^[=+\-@\t\r]/.test(s)) s = `'${s}`;
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 

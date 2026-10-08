@@ -6,7 +6,8 @@ import { blockedReason, checkedLookup, checkUrl, outboundFetch, OutboundBlockedE
 
 test('blocks loopback, link-local, metadata and private addresses', () => {
   delete process.env.KERNEL_OUTBOUND_ALLOW;
-  for (const ip of ['127.0.0.1', '169.254.169.254', '::1', 'fd00:ec2::254', '0.0.0.0', '::ffff:127.0.0.1', 'fe80::1']) {
+  for (const ip of ['127.0.0.1', '169.254.169.254', '::1', 'fd00:ec2::254', '0.0.0.0', '::ffff:127.0.0.1', 'fe80::1',
+    '::127.0.0.1', '64:ff9b::7f00:1', '64:ff9b:1::a00:1', '2002:7f00:1::', 'fec0::1']) {
     assert.match(blockedReason(ip) ?? '', /loopback|link-local|metadata|reserved/, ip);
   }
   for (const ip of ['10.1.2.3', '192.168.1.229', '172.20.0.1', 'fd12::1']) assert.match(blockedReason(ip) ?? '', /private/, ip);
@@ -27,6 +28,9 @@ test('rejects bad URLs up front', () => {
   assert.match(checkUrl('http://localhost:8080/x') ?? '', /internal/);
   assert.match(checkUrl('https://user:pw@example.com') ?? '', /Credentials/);
   assert.match(checkUrl('http://[::1]/') ?? '', /loopback/);
+  assert.match(checkUrl('http://[::127.0.0.1]/') ?? '', /loopback/);
+  assert.match(checkUrl('http://[64:ff9b::a9fe:a9fe]/') ?? '', /loopback/);
+  assert.match(checkUrl('http://2130706433/') ?? '', /loopback/, 'decimal IPv4 literal');
   assert.equal(checkUrl('https://hooks.slack.com/services/x'), null);
 });
 
