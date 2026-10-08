@@ -71,30 +71,30 @@ export async function adminRoutes(app: FastifyInstance) {
     return { webhooks: await webhooks.listWebhooks(), events: webhooks.EVENTS, formats: webhooks.FORMATS };
   });
   app.post('/api/webhooks', async (req, reply) => {
-    requireRole(req, 'admin');
+    const admin = requireRole(req, 'admin');
     reply.code(201);
-    return webhooks.createWebhook(webhooks.webhookSchema.parse(req.body));
+    return webhooks.createWebhook(admin, webhooks.webhookSchema.parse(req.body));
   });
   app.put<Id>('/api/webhooks/:id', async (req) => {
-    requireRole(req, 'admin');
-    return webhooks.updateWebhook(Number(req.params.id), webhooks.webhookSchema.parse(req.body));
+    const admin = requireRole(req, 'admin');
+    return webhooks.updateWebhook(admin, Number(req.params.id), webhooks.webhookSchema.parse(req.body));
   });
   app.delete<Id>('/api/webhooks/:id', async (req) => {
-    requireRole(req, 'admin');
-    await webhooks.deleteWebhook(Number(req.params.id));
+    const admin = requireRole(req, 'admin');
+    await webhooks.deleteWebhook(admin, Number(req.params.id));
     return { ok: true };
   });
-  app.get<Id>('/api/webhooks/:id/secret', async (req) => {
-    requireRole(req, 'admin');
-    return { secret: await webhooks.revealSecret(Number(req.params.id)) };
+  app.post<Id>('/api/webhooks/:id/rotate', async (req) => {
+    const admin = requireRole(req, 'admin');
+    return webhooks.rotateSecret(admin, Number(req.params.id));
   });
   app.get<Id>('/api/webhooks/:id/deliveries', async (req) => {
     requireRole(req, 'admin');
     return webhooks.deliveries(Number(req.params.id));
   });
   app.post<Id>('/api/webhooks/:id/ping', async (req) => {
-    requireRole(req, 'admin');
-    return webhooks.ping(Number(req.params.id));
+    const admin = requireRole(req, 'admin');
+    return webhooks.ping(admin, Number(req.params.id));
   });
 
   app.post('/api/categories', async (req, reply) => {

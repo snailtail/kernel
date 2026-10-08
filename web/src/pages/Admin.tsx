@@ -276,7 +276,7 @@ function SystemModal({ system, onClose, onDone }: { system: ExternalSystem | nul
   );
 }
 
-interface Webhook { id: number; name: string; url: string; format: string; events: string[]; active: boolean; failed: number; last_delivered_at: string | null; secret?: string }
+interface Webhook { id: number; name: string; url: string; format: string; events: string[]; active: boolean; failed: number; last_delivered_at: string | null; secret_set_at: string; secret?: string }
 interface Delivery { id: number; event: string; status: string; attempts: number; response_status: number | null; last_error: string | null; created_at: string; summary: string | null; ref: string | null }
 
 function WebhooksCard() {
@@ -291,7 +291,11 @@ function WebhooksCard() {
     setMessage(d.status === 'ok' ? `Test delivery to ${w.name} succeeded (HTTP ${d.response_status}).` : `Test delivery to ${w.name} failed: ${d.last_error}`);
     reload();
   };
-  const reveal = async (w: Webhook) => setSecret({ name: w.name, secret: (await api.get<{ secret: string }>(`/api/webhooks/${w.id}/secret`)).secret });
+  const rotate = async (w: Webhook) => {
+    if (!confirm(`Replace the signing secret of ${w.name}? Receivers must be updated with the new secret.`)) return;
+    setSecret({ name: w.name, secret: (await api.post<{ secret: string }>(`/api/webhooks/${w.id}/rotate`)).secret });
+    reload();
+  };
 
   return (
     <section className="card">
@@ -300,8 +304,9 @@ function WebhooksCard() {
         <button className="btn primary small" onClick={() => setEditing('new')}>Add webhook</button>
       </div>
       <p className="muted small">
-        Kernel POSTs problem events to these URLs. Payloads are signed: <code>X-Kernel-Signature: sha256=HMAC(secret, body)</code>.
-        Failed deliveries are retried with backoff. Slack and Teams formats work with their incoming webhooks.
+        Kernel POSTs problem events to these URLs, signed per <a href="https://www.standardwebhooks.com/" target="_blank" rel="noreferrer noopener">Standard Webhooks</a>
+        (<code>webhook-id</code>, <code>webhook-timestamp</code>, <code>webhook-signature</code>). Payloads contain ref, title, status and a link, never long texts.
+        Failed deliveries are retried with backoff. Private network addresses must be allowed with <code>KERNEL_OUTBOUND_ALLOW</code>.
       </p>
       {message && <div className={message.includes('failed') ? 'error' : 'success'}>{message}</div>}
       {data?.webhooks.length === 0 && <p className="empty">No webhooks yet.</p>}
@@ -319,7 +324,7 @@ function WebhooksCard() {
                 <td className="nowrap row-links">
                   <button className="btn-link" onClick={() => ping(w)}>Test</button>
                   <button className="btn-link" onClick={() => setLog(w)}>Log</button>
-                  <button className="btn-link" onClick={() => reveal(w)}>Secret</button>
+                  <button className="btn-link" onClick={() => rotate(w)} title={`Secret set ${relativeTime(w.secret_set_at)}`}>Rotate secret</button>
                   <button className="btn-link" onClick={() => setEditing(w)}>Edit</button>
                 </td>
               </tr>
@@ -339,7 +344,7 @@ function WebhooksCard() {
       {log && <DeliveriesModal hook={log} onClose={() => setLog(null)} />}
       {secret && (
         <Modal title={`Signing secret – ${secret.name}`} onClose={() => setSecret(null)}>
-          <p className="muted">Use this to verify the <code>X-Kernel-Signature</code> header on received deliveries.</p>
+          <p className="muted">Copy it now – it will not be shown again. Receivers use it to verify the <code>webhook-signature</code> header (Standard Webhooks libraries accept it as is).</p>
           <pre className="secret">{secret.secret}</pre>
         </Modal>
       )}
@@ -371,7 +376,7 @@ function WebhookModal({ hook, events, formats, onClose, onDone }: { hook: Webhoo
         <label>Name<input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Team chat" /></label>
         <label>Format
           <select value={form.format} onChange={(e) => setForm({ ...form, format: e.target.value })}>
-            {formats.map((f) => <option key={f} value={f}>{f === 'json' ? 'Generic JSON' : f === 'slack' ? 'Slack' : 'Microsoft Teams'}</option>)}
+            {formats.map((f) => <option key={f} value={f}>{({ json: 'Generic JSON', slack: 'Slack', teams_workflow: 'Microsoft Teams (Workflows)', teams: 'Microsoft Teams (legacy connector)' } as Record<string, string>)[f] ?? f}</option>)}
           </select>
         </label>
         <label className="full">URL<input required type="url" value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} placeholder="https://hooks.slack.com/services/…" /></label>

@@ -94,7 +94,7 @@ export const OPERATIONS: Op[] = [
   { method: 'post', path: '/api/webhooks', tag: 'Administration', summary: 'Create a webhook (secret returned once)', body: webhooks.webhookSchema },
   { method: 'put', path: '/api/webhooks/:id', tag: 'Administration', summary: 'Update a webhook', body: webhooks.webhookSchema },
   { method: 'delete', path: '/api/webhooks/:id', tag: 'Administration', summary: 'Delete a webhook' },
-  { method: 'get', path: '/api/webhooks/:id/secret', tag: 'Administration', summary: 'Reveal the signing secret' },
+  { method: 'post', path: '/api/webhooks/:id/rotate', tag: 'Administration', summary: 'Replace the signing secret (new secret returned once)' },
   { method: 'get', path: '/api/webhooks/:id/deliveries', tag: 'Administration', summary: 'Recent deliveries' },
   { method: 'post', path: '/api/webhooks/:id/ping', tag: 'Administration', summary: 'Send a test delivery' },
 

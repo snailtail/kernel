@@ -2,6 +2,7 @@
 // the default is pino's standard JSON.
 import { ecsFormat } from '@elastic/ecs-pino-format';
 import pino, { type DestinationStream, type Logger } from 'pino';
+import { minimiseData } from './minimise.js';
 
 const FORMAT = () => process.env.KERNEL_LOG_FORMAT ?? 'json';
 
@@ -55,10 +56,20 @@ export function logDomainEvent(e: {
         is_major: e.problem.is_major ?? false,
         ...(e.problem.category ? { category: e.problem.category } : {}),
         ...(e.problem.service ? { service: e.problem.service } : {}),
-        ...(e.data ? { change: e.data } : {}),
+        ...(e.data ? { change: minimiseData(e.data) } : {}),
       },
       ...(e.actor ? { user: { name: e.actor } } : {}),
     },
     e.summary,
   );
+}
+
+const auditLogger = createLogger({ dataset: 'kernel.audit', level: 'info' });
+
+/**
+ * Administrative actions (webhooks today). An interim audit trail until the unified audit log (#57);
+ * values that are secrets must never be passed here.
+ */
+export function auditLog(actor: { id: number; username: string } | null, action: string, details: Record<string, unknown>) {
+  auditLogger.info({ event: { kind: 'event', category: ['configuration'], action }, user: actor ? { id: actor.id, name: actor.username } : undefined, details }, action);
 }

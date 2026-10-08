@@ -13,7 +13,12 @@ describe('webhooks and watching', { skip }, () => {
   const received: { headers: Record<string, any>; body: string }[] = [];
   let failNext = 0;
 
+  let secret: string;
+  let hookId: number;
+
   before(async () => {
+    process.env.KERNEL_SECRET_KEY = 'test-secret-key-0123456789abcdefghijklmnop';
+    process.env.KERNEL_OUTBOUND_ALLOW = '127.0.0.1';
     k = await startKernel();
     [admin, analyst, pm] = await Promise.all([k.login('admin'), k.login('analyst'), k.login('pm')]);
     receiver = createServer((req, res) => {
@@ -39,19 +44,36 @@ describe('webhooks and watching', { skip }, () => {
 
   const deliver = async () => (await import('../../src/webhooks.js')).processDeliveries();
 
-  test('admins manage webhooks and can ping them', async () => {
+  test('admins manage webhooks; secrets are shown once and encrypted at rest', async () => {
     assert.equal((await pm.post('/api/webhooks', { name: 'x', url: receiverUrl })).status, 403);
-    const created = await admin.post('/api/webhooks', { name: 'Receiver', url: receiverUrl, events: ['problem.created', 'problem.status_changed'] });
+    for (const url of ['http://169.254.169.254/latest/meta-data/', 'http://localhost:8080/', 'http://10.0.0.5/hook', 'ftp://x.example']) {
+      assert.equal((await admin.post('/api/webhooks', { name: 'bad', url })).status, 400, url);
+    }
+    const created = await admin.post('/api/webhooks', { name: 'Receiver', url: receiverUrl, events: ['problem.created', 'problem.status_changed', 'problem.updated'] });
     assert.equal(created.status, 201);
-    assert.ok(created.body.secret);
-    const ping = await admin.post(`/api/webhooks/${created.body.id}/ping`);
-    assert.equal(ping.body.status, 'ok');
-    assert.equal(received.at(-1)!.headers['x-kernel-event'], 'ping');
+    assert.match(created.body.secret, /^whsec_/);
+    secret = created.body.secret;
+    hookId = created.body.id;
+    assert.equal((await admin.get('/api/webhooks')).body.webhooks[0].secret, undefined, 'never listed');
+    const { pool } = await import('../../src/db.js');
+    const stored = (await pool.query('SELECT secret FROM webhooks WHERE id = $1', [hookId])).rows[0].secret;
+    assert.match(stored, /^v1:/);
+    assert.ok(!stored.includes(secret.slice(6, 20)));
   });
 
-  test('changes are delivered, signed, filtered by event, and retried', async () => {
-    const hooks = (await admin.get('/api/webhooks')).body.webhooks;
-    const secret = (await admin.get(`/api/webhooks/${hooks[0].id}/secret`)).body.secret;
+  test('ping sends only its own delivery', async () => {
+    const { pool } = await import('../../src/db.js');
+    await pool.query(`INSERT INTO webhook_deliveries (webhook_id, event, payload, next_attempt_at) VALUES ($1, 'problem.updated', '{}', now() + interval '1 hour')`, [hookId]);
+    const queuedNow = await pool.query(`INSERT INTO webhook_deliveries (webhook_id, event, payload) VALUES ($1, 'problem.updated', '{}') RETURNING id`, [hookId]);
+    const ping = await admin.post(`/api/webhooks/${hookId}/ping`);
+    assert.equal(ping.body.status, 'ok');
+    assert.equal(received.at(-1)!.headers['x-kernel-event'], 'ping');
+    const other = (await pool.query('SELECT status FROM webhook_deliveries WHERE id = $1', [queuedNow.rows[0].id])).rows[0];
+    assert.equal(other.status, 'pending', 'other due deliveries are left to the worker');
+    await pool.query("DELETE FROM webhook_deliveries WHERE event = 'problem.updated'");
+  });
+
+  test('changes are delivered with Standard Webhooks signatures, minimal data, filtered by event, and retried', async () => {
     received.length = 0;
 
     const p = (await analyst.post('/api/problems', { title: 'Webhook me' })).body;
@@ -61,23 +83,44 @@ describe('webhooks and watching', { skip }, () => {
     const r = received[0];
     assert.equal(r.headers['x-kernel-event'], 'problem.created');
     assert.equal(r.headers['x-kernel-signature'], 'sha256=' + createHmac('sha256', secret).update(r.body).digest('hex'));
+    const expected = createHmac('sha256', Buffer.from(secret.slice(6), 'base64')).update(`${r.headers['webhook-id']}.${r.headers['webhook-timestamp']}.${r.body}`).digest('base64');
+    assert.equal(r.headers['webhook-signature'], `v1,${expected}`);
+    assert.ok(Math.abs(Number(r.headers['webhook-timestamp']) - Date.now() / 1000) < 60);
     const payload = JSON.parse(r.body);
     assert.equal(payload.problem.ref, p.ref);
     assert.equal(payload.actor.username, 'analyst');
 
+    received.length = 0;
+    await analyst.patch(`/api/problems/${p.ref}`, { description: 'Secret detail '.repeat(30), impact: 1 });
+    await deliver();
+    const update = JSON.parse(received[0].body);
+    assert.deepEqual(update.data.impact, { from: 3, to: 1 });
+    assert.ok(update.data.description, 'the change is reported');
+    assert.ok(!received[0].body.includes('Secret detail'));
+    received.length = 0;
+
     failNext = 1;
     await analyst.post(`/api/problems/${p.ref}/transition`, { to: 'analysis' });
     await deliver();
-    const log = (await admin.get(`/api/webhooks/${hooks[0].id}/deliveries`)).body;
+    const log = (await admin.get(`/api/webhooks/${hookId}/deliveries`)).body;
     assert.equal(log[0].status, 'pending');
     assert.equal(log[0].attempts, 1);
     assert.match(log[0].last_error, /503/);
   });
 
-  test('slack format', async () => {
+  test('slack and Teams Workflows formats', async () => {
     const { formatBody } = await import('../../src/webhooks.js');
-    const body = formatBody('slack', { event: 'problem.created', summary: 'Logged', actor: { display_name: 'Ann' }, problem: { ref: 'PRB1', title: 'T', url: null } });
-    assert.deepEqual(body, { text: '*PRB1: T*\nAnn: Logged' });
+    const payload = { event: 'problem.created', summary: 'Logged', actor: { display_name: 'Ann' }, problem: { ref: 'PRB1', title: 'T', url: 'https://k.example/problems/PRB1' } };
+    assert.deepEqual(formatBody('slack', { ...payload, problem: { ...payload.problem, url: null } }), { text: '*PRB1: T*\nAnn: Logged' });
+    const teams: any = formatBody('teams_workflow', payload);
+    assert.equal(teams.attachments[0].contentType, 'application/vnd.microsoft.card.adaptive');
+    assert.equal(teams.attachments[0].content.actions[0].url, payload.problem.url);
+  });
+
+  test('rotating the secret returns a new one once', async () => {
+    const rotated = await admin.post(`/api/webhooks/${hookId}/rotate`);
+    assert.match(rotated.body.secret, /^whsec_/);
+    assert.notEqual(rotated.body.secret, secret);
   });
 
   test('creators and assignees watch problems, and see others changes', async () => {

@@ -59,10 +59,14 @@ actions — with quick assignment, Markdown export and a print layout (MCP: `get
 problem can be exported as a Markdown document or printed / saved as PDF from its print view — handy for major
 problem reviews and known error articles (MCP: `export_problem`).
 
-**Webhooks and watching**: administrators register webhooks (generic JSON, Slack or Teams) for problem events —
+**Webhooks and watching**: administrators register webhooks (generic JSON, Slack, Teams Workflows or legacy Teams connectors) for problem events —
 created, status changed, assigned, updated, commented, linked, assessed, analysis, action changed/overdue. Deliveries
-are queued in the same transaction as the change, signed with `X-Kernel-Signature: sha256=HMAC(secret, body)` and
-retried with backoff; each webhook has a test button and a delivery log. Creators and assignees watch problems
+are queued in the same transaction as the change, signed per [Standard Webhooks](https://www.standardwebhooks.com/)
+(`webhook-id`, `webhook-timestamp`, `webhook-signature`; the legacy `X-Kernel-Signature` is also sent) and retried
+with backoff; each webhook has a test button and a delivery log. Payloads carry ref, title, status, a link and short
+field changes, never long texts. Signing secrets are shown once, can be rotated, and are encrypted at rest with
+`KERNEL_SECRET_KEY`. Outbound requests go through one client that blocks loopback, link-local, cloud metadata and
+(unless allowed) private addresses, re-checks redirects and pins the checked IP. Creators and assignees watch problems
 automatically, anyone can watch or unwatch, and the dashboard shows changes on watched problems
 (MCP: `watch_problem`).
 
@@ -103,6 +107,9 @@ Open http://localhost:8080 and sign in as `admin`. Database migrations run autom
 | `KERNEL_PUBLIC_URL` | – | Public URL of the UI, used for links in webhook messages |
 | `KERNEL_LOG_FORMAT` | `json` | `ecs` writes Elastic Common Schema JSON logs |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | – | Enables OpenTelemetry traces and metrics over OTLP (standard `OTEL_*` variables apply) |
+| `KERNEL_SECRET_KEY` | – | Encrypts stored secrets at rest (≥ 32 random characters); required for webhooks |
+| `KERNEL_OUTBOUND_ALLOW` | – | CIDRs/addresses on private networks that webhooks may reach (loopback, link-local and metadata addresses are always blocked) |
+| `KERNEL_WEBHOOK_RETENTION_DAYS` | `30` | Successful deliveries are deleted after this many days, failed after three times as long |
 | `PORT` | `8080` | Listen port inside the container |
 
 To deploy to the test server, push your commits and run `scripts/deploy.sh`. It pulls `main` in `~/kernel` on
