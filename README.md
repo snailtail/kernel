@@ -51,6 +51,10 @@ shows a checklist of the next steps, derived from the record itself; the same gu
 shown live. A problem manager can close a problem as a duplicate of another, which links the two and moves its
 incidents and events to the original.
 
+**Problem review**: an agenda for the regular review meeting — problems to triage or without owner, major problems,
+known errors awaiting a decision or due for review, stale problems, resolved problems awaiting closure and overdue
+actions — with quick assignment, Markdown export and a print layout (MCP: `get_review_agenda`).
+
 **Follow-up actions** track work that follows from a problem (vendor fixes, monitoring, runbook updates, review
 outcomes) with an owner and due date.
 
@@ -110,7 +114,7 @@ Tools: `whoami`, `list_reference_data`, `search_problems`, `get_problem`, `searc
 `create_problem`, `update_problem`, `transition_problem`, `add_comment`, `link_record`, `unlink_record`,
 `assess_known_error`, `start_analysis`, `update_analysis`, `list_actions`, `add_action`, `update_action`, `get_report`,
 `list_problem_candidates`, `create_problem_from_candidate`, `link_candidate_records`, `report_records`,
-`find_similar_problems`, `mark_duplicate`.
+`find_similar_problems`, `mark_duplicate`, `get_review_agenda`.
 
 ## REST API
 

@@ -418,6 +418,20 @@ describe('REST API', { skip }, () => {
     });
   });
 
+  describe('review board', () => {
+    test('builds the agenda and its Markdown', async () => {
+      const p = await create({ title: 'Needs triage' });
+      const agenda = await viewer.get('/api/review?stale_days=30');
+      assert.equal(agenda.status, 200);
+      const untriaged = agenda.body.sections.find((s: any) => s.id === 'untriaged');
+      assert.ok(untriaged.problems.some((x: any) => x.ref === p.ref));
+      const res = await fetch(`${k.base}/api/review/agenda.md`, { headers: { Cookie: viewer.cookie! } });
+      const md = await res.text();
+      assert.match(md, /^# Problem review/);
+      assert.ok(md.includes(p.ref));
+    });
+  });
+
   describe('administration', () => {
     test('admins manage users; others cannot', async () => {
       assert.equal((await pm.get('/api/users')).status, 403);

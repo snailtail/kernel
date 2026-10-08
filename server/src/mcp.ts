@@ -12,6 +12,7 @@ import * as analyses from './analyses.js';
 import * as integrations from './integrations.js';
 import * as problems from './problems.js';
 import * as reports from './reports.js';
+import * as review from './review.js';
 import { CLOSURE_CODES, EC_DECISIONS, STATUSES, TRANSITIONS, WORKAROUND_EFFECTIVENESS } from './workflow.js';
 
 const INSTRUCTIONS = `Kernel is a problem management system following the ITIL 4 problem management practice.
@@ -233,6 +234,17 @@ function buildServer(user: User) {
     { records: z.array(integrations.recordSchema).min(1).max(100) },
     false,
     async (args) => integrations.ingestRecords(user, integrations.ingestSchema.parse(args)),
+  );
+
+  tool(
+    'get_review_agenda',
+    'Agenda for the problem review meeting: problems to triage, without owner, major problems, known errors awaiting a decision or due for review, stale problems, resolved awaiting closure, and overdue actions. Returns structured data and a Markdown version.',
+    { stale_days: z.number().int().min(1).max(365).optional().describe('Days without activity to count as stale (default 14)') },
+    true,
+    async ({ stale_days }) => {
+      const agenda = await review.reviewAgenda(review.agendaSchema.parse({ stale_days }));
+      return { ...agenda, markdown: review.agendaMarkdown(agenda) };
+    },
   );
 
   tool(

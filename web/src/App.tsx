@@ -14,6 +14,7 @@ import { NewProblemPage } from './pages/NewProblem';
 import { ProblemPage } from './pages/Problem';
 import { ProblemsPage } from './pages/Problems';
 import { ReportsPage } from './pages/Reports';
+import { ReviewPage } from './pages/Review';
 import { SettingsPage } from './pages/Settings';
 import { SessionContext, canEdit, isManager } from './session';
 
@@ -73,6 +74,7 @@ export function App() {
             <NavLink to="/candidates">{icons.candidates}Candidates</NavLink>
             <NavLink to="/kedb">{icons.kedb}Known Errors</NavLink>
             <NavLink to="/actions">{icons.actions}Actions</NavLink>
+            <NavLink to="/review">{icons.review}Review</NavLink>
             <NavLink to="/reports">{icons.reports}Reports</NavLink>
             {canEdit(user) && <NavLink to="/problems/new" className="nav-cta">{icons.plus}Log problem</NavLink>}
             {isManager(user) && <NavLink to="/admin">{icons.admin}Administration</NavLink>}
@@ -99,6 +101,7 @@ export function App() {
             <Route path="/kedb" element={<KedbPage />} />
             <Route path="/actions" element={<ActionsPage />} />
             <Route path="/reports" element={<ReportsPage />} />
+            <Route path="/review" element={<ReviewPage />} />
             <Route path="/admin" element={<AdminPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/guide" element={<GuidePage />} />

@@ -7,6 +7,7 @@ import * as actions from '../actions.js';
 import * as analyses from '../analyses.js';
 import * as problems from '../problems.js';
 import * as reports from '../reports.js';
+import * as review from '../review.js';
 import { CLOSURE_CODES, EC_DECISIONS, ROLES, STATUSES, TRANSITIONS, WORKAROUND_EFFECTIVENESS } from '../workflow.js';
 
 type RefParams = { Params: { ref: string } };
@@ -128,6 +129,19 @@ export async function problemRoutes(app: FastifyInstance) {
     reply.header('Content-Type', 'text/csv; charset=utf-8');
     reply.header('Content-Disposition', `attachment; filename="kernel-problems-${params.from}-${params.to}.csv"`);
     return reports.problemsCsv(params);
+  });
+
+  app.get('/api/review', async (req) => {
+    requireUser(req);
+    return review.reviewAgenda(review.agendaSchema.parse(req.query));
+  });
+
+  app.get('/api/review/agenda.md', async (req, reply) => {
+    requireUser(req);
+    const agenda = await review.reviewAgenda(review.agendaSchema.parse(req.query));
+    reply.header('Content-Type', 'text/markdown; charset=utf-8');
+    reply.header('Content-Disposition', `attachment; filename="problem-review-${agenda.generated_at.slice(0, 10)}.md"`);
+    return review.agendaMarkdown(agenda);
   });
 
   app.get('/api/kedb', async (req) => {
