@@ -130,7 +130,8 @@ Tools: `whoami`, `list_reference_data`, `search_problems`, `get_problem`, `searc
 
 ## REST API
 
-All endpoints are under `/api` and accept either the session cookie (web UI) or `Authorization: Bearer krn_...`.
+The full, machine-readable description is served at `/api/openapi.json` (OpenAPI 3.1, generated from the same
+schemas the server validates with) and rendered under **API reference** in the UI. All endpoints are under `/api` and accept either the session cookie (web UI) or `Authorization: Bearer krn_...`.
 Cookie-authenticated requests that change data must send the header `X-Kernel-Request: 1`.
 
 | Method | Path | |

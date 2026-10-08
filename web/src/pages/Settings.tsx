@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { Link } from 'react-router';
 import { api } from '../api';
 import { formatDate, relativeTime, ROLE_LABEL } from '../format';
 import { useApi } from '../hooks';
@@ -154,6 +155,8 @@ function TokensCard() {
       <CopyBlock text={claudeCode} />
       <h3>Other MCP clients (JSON config)</h3>
       <CopyBlock text={jsonConfig} />
+      <h3>REST API</h3>
+      <p className="muted small">The same token works for the REST API. See the <Link to="/api-docs">API reference</Link> or the OpenAPI document at <code>/api/openapi.json</code>.</p>
       <h3>Report incidents and events from other systems</h3>
       <p className="muted small">
         Use a token belonging to a user with the Integration role. Records with a <code>problem_ref</code> are linked to that problem;

@@ -52,6 +52,7 @@ export class Client {
 
 export interface Harness {
   base: string;
+  routes: { method: string; url: string }[];
   login(user: keyof typeof USERS): Promise<Client>;
   tokenFor(user: keyof typeof USERS): Promise<string>;
   close(): Promise<void>;
@@ -88,6 +89,7 @@ export async function startKernel(): Promise<Harness> {
 
   return {
     base,
+    routes: app.kernelRoutes,
     login,
     async tokenFor(user) {
       const client = await login(user);

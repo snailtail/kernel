@@ -5,6 +5,7 @@ import { icons } from './components/Icons';
 import { ROLE_LABEL } from './format';
 import { ActionsPage } from './pages/Actions';
 import { AdminPage } from './pages/Admin';
+import { ApiDocsPage } from './pages/ApiDocs';
 import { CandidatesPage } from './pages/Candidates';
 import { DashboardPage } from './pages/Dashboard';
 import { GuidePage } from './pages/Guide';
@@ -107,6 +108,7 @@ export function App() {
             <Route path="/admin" element={<AdminPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/guide" element={<GuidePage />} />
+            <Route path="/api-docs" element={<ApiDocsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>

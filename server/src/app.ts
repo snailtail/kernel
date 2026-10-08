@@ -8,10 +8,17 @@ import { config } from './config.js';
 import { query } from './db.js';
 import { HttpError } from './errors.js';
 import { mcpRoutes } from './mcp.js';
+import { openApiDocument } from './openapi.js';
 import { adminRoutes } from './routes/admin.js';
 import { authRoutes } from './routes/auth.js';
 import { integrationRoutes } from './routes/integrations.js';
 import { problemRoutes } from './routes/problems.js';
+
+declare module 'fastify' {
+  interface FastifyInstance {
+    kernelRoutes: { method: string; url: string }[];
+  }
+}
 
 /** Builds the HTTP application: API, MCP endpoint and (if built) the web UI. */
 export async function buildApp(options: { logLevel?: string; serveWeb?: boolean } = {}) {
@@ -21,6 +28,13 @@ export async function buildApp(options: { logLevel?: string; serveWeb?: boolean 
   });
 
   await app.register(cookie);
+
+  // Registered routes, so tests can check that the OpenAPI document covers them.
+  const routes: { method: string; url: string }[] = [];
+  app.addHook('onRoute', (r) => {
+    for (const method of ([] as string[]).concat(r.method)) routes.push({ method: method.toLowerCase(), url: r.url });
+  });
+  app.decorate('kernelRoutes', routes);
 
   app.setErrorHandler((err, req, reply) => {
     if (err instanceof ZodError) {
@@ -47,6 +61,8 @@ export async function buildApp(options: { logLevel?: string; serveWeb?: boolean 
   await app.register(adminRoutes);
   await app.register(integrationRoutes);
   await app.register(mcpRoutes);
+
+  app.get('/api/openapi.json', async (req) => openApiDocument(config.publicUrl ?? `${req.protocol}://${req.host}`));
 
   app.all('/api/*', async (_req, reply) => reply.code(404).send({ error: 'Not found' }));
 

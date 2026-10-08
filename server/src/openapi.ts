@@ -1,0 +1,154 @@
+// OpenAPI 3.1 description of the REST API, generated from the zod schemas the routes validate with.
+// A test checks that every registered /api route is listed here.
+import { z } from 'zod';
+import * as actions from './actions.js';
+import * as analyses from './analyses.js';
+import * as integrations from './integrations.js';
+import * as problems from './problems.js';
+import * as reports from './reports.js';
+import * as review from './review.js';
+import * as webhooks from './webhooks.js';
+import { ROLES } from './workflow.js';
+
+interface Op {
+  method: 'get' | 'post' | 'put' | 'patch' | 'delete';
+  path: string; // Fastify style, e.g. /api/problems/:ref
+  tag: string;
+  summary: string;
+  query?: z.ZodType;
+  body?: z.ZodType;
+  produces?: string; // non-JSON response type
+  public?: boolean;
+}
+
+const user = z.object({
+  username: z.string().trim().min(2).max(50),
+  display_name: z.string().trim().min(1).max(100),
+  email: z.string().max(200).optional(),
+  role: z.enum(ROLES),
+  active: z.boolean().optional(),
+  password: z.string().min(10),
+});
+const ids = integrations.candidateActionSchema;
+
+export const OPERATIONS: Op[] = [
+  { method: 'post', path: '/api/auth/login', tag: 'Authentication', summary: 'Sign in with username and password (sets a session cookie)', body: z.object({ username: z.string(), password: z.string() }), public: true },
+  { method: 'post', path: '/api/auth/logout', tag: 'Authentication', summary: 'Sign out' },
+  { method: 'get', path: '/api/auth/me', tag: 'Authentication', summary: 'The signed-in user, with preferences' },
+  { method: 'post', path: '/api/auth/password', tag: 'Authentication', summary: 'Change your password', body: z.object({ current: z.string(), password: z.string().min(10) }) },
+  { method: 'put', path: '/api/auth/preferences', tag: 'Authentication', summary: 'Update your preferences (merged)', body: z.object({ theme: z.enum(['system', 'light', 'dark']).optional(), guided: z.boolean().optional(), intro_seen: z.boolean().optional() }) },
+  { method: 'get', path: '/api/tokens', tag: 'Authentication', summary: 'Your personal API tokens' },
+  { method: 'post', path: '/api/tokens', tag: 'Authentication', summary: 'Create a personal API token (returned once)', body: z.object({ name: z.string().min(1).max(100), expires_in_days: z.number().int().min(1).max(3650).optional() }) },
+  { method: 'delete', path: '/api/tokens/:id', tag: 'Authentication', summary: 'Revoke a token' },
+
+  { method: 'get', path: '/api/meta', tag: 'Reference data', summary: 'Statuses, transitions, closure codes, categories, assignees and other reference data' },
+  { method: 'get', path: '/api/dashboard', tag: 'Reference data', summary: 'Backlog summary for the dashboard' },
+
+  { method: 'get', path: '/api/problems', tag: 'Problems', summary: 'Search problems', query: problems.listSchema },
+  { method: 'post', path: '/api/problems', tag: 'Problems', summary: 'Log a problem', body: problems.createProblemSchema },
+  { method: 'get', path: '/api/problems/similar', tag: 'Problems', summary: 'Problems similar to a text (duplicate check)', query: z.object({ text: z.string(), exclude: z.string().optional(), limit: z.number().int().optional() }) },
+  { method: 'get', path: '/api/problems/:ref', tag: 'Problems', summary: 'A problem with links, activity, actions, analyses, watchers and next_steps' },
+  { method: 'patch', path: '/api/problems/:ref', tag: 'Problems', summary: 'Update problem fields', body: problems.updateProblemSchema },
+  { method: 'post', path: '/api/problems/:ref/transition', tag: 'Problems', summary: 'Change status (with the fields the target status requires)', body: problems.transitionSchema },
+  { method: 'put', path: '/api/problems/:ref/assessment', tag: 'Problems', summary: 'Error control assessment and decision for a known error', body: problems.assessmentSchema },
+  { method: 'post', path: '/api/problems/:ref/comments', tag: 'Problems', summary: 'Add a work note', body: z.object({ body: z.string().max(20000) }) },
+  { method: 'post', path: '/api/problems/:ref/links', tag: 'Problems', summary: 'Link an incident, event, change or problem', body: problems.linkSchema },
+  { method: 'delete', path: '/api/problems/:ref/links/:id', tag: 'Problems', summary: 'Remove a link' },
+  { method: 'post', path: '/api/problems/:ref/duplicate', tag: 'Problems', summary: 'Close as duplicate of another problem (problem managers)', body: z.object({ of: z.string() }) },
+  { method: 'put', path: '/api/problems/:ref/watch', tag: 'Problems', summary: 'Watch a problem' },
+  { method: 'delete', path: '/api/problems/:ref/watch', tag: 'Problems', summary: 'Stop watching a problem' },
+  { method: 'get', path: '/api/problems/:ref/export.md', tag: 'Problems', summary: 'Export a problem as Markdown', produces: 'text/markdown' },
+
+  { method: 'post', path: '/api/problems/:ref/actions', tag: 'Actions', summary: 'Add a follow-up action', body: actions.createActionSchema },
+  { method: 'patch', path: '/api/problems/:ref/actions/:id', tag: 'Actions', summary: 'Update, complete, cancel or reopen an action', body: actions.updateActionSchema },
+  { method: 'get', path: '/api/actions', tag: 'Actions', summary: 'Actions across problems', query: actions.listActionsSchema },
+
+  { method: 'post', path: '/api/problems/:ref/analyses', tag: 'Analyses', summary: 'Start a root cause analysis (five_whys, ishikawa, kepner_tregoe, timeline)', body: analyses.createAnalysisSchema },
+  { method: 'patch', path: '/api/problems/:ref/analyses/:id', tag: 'Analyses', summary: 'Update an analysis (data replaces the whole structure)', body: analyses.updateAnalysisSchema },
+  { method: 'delete', path: '/api/problems/:ref/analyses/:id', tag: 'Analyses', summary: 'Remove an analysis' },
+
+  { method: 'get', path: '/api/kedb', tag: 'Known errors', summary: 'Search the known error database', query: z.object({ q: z.string().optional(), include_resolved: z.enum(['true', 'false']).optional() }) },
+
+  { method: 'get', path: '/api/reports', tag: 'Reports', summary: 'KPIs and trends for a period', query: reports.reportSchema },
+  { method: 'get', path: '/api/reports/problems.csv', tag: 'Reports', summary: 'Problems active in a period as CSV', query: reports.reportSchema, produces: 'text/csv' },
+  { method: 'get', path: '/api/review', tag: 'Reports', summary: 'Problem review meeting agenda', query: review.agendaSchema },
+  { method: 'get', path: '/api/review/agenda.md', tag: 'Reports', summary: 'Review agenda as Markdown', query: review.agendaSchema, produces: 'text/markdown' },
+
+  { method: 'post', path: '/api/integrations/records', tag: 'Integrations', summary: 'Report incidents/events from other systems (idempotent; optional problem_ref links them)', body: integrations.ingestSchema },
+  { method: 'get', path: '/api/candidates', tag: 'Integrations', summary: 'Problem candidates: services with recurring unlinked records' },
+  { method: 'put', path: '/api/candidates/rule', tag: 'Integrations', summary: 'Set the candidate rule (problem managers)', body: integrations.ruleSchema },
+  { method: 'post', path: '/api/candidates/create', tag: 'Integrations', summary: 'Log a problem from candidate records', body: ids.extend({ problem: problems.createProblemSchema }) },
+  { method: 'post', path: '/api/candidates/link', tag: 'Integrations', summary: 'Link candidate records to a problem', body: ids.extend({ ref: z.string() }) },
+  { method: 'post', path: '/api/candidates/dismiss', tag: 'Integrations', summary: 'Dismiss candidate records', body: ids },
+  { method: 'get', path: '/api/systems', tag: 'Integrations', summary: 'External systems and their URL templates' },
+  { method: 'post', path: '/api/systems', tag: 'Integrations', summary: 'Add an external system (problem managers)', body: integrations.systemSchema },
+  { method: 'put', path: '/api/systems/:id', tag: 'Integrations', summary: 'Update an external system', body: integrations.systemSchema },
+
+  { method: 'get', path: '/api/users', tag: 'Administration', summary: 'Users (admins)' },
+  { method: 'post', path: '/api/users', tag: 'Administration', summary: 'Create a user (admins)', body: user },
+  { method: 'patch', path: '/api/users/:id', tag: 'Administration', summary: 'Update a user (admins)', body: user.partial().omit({ username: true }) },
+  { method: 'post', path: '/api/categories', tag: 'Administration', summary: 'Add a category', body: z.object({ name: z.string().min(1).max(100) }) },
+  { method: 'patch', path: '/api/categories/:id', tag: 'Administration', summary: 'Rename or (de)activate a category', body: z.object({ name: z.string().optional(), active: z.boolean().optional() }) },
+  { method: 'get', path: '/api/admin/backups', tag: 'Administration', summary: 'Backup health and dumps' },
+  { method: 'get', path: '/api/webhooks', tag: 'Administration', summary: 'Webhooks, available events and formats (admins)' },
+  { method: 'post', path: '/api/webhooks', tag: 'Administration', summary: 'Create a webhook (secret returned once)', body: webhooks.webhookSchema },
+  { method: 'put', path: '/api/webhooks/:id', tag: 'Administration', summary: 'Update a webhook', body: webhooks.webhookSchema },
+  { method: 'delete', path: '/api/webhooks/:id', tag: 'Administration', summary: 'Delete a webhook' },
+  { method: 'get', path: '/api/webhooks/:id/secret', tag: 'Administration', summary: 'Reveal the signing secret' },
+  { method: 'get', path: '/api/webhooks/:id/deliveries', tag: 'Administration', summary: 'Recent deliveries' },
+  { method: 'post', path: '/api/webhooks/:id/ping', tag: 'Administration', summary: 'Send a test delivery' },
+
+  { method: 'get', path: '/api/openapi.json', tag: 'Reference data', summary: 'This document', public: true },
+];
+
+const toSchema = (s: z.ZodType) => z.toJSONSchema(s, { io: 'input', unrepresentable: 'any' }) as Record<string, any>;
+
+export function openApiDocument(serverUrl?: string) {
+  const paths: Record<string, Record<string, unknown>> = {};
+  for (const op of OPERATIONS) {
+    const path = op.path.replace(/:(\w+)/g, '{$1}');
+    const params = [...op.path.matchAll(/:(\w+)/g)].map(([, name]) => ({ name, in: 'path', required: true, schema: { type: name === 'ref' ? 'string' : 'integer' } }));
+    if (op.query) {
+      const q = toSchema(op.query);
+      for (const [name, schema] of Object.entries<any>(q.properties ?? {})) {
+        params.push({ name, in: 'query', required: (q.required ?? []).includes(name) && schema.default === undefined, schema } as any);
+      }
+    }
+    (paths[path] ??= {})[op.method] = {
+      tags: [op.tag],
+      summary: op.summary,
+      operationId: `${op.method}_${op.path.replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_|_$/g, '')}`,
+      ...(params.length ? { parameters: params } : {}),
+      ...(op.body ? { requestBody: { required: true, content: { 'application/json': { schema: toSchema(op.body) } } } } : {}),
+      responses: {
+        '200': { description: 'OK', content: { [op.produces ?? 'application/json']: {} } },
+        '400': { description: 'Invalid input', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        ...(op.public ? {} : { '401': { description: 'Not authenticated' }, '403': { description: 'Not allowed for your role' } }),
+        '404': { description: 'Not found' },
+        '409': { description: 'Conflicts with the current state, e.g. a workflow rule', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+      },
+      ...(op.public ? { security: [] } : {}),
+    };
+  }
+  return {
+    openapi: '3.1.0',
+    info: {
+      title: 'Kernel API',
+      version: '1',
+      description:
+        'Problem management (ITIL 4). Authenticate with `Authorization: Bearer krn_…` (personal API token, see Settings) or the session cookie; ' +
+        'cookie-authenticated changes must send `X-Kernel-Request: 1`. Business rules (workflow, roles) are enforced server-side and reported as 409/403 with an `error` message. ' +
+        'An MCP server with the same capabilities is available at /mcp.',
+    },
+    ...(serverUrl ? { servers: [{ url: serverUrl }] } : {}),
+    security: [{ bearer: [] }, { cookie: [] }],
+    components: {
+      securitySchemes: {
+        bearer: { type: 'http', scheme: 'bearer', description: 'Personal API token (krn_…)' },
+        cookie: { type: 'apiKey', in: 'cookie', name: 'kernel_session' },
+      },
+      schemas: { Error: { type: 'object', properties: { error: { type: 'string' } }, required: ['error'] } },
+    },
+    paths,
+  };
+}

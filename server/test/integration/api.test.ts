@@ -447,6 +447,21 @@ describe('REST API', { skip }, () => {
     });
   });
 
+  describe('OpenAPI', () => {
+    test('describes every registered API route', async () => {
+      const doc = (await new Client(k.base).get('/api/openapi.json')).body;
+      assert.equal(doc.openapi, '3.1.0');
+      const missing = k.routes
+        .filter((r) => r.url.startsWith('/api/') && r.url !== '/api/*' && !['head', 'options'].includes(r.method))
+        .filter((r) => !doc.paths[r.url.replace(/:(\w+)/g, '{$1}')]?.[r.method])
+        .map((r) => `${r.method.toUpperCase()} ${r.url}`);
+      assert.deepEqual(missing, []);
+      const create = doc.paths['/api/problems'].post.requestBody.content['application/json'].schema;
+      assert.ok(create.required.includes('title'));
+      assert.ok(doc.paths['/api/problems'].get.parameters.some((p: any) => p.name === 'status'));
+    });
+  });
+
   describe('administration', () => {
     test('admins manage users; others cannot', async () => {
       assert.equal((await pm.get('/api/users')).status, 403);
