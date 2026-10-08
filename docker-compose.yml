@@ -25,6 +25,13 @@ services:
       KERNEL_BACKUP_DIR: /backups
     volumes:
       - ${KERNEL_BACKUP_DIR:-./backups}:/backups:ro
+    # Hardened container: read-only filesystem, no Linux capabilities, no privilege escalation, resource limits.
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 768m
+    pids_limit: 256
     depends_on:
       db:
         condition: service_healthy
@@ -38,6 +45,11 @@ services:
       POSTGRES_DB: kernel
     volumes:
       - pgdata:/var/lib/postgresql
+    # Not published on the host; only reachable from the app and backup containers.
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 1g
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U kernel -d kernel"]
       interval: 5s
@@ -62,6 +74,12 @@ services:
     volumes:
       - ./scripts/backup.sh:/backup.sh:ro
       - ${KERNEL_BACKUP_DIR:-./backups}:/backups
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    cap_add: [DAC_OVERRIDE]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 256m
     depends_on:
       db:
         condition: service_healthy

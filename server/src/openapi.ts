@@ -89,6 +89,8 @@ export const OPERATIONS: Op[] = [
   { method: 'patch', path: '/api/users/:id', tag: 'Administration', summary: 'Update a user (admins)', body: user.partial().omit({ username: true }) },
   { method: 'post', path: '/api/categories', tag: 'Administration', summary: 'Add a category', body: z.object({ name: z.string().min(1).max(100) }) },
   { method: 'patch', path: '/api/categories/:id', tag: 'Administration', summary: 'Rename or (de)activate a category', body: z.object({ name: z.string().optional(), active: z.boolean().optional() }) },
+  { method: 'get', path: '/api/admin/security', tag: 'Administration', summary: 'Security configuration checklist (admins)' },
+  { method: 'post', path: '/api/csp-report', tag: 'Reference data', summary: 'Content Security Policy violation reports (browsers)', public: true },
   { method: 'get', path: '/api/admin/backups', tag: 'Administration', summary: 'Backup health and dumps' },
   { method: 'get', path: '/api/webhooks', tag: 'Administration', summary: 'Webhooks, available events and formats (admins)' },
   { method: 'post', path: '/api/webhooks', tag: 'Administration', summary: 'Create a webhook (secret returned once)', body: webhooks.webhookSchema },

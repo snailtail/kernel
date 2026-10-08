@@ -1,4 +1,5 @@
 import { buildApp } from './app.js';
+import { checkConfiguration } from './security.js';
 import { bootstrapAdmin } from './auth.js';
 import { config } from './config.js';
 import { migrate, pool, query, waitForDb } from './db.js';
@@ -6,6 +7,7 @@ import { encryptLegacySecrets, startWorker } from './webhooks.js';
 
 const app = await buildApp();
 const log = (msg: string) => app.log.info(msg);
+checkConfiguration((msg) => app.log.warn(msg));
 
 await waitForDb(log);
 await migrate(log);

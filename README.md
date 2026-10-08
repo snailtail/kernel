@@ -105,7 +105,7 @@ Open http://localhost:8080 and sign in as `admin`. Database migrations run autom
 | `KERNEL_ADMIN_PASSWORD` | generated | Password for the initial `admin` user (first start only) |
 | `KERNEL_SESSION_DAYS` | `7` | Web session lifetime |
 | `KERNEL_SECURE_COOKIES` | `false` | Always mark the session cookie Secure. Without it, the cookie is Secure whenever the request arrived over HTTPS (needs `KERNEL_TRUST_PROXY` behind a proxy) |
-| `KERNEL_TRUST_PROXY` | `false` | Set `true` behind a reverse proxy or Cloudflare Tunnel, so `X-Forwarded-*` headers give the client IP and protocol |
+| `KERNEL_TRUST_PROXY` | `false` | Proxies whose `X-Forwarded-*` headers are trusted: a comma-separated list of addresses/CIDRs (recommended, e.g. `172.16.0.0/12` for a proxy reaching Kernel through Docker), a hop count, or `true` (only if Kernel is unreachable except through the proxy) |
 | `KERNEL_MCP_URL` | UI origin + `/mcp` | MCP endpoint shown in Settings, e.g. a LAN address when the public hostname is behind Cloudflare Access |
 | `KERNEL_PUBLIC_URL` | – | Public URL of the UI, used for links in webhook messages |
 | `KERNEL_LOG_FORMAT` | `json` | `ecs` writes Elastic Common Schema JSON logs |
@@ -119,6 +119,20 @@ To deploy to the test server, push your commits and run `scripts/deploy.sh`. It 
 `dockerhost` (a clone using a read-only deploy key), rebuilds the containers and waits until the app is healthy.
 
 `GET /healthz` checks the app and its database connection, for container health checks and Kubernetes probes.
+
+## Security
+
+- Strict Content Security Policy (no inline or eval scripts, no framing), HSTS, `nosniff`, a restrictive
+  `Permissions-Policy`, `Cache-Control: no-store` on API responses and a 256 kB request body limit.
+- Cookie-authenticated writes need the `X-Kernel-Request` header, a same-origin `Origin`/`Sec-Fetch-Site` and a
+  JSON body; bearer tokens are exempt. Sessions use `HttpOnly`, `SameSite=Lax` and `Secure` over HTTPS.
+- The generated initial admin password must be changed at first login. **Administration → Security status** lists the
+  security-relevant configuration.
+- Containers run with a read-only filesystem, no Linux capabilities beyond what PostgreSQL needs,
+  `no-new-privileges` and memory/PID limits. PostgreSQL is not published on the host.
+- Reference deployment: Cloudflare Tunnel with Cloudflare Access in front of the public hostname, the MCP endpoint
+  only on the LAN (or behind Access with a service token), `KERNEL_TRUST_PROXY` set to the proxy's network, and
+  `KERNEL_SECRET_KEY` set.
 
 ## Observability (Elasticsearch)
 

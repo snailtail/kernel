@@ -10,7 +10,7 @@ import { CandidatesPage } from './pages/Candidates';
 import { DashboardPage } from './pages/Dashboard';
 import { GuidePage } from './pages/Guide';
 import { KedbPage } from './pages/Kedb';
-import { LoginPage } from './pages/Login';
+import { ChangeInitialPassword, LoginPage } from './pages/Login';
 import { NewProblemPage } from './pages/NewProblem';
 import { ProblemPage } from './pages/Problem';
 import { ProblemsPage } from './pages/Problems';
@@ -57,6 +57,7 @@ export function App() {
 
   if (user === undefined) return null;
   if (user === null) return <LoginPage onLogin={setUser} />;
+  if (user.must_change_password) return <ChangeInitialPassword onDone={() => setUser({ ...user, must_change_password: false })} onLogout={logout} />;
   if (!meta) return <div className="loading-screen">Loading…</div>;
 
   return (

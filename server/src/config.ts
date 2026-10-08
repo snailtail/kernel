@@ -11,6 +11,11 @@ export const config = {
   // Used only on first start, when the users table is empty.
   adminPassword: process.env.KERNEL_ADMIN_PASSWORD,
   sessionDays: Number(env('KERNEL_SESSION_DAYS', '7')),
+  /**
+   * KERNEL_TRUST_PROXY: "true" trusts every proxy hop (only safe when Kernel is unreachable except through the proxy),
+   * a number trusts that many hops, or a comma-separated list of proxy addresses/CIDRs (recommended).
+   */
+  trustProxy: ((v) => (!v || v === 'false' ? false : v === 'true' ? true : /^\d+$/.test(v) ? Number(v) : v.split(',').map((s) => s.trim())))(process.env.KERNEL_TRUST_PROXY) as boolean | number | string[],
   secureCookies: env('KERNEL_SECURE_COOKIES', 'false') === 'true',
   // MCP endpoint shown to users in Settings; defaults to the URL the UI is opened on.
   // Where the backup service writes dumps (mounted read only), used to report backup health.

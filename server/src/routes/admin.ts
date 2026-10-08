@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { hashPassword, requireRole } from '../auth.js';
 import { backupStatus } from '../backups.js';
+import { securityStatus } from '../security.js';
 import * as webhooks from '../webhooks.js';
 import { query } from '../db.js';
 import { badRequest, conflict, notFound } from '../errors.js';
@@ -95,6 +96,11 @@ export async function adminRoutes(app: FastifyInstance) {
   app.post<Id>('/api/webhooks/:id/ping', async (req) => {
     const admin = requireRole(req, 'admin');
     return webhooks.ping(admin, Number(req.params.id));
+  });
+
+  app.get('/api/admin/security', async (req) => {
+    requireRole(req, 'admin');
+    return securityStatus();
   });
 
   app.post('/api/categories', async (req, reply) => {

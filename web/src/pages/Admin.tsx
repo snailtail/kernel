@@ -21,6 +21,7 @@ export function AdminPage() {
   return (
     <>
       <header className="page-head"><h1>Administration</h1></header>
+      {user.role === 'admin' && <SecurityCard />}
       {user.role === 'admin' && <WebhooksCard />}
       <SystemsCard />
       <BackupsCard />
@@ -423,5 +424,27 @@ function DeliveriesModal({ hook, onClose }: { hook: Webhook; onClose: () => void
         </table>
       )}
     </Modal>
+  );
+}
+
+function SecurityCard() {
+  const { data } = useApi<{ checks: { id: string; label: string; ok: boolean; detail: string }[] }>('/api/admin/security');
+  if (!data) return null;
+  const failing = data.checks.filter((c) => !c.ok).length;
+  return (
+    <section className="card">
+      <div className="section-head">
+        <h2>Security status</h2>
+        <span className={`badge ${failing ? 'major' : 'status-resolved'}`}>{failing ? `${failing} to review` : 'All good'}</span>
+      </div>
+      <ul className="checklist">
+        {data.checks.map((c) => (
+          <li key={c.id} className={c.ok ? 'ok' : 'warn'}>
+            <span className="check-mark" aria-hidden="true">{c.ok ? '✓' : '!'}</span>
+            <div><strong>{c.label}</strong><div className="muted small">{c.detail}</div></div>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

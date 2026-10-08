@@ -10,6 +10,7 @@ import { HttpError } from './errors.js';
 import { createLogger, logger } from './log.js';
 import { mcpRoutes } from './mcp.js';
 import { openApiDocument } from './openapi.js';
+import { registerSecurity } from './security.js';
 import { adminRoutes } from './routes/admin.js';
 import { authRoutes } from './routes/auth.js';
 import { integrationRoutes } from './routes/integrations.js';
@@ -25,10 +26,15 @@ declare module 'fastify' {
 export async function buildApp(options: { logLevel?: string; serveWeb?: boolean } = {}) {
   const app = Fastify({
     loggerInstance: options.logLevel ? createLogger({ level: options.logLevel }) : logger,
-    trustProxy: process.env.KERNEL_TRUST_PROXY === 'true',
+    // A hop count is supported at runtime (proxy-addr) but missing from Fastify's types.
+    trustProxy: config.trustProxy as boolean | string[],
+    bodyLimit: 256 * 1024,
   });
 
   await app.register(cookie);
+  await registerSecurity(app);
+  // Only JSON request bodies: text/plain and form posts are what cross-site forms could send (CSRF).
+  app.removeContentTypeParser('text/plain');
 
   // Registered routes, so tests can check that the OpenAPI document covers them.
   const routes: { method: string; url: string }[] = [];

@@ -9,6 +9,7 @@ export interface User {
   email: string;
   role: Role;
   preferences: Preferences;
+  must_change_password?: boolean;
 }
 
 export interface Preferences {

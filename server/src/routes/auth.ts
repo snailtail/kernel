@@ -55,7 +55,8 @@ export async function authRoutes(app: FastifyInstance) {
     const body = z.object({ current: z.string(), password: z.string().min(10, 'Use at least 10 characters') }).parse(req.body);
     const { rows } = await query('SELECT password_hash FROM users WHERE id = $1', [user.id]);
     if (!(await bcrypt.compare(body.current, rows[0].password_hash))) throw badRequest('Current password is incorrect');
-    await query('UPDATE users SET password_hash = $2 WHERE id = $1', [user.id, await hashPassword(body.password)]);
+    if (body.password === body.current) throw badRequest('Choose a new password');
+    await query('UPDATE users SET password_hash = $2, must_change_password = false WHERE id = $1', [user.id, await hashPassword(body.password)]);
     return { ok: true };
   });
 

@@ -4,6 +4,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { config } from './config.js';
 import { query } from './db.js';
 import { forbidden, HttpError } from './errors.js';
+import { checkSameOrigin } from './security.js';
 import type { Role } from './workflow.js';
 
 export interface User {
@@ -13,6 +14,7 @@ export interface User {
   email: string;
   role: Role;
   preferences: Preferences;
+  must_change_password: boolean;
 }
 
 export interface Preferences {
@@ -29,7 +31,7 @@ declare module 'fastify' {
 }
 
 export const SESSION_COOKIE = 'kernel_session';
-const USER_COLUMNS = 'u.id, u.username, u.display_name, u.email, u.role, u.preferences';
+const USER_COLUMNS = 'u.id, u.username, u.display_name, u.email, u.role, u.preferences, u.must_change_password';
 
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
 
@@ -114,8 +116,13 @@ export async function authenticate(req: FastifyRequest) {
   const cookie = req.cookies[SESSION_COOKIE];
   if (!cookie) return;
   req.user = (await userFromSession(cookie)) ?? undefined;
-  if (req.user && !['GET', 'HEAD', 'OPTIONS'].includes(req.method) && !req.headers['x-kernel-request']) {
-    throw forbidden('Missing X-Kernel-Request header');
+  if (req.user && !['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+    if (!req.headers['x-kernel-request']) throw forbidden('Missing X-Kernel-Request header');
+    checkSameOrigin(req);
+  }
+  // A generated initial password must be changed before anything else.
+  if (req.user?.must_change_password && !['/api/auth/me', '/api/auth/password', '/api/auth/logout', '/api/meta'].includes(req.url.split('?')[0])) {
+    throw new HttpError(403, 'Change your password before continuing', { must_change_password: true });
   }
 }
 
@@ -142,7 +149,7 @@ export async function bootstrapAdmin(log: (msg: string) => void) {
     log('Created user "admin" with password from KERNEL_ADMIN_PASSWORD');
   }
   await query(
-    `INSERT INTO users (username, display_name, password_hash, role) VALUES ('admin', 'Administrator', $1, 'admin')`,
+    `INSERT INTO users (username, display_name, password_hash, role, must_change_password) VALUES ('admin', 'Administrator', $1, 'admin', true)`,
     [await hashPassword(password)],
   );
 }
