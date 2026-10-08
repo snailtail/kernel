@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type pg from 'pg';
 import type { User } from './auth.js';
 import { afterCommit, query, tx } from './db.js';
+import { audit } from './audit.js';
 import { logDomainEvent } from './log.js';
 import { recordActivity } from './metrics.js';
 import { badRequest, conflict, forbidden, notFound } from './errors.js';
@@ -125,15 +126,17 @@ export async function logActivity(db: Db, problemId: number, userId: number, kin
     body,
     JSON.stringify(data),
   ]);
-  const event = eventFor(kind, data);
-  const summary = body || defaultSummary(kind, data);
-  await enqueueWebhooks(db, event, problemId, userId, summary, data);
   const { rows } = await db.query(
     `SELECT p.ref, p.status, p.priority, p.is_major, p.detection, p.affected_service, c.name AS category, u.username
      FROM problems p LEFT JOIN categories c ON c.id = p.category_id LEFT JOIN users u ON u.id = $2 WHERE p.id = $1`,
     [problemId, userId],
   );
   const p = rows[0];
+  // The unified audit trail (#57): same transaction, full before/after values.
+  await audit(db, { entity_type: 'problem', entity_ref: p?.ref ?? String(problemId), action: kind, changes: kind === 'comment' ? { body } : { ...(data as object), ...(body && kind !== 'update' ? { summary: body } : {}) } });
+  const event = eventFor(kind, data);
+  const summary = body || defaultSummary(kind, data);
+  await enqueueWebhooks(db, event, problemId, userId, summary, data);
   if (p) {
     afterCommit(db, () => {
       logDomainEvent({

@@ -516,7 +516,8 @@ describe('REST API', { skip }, () => {
       const created = await admin.post('/api/users', { username: 'newbie', display_name: 'New', role: 'analyst', password: 'long enough pw' });
       assert.equal(created.status, 201);
       assert.equal((await admin.post('/api/users', { username: 'newbie', display_name: 'Dup', role: 'analyst', password: 'long enough pw' })).status, 409);
-      const deactivated = await admin.patch(`/api/users/${created.body.id}`, { active: false });
+      assert.equal((await admin.patch(`/api/users/${created.body.id}`, { active: false })).status, 400, 'a reason is required');
+      const deactivated = await admin.patch(`/api/users/${created.body.id}`, { active: false, reason: 'Left the team' });
       assert.equal(deactivated.body.active, false);
     });
 

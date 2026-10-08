@@ -4,6 +4,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { config } from './config.js';
 import { query } from './db.js';
 import { forbidden, HttpError } from './errors.js';
+import { audit } from './audit.js';
 import { logger } from './log.js';
 import { mfaRequiredFor } from './mfapolicy.js';
 import { checkSameOrigin } from './security.js';
@@ -34,6 +35,7 @@ declare module 'fastify' {
     user?: User;
     /** Scopes of the API token used, if the request was token-authenticated. */
     tokenScopes?: string[];
+    tokenPrefix?: string;
   }
 }
 
@@ -156,6 +158,7 @@ export function loginFailed(ip: string, account: string) {
     else e.count++;
   }
   if (count(`acct:${account}`) === MAX_PER_ACCOUNT) {
+    void audit(null, { entity_type: 'session', entity_ref: account, action: 'account_locked', changes: { ip } }).catch(() => {});
     securityLog.warn({ event: { action: 'auth.account_locked', category: ['authentication'] }, user: { name: account }, source: { ip } }, 'Account temporarily locked after failed logins');
   }
   if (failures.size > 50_000) for (const [k, v] of failures) if (v.until <= Date.now()) failures.delete(k);
@@ -165,11 +168,11 @@ export function loginSucceeded(account: string) {
   failures.delete(`acct:${account}`);
 }
 
-async function userFromApiToken(token: string, ip: string): Promise<(User & { scopes: TokenScope[] }) | null> {
+async function userFromApiToken(token: string, ip: string): Promise<(User & { scopes: TokenScope[]; token_prefix: string }) | null> {
   const { rows } = await query(
     `UPDATE api_tokens t SET last_used_at = now(), last_used_ip = $2 FROM users u
-     WHERE u.id = t.user_id AND t.token_hash = $1 AND u.active AND (t.expires_at IS NULL OR t.expires_at > now())
-     RETURNING ${USER_COLUMNS}, t.scopes`,
+     WHERE u.id = t.user_id AND t.token_hash = $1 AND u.active AND t.revoked_at IS NULL AND (t.expires_at IS NULL OR t.expires_at > now())
+     RETURNING ${USER_COLUMNS}, t.scopes, t.prefix AS token_prefix`,
     [sha256(token), ip],
   );
   return rows[0] ?? null;
@@ -201,9 +204,10 @@ export async function authenticate(req: FastifyRequest) {
   if (bearer) {
     const found = await userFromApiToken(bearer, req.ip);
     if (found) {
-      const { scopes, ...user } = found;
+      const { scopes, token_prefix, ...user } = found;
       req.user = user;
       req.tokenScopes = scopes;
+      req.tokenPrefix = token_prefix;
       checkTokenScope(req);
     }
     return;

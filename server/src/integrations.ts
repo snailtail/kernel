@@ -1,6 +1,7 @@
 // External systems (link URL templates), inbound incident/event records, and problem candidates.
 import { z } from 'zod';
 import type { User } from './auth.js';
+import { audit } from './audit.js';
 import { query, tx } from './db.js';
 import { badRequest, conflict, forbidden, notFound } from './errors.js';
 import { createProblem, createProblemSchema, getProblem, LINK_KINDS, loadForUpdate, logActivity, type Db } from './problems.js';
@@ -27,6 +28,7 @@ export async function saveSystem(user: User, id: number | null, input: z.infer<t
       ? await query('UPDATE external_systems SET name = $2, url_templates = $3, active = $4 WHERE id = $1 RETURNING *', [id, input.name, templates, input.active])
       : await query('INSERT INTO external_systems (name, url_templates, active) VALUES ($1, $2, $3) RETURNING *', [input.name, templates, input.active]);
     if (!rows[0]) throw notFound();
+    await audit(null, { entity_type: 'external_system', entity_ref: input.name, action: id ? 'update' : 'create', changes: { url_templates: templates, active: input.active } });
     return rows[0];
   } catch (err: any) {
     if (err.code === '23505') throw conflict('A system with that name already exists');
@@ -122,7 +124,9 @@ export async function getRule(): Promise<z.infer<typeof ruleSchema>> {
 
 export async function setRule(user: User, rule: z.infer<typeof ruleSchema>) {
   if (!isManager(user.role)) throw forbidden();
+  const before = await getRule();
   await query("INSERT INTO settings (key, value) VALUES ('candidate_rule', $1) ON CONFLICT (key) DO UPDATE SET value = excluded.value", [rule]);
+  await audit(null, { entity_type: 'setting', entity_ref: 'candidate_rule', action: 'update', changes: { rule: { from: before, to: rule } } });
   return rule;
 }
 
@@ -169,5 +173,6 @@ export async function linkCandidate(user: User, ref: string, recordIds: number[]
 export async function dismissRecords(user: User, recordIds: number[]) {
   if (!canEdit(user.role)) throw forbidden();
   const { rowCount } = await query('UPDATE external_records SET dismissed = true WHERE id = ANY($1) AND problem_id IS NULL', [recordIds]);
+  await audit(null, { entity_type: 'external_record', action: 'dismiss', changes: { record_ids: recordIds, dismissed: rowCount } });
   return { dismissed: rowCount };
 }

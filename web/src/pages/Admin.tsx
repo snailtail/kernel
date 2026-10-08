@@ -87,7 +87,10 @@ function UserModal({ user, self, roles, onClose, onDone }: { user: AdminUser | n
     try {
       if (user) {
         const { username: _, password, ...fields } = form;
-        await api.patch(`/api/users/${user.id}`, password ? { ...fields, password } : fields);
+        const sensitive = !self && (password || fields.role !== user.role || fields.active !== user.active);
+        const reason = sensitive ? window.prompt('Reason for this change (recorded in the audit trail):')?.trim() : undefined;
+        if (sensitive && !reason) return;
+        await api.patch(`/api/users/${user.id}`, { ...(password ? { ...fields, password } : fields), reason });
       } else {
         await api.post('/api/users', form);
       }
@@ -117,8 +120,9 @@ function UserModal({ user, self, roles, onClose, onDone }: { user: AdminUser | n
         {user && user.mfa_enabled && (
           <div className="full">
             <button type="button" className="btn-link danger" onClick={async () => {
-              if (!confirm(`Reset two-factor authentication for ${user.username}? They will need to set it up again.`)) return;
-              try { await api.post(`/api/users/${user.id}/mfa/reset`); onDone(); } catch (err) { setError((err as Error).message); }
+              const reason = window.prompt(`Reason for resetting two-factor authentication for ${user.username} (recorded in the audit trail):`)?.trim();
+              if (!reason) return;
+              try { await api.post(`/api/users/${user.id}/mfa/reset`, { reason }); onDone(); } catch (err) { setError((err as Error).message); }
             }}>Reset two-factor authentication</button>
           </div>
         )}
@@ -375,8 +379,9 @@ function WebhookModal({ hook, events, formats, onClose, onDone }: { hook: Webhoo
     }
   };
   const remove = async () => {
-    if (hook && confirm(`Delete webhook ${hook.name}?`)) {
-      await api.del(`/api/webhooks/${hook.id}`);
+    const reason = hook ? window.prompt(`Reason for deleting webhook ${hook.name} (recorded in the audit trail):`)?.trim() : '';
+    if (hook && reason) {
+      await api.del(`/api/webhooks/${hook.id}?reason=${encodeURIComponent(reason)}`);
       onDone();
     }
   };
@@ -444,7 +449,9 @@ function SecurityCard() {
   const toggleRole = async (role: Role) => {
     if (!policy) return;
     const roles = policy.required_roles.includes(role) ? policy.required_roles.filter((r) => r !== role) : [...policy.required_roles, role];
-    await api.put('/api/admin/mfa-policy', { required_roles: roles });
+    const reason = window.prompt('Reason for changing the two-factor policy (recorded in the audit trail):')?.trim();
+    if (!reason) return;
+    await api.put('/api/admin/mfa-policy', { required_roles: roles, reason });
     reloadPolicy();
     reload();
   };

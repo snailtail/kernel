@@ -13,6 +13,7 @@ import * as integrations from './integrations.js';
 import * as problems from './problems.js';
 import * as reports from './reports.js';
 import { traceTool } from './metrics.js';
+import { auditQuerySchema, queryAudit } from './audit.js';
 import { problemMarkdown } from './export.js';
 import * as review from './review.js';
 import { CLOSURE_CODES, EC_DECISIONS, STATUSES, TRANSITIONS, WORKAROUND_EFFECTIVENESS } from './workflow.js';
@@ -191,6 +192,34 @@ function buildServer(user: User, scopes?: string[]) {
     false,
     async ({ ref, of }) => compactProblem(await problems.markDuplicate(user, ref, of), 5),
   );
+
+  tool(
+    'get_history',
+    'Who changed what on a problem, when, through which channel (web, API, MCP) and why, with before/after values, newest first.',
+    { ref: z.string(), limit: z.number().int().min(1).max(500).optional() },
+    true,
+    async ({ ref, limit }) => (await queryAudit(auditQuerySchema.parse({ entity_type: 'problem', entity_ref: ref.toUpperCase(), limit: limit ?? 100 }))).map(({ user_agent, ...e }) => e),
+  );
+
+  if (user.role === 'admin') {
+    tool(
+      'query_audit_log',
+      'Search the audit trail across everything (admins): filter by actor, actor_type (user, api_token, mcp, integration, system, anonymous), entity_type (problem, user, api_token, webhook, session, setting…), entity_ref, action, date range or IP.',
+      {
+        actor: z.string().optional(),
+        actor_type: z.string().optional(),
+        entity_type: z.string().optional(),
+        entity_ref: z.string().optional(),
+        action: z.string().optional(),
+        from: z.string().optional().describe('YYYY-MM-DD'),
+        to: z.string().optional().describe('YYYY-MM-DD'),
+        ip: z.string().optional(),
+        limit: z.number().int().min(1).max(500).optional(),
+      },
+      true,
+      async (args) => queryAudit(auditQuerySchema.parse({ ...args, limit: args.limit ?? 100 })),
+    );
+  }
 
   tool(
     'get_problem',

@@ -128,6 +128,18 @@ describe('MCP server', { skip }, () => {
     assert.ok(Array.isArray(r.data.flow));
   });
 
+  test('shows the change history of a problem', async () => {
+    const { data: p } = await call(mcp, 'create_problem', { title: 'History please' });
+    await call(mcp, 'update_problem', { ref: p.ref, impact: 1 });
+    const history = await call(mcp, 'get_history', { ref: p.ref });
+    const update = history.data.find((e: any) => e.action === 'update');
+    assert.equal(update.channel, 'mcp');
+    assert.equal(update.actor_type, 'mcp');
+    assert.deepEqual(update.changes.impact, { from: 3, to: 1 });
+    const { tools } = await mcp.listTools();
+    assert.ok(!tools.some((t) => t.name === 'query_audit_log'), 'admin-only tool hidden from a problem manager');
+  });
+
   test('reports helpful errors', async () => {
     const unknown = await call(mcp, 'update_problem', { ref: 'PRB000001', category: 'Nope' });
     assert.equal(unknown.isError, true);

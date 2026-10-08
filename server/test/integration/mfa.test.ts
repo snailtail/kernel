@@ -75,14 +75,14 @@ describe('two-factor authentication and step-up', { skip }, () => {
   });
 
   test('roles can be required to use two-factor authentication', async () => {
-    assert.equal((await admin.put('/api/admin/mfa-policy', { required_roles: ['viewer'] })).status, 200);
+    assert.equal((await admin.put('/api/admin/mfa-policy', { required_roles: ['viewer'], reason: 'Test policy' })).status, 200);
     const v = await k.login('viewer');
     assert.equal((await v.get('/api/auth/me')).body.mfa_enrollment_required, true);
     const blocked = await v.get('/api/problems');
     assert.equal(blocked.status, 403);
     assert.equal(blocked.body.mfa_enrollment_required, true);
     assert.equal((await v.post('/api/auth/mfa/setup')).status, 200, 'enrolment itself is allowed');
-    await admin.put('/api/admin/mfa-policy', { required_roles: [] });
+    await admin.put('/api/admin/mfa-policy', { required_roles: [], reason: 'Back to normal' });
   });
 
   test('a known device can still sign in while others keep the account locked', async () => {

@@ -6,7 +6,7 @@ import QRCode from 'qrcode';
 import { currentSessionHash, type User } from './auth.js';
 import { query, tx } from './db.js';
 import { badRequest, conflict, forbidden, HttpError } from './errors.js';
-import { auditLog } from './log.js';
+import { audit } from './audit.js';
 import { decryptSecret, encryptSecret } from './secrets.js';
 import { clearMfaPolicyCache } from './mfapolicy.js';
 import { generateSecret, otpauthUrl, verifyCode } from './totp.js';
@@ -20,11 +20,12 @@ export async function requiredRoles(): Promise<Role[]> {
   return rows[0]?.value ?? [];
 }
 
-export async function setRequiredRoles(actor: User, roles: Role[]) {
+export async function setRequiredRoles(actor: User, roles: Role[], reason: string) {
+  const before = await requiredRoles();
   clearMfaPolicyCache();
   await query("INSERT INTO settings (key, value) VALUES ('mfa_required_roles', $1) ON CONFLICT (key) DO UPDATE SET value = excluded.value", [JSON.stringify(roles)]);
   clearMfaPolicyCache();
-  auditLog(actor, 'mfa.policy', { required_roles: roles });
+  await audit(null, { entity_type: 'setting', entity_ref: 'mfa_required_roles', action: 'update', changes: { required_roles: { from: before, to: roles } }, reason });
   return roles;
 }
 
@@ -130,7 +131,7 @@ export async function enable(user: User, code: string) {
   await query('UPDATE users SET mfa_enabled_at = now(), mfa_last_step = $2 WHERE id = $1', [user.id, step]);
   const codes = newRecoveryCodes();
   await storeRecoveryCodes(user.id, codes);
-  auditLog(user, 'mfa.enable', { user_id: user.id });
+  await audit(null, { entity_type: 'user', entity_ref: user.username, action: 'mfa_enable' });
   return { recovery_codes: codes };
 }
 
@@ -138,12 +139,12 @@ export async function regenerateRecoveryCodes(user: User) {
   if (!(await hasMfa(user.id))) throw conflict('Two-factor authentication is not enabled');
   const codes = newRecoveryCodes();
   await storeRecoveryCodes(user.id, codes);
-  auditLog(user, 'mfa.recovery_codes', { user_id: user.id });
+  await audit(null, { entity_type: 'user', entity_ref: user.username, action: 'mfa_recovery_codes' });
   return { recovery_codes: codes };
 }
 
-export async function disable(actor: User, userId: number) {
-  const { rows } = await query('SELECT role FROM users WHERE id = $1', [userId]);
+export async function disable(actor: User, userId: number, reason = '') {
+  const { rows } = await query('SELECT role, username FROM users WHERE id = $1', [userId]);
   if (!rows[0]) throw new HttpError(404, 'User not found');
   if (actor.id === userId && (await requiredRoles()).includes(rows[0].role)) {
     throw forbidden('Your role requires two-factor authentication');
@@ -151,7 +152,7 @@ export async function disable(actor: User, userId: number) {
   await query('UPDATE users SET mfa_secret = NULL, mfa_enabled_at = NULL, mfa_last_step = 0 WHERE id = $1', [userId]);
   await query('DELETE FROM mfa_recovery_codes WHERE user_id = $1', [userId]);
   if (actor.id !== userId) await forgetDevices(userId);
-  auditLog(actor, actor.id === userId ? 'mfa.disable' : 'mfa.reset', { user_id: userId });
+  await audit(null, { entity_type: 'user', entity_ref: rows[0].username, action: actor.id === userId ? 'mfa_disable' : 'mfa_reset', reason });
 }
 
 // ---- Step-up re-authentication -----------------------------------------------------------------

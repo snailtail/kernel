@@ -8,6 +8,8 @@ import { securityStatus } from '../security.js';
 import * as webhooks from '../webhooks.js';
 import { query } from '../db.js';
 import { badRequest, conflict, notFound } from '../errors.js';
+import { audit, auditQuerySchema, queryAudit, requireReason, verifyChain } from '../audit.js';
+import { csvCell } from '../reports.js';
 import { ROLES } from '../workflow.js';
 
 const userFields = {
@@ -36,6 +38,7 @@ export async function adminRoutes(app: FastifyInstance) {
         `INSERT INTO users (username, display_name, email, role, active, password_hash) VALUES ($1, $2, $3, $4, $5, $6) RETURNING ${USER_COLUMNS}`,
         [body.username, body.display_name, body.email, body.role, body.active, await hashPassword(body.password)],
       );
+      await audit(null, { entity_type: 'user', entity_ref: body.username, action: 'create', changes: { display_name: body.display_name, email: body.email, role: body.role, active: body.active } });
       reply.code(201);
       return rows[0];
     } catch (err: any) {
@@ -48,12 +51,17 @@ export async function adminRoutes(app: FastifyInstance) {
     const admin = requireRole(req, 'admin');
     await requireStepUp(req);
     const id = Number(req.params.id);
-    const body = z.object({ ...userFields, password }).partial().omit({ username: true }).parse(req.body);
+    const body = z.object({ ...userFields, password, reason: z.string().max(1000).optional() }).partial().omit({ username: true }).parse(req.body);
     if (id === admin.id && (body.active === false || (body.role && body.role !== 'admin'))) {
       throw badRequest('You cannot deactivate or demote yourself');
     }
-    const { password: newPassword, ...fields } = body;
-    if (newPassword) await checkPassword(newPassword, fields);
+    const { password: newPassword, reason, ...fields } = body;
+    const { rows: before } = await query(`SELECT ${USER_COLUMNS} FROM users WHERE id = $1`, [id]);
+    if (!before[0]) throw notFound();
+    // Changing someone's role, status or password is sensitive: a reason is required and recorded.
+    const sensitive = id !== admin.id && (newPassword || (fields.role && fields.role !== before[0].role) || (fields.active !== undefined && fields.active !== before[0].active));
+    const why = sensitive ? requireReason(reason) : reason;
+    if (newPassword) await checkPassword(newPassword, { username: before[0].username, ...fields });
     const sets = Object.entries(fields).filter(([, v]) => v !== undefined);
     if (newPassword) sets.push(['password_hash', await hashPassword(newPassword)]);
     if (!sets.length) throw badRequest('Nothing to update');
@@ -62,6 +70,11 @@ export async function adminRoutes(app: FastifyInstance) {
       [id, ...sets.map(([, v]) => v)],
     );
     if (!rows[0]) throw notFound();
+    const changes: Record<string, unknown> = Object.fromEntries(
+      Object.entries(fields).filter(([k, v]) => v !== undefined && before[0][k] !== v).map(([k, v]) => [k, { from: before[0][k], to: v }]),
+    );
+    if (newPassword) changes.password = '[changed]';
+    await audit(null, { entity_type: 'user', entity_ref: before[0].username, action: 'update', changes, reason: why });
     // Changing role, status or password signs the user out everywhere.
     await query('DELETE FROM sessions WHERE user_id = $1 AND user_id <> $2', [id, admin.id]);
     return rows[0];
@@ -88,10 +101,10 @@ export async function adminRoutes(app: FastifyInstance) {
     await requireStepUp(req);
     return webhooks.updateWebhook(admin, Number(req.params.id), webhooks.webhookSchema.parse(req.body));
   });
-  app.delete<Id>('/api/webhooks/:id', async (req) => {
+  app.delete<Id & { Querystring: { reason?: string } }>('/api/webhooks/:id', async (req) => {
     const admin = requireRole(req, 'admin');
     await requireStepUp(req);
-    await webhooks.deleteWebhook(admin, Number(req.params.id));
+    await webhooks.deleteWebhook(admin, Number(req.params.id), requireReason(req.query.reason));
     return { ok: true };
   });
   app.post<Id>('/api/webhooks/:id/rotate', async (req) => {
@@ -115,13 +128,14 @@ export async function adminRoutes(app: FastifyInstance) {
   app.put('/api/admin/mfa-policy', async (req) => {
     const admin = requireRole(req, 'admin');
     await requireStepUp(req);
-    const body = z.object({ required_roles: z.array(z.enum(ROLES)).max(10) }).parse(req.body);
-    return { required_roles: await setRequiredRoles(admin, body.required_roles) };
+    const body = z.object({ required_roles: z.array(z.enum(ROLES)).max(10), reason: z.string().max(1000).optional() }).parse(req.body);
+    return { required_roles: await setRequiredRoles(admin, body.required_roles, requireReason(body.reason)) };
   });
   app.post<{ Params: { id: string } }>('/api/users/:id/mfa/reset', async (req) => {
     const admin = requireRole(req, 'admin');
     await requireStepUp(req);
-    await disableMfa(admin, Number(req.params.id));
+    const body = z.object({ reason: z.string().max(1000).optional() }).parse(req.body ?? {});
+    await disableMfa(admin, Number(req.params.id), requireReason(body.reason));
     return { ok: true };
   });
 
@@ -135,6 +149,7 @@ export async function adminRoutes(app: FastifyInstance) {
     const body = z.object({ name: z.string().trim().min(1).max(100) }).parse(req.body);
     const { rows } = await query('INSERT INTO categories (name) VALUES ($1) ON CONFLICT (name) DO NOTHING RETURNING *', [body.name]);
     if (!rows[0]) throw conflict('Category already exists');
+    await audit(null, { entity_type: 'category', entity_ref: body.name, action: 'create' });
     reply.code(201);
     return rows[0];
   });
@@ -142,11 +157,38 @@ export async function adminRoutes(app: FastifyInstance) {
   app.patch<{ Params: { id: string } }>('/api/categories/:id', async (req) => {
     requireRole(req, 'admin', 'problem_manager');
     const body = z.object({ name: z.string().trim().min(1).max(100).optional(), active: z.boolean().optional() }).parse(req.body);
+    const { rows: before } = await query('SELECT * FROM categories WHERE id = $1', [Number(req.params.id)]);
+    if (!before[0]) throw notFound();
     const { rows } = await query(
       'UPDATE categories SET name = coalesce($2, name), active = coalesce($3, active) WHERE id = $1 RETURNING *',
       [Number(req.params.id), body.name ?? null, body.active ?? null],
     );
-    if (!rows[0]) throw notFound();
+    await audit(null, {
+      entity_type: 'category',
+      entity_ref: before[0].name,
+      action: 'update',
+      changes: Object.fromEntries(Object.entries(body).filter(([k, v]) => v !== undefined && before[0][k] !== v).map(([k, v]) => [k, { from: before[0][k], to: v }])),
+    });
     return rows[0];
+  });
+
+  // ---- Audit trail ----------------------------------------------------------------------------
+  app.get('/api/audit', async (req) => {
+    requireRole(req, 'admin');
+    return queryAudit(auditQuerySchema.parse(req.query));
+  });
+  app.get('/api/audit.csv', async (req, reply) => {
+    requireRole(req, 'admin');
+    const filter = auditQuerySchema.parse({ ...(req.query as object), limit: 1000 });
+    const rows = await queryAudit(filter);
+    await audit(null, { entity_type: 'audit_log', action: 'export', changes: { filter, rows: rows.length } });
+    reply.header('Content-Type', 'text/csv; charset=utf-8');
+    reply.header('Content-Disposition', 'attachment; filename="kernel-audit.csv"');
+    const cols = ['id', 'at', 'actor_name', 'actor_type', 'channel', 'ip', 'entity_type', 'entity_ref', 'action', 'changes', 'reason'] as const;
+    return [cols.join(','), ...rows.map((r) => cols.map((c) => csvCell(c === 'changes' ? JSON.stringify(r[c]) : c === 'at' ? (r.at as Date).toISOString() : r[c])).join(','))].join('\r\n') + '\r\n';
+  });
+  app.get('/api/audit/verify', async (req) => {
+    requireRole(req, 'admin');
+    return verifyChain();
   });
 }

@@ -5,6 +5,7 @@ import fastifyStatic from '@fastify/static';
 import { ZodError } from 'zod';
 import { authenticate } from './auth.js';
 import { config } from './config.js';
+import { contextStore } from './context.js';
 import { query } from './db.js';
 import { HttpError } from './errors.js';
 import { createLogger, logger } from './log.js';
@@ -57,6 +58,24 @@ export async function buildApp(options: { logLevel?: string; serveWeb?: boolean 
 
   app.addHook('onRequest', async (req) => {
     if (req.url.startsWith('/api/') || req.url.startsWith('/mcp')) await authenticate(req);
+  });
+  // Who is acting and how, for the audit trail; the rest of the request runs inside this context.
+  app.addHook('onRequest', (req, _reply, done) => {
+    const u = req.user;
+    const bearer = !!req.headers.authorization && !!u;
+    contextStore.run(
+      {
+        userId: u?.id ?? null,
+        userName: u?.username ?? '',
+        actorType: !u ? 'anonymous' : bearer ? (u.role === 'integration' ? 'integration' : req.url.startsWith('/mcp') ? 'mcp' : 'api_token') : 'user',
+        channel: req.url.startsWith('/mcp') ? 'mcp' : bearer ? 'api' : 'web',
+        tokenPrefix: req.tokenPrefix ?? '',
+        ip: req.ip,
+        userAgent: String(req.headers['user-agent'] ?? '').slice(0, 300),
+        requestId: String(req.id),
+      },
+      done,
+    );
   });
 
   app.get('/healthz', async () => {

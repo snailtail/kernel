@@ -63,13 +63,3 @@ export function logDomainEvent(e: {
     e.summary,
   );
 }
-
-const auditLogger = createLogger({ dataset: 'kernel.audit', level: 'info' });
-
-/**
- * Administrative actions (webhooks today). An interim audit trail until the unified audit log (#57);
- * values that are secrets must never be passed here.
- */
-export function auditLog(actor: { id: number; username: string } | null, action: string, details: Record<string, unknown>) {
-  auditLogger.info({ event: { kind: 'event', category: ['configuration'], action }, user: actor ? { id: actor.id, name: actor.username } : undefined, details }, action);
-}

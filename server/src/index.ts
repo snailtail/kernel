@@ -1,4 +1,6 @@
 import { buildApp } from './app.js';
+import { startChainVerification } from './audit.js';
+import { asSystem } from './context.js';
 import { checkConfiguration } from './security.js';
 import { bootstrapAdmin } from './auth.js';
 import { config } from './config.js';
@@ -14,7 +16,10 @@ await migrate(log);
 await bootstrapAdmin(log);
 await encryptLegacySecrets(log);
 setInterval(() => query('DELETE FROM sessions WHERE expires_at < now()').catch(() => {}), 3600_000).unref();
-startWorker(log);
+asSystem(() => {
+  startWorker(log);
+  startChainVerification((msg) => app.log.error(msg));
+});
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, async () => {

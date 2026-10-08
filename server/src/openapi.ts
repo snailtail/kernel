@@ -2,6 +2,7 @@
 // A test checks that every registered /api route is listed here.
 import { z } from 'zod';
 import * as actions from './actions.js';
+import { auditQuerySchema } from './audit.js';
 import * as analyses from './analyses.js';
 import * as integrations from './integrations.js';
 import * as problems from './problems.js';
@@ -45,8 +46,8 @@ export const OPERATIONS: Op[] = [
   { method: 'post', path: '/api/auth/mfa/disable', tag: 'Authentication', summary: 'Turn off two-factor authentication' },
   { method: 'post', path: '/api/auth/mfa/recovery-codes', tag: 'Authentication', summary: 'Replace recovery codes (returned once)' },
   { method: 'get', path: '/api/admin/mfa-policy', tag: 'Administration', summary: 'Roles that must use two-factor authentication' },
-  { method: 'put', path: '/api/admin/mfa-policy', tag: 'Administration', summary: 'Set the roles that must use two-factor authentication', body: z.object({ required_roles: z.array(z.enum(ROLES)) }) },
-  { method: 'post', path: '/api/users/:id/mfa/reset', tag: 'Administration', summary: "Reset a user's two-factor authentication (admins)" },
+  { method: 'put', path: '/api/admin/mfa-policy', tag: 'Administration', summary: 'Set the roles that must use two-factor authentication', body: z.object({ required_roles: z.array(z.enum(ROLES)), reason: z.string() }) },
+  { method: 'post', path: '/api/users/:id/mfa/reset', tag: 'Administration', summary: "Reset a user's two-factor authentication (admins; reason required)", body: z.object({ reason: z.string() }) },
   { method: 'get', path: '/api/auth/sessions', tag: 'Authentication', summary: 'Your active sessions' },
   { method: 'delete', path: '/api/auth/sessions/:id', tag: 'Authentication', summary: 'Sign out a session' },
   { method: 'post', path: '/api/auth/sessions/revoke-others', tag: 'Authentication', summary: 'Sign out all other sessions' },
@@ -99,16 +100,19 @@ export const OPERATIONS: Op[] = [
 
   { method: 'get', path: '/api/users', tag: 'Administration', summary: 'Users (admins)' },
   { method: 'post', path: '/api/users', tag: 'Administration', summary: 'Create a user (admins)', body: user },
-  { method: 'patch', path: '/api/users/:id', tag: 'Administration', summary: 'Update a user (admins)', body: user.partial().omit({ username: true }) },
+  { method: 'patch', path: '/api/users/:id', tag: 'Administration', summary: "Update a user (admins); a reason is required to change someone's role, status or password", body: user.partial().omit({ username: true }).extend({ reason: z.string().optional() }) },
   { method: 'post', path: '/api/categories', tag: 'Administration', summary: 'Add a category', body: z.object({ name: z.string().min(1).max(100) }) },
   { method: 'patch', path: '/api/categories/:id', tag: 'Administration', summary: 'Rename or (de)activate a category', body: z.object({ name: z.string().optional(), active: z.boolean().optional() }) },
   { method: 'get', path: '/api/admin/security', tag: 'Administration', summary: 'Security configuration checklist (admins)' },
   { method: 'post', path: '/api/csp-report', tag: 'Reference data', summary: 'Content Security Policy violation reports (browsers)', public: true },
+  { method: 'get', path: '/api/audit', tag: 'Administration', summary: 'Audit trail: who did what, when, how and why (admins)', query: auditQuerySchema },
+  { method: 'get', path: '/api/audit.csv', tag: 'Administration', summary: 'Audit trail as CSV (the export itself is audited)', query: auditQuerySchema, produces: 'text/csv' },
+  { method: 'get', path: '/api/audit/verify', tag: 'Administration', summary: 'Verify the audit trail hash chain' },
   { method: 'get', path: '/api/admin/backups', tag: 'Administration', summary: 'Backup health and dumps' },
   { method: 'get', path: '/api/webhooks', tag: 'Administration', summary: 'Webhooks, available events and formats (admins)' },
   { method: 'post', path: '/api/webhooks', tag: 'Administration', summary: 'Create a webhook (secret returned once)', body: webhooks.webhookSchema },
   { method: 'put', path: '/api/webhooks/:id', tag: 'Administration', summary: 'Update a webhook', body: webhooks.webhookSchema },
-  { method: 'delete', path: '/api/webhooks/:id', tag: 'Administration', summary: 'Delete a webhook' },
+  { method: 'delete', path: '/api/webhooks/:id', tag: 'Administration', summary: 'Delete a webhook (reason required as ?reason=)', query: z.object({ reason: z.string() }) },
   { method: 'post', path: '/api/webhooks/:id/rotate', tag: 'Administration', summary: 'Replace the signing secret (new secret returned once)' },
   { method: 'get', path: '/api/webhooks/:id/deliveries', tag: 'Administration', summary: 'Recent deliveries' },
   { method: 'post', path: '/api/webhooks/:id/ping', tag: 'Administration', summary: 'Send a test delivery' },

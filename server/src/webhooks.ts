@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { config } from './config.js';
 import { query, tx } from './db.js';
 import { notFound } from './errors.js';
-import { auditLog } from './log.js';
+import { audit } from './audit.js';
 import { minimiseData } from './minimise.js';
 import { checkUrl, outboundFetch } from './outbound.js';
 import { decryptSecret, encryptSecret, isEncrypted, secretsConfigured } from './secrets.js';
@@ -282,7 +282,7 @@ export async function createWebhook(actor: Actor, input: z.infer<typeof webhookS
     `INSERT INTO webhooks (name, url, format, events, active, secret) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
     [input.name, input.url, input.format, input.events, input.active, encryptSecret(secret)],
   );
-  auditLog(actor, 'webhook.create', { webhook_id: rows[0].id, name: input.name, url: input.url, events: input.events });
+  await audit(null, { entity_type: 'webhook', entity_ref: String(rows[0].id), action: 'create', changes: { name: input.name, url: input.url, format: input.format, events: input.events, active: input.active } });
   // The secret is shown once, at creation; afterwards it can only be rotated.
   return { ...(await query(`SELECT ${COLUMNS} FROM webhooks w WHERE w.id = $1`, [rows[0].id])).rows[0], secret };
 }
@@ -293,14 +293,15 @@ export async function updateWebhook(actor: Actor, id: number, input: z.infer<typ
   await query('UPDATE webhooks SET name = $2, url = $3, format = $4, events = $5, active = $6 WHERE id = $1', [
     id, input.name, input.url, input.format, input.events, input.active,
   ]);
-  auditLog(actor, 'webhook.update', { webhook_id: id, before: before[0], after: input });
+  const changed = Object.fromEntries(Object.entries(input).filter(([k, v]) => JSON.stringify(before[0][k]) !== JSON.stringify(v)).map(([k, v]) => [k, { from: before[0][k], to: v }]));
+  await audit(null, { entity_type: 'webhook', entity_ref: String(id), action: 'update', changes: changed });
   return (await query(`SELECT ${COLUMNS} FROM webhooks w WHERE w.id = $1`, [id])).rows[0];
 }
 
-export async function deleteWebhook(actor: Actor, id: number) {
+export async function deleteWebhook(actor: Actor, id: number, reason: string) {
   const { rows } = await query('DELETE FROM webhooks WHERE id = $1 RETURNING name, url', [id]);
   if (!rows[0]) throw notFound();
-  auditLog(actor, 'webhook.delete', { webhook_id: id, ...rows[0] });
+  await audit(null, { entity_type: 'webhook', entity_ref: String(id), action: 'delete', changes: rows[0], reason });
 }
 
 /** Replaces the signing secret and returns the new one (shown once). */
@@ -308,7 +309,7 @@ export async function rotateSecret(actor: Actor, id: number) {
   const secret = newSecret();
   const { rowCount } = await query('UPDATE webhooks SET secret = $2, secret_rotated_at = now() WHERE id = $1', [id, encryptSecret(secret)]);
   if (!rowCount) throw notFound();
-  auditLog(actor, 'webhook.rotate_secret', { webhook_id: id });
+  await audit(null, { entity_type: 'webhook', entity_ref: String(id), action: 'rotate_secret', changes: { secret: '[changed]' } });
   return { secret };
 }
 
@@ -332,7 +333,7 @@ export async function ping(actor: Actor, id: number) {
     'ping',
     JSON.stringify({ event: 'ping', occurred_at: new Date().toISOString(), summary: 'Test delivery from Kernel', problem: null, actor: null, data: {} }),
   ]);
-  auditLog(actor, 'webhook.ping', { webhook_id: id });
+  await audit(null, { entity_type: 'webhook', entity_ref: String(id), action: 'ping' });
   await processDeliveries({ ids: [created[0].id] });
   return (await deliveries(id))[0];
 }

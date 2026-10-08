@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { TOKEN_MAX_DAYS, TOKEN_SCOPES, createApiToken, createSession, currentSessionHash, destroySession, guardLogin, hashPassword, listSessions, loginFailed, loginSucceeded, requireUser, revokeSession, verifyLogin } from '../auth.js';
+import { audit } from '../audit.js';
 import { config } from '../config.js';
 import * as mfa from '../mfa.js';
 import { mfaRequiredFor } from '../mfapolicy.js';
@@ -24,7 +25,7 @@ export async function authRoutes(app: FastifyInstance) {
     }
     if (user.mfa_enabled) return { mfa_required: true, mfa_token: await mfa.createChallenge(user.id) };
     loginSucceeded(account);
-    await finishLogin(req, reply, user.id);
+    await finishLogin(req, reply, user.id, user.username);
     return user;
   });
 
@@ -38,12 +39,13 @@ export async function authRoutes(app: FastifyInstance) {
       throw new HttpError(401, 'That code is not valid');
     }
     loginSucceeded(account);
-    await finishLogin(req, reply, userId);
+    await finishLogin(req, reply, userId, account);
     return (await query(`SELECT id, username, display_name, email, role, preferences, must_change_password, true AS mfa_enabled FROM users WHERE id = $1`, [userId])).rows[0];
   });
 
-  async function finishLogin(req: FastifyRequest, reply: FastifyReply, userId: number) {
+  async function finishLogin(req: FastifyRequest, reply: FastifyReply, userId: number, username: string) {
     await createSession(req, reply, userId);
+    await audit(null, { entity_type: 'session', entity_ref: username, action: 'login', actor: { id: userId, name: username } });
     const device = await mfa.rememberDevice(userId, req.cookies[mfa.DEVICE_COOKIE]);
     reply.setCookie(mfa.DEVICE_COOKIE, device, { path: '/api/auth', httpOnly: true, sameSite: 'strict', secure: config.secureCookies || req.protocol === 'https', maxAge: 180 * 86400 });
   }
@@ -80,6 +82,7 @@ export async function authRoutes(app: FastifyInstance) {
   });
 
   app.post('/api/auth/logout', async (req, reply) => {
+    if (req.user) await audit(null, { entity_type: 'session', entity_ref: req.user.username, action: 'logout' });
     await destroySession(req, reply);
     return { ok: true };
   });
@@ -113,6 +116,7 @@ export async function authRoutes(app: FastifyInstance) {
     await query('DELETE FROM sessions WHERE user_id = $1 AND token_hash <> $2', [user.id, currentSessionHash(req)]);
     if (body.revoke_tokens) await query('DELETE FROM api_tokens WHERE user_id = $1', [user.id]);
     await mfa.forgetDevices(user.id, req.cookies[mfa.DEVICE_COOKIE]);
+    await audit(null, { entity_type: 'user', entity_ref: user.username, action: 'password_change', changes: { password: '[changed]', revoked_tokens: !!body.revoke_tokens } });
     return { ok: true };
   });
 
@@ -131,7 +135,7 @@ export async function authRoutes(app: FastifyInstance) {
   app.get('/api/tokens', async (req) => {
     const user = requireUser(req);
     const { rows } = await query(
-      'SELECT id, name, prefix, scopes, created_at, last_used_at, last_used_ip, expires_at FROM api_tokens WHERE user_id = $1 ORDER BY created_at DESC',
+      'SELECT id, name, prefix, scopes, created_at, last_used_at, last_used_ip, expires_at FROM api_tokens WHERE user_id = $1 AND revoked_at IS NULL ORDER BY created_at DESC',
       [user.id],
     );
     return rows;
@@ -151,13 +155,16 @@ export async function authRoutes(app: FastifyInstance) {
       .parse(req.body);
     const scopes = body.scopes ?? (user.role === 'integration' ? ['ingest'] : ['read']);
     if (user.role === 'integration' && scopes.some((s) => s !== 'ingest' && s !== 'read')) throw badRequest('Integration accounts can only have read and ingest tokens');
-    return createApiToken(user.id, body.name, body.expires_in_days, [...new Set(scopes)]);
+    const created = await createApiToken(user.id, body.name, body.expires_in_days, [...new Set(scopes)]);
+    await audit(null, { entity_type: 'api_token', entity_ref: created.prefix, action: 'create', changes: { name: body.name, scopes: created.scopes, expires_at: created.expires_at } });
+    return created;
   });
 
   app.delete<{ Params: { id: string } }>('/api/tokens/:id', async (req) => {
     const user = requireUser(req);
-    const { rowCount } = await query('DELETE FROM api_tokens WHERE id = $1 AND user_id = $2', [Number(req.params.id), user.id]);
-    if (!rowCount) throw notFound();
+    const { rows } = await query('UPDATE api_tokens SET revoked_at = now() WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL RETURNING prefix, name', [Number(req.params.id), user.id]);
+    if (!rows[0]) throw notFound();
+    await audit(null, { entity_type: 'api_token', entity_ref: rows[0].prefix, action: 'revoke', changes: { name: rows[0].name } });
     return { ok: true };
   });
 }

@@ -7,6 +7,7 @@ import { query } from './db.js';
 import { forbidden } from './errors.js';
 import { logger } from './log.js';
 import { rateLimit } from './ratelimit.js';
+import { lastChainVerification } from './audit.js';
 import { secretsConfigured } from './secrets.js';
 
 const securityLog = logger.child({ event: { dataset: 'kernel.security' } });
@@ -141,6 +142,12 @@ export async function securityStatus(): Promise<{ checks: SecurityCheck[] }> {
       { id: 'backups', label: 'Backups', ok: backups.configured ? !!backups.healthy : false, detail: backups.configured ? (backups.healthy ? 'Recent successful backup.' : 'No recent successful backup.') : 'No backup directory configured.' },
       { id: 'outbound', label: 'Outbound requests', ok: true, detail: process.env.KERNEL_OUTBOUND_ALLOW ? `Private ranges allowed: ${process.env.KERNEL_OUTBOUND_ALLOW}` : 'Webhooks cannot reach private networks.' },
       { id: 'headers', label: 'Security headers and CSP', ok: true, detail: 'Strict Content Security Policy, HSTS, frame denial, no-store on API responses.' },
+      ((v) => ({
+        id: 'audit',
+        label: 'Audit trail integrity',
+        ok: !v || v.ok,
+        detail: !v ? 'Not verified yet since start (runs hourly).' : v.ok ? `Hash chain verified ${v.at.slice(0, 16).replace('T', ' ')} UTC (${v.checked} entries).` : `Hash chain broken at entry ${v.broken_at}; investigate immediately.`,
+      }))(lastChainVerification()),
     ],
   };
 }
