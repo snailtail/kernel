@@ -13,6 +13,7 @@ import { LoginPage } from './pages/Login';
 import { NewProblemPage } from './pages/NewProblem';
 import { ProblemPage } from './pages/Problem';
 import { ProblemsPage } from './pages/Problems';
+import { ProblemPrintPage } from './pages/ProblemPrint';
 import { ReportsPage } from './pages/Reports';
 import { ReviewPage } from './pages/Review';
 import { SettingsPage } from './pages/Settings';
@@ -97,6 +98,7 @@ export function App() {
             <Route path="/problems" element={<ProblemsPage />} />
             <Route path="/problems/new" element={<NewProblemPage />} />
             <Route path="/problems/:ref" element={<ProblemPage />} />
+            <Route path="/problems/:ref/print" element={<ProblemPrintPage />} />
             <Route path="/candidates" element={<CandidatesPage />} />
             <Route path="/kedb" element={<KedbPage />} />
             <Route path="/actions" element={<ActionsPage />} />

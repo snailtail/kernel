@@ -12,6 +12,7 @@ import * as analyses from './analyses.js';
 import * as integrations from './integrations.js';
 import * as problems from './problems.js';
 import * as reports from './reports.js';
+import { problemMarkdown } from './export.js';
 import * as review from './review.js';
 import { CLOSURE_CODES, EC_DECISIONS, STATUSES, TRANSITIONS, WORKAROUND_EFFECTIVENESS } from './workflow.js';
 
@@ -160,6 +161,14 @@ function buildServer(user: User) {
         category: p.category, affected_service: p.affected_service, assignee: p.assignee, updated_at: p.updated_at,
       }));
     },
+  );
+
+  tool(
+    'export_problem',
+    'Export a problem record as a Markdown document (summary, root cause, workaround, error control, resolution, review, analyses, actions, links, timeline). Useful for sharing a major problem review or a known error article.',
+    { ref: z.string() },
+    true,
+    async ({ ref }) => ({ markdown: await problemMarkdown(ref) }),
   );
 
   tool(

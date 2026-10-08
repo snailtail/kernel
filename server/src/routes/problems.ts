@@ -7,6 +7,7 @@ import * as actions from '../actions.js';
 import * as analyses from '../analyses.js';
 import * as problems from '../problems.js';
 import * as reports from '../reports.js';
+import { problemMarkdown } from '../export.js';
 import * as review from '../review.js';
 import { CLOSURE_CODES, EC_DECISIONS, ROLES, STATUSES, TRANSITIONS, WORKAROUND_EFFECTIVENESS } from '../workflow.js';
 
@@ -62,6 +63,14 @@ export async function problemRoutes(app: FastifyInstance) {
   app.get<RefParams>('/api/problems/:ref', async (req) => {
     requireUser(req);
     return problems.getProblem(req.params.ref);
+  });
+
+  app.get<RefParams>('/api/problems/:ref/export.md', async (req, reply) => {
+    requireUser(req);
+    const md = await problemMarkdown(req.params.ref);
+    reply.header('Content-Type', 'text/markdown; charset=utf-8');
+    reply.header('Content-Disposition', `attachment; filename="${req.params.ref.toUpperCase()}.md"`);
+    return md;
   });
 
   app.patch<RefParams>('/api/problems/:ref', async (req) =>

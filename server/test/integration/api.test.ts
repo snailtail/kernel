@@ -432,6 +432,21 @@ describe('REST API', { skip }, () => {
     });
   });
 
+  describe('export', () => {
+    test('exports a problem as Markdown', async () => {
+      const p = await create({ title: 'Export | me', description: 'Some **bold** text' });
+      await analyst.post(`/api/problems/${p.ref}/analyses`, { technique: 'five_whys', data: { problem_statement: 'X', whys: [{ why: 'Why?', because: 'Because' }] } });
+      await analyst.post(`/api/problems/${p.ref}/actions`, { title: 'Follow up' });
+      const res = await fetch(`${k.base}/api/problems/${p.ref}/export.md`, { headers: { Cookie: viewer.cookie! } });
+      assert.match(res.headers.get('content-disposition') ?? '', new RegExp(p.ref));
+      const md = await res.text();
+      assert.ok(md.startsWith(`# ${p.ref}: Export | me`));
+      assert.match(md, /## Description\n\nSome \*\*bold\*\* text/);
+      assert.match(md, /1\. Why\? → Because/);
+      assert.match(md, /\| Follow up \|/);
+    });
+  });
+
   describe('administration', () => {
     test('admins manage users; others cannot', async () => {
       assert.equal((await pm.get('/api/users')).status, 403);

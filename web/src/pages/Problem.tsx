@@ -6,6 +6,7 @@ import { ActionList, ActionModal } from '../components/Actions';
 import { AnalysesSection } from '../components/Analyses';
 import { GuidePanel } from '../components/Guide';
 import { SimilarProblems } from '../components/Similar';
+import { Markdown } from '../components/Markdown';
 import { Modal } from '../components/Modal';
 import {
   CLOSURE_LABEL, DECISION_LABEL, EFFECTIVENESS_LABEL, FIELD_LABEL, formatDate, formatDay, LEVEL_LABEL, LINK_LABEL, PRIORITY_LABEL, relativeTime, RISK_LABEL,
@@ -46,7 +47,13 @@ export function ProblemPage() {
   return (
     <>
       <header className="problem-head">
-        <div className="crumbs"><Link to="/problems">Problems</Link> / <span className="mono">{p.ref}</span></div>
+        <div className="crumbs">
+          <Link to="/problems">Problems</Link> / <span className="mono">{p.ref}</span>
+          <span className="crumb-actions no-print">
+            <Link to={`/problems/${p.ref}/print`}>Print / PDF</Link>
+            <a href={`/api/problems/${p.ref}/export.md`}>Export Markdown</a>
+          </span>
+        </div>
         <EditableTitle value={p.title} editable={editable} onSave={(title) => save({ title })} />
         <div className="badges">
           <StatusBadge status={p.status} />
@@ -148,13 +155,14 @@ function TextSection(props: { title: string; hint: string; value: string; editab
       {draft !== null ? (
         <>
           <textarea autoFocus rows={Math.max(5, draft.split('\n').length + 1)} value={draft} placeholder={props.hint} onChange={(e) => setDraft(e.target.value)} />
+          <span className="muted small">Markdown supported: **bold**, _italic_, `code`, lists, tables, links.</span>
           <div className="actions">
             <button className="btn" onClick={() => setDraft(null)} disabled={busy}>Cancel</button>
             <button className="btn primary" onClick={commit} disabled={busy}>Save</button>
           </div>
         </>
       ) : props.value ? (
-        <p className="prose">{props.value}</p>
+        <Markdown text={props.value} />
       ) : (
         <p className="placeholder">{props.hint}</p>
       )}
@@ -314,9 +322,9 @@ function ErrorControlSection({ problem: p, onChange }: { problem: ProblemDetail;
         <p className="placeholder">Assess the risk of not fixing this known error against the cost of a permanent fix, and record the decision.</p>
       ) : (
         <dl className="ec-grid">
-          {p.ec_risk && (<><dt>Risk of not fixing</dt><dd className="prose">{p.ec_risk}</dd></>)}
-          {p.ec_fix_cost && (<><dt>Cost of fixing</dt><dd className="prose">{p.ec_fix_cost}</dd></>)}
-          {p.ec_decision_note && (<><dt>Rationale</dt><dd className="prose">{p.ec_decision_note}</dd></>)}
+          {p.ec_risk && (<><dt>Risk of not fixing</dt><dd><Markdown text={p.ec_risk} /></dd></>)}
+          {p.ec_fix_cost && (<><dt>Cost of fixing</dt><dd><Markdown text={p.ec_fix_cost} /></dd></>)}
+          {p.ec_decision_note && (<><dt>Rationale</dt><dd><Markdown text={p.ec_decision_note} /></dd></>)}
         </dl>
       )}
       {p.ec_decided_by_name && p.ec_decided_at && (
@@ -508,7 +516,7 @@ export function ActivityLine({ activity: a }: { activity: Activity }) {
         <strong>{a.user_name ?? 'System'}</strong> {text}
         <time title={formatDate(a.created_at)}>{relativeTime(a.created_at)}</time>
       </div>
-      {(a.kind === 'comment' || (a.kind === 'status' && a.body)) && <p className="prose activity-body">{a.body}</p>}
+      {(a.kind === 'comment' || (a.kind === 'status' && a.body)) && <Markdown text={a.body} className="activity-body" />}
     </div>
   );
 }

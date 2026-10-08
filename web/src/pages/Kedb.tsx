@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import type { Problem } from '../api';
 import { PriorityBadge, StatusBadge } from '../components/Badges';
+import { Markdown } from '../components/Markdown';
 import { DECISION_LABEL, EFFECTIVENESS_LABEL, formatDate } from '../format';
 import { useApi } from '../hooks';
 
@@ -56,11 +57,11 @@ export function KedbPage() {
             <div className="kedb-cols">
               <div>
                 <h4>Root cause</h4>
-                <p className="prose">{p.root_cause || <span className="muted">Not documented</span>}</p>
+                {p.root_cause ? <Markdown text={p.root_cause} /> : <p className="muted">Not documented</p>}
               </div>
               <div>
                 <h4>Workaround</h4>
-                <p className="prose">{p.workaround || <span className="muted">No workaround available</span>}</p>
+                {p.workaround ? <Markdown text={p.workaround} /> : <p className="muted">No workaround available</p>}
               </div>
             </div>
           </article>
