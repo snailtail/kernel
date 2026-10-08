@@ -10,6 +10,8 @@ export interface User {
   role: Role;
   preferences: Preferences;
   must_change_password?: boolean;
+  mfa_enabled?: boolean;
+  mfa_enrollment_required?: boolean;
 }
 
 export interface Preferences {
@@ -167,7 +169,14 @@ export interface Conflict {
 export const asConflict = (err: unknown): Conflict | null =>
   err instanceof ApiError && err.status === 409 && ('conflicts' in err.details || 'current' in err.details) ? (err.details as Conflict) : null;
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+type ReauthHandler = (mfa: boolean) => Promise<boolean>;
+let reauthHandler: ReauthHandler | null = null;
+/** Registers the UI that asks the user to confirm it is them (step-up) when the server requires it. */
+export const setReauthHandler = (h: ReauthHandler | null) => {
+  reauthHandler = h;
+};
+
+async function request<T>(method: string, path: string, body?: unknown, retried = false): Promise<T> {
   const res = await fetch(path, {
     method,
     credentials: 'same-origin',
@@ -179,7 +188,11 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   });
   const data = res.status === 204 ? null : await res.json().catch(() => null);
   if (!res.ok) {
-    if (res.status === 401 && path !== '/api/auth/login') window.dispatchEvent(new Event('kernel:unauthorized'));
+    if (res.status === 401 && !path.startsWith('/api/auth/login') && path !== '/api/auth/reauth') window.dispatchEvent(new Event('kernel:unauthorized'));
+    // Sensitive action: confirm identity, then retry once.
+    if (res.status === 403 && data?.reauth_required && reauthHandler && !retried && (await reauthHandler(!!data.mfa))) {
+      return request<T>(method, path, body, true);
+    }
     throw new ApiError(res.status, data?.error ?? res.statusText, data ?? {});
   }
   return data as T;

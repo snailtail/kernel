@@ -6,6 +6,7 @@ import { isManager, useSession } from '../session';
 import { Modal } from '../components/Modal';
 
 interface AdminUser {
+  mfa_enabled: boolean;
   id: number;
   username: string;
   display_name: string;
@@ -48,7 +49,7 @@ function UsersCard() {
         <button className="btn primary small" onClick={() => setEditing('new')}>Add user</button>
       </div>
       <table className="table compact">
-        <thead><tr><th>Username</th><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Created</th><th /></tr></thead>
+        <thead><tr><th>Username</th><th>Name</th><th>Email</th><th>Role</th><th>2FA</th><th>Status</th><th>Created</th><th /></tr></thead>
         <tbody>
           {users?.map((u) => (
             <tr key={u.id} className={u.active ? '' : 'inactive'}>
@@ -56,6 +57,7 @@ function UsersCard() {
               <td>{u.display_name}</td>
               <td>{u.email || '–'}</td>
               <td>{ROLE_LABEL[u.role]}</td>
+              <td>{u.mfa_enabled ? '✓' : '–'}</td>
               <td>{u.active ? 'Active' : 'Deactivated'}</td>
               <td>{formatDate(u.created_at)}</td>
               <td><button className="btn-link" onClick={() => setEditing(u)}>Edit</button></td>
@@ -111,6 +113,14 @@ function UserModal({ user, self, roles, onClose, onDone }: { user: AdminUser | n
         </label>
         {user && !self && (
           <label className="check full"><input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Active</label>
+        )}
+        {user && user.mfa_enabled && (
+          <div className="full">
+            <button type="button" className="btn-link danger" onClick={async () => {
+              if (!confirm(`Reset two-factor authentication for ${user.username}? They will need to set it up again.`)) return;
+              try { await api.post(`/api/users/${user.id}/mfa/reset`); onDone(); } catch (err) { setError((err as Error).message); }
+            }}>Reset two-factor authentication</button>
+          </div>
         )}
         {error && <div className="error full">{error}</div>}
         <div className="actions full">
@@ -428,7 +438,16 @@ function DeliveriesModal({ hook, onClose }: { hook: Webhook; onClose: () => void
 }
 
 function SecurityCard() {
-  const { data } = useApi<{ checks: { id: string; label: string; ok: boolean; detail: string }[] }>('/api/admin/security');
+  const { meta } = useSession();
+  const { data, reload } = useApi<{ checks: { id: string; label: string; ok: boolean; detail: string }[] }>('/api/admin/security');
+  const { data: policy, reload: reloadPolicy } = useApi<{ required_roles: Role[] }>('/api/admin/mfa-policy');
+  const toggleRole = async (role: Role) => {
+    if (!policy) return;
+    const roles = policy.required_roles.includes(role) ? policy.required_roles.filter((r) => r !== role) : [...policy.required_roles, role];
+    await api.put('/api/admin/mfa-policy', { required_roles: roles });
+    reloadPolicy();
+    reload();
+  };
   if (!data) return null;
   const failing = data.checks.filter((c) => !c.ok).length;
   return (
@@ -445,6 +464,17 @@ function SecurityCard() {
           </li>
         ))}
       </ul>
+      {policy && (
+        <div className="mfa-policy">
+          <h3>Two-factor policy</h3>
+          <p className="muted small">Users in these roles must set up two-factor authentication before they can use Kernel.</p>
+          <div className="chip-row">
+            {meta.roles.filter((r) => r !== 'integration').map((r) => (
+              <label key={r} className="check"><input type="checkbox" checked={policy.required_roles.includes(r)} onChange={() => toggleRole(r)} /> {ROLE_LABEL[r]}</label>
+            ))}
+          </div>
+        </div>
+      )}
     </section>
   );
 }

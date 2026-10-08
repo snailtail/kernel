@@ -10,7 +10,8 @@ import { CandidatesPage } from './pages/Candidates';
 import { DashboardPage } from './pages/Dashboard';
 import { GuidePage } from './pages/Guide';
 import { KedbPage } from './pages/Kedb';
-import { ChangeInitialPassword, LoginPage } from './pages/Login';
+import { ChangeInitialPassword, EnrollTwoFactor, LoginPage } from './pages/Login';
+import { ReauthPrompt } from './components/Reauth';
 import { NewProblemPage } from './pages/NewProblem';
 import { ProblemPage } from './pages/Problem';
 import { ProblemsPage } from './pages/Problems';
@@ -58,10 +59,12 @@ export function App() {
   if (user === undefined) return null;
   if (user === null) return <LoginPage onLogin={setUser} />;
   if (user.must_change_password) return <ChangeInitialPassword onDone={() => setUser({ ...user, must_change_password: false })} onLogout={logout} />;
+  if (user.mfa_enrollment_required) return (<><ReauthPrompt /><EnrollTwoFactor onDone={() => setUser({ ...user, mfa_enrollment_required: false, mfa_enabled: true })} onLogout={logout} /></>);
   if (!meta) return <div className="loading-screen">Loading…</div>;
 
   return (
     <SessionContext.Provider value={{ user, meta, reloadMeta, logout, setPreferences }}>
+      <ReauthPrompt />
       <div className="shell">
         <aside className="sidebar">
           <div className="brand">

@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { hashPassword, requireRole } from '../auth.js';
 import { backupStatus } from '../backups.js';
+import { disable as disableMfa, requiredRoles, requireStepUp, setRequiredRoles } from '../mfa.js';
 import { checkPassword } from '../passwords.js';
 import { securityStatus } from '../security.js';
 import * as webhooks from '../webhooks.js';
@@ -17,7 +18,7 @@ const userFields = {
   active: z.boolean(),
 };
 const password = z.string();
-const USER_COLUMNS = 'id, username, display_name, email, role, active, created_at';
+const USER_COLUMNS = 'id, username, display_name, email, role, active, created_at, mfa_enabled_at IS NOT NULL AS mfa_enabled';
 
 export async function adminRoutes(app: FastifyInstance) {
   app.get('/api/users', async (req) => {
@@ -27,6 +28,7 @@ export async function adminRoutes(app: FastifyInstance) {
 
   app.post('/api/users', async (req, reply) => {
     requireRole(req, 'admin');
+    await requireStepUp(req);
     const body = z.object({ ...userFields, email: userFields.email.default(''), active: userFields.active.default(true), password }).parse(req.body);
     await checkPassword(body.password, body);
     try {
@@ -44,6 +46,7 @@ export async function adminRoutes(app: FastifyInstance) {
 
   app.patch<{ Params: { id: string } }>('/api/users/:id', async (req) => {
     const admin = requireRole(req, 'admin');
+    await requireStepUp(req);
     const id = Number(req.params.id);
     const body = z.object({ ...userFields, password }).partial().omit({ username: true }).parse(req.body);
     if (id === admin.id && (body.active === false || (body.role && body.role !== 'admin'))) {
@@ -76,20 +79,24 @@ export async function adminRoutes(app: FastifyInstance) {
   });
   app.post('/api/webhooks', async (req, reply) => {
     const admin = requireRole(req, 'admin');
+    await requireStepUp(req);
     reply.code(201);
     return webhooks.createWebhook(admin, webhooks.webhookSchema.parse(req.body));
   });
   app.put<Id>('/api/webhooks/:id', async (req) => {
     const admin = requireRole(req, 'admin');
+    await requireStepUp(req);
     return webhooks.updateWebhook(admin, Number(req.params.id), webhooks.webhookSchema.parse(req.body));
   });
   app.delete<Id>('/api/webhooks/:id', async (req) => {
     const admin = requireRole(req, 'admin');
+    await requireStepUp(req);
     await webhooks.deleteWebhook(admin, Number(req.params.id));
     return { ok: true };
   });
   app.post<Id>('/api/webhooks/:id/rotate', async (req) => {
     const admin = requireRole(req, 'admin');
+    await requireStepUp(req);
     return webhooks.rotateSecret(admin, Number(req.params.id));
   });
   app.get<Id>('/api/webhooks/:id/deliveries', async (req) => {
@@ -99,6 +106,23 @@ export async function adminRoutes(app: FastifyInstance) {
   app.post<Id>('/api/webhooks/:id/ping', async (req) => {
     const admin = requireRole(req, 'admin');
     return webhooks.ping(admin, Number(req.params.id));
+  });
+
+  app.get('/api/admin/mfa-policy', async (req) => {
+    requireRole(req, 'admin');
+    return { required_roles: await requiredRoles() };
+  });
+  app.put('/api/admin/mfa-policy', async (req) => {
+    const admin = requireRole(req, 'admin');
+    await requireStepUp(req);
+    const body = z.object({ required_roles: z.array(z.enum(ROLES)).max(10) }).parse(req.body);
+    return { required_roles: await setRequiredRoles(admin, body.required_roles) };
+  });
+  app.post<{ Params: { id: string } }>('/api/users/:id/mfa/reset', async (req) => {
+    const admin = requireRole(req, 'admin');
+    await requireStepUp(req);
+    await disableMfa(admin, Number(req.params.id));
+    return { ok: true };
   });
 
   app.get('/api/admin/security', async (req) => {

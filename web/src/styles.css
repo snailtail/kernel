@@ -715,3 +715,17 @@ a.stat:hover { border-color: var(--accent); text-decoration: none; }
 .check-mark { flex: none; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700; color: var(--surface); margin-top: 1px; }
 .checklist li.ok .check-mark { background: var(--success); }
 .checklist li.warn .check-mark { background: var(--warn); }
+
+/* Two-factor authentication */
+.mfa-setup { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
+.mfa-setup img { border-radius: 8px; background: #fff; padding: 6px; }
+.mfa-setup ol { margin: 0 0 12px; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
+.mfa-setup .inline-form input { max-width: 160px; min-width: 0; letter-spacing: .2em; }
+.secret-key { word-break: break-all; }
+.recovery { display: flex; flex-direction: column; gap: 10px; }
+.recovery-codes { list-style: none; margin: 0; padding: 12px; background: var(--surface-2); border-radius: 8px; display: grid; grid-template-columns: repeat(2, max-content); gap: 6px 28px; }
+.two-factor p { margin: 0 0 10px; }
+.login-card.wide { width: min(560px, 100%); }
+.chip-row { display: flex; flex-wrap: wrap; gap: 8px 18px; }
+.mfa-policy { border-top: 1px solid var(--border); padding-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+.mfa-policy p { margin: 0; }

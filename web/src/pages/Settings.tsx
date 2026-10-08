@@ -3,6 +3,7 @@ import { Link } from 'react-router';
 import { api } from '../api';
 import { formatDate, relativeTime, ROLE_LABEL } from '../format';
 import { useApi } from '../hooks';
+import { TwoFactor } from '../components/TwoFactor';
 import { useSession } from '../session';
 
 interface Token {
@@ -26,6 +27,10 @@ export function SettingsPage() {
         </div>
       </header>
       <PreferencesCard />
+      <section className="card">
+        <h2>Two-factor authentication</h2>
+        <TwoFactor />
+      </section>
       <TokensCard />
       <SessionsCard />
       <PasswordCard />
@@ -68,15 +73,15 @@ function PreferencesCard() {
 }
 
 function PasswordCard() {
-  const [form, setForm] = useState({ current: '', password: '', confirm: '' });
+  const [form, setForm] = useState({ current: '', password: '', confirm: '', revoke_tokens: false });
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (form.password !== form.confirm) return setMessage({ ok: false, text: 'Passwords do not match' });
     try {
-      await api.post('/api/auth/password', { current: form.current, password: form.password });
-      setForm({ current: '', password: '', confirm: '' });
+      await api.post('/api/auth/password', { current: form.current, password: form.password, revoke_tokens: form.revoke_tokens });
+      setForm({ current: '', password: '', confirm: '', revoke_tokens: false });
       setMessage({ ok: true, text: 'Password changed' });
     } catch (err) {
       setMessage({ ok: false, text: (err as Error).message });
@@ -90,6 +95,7 @@ function PasswordCard() {
         <label className="full">Current password<input type="password" autoComplete="current-password" value={form.current} onChange={(e) => setForm({ ...form, current: e.target.value })} /></label>
         <label>New password <span className="muted small">(at least 12 characters; a passphrase works well)</span><input type="password" autoComplete="new-password" minLength={12} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></label>
         <label>Confirm<input type="password" autoComplete="new-password" value={form.confirm} onChange={(e) => setForm({ ...form, confirm: e.target.value })} /></label>
+        <label className="check full"><input type="checkbox" checked={form.revoke_tokens} onChange={(e) => setForm({ ...form, revoke_tokens: e.target.checked })} /> Also revoke all my API tokens (other sessions are always signed out)</label>
         {message && <div className={`full ${message.ok ? 'success' : 'error'}`}>{message.text}</div>}
         <div className="actions full"><button className="btn primary" disabled={!form.current || !form.password}>Change password</button></div>
       </form>

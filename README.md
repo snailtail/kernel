@@ -132,6 +132,13 @@ To deploy to the test server, push your commits and run `scripts/deploy.sh`. It 
   user's name, or (optionally) found in breaches. Logins are limited per client and per account (temporary lockout,
   logged as a security event, identical for unknown accounts). Sessions expire after inactivity and have an absolute
   lifetime; users see and revoke their sessions in Settings, and a password change signs out other sessions.
+- Two-factor authentication with any TOTP authenticator app, plus single-use recovery codes; replayed codes are
+  rejected and the secret is encrypted with `KERNEL_SECRET_KEY`. Administrators can require it per role
+  (Administration → Security status) and reset it for a user.
+- Sensitive actions (creating API tokens, managing users and roles, webhooks, two-factor settings) need a
+  re-authentication within the last 10 minutes (`KERNEL_STEPUP_MINUTES`) and are not available with API tokens.
+- A device where the account signed in before can still sign in while the account is locked by failed attempts
+  from elsewhere, so nobody can lock a user out deliberately.
 - The generated initial admin password must be changed at first login. **Administration → Security status** lists the
   security-relevant configuration.
 - Containers run with a read-only filesystem, no Linux capabilities beyond what PostgreSQL needs,

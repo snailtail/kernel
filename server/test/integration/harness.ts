@@ -20,7 +20,10 @@ export interface Response<T = any> {
 }
 
 export class Client {
-  cookie?: string;
+  cookies = new Map<string, string>();
+  get cookie() {
+    return this.cookies.size ? [...this.cookies].map(([k, v]) => `${k}=${v}`).join('; ') : undefined;
+  }
   constructor(
     public base: string,
     public token?: string,
@@ -37,8 +40,12 @@ export class Client {
       },
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
-    const setCookie = res.headers.get('set-cookie');
-    if (setCookie?.startsWith('kernel_session=')) this.cookie = setCookie.split(';')[0];
+    for (const c of res.headers.getSetCookie()) {
+      const [pair] = c.split(';');
+      const [name, ...value] = pair.split('=');
+      if (value.join('=')) this.cookies.set(name, value.join('='));
+      else this.cookies.delete(name);
+    }
     const text = await res.text();
     return { status: res.status, body: text ? JSON.parse(text) : null };
   }

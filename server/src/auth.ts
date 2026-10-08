@@ -5,6 +5,7 @@ import { config } from './config.js';
 import { query } from './db.js';
 import { forbidden, HttpError } from './errors.js';
 import { logger } from './log.js';
+import { mfaRequiredFor } from './mfapolicy.js';
 import { checkSameOrigin } from './security.js';
 
 const securityLog = logger.child({ event: { dataset: 'kernel.security' } });
@@ -18,6 +19,7 @@ export interface User {
   role: Role;
   preferences: Preferences;
   must_change_password: boolean;
+  mfa_enabled: boolean;
 }
 
 export interface Preferences {
@@ -34,7 +36,7 @@ declare module 'fastify' {
 }
 
 export const SESSION_COOKIE = 'kernel_session';
-const USER_COLUMNS = 'u.id, u.username, u.display_name, u.email, u.role, u.preferences, u.must_change_password';
+const USER_COLUMNS = 'u.id, u.username, u.display_name, u.email, u.role, u.preferences, u.must_change_password, u.mfa_enabled_at IS NOT NULL AS mfa_enabled';
 
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
 
@@ -130,9 +132,12 @@ function count(key: string) {
   return e && e.until > Date.now() ? e.count : 0;
 }
 
-/** Rejects a login attempt when the client or the account has had too many recent failures. */
-export function guardLogin(ip: string, account: string) {
-  if (count(`ip:${ip}`) >= MAX_PER_IP || count(`acct:${account}`) >= MAX_PER_ACCOUNT) {
+/**
+ * Rejects a login attempt when the client or the account has had too many recent failures. A device where the
+ * account signed in before skips the per-account lock, so others cannot lock a user out (the per-IP limit stays).
+ */
+export function guardLogin(ip: string, account: string, knownDevice = false) {
+  if (count(`ip:${ip}`) >= MAX_PER_IP || (!knownDevice && count(`acct:${account}`) >= MAX_PER_ACCOUNT)) {
     throw new HttpError(429, 'Too many failed login attempts, try again in 15 minutes');
   }
 }
@@ -180,9 +185,13 @@ export async function authenticate(req: FastifyRequest) {
     if (!req.headers['x-kernel-request']) throw forbidden('Missing X-Kernel-Request header');
     checkSameOrigin(req);
   }
-  // A generated initial password must be changed before anything else.
-  if (req.user?.must_change_password && !['/api/auth/me', '/api/auth/password', '/api/auth/logout', '/api/meta'].includes(req.url.split('?')[0])) {
+  // A generated initial password must be changed, and required two-factor authentication set up, before anything else.
+  const path = req.url.split('?')[0];
+  if (req.user?.must_change_password && !['/api/auth/me', '/api/auth/password', '/api/auth/logout', '/api/meta'].includes(path)) {
     throw new HttpError(403, 'Change your password before continuing', { must_change_password: true });
+  }
+  if (req.user && !req.user.mfa_enabled && !path.startsWith('/api/auth/') && path !== '/api/meta' && (await mfaRequiredFor(req.user.role))) {
+    throw new HttpError(403, 'Set up two-factor authentication before continuing', { mfa_enrollment_required: true });
   }
 }
 
