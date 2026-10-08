@@ -5,6 +5,7 @@ import { MajorBadge, PriorityBadge, StatusBadge } from '../components/Badges';
 import { ActionList, ActionModal } from '../components/Actions';
 import { AnalysesSection } from '../components/Analyses';
 import { GuidePanel } from '../components/Guide';
+import { SimilarProblems } from '../components/Similar';
 import { Modal } from '../components/Modal';
 import {
   CLOSURE_LABEL, DECISION_LABEL, EFFECTIVENESS_LABEL, FIELD_LABEL, formatDate, formatDay, LEVEL_LABEL, LINK_LABEL, PRIORITY_LABEL, relativeTime, RISK_LABEL,
@@ -94,6 +95,7 @@ export function ProblemPage() {
         <aside className="problem-side">
           <DetailsPanel problem={p} editable={editable} onSave={save} />
           <LinksPanel problem={p} editable={canEdit(user)} onChange={setData} />
+          <SimilarProblems text={`${p.title} ${p.description}`} exclude={p.ref} duplicateRef={isManager(user) && p.status !== 'closed' ? p.ref : undefined} />
         </aside>
       </div>
 

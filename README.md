@@ -47,6 +47,10 @@ linked in one step.
 shows a checklist of the next steps, derived from the record itself; the same guidance is returned to MCP clients as
 `next_steps` in `get_problem`. New users are offered a short introduction, "Problem management in 5 minutes".
 
+**Duplicates**: while a problem is being logged, similar problems and known errors (with their workarounds) are
+shown live. A problem manager can close a problem as a duplicate of another, which links the two and moves its
+incidents and events to the original.
+
 **Follow-up actions** track work that follows from a problem (vendor fixes, monitoring, runbook updates, review
 outcomes) with an owner and due date.
 
@@ -105,7 +109,8 @@ result in Kernel.
 Tools: `whoami`, `list_reference_data`, `search_problems`, `get_problem`, `search_known_errors`, `get_dashboard`,
 `create_problem`, `update_problem`, `transition_problem`, `add_comment`, `link_record`, `unlink_record`,
 `assess_known_error`, `start_analysis`, `update_analysis`, `list_actions`, `add_action`, `update_action`, `get_report`,
-`list_problem_candidates`, `create_problem_from_candidate`, `link_candidate_records`, `report_records`.
+`list_problem_candidates`, `create_problem_from_candidate`, `link_candidate_records`, `report_records`,
+`find_similar_problems`, `mark_duplicate`.
 
 ## REST API
 

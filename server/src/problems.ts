@@ -415,3 +415,63 @@ export async function assessProblem(user: User, ref: string, input: z.infer<type
   });
   return getProblem(ref);
 }
+
+// Words too common to say anything about similarity.
+const STOPWORDS = new Set(
+  'the and for with from that this are was were has have not but when after before into onto over under about than then there their they them our you your can cannot does did doing during each some such only same other more most very also just been being which while where what who how why all any both few its it’s off out own too again further once here same should would could will shall may might must per via'.split(' '),
+);
+
+/** Problems similar to a free text (e.g. a draft title and description), best matches first. */
+export async function findSimilar(text: string, excludeRef?: string, limit = 5) {
+  const words = [...new Set(text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 3 && !STOPWORDS.has(w)))].slice(0, 16);
+  if (!words.length) return [];
+  const { rows } = await query(
+    `WITH q AS (SELECT to_tsquery('simple', $1) AS q)
+     SELECT p.ref, p.title, p.status, p.priority, p.affected_service, p.workaround, p.root_cause,
+            round(ts_rank(p.search, q.q)::numeric, 4)::float AS score
+     FROM problems p, q
+     WHERE p.search @@ q.q AND ($2::text IS NULL OR p.ref <> $2)
+     ORDER BY ts_rank(p.search, q.q) * CASE p.status WHEN 'known_error' THEN 1.5 WHEN 'closed' THEN 0.6 ELSE 1 END DESC, p.updated_at DESC
+     LIMIT $3`,
+    [words.map((w) => `${w}:*`).join(' | '), excludeRef?.toUpperCase() ?? null, limit],
+  );
+  // Require a reasonable overlap so a single shared word does not count as similar.
+  return rows.filter((r) => r.score >= 0.03 || words.length <= 2);
+}
+
+/**
+ * Marks a problem as a duplicate of another: links the two, copies its incident/event links to the original,
+ * and closes it with closure code "duplicate". Closing is reserved for problem managers.
+ */
+export async function markDuplicate(user: User, ref: string, ofRef: string) {
+  if (!isManager(user.role)) throw forbidden('Only a problem manager can mark duplicates (it closes the problem)');
+  if (ref.toUpperCase() === ofRef.toUpperCase()) throw badRequest('A problem cannot be a duplicate of itself');
+  await tx(async (db) => {
+    const dup = await loadForUpdate(db, ref);
+    const original = await loadForUpdate(db, ofRef);
+    if (dup.status === 'closed') throw conflict(`${dup.ref} is already closed`);
+    if (original.status === 'closed') throw conflict(`${original.ref} is closed; reopen it or pick another problem`);
+    const link = (from: { id: number }, to: { ref: string }, note: string) =>
+      db.query(
+        `INSERT INTO problem_links (problem_id, kind, reference, note, created_by) VALUES ($1, 'problem', $2, $3, $4) ON CONFLICT DO NOTHING`,
+        [from.id, to.ref, note, user.id],
+      );
+    await link(dup, original, 'Duplicate of');
+    await link(original, dup, 'Duplicate');
+    const { rowCount: moved } = await db.query(
+      `INSERT INTO problem_links (problem_id, kind, reference, system, url, note, created_by)
+       SELECT $1, kind, reference, system, url, note, $3 FROM problem_links WHERE problem_id = $2 AND kind IN ('incident', 'event')
+       ON CONFLICT DO NOTHING`,
+      [original.id, dup.id, user.id],
+    );
+    await db.query('UPDATE external_records SET problem_id = $1 WHERE problem_id = $2', [original.id, dup.id]);
+    await db.query(
+      `UPDATE problems SET status = 'closed', closure_code = 'duplicate', closed_at = now(), updated_at = now() WHERE id = $1`,
+      [dup.id],
+    );
+    await logActivity(db, dup.id, user.id, 'status', `Duplicate of ${original.ref}`, { from: dup.status, to: 'closed', closure_code: 'duplicate', duplicate_of: original.ref });
+    await logActivity(db, original.id, user.id, 'link', `Merged duplicate ${dup.ref}${moved ? ` (${moved} incident/event link${moved === 1 ? '' : 's'} moved)` : ''}`, { duplicate: dup.ref });
+    await db.query('UPDATE problems SET updated_at = now() WHERE id = $1', [original.id]);
+  });
+  return getProblem(ofRef);
+}

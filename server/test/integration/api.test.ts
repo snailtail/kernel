@@ -396,6 +396,28 @@ describe('REST API', { skip }, () => {
     });
   });
 
+  describe('duplicates', () => {
+    test('finds similar problems and merges duplicates', async () => {
+      const original = await create({ title: 'Kubernetes ingress drops websocket connections', description: 'Websocket clients reconnect every 60 seconds' });
+      const dup = await create({ title: 'Websocket connections dropped by ingress', description: 'Chat clients disconnect' });
+      await analyst.post(`/api/problems/${dup.ref}/links`, { kind: 'incident', reference: 'INC-WS1' });
+
+      const similar = await analyst.get(`/api/problems/similar?text=${encodeURIComponent('websocket ingress disconnects')}&exclude=${dup.ref}`);
+      assert.equal(similar.body[0].ref, original.ref);
+      assert.deepEqual((await analyst.get('/api/problems/similar?text=the%20and')).body, []);
+
+      assert.equal((await analyst.post(`/api/problems/${dup.ref}/duplicate`, { of: original.ref })).status, 403);
+      const merged = await pm.post(`/api/problems/${dup.ref}/duplicate`, { of: original.ref });
+      assert.equal(merged.body.ref, original.ref);
+      assert.ok(merged.body.links.some((l: any) => l.kind === 'incident' && l.reference === 'INC-WS1'));
+      assert.ok(merged.body.links.some((l: any) => l.kind === 'problem' && l.reference === dup.ref));
+      const closed = (await analyst.get(`/api/problems/${dup.ref}`)).body;
+      assert.equal(closed.status, 'closed');
+      assert.equal(closed.closure_code, 'duplicate');
+      assert.equal((await pm.post(`/api/problems/${dup.ref}/duplicate`, { of: original.ref })).status, 409);
+    });
+  });
+
   describe('administration', () => {
     test('admins manage users; others cannot', async () => {
       assert.equal((await pm.get('/api/users')).status, 403);

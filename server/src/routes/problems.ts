@@ -47,6 +47,17 @@ export async function problemRoutes(app: FastifyInstance) {
     return created;
   });
 
+  app.get('/api/problems/similar', async (req) => {
+    requireUser(req);
+    const q = z.object({ text: z.string().max(5000), exclude: z.string().max(20).optional(), limit: z.coerce.number().int().min(1).max(20).default(5) }).parse(req.query);
+    return problems.findSimilar(q.text, q.exclude, q.limit);
+  });
+
+  app.post<RefParams>('/api/problems/:ref/duplicate', async (req) => {
+    const body = z.object({ of: z.string().trim().min(1) }).parse(req.body);
+    return problems.markDuplicate(requireUser(req), req.params.ref, body.of);
+  });
+
   app.get<RefParams>('/api/problems/:ref', async (req) => {
     requireUser(req);
     return problems.getProblem(req.params.ref);

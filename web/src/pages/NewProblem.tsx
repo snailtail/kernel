@@ -1,9 +1,10 @@
 import { useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import { api, type LinkKind, type ProblemDetail } from '../api';
 import { LEVEL_LABEL, LINK_LABEL, PRIORITY_LABEL } from '../format';
 import { canEdit, isManager, useSession } from '../session';
 import { Hint } from '../components/Guide';
+import { SimilarProblems } from '../components/Similar';
 
 export function NewProblemPage() {
   const { user, meta } = useSession();
@@ -58,6 +59,7 @@ export function NewProblemPage() {
           <p className="muted">Problem identification – record the problem, its scope and the triggering incidents or events.</p>
         </div>
       </header>
+      <div className="new-problem">
       <form className="card form" onSubmit={submit}>
         <label className="full">
           Title
@@ -72,7 +74,7 @@ export function NewProblemPage() {
         <div className="full">
           <Hint>
             A problem is the underlying cause of one or more incidents. Describe what you observe and its impact; the cause is found later, in analysis.
-            Before logging, search <a href="/problems?status=all">existing problems</a> and the <a href="/kedb">known error database</a>.
+            Before logging, search <Link to="/problems?status=all">existing problems</Link> and the <Link to="/kedb">known error database</Link>.
           </Hint>
         </div>
         <fieldset className="full segmented">
@@ -147,6 +149,10 @@ export function NewProblemPage() {
           <button className="btn primary" disabled={busy || !form.title.trim()}>{busy ? 'Saving…' : 'Log problem'}</button>
         </div>
       </form>
+      <aside>
+        <SimilarProblems text={`${form.title} ${form.description}`} title="Already known?" empty="No similar problems found." />
+      </aside>
+      </div>
     </>
   );
 }

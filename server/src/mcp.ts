@@ -162,6 +162,22 @@ function buildServer(user: User) {
   );
 
   tool(
+    'find_similar_problems',
+    'Find existing problems and known errors similar to a text, e.g. an incident description or a draft problem. Use before create_problem, or while handling an incident to find a known workaround.',
+    { text: z.string().describe('Symptoms, title or description'), exclude_ref: z.string().optional(), limit: z.number().int().min(1).max(20).optional() },
+    true,
+    async ({ text, exclude_ref, limit }) => problems.findSimilar(text, exclude_ref, limit ?? 5),
+  );
+
+  tool(
+    'mark_duplicate',
+    'Mark a problem as a duplicate of another: links them, moves incident/event links to the original and closes the duplicate. Problem managers only.',
+    { ref: z.string().describe('The duplicate'), of: z.string().describe('The original problem to keep') },
+    false,
+    async ({ ref, of }) => compactProblem(await problems.markDuplicate(user, ref, of), 5),
+  );
+
+  tool(
     'get_problem',
     'Get a problem record with all fields, linked incidents/events/changes and recent activity.',
     { ref: z.string().describe('Problem reference, e.g. PRB000012'), activity_limit: z.number().int().min(0).max(500).optional() },
