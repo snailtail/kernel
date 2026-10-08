@@ -13,6 +13,9 @@ services:
       KERNEL_SECURE_COOKIES: ${KERNEL_SECURE_COOKIES:-false}
       KERNEL_TRUST_PROXY: ${KERNEL_TRUST_PROXY:-false}
       KERNEL_MCP_URL: ${KERNEL_MCP_URL:-}
+      KERNEL_BACKUP_DIR: /backups
+    volumes:
+      - ${KERNEL_BACKUP_DIR:-./backups}:/backups:ro
     depends_on:
       db:
         condition: service_healthy
@@ -31,6 +34,28 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  # Nightly pg_dump with retention, see scripts/backup.sh. Restore with scripts/restore.sh.
+  backup:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/backup.sh"]
+    environment:
+      PGHOST: db
+      PGUSER: kernel
+      PGDATABASE: kernel
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      TZ: ${TZ:-UTC}
+      BACKUP_TIME: ${KERNEL_BACKUP_TIME:-02:30}
+      KEEP_DAILY: ${KERNEL_BACKUP_KEEP_DAILY:-7}
+      KEEP_WEEKLY: ${KERNEL_BACKUP_KEEP_WEEKLY:-4}
+      KEEP_MONTHLY: ${KERNEL_BACKUP_KEEP_MONTHLY:-6}
+    volumes:
+      - ./scripts/backup.sh:/backup.sh:ro
+      - ${KERNEL_BACKUP_DIR:-./backups}:/backups
+    depends_on:
+      db:
+        condition: service_healthy
 
 volumes:
   pgdata:

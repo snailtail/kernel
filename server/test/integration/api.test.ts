@@ -200,6 +200,11 @@ describe('REST API', { skip }, () => {
       assert.equal(deactivated.body.active, false);
     });
 
+    test('backup status is visible to managers only', async () => {
+      assert.equal((await analyst.get('/api/admin/backups')).status, 403);
+      assert.deepEqual((await pm.get('/api/admin/backups')).body, { configured: false });
+    });
+
     test('managers manage categories', async () => {
       assert.equal((await analyst.post('/api/categories', { name: 'Batch' })).status, 403);
       assert.equal((await pm.post('/api/categories', { name: 'Batch' })).status, 201);

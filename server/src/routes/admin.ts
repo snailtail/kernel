@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { hashPassword, requireRole } from '../auth.js';
+import { backupStatus } from '../backups.js';
 import { query } from '../db.js';
 import { badRequest, conflict, notFound } from '../errors.js';
 import { ROLES } from '../workflow.js';
@@ -56,6 +57,11 @@ export async function adminRoutes(app: FastifyInstance) {
     // Changing role, status or password signs the user out everywhere.
     await query('DELETE FROM sessions WHERE user_id = $1 AND user_id <> $2', [id, admin.id]);
     return rows[0];
+  });
+
+  app.get('/api/admin/backups', async (req) => {
+    requireRole(req, 'admin', 'problem_manager');
+    return backupStatus();
   });
 
   app.post('/api/categories', async (req, reply) => {

@@ -365,3 +365,7 @@ a.stat:hover { border-color: var(--accent); text-decoration: none; }
   .page-head { flex-direction: column; align-items: flex-start; }
   fieldset.segmented { flex-direction: column; }
 }
+
+.banner { display: block; padding: 10px 14px; border-radius: 8px; font-weight: 550; }
+.banner.warn { background: var(--s-known-bg); color: var(--s-known); border: 1px solid currentColor; }
+.banner:hover { text-decoration: none; filter: brightness(0.98); }

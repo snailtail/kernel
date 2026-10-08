@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { api, type Role } from '../api';
-import { formatDate, ROLE_LABEL } from '../format';
+import { formatDate, relativeTime, ROLE_LABEL } from '../format';
 import { useApi } from '../hooks';
 import { isManager, useSession } from '../session';
 import { Modal } from '../components/Modal';
@@ -21,6 +21,7 @@ export function AdminPage() {
   return (
     <>
       <header className="page-head"><h1>Administration</h1></header>
+      <BackupsCard />
       {user.role === 'admin' && <UsersCard />}
       <CategoriesCard />
     </>
@@ -151,6 +152,57 @@ function CategoriesCard() {
           </li>
         ))}
       </ul>
+    </section>
+  );
+}
+
+export interface BackupStatus {
+  configured: boolean;
+  last_success?: string | null;
+  last_failure?: string | null;
+  healthy?: boolean;
+  files?: { tier: string; name: string; size: number; created_at: string }[];
+}
+
+const formatSize = (bytes: number) =>
+  bytes < 1024 ? `${bytes} B` : bytes < 1048576 ? `${(bytes / 1024).toFixed(0)} kB` : `${(bytes / 1048576).toFixed(1)} MB`;
+
+function BackupsCard() {
+  const { data } = useApi<BackupStatus>('/api/admin/backups');
+  if (!data) return null;
+  return (
+    <section className="card">
+      <div className="section-head">
+        <h2>Backups</h2>
+        {data.configured && <span className={`badge ${data.healthy ? 'status-resolved' : 'major'}`}>{data.healthy ? 'Healthy' : 'Attention'}</span>}
+      </div>
+      {!data.configured ? (
+        <p className="muted">No backup directory configured (KERNEL_BACKUP_DIR).</p>
+      ) : (
+        <>
+          <dl className="kv">
+            <dt>Last successful backup</dt>
+            <dd>{data.last_success ? `${formatDate(data.last_success)} (${relativeTime(data.last_success)})` : 'Never'}</dd>
+            {data.last_failure && (<><dt>Last failure</dt><dd className="warn">{formatDate(data.last_failure)}</dd></>)}
+          </dl>
+          {data.files && data.files.length > 0 && (
+            <table className="table compact">
+              <thead><tr><th>Dump</th><th>Retention</th><th>Size</th><th>Created</th></tr></thead>
+              <tbody>
+                {data.files.map((f) => (
+                  <tr key={f.tier + f.name}>
+                    <td className="mono">{f.name}</td>
+                    <td>{f.tier}</td>
+                    <td>{formatSize(f.size)}</td>
+                    <td>{formatDate(f.created_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          <p className="muted small">Restore on the Docker host with <code>scripts/restore.sh</code>; use <code>--verify</code> to test a dump without downtime.</p>
+        </>
+      )}
     </section>
   );
 }

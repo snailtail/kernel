@@ -1,9 +1,10 @@
 import { Link } from 'react-router';
 import type { Activity, Problem, Status } from '../api';
 import { ProblemTable } from '../components/ProblemTable';
-import { PRIORITY_LABEL, STATUS_LABEL, STATUS_PHASE } from '../format';
+import { PRIORITY_LABEL, relativeTime, STATUS_LABEL, STATUS_PHASE } from '../format';
 import { useApi } from '../hooks';
-import { useSession } from '../session';
+import { isManager, useSession } from '../session';
+import type { BackupStatus } from './Admin';
 import { ActivityLine } from './Problem';
 
 interface Dashboard {
@@ -18,6 +19,7 @@ interface Dashboard {
 export function DashboardPage() {
   const { user } = useSession();
   const { data, error } = useApi<Dashboard>('/api/dashboard');
+  const { data: backups } = useApi<BackupStatus>(isManager(user) ? '/api/admin/backups' : null);
   if (error) return <div className="error">{error}</div>;
   if (!data) return null;
 
@@ -32,6 +34,12 @@ export function DashboardPage() {
           <p className="muted">Welcome back, {user.display_name}.</p>
         </div>
       </header>
+
+      {backups?.configured && !backups.healthy && (
+        <Link to="/admin" className="banner warn">
+          Backups need attention: {backups.last_success ? `last successful backup ${relativeTime(backups.last_success)}` : 'no successful backup yet'}.
+        </Link>
+      )}
 
       <section className="stat-row">
         <Link to="/problems" className="stat">
