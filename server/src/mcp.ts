@@ -7,6 +7,7 @@ import { z } from 'zod';
 import type { User } from './auth.js';
 import { query } from './db.js';
 import { badRequest, HttpError } from './errors.js';
+import * as actions from './actions.js';
 import * as problems from './problems.js';
 import { CLOSURE_CODES, STATUSES, TRANSITIONS } from './workflow.js';
 
@@ -16,6 +17,7 @@ A known error requires a documented root cause; resolving requires a resolution;
 and, for major problems, a major problem review. Problems are identified reactively (from incidents) or proactively
 (from events, trends). Link incidents, events and changes in external systems with link_record.
 Impact and urgency are 1 (high) to 3 (low); priority = impact + urgency - 1 (1 critical .. 5 planning).
+Track follow-up work (vendor patches, monitoring, runbook updates, review actions) as actions with an owner and due date.
 Before creating a problem, search existing problems and the known error database to avoid duplicates.`;
 
 const json = (value: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(value, null, 2) }] });
@@ -192,6 +194,7 @@ function buildServer(user: User) {
       to: z.enum(STATUSES),
       comment: z.string().optional().describe('Why the status changes'),
       closure_code: z.enum(CLOSURE_CODES).optional().describe('Required when closing'),
+      acknowledge_open_actions: z.boolean().optional().describe('Close even though follow-up actions are still open'),
       root_cause: z.string().optional(),
       workaround: z.string().optional(),
       resolution: z.string().optional(),
@@ -225,6 +228,55 @@ function buildServer(user: User) {
     },
     false,
     async ({ ref, ...link }) => (await problems.addLink(user, ref, problems.linkSchema.parse(link))).links,
+  );
+
+  const actionShape = {
+    title: z.string().describe('What needs to be done'),
+    description: z.string().optional(),
+    owner: z.string().nullable().optional().describe('Username of the person responsible'),
+    due_date: z.string().nullable().optional().describe('YYYY-MM-DD'),
+    change_ref: z.string().optional().describe('Change implementing the action, e.g. CHG0042'),
+  };
+  const actionInput = async ({ owner, ...rest }: { owner?: string | null; [k: string]: unknown }) => {
+    const owner_id = await resolveAssignee(owner);
+    return owner_id === undefined ? rest : { ...rest, owner_id };
+  };
+
+  tool(
+    'list_actions',
+    'List follow-up actions across all problems, e.g. my open actions or everything overdue.',
+    {
+      status: z.enum([...actions.ACTION_STATUSES, 'all']).optional().describe('Default "open"'),
+      owner: z.string().optional().describe('Username'),
+      overdue: z.boolean().optional(),
+      q: z.string().optional().describe('Matches action title, problem ref or problem title'),
+    },
+    true,
+    async ({ owner, ...args }) =>
+      actions.listActions(actions.listActionsSchema.parse({ ...args, owner_id: (await resolveAssignee(owner)) ?? undefined, limit: 100 })),
+  );
+
+  tool(
+    'add_action',
+    'Add a follow-up action to a problem, with an owner and due date.',
+    { ref: z.string(), ...actionShape },
+    false,
+    async ({ ref, ...args }) => (await actions.createAction(user, ref, actions.createActionSchema.parse(await actionInput(args)))).actions,
+  );
+
+  tool(
+    'update_action',
+    'Update a follow-up action, or complete/cancel/reopen it via status. Get the action id from get_problem or list_actions.',
+    {
+      ref: z.string(),
+      action_id: z.number().int(),
+      ...actionShape,
+      title: actionShape.title.optional(),
+      status: z.enum(actions.ACTION_STATUSES).optional(),
+    },
+    false,
+    async ({ ref, action_id, ...args }) =>
+      (await actions.updateAction(user, ref, action_id, actions.updateActionSchema.parse(await actionInput(args)))).actions,
   );
 
   tool(

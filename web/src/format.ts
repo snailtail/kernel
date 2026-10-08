@@ -100,3 +100,16 @@ export function relativeTime(value: string) {
 export function ageDays(value: string) {
   return Math.floor((Date.now() - new Date(value).getTime()) / 86400000);
 }
+
+export function formatDay(value: string | null | undefined) {
+  if (!value) return '–';
+  const [y, m, d] = value.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, { dateStyle: 'medium' });
+}
+
+/** Days until a YYYY-MM-DD date (negative when past). */
+export function daysUntil(value: string) {
+  const [y, m, d] = value.split('-').map(Number);
+  const today = new Date();
+  return Math.round((new Date(y, m - 1, d).getTime() - new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()) / 86400000);
+}

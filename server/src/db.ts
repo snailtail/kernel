@@ -2,6 +2,9 @@ import { readdir, readFile } from 'node:fs/promises';
 import pg from 'pg';
 import { config } from './config.js';
 
+// Return DATE columns as 'YYYY-MM-DD' strings instead of local-midnight Date objects.
+pg.types.setTypeParser(pg.types.builtins.DATE, (value) => value);
+
 export const pool = new pg.Pool({ connectionString: config.databaseUrl });
 
 export async function query<T extends pg.QueryResultRow = any>(sql: string, params: unknown[] = []) {

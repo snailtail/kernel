@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Navigate, NavLink, Route, Routes } from 'react-router';
 import { api, type Meta, type User } from './api';
 import { ROLE_LABEL } from './format';
+import { ActionsPage } from './pages/Actions';
 import { AdminPage } from './pages/Admin';
 import { DashboardPage } from './pages/Dashboard';
 import { KedbPage } from './pages/Kedb';
@@ -54,6 +55,7 @@ export function App() {
             <NavLink to="/" end>Dashboard</NavLink>
             <NavLink to="/problems">Problems</NavLink>
             <NavLink to="/kedb">Known Errors</NavLink>
+            <NavLink to="/actions">Actions</NavLink>
             {canEdit(user) && <NavLink to="/problems/new" className="nav-cta">+ Log problem</NavLink>}
             {isManager(user) && <NavLink to="/admin">Administration</NavLink>}
           </nav>
@@ -75,6 +77,7 @@ export function App() {
             <Route path="/problems/new" element={<NewProblemPage />} />
             <Route path="/problems/:ref" element={<ProblemPage />} />
             <Route path="/kedb" element={<KedbPage />} />
+            <Route path="/actions" element={<ActionsPage />} />
             <Route path="/admin" element={<AdminPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />

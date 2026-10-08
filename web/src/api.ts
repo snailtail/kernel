@@ -52,7 +52,7 @@ export interface Link {
 
 export interface Activity {
   id: number;
-  kind: 'created' | 'comment' | 'status' | 'update' | 'link';
+  kind: 'created' | 'comment' | 'status' | 'update' | 'link' | 'action' | 'analysis' | 'assessment';
   body: string;
   data: any;
   created_at: string;
@@ -61,9 +61,30 @@ export interface Activity {
   title?: string;
 }
 
+export type ActionStatus = 'open' | 'done' | 'cancelled';
+
+export interface Action {
+  id: number;
+  problem_id: number;
+  ref: string;
+  problem_title: string;
+  title: string;
+  description: string;
+  owner_id: number | null;
+  owner: string | null;
+  due_date: string | null;
+  status: ActionStatus;
+  change_ref: string;
+  overdue: boolean;
+  created_by: string;
+  created_at: string;
+  completed_at: string | null;
+}
+
 export interface ProblemDetail extends Problem {
   links: Link[];
   activity: Activity[];
+  actions: Action[];
 }
 
 export interface Meta {
@@ -73,6 +94,7 @@ export interface Meta {
   roles: Role[];
   link_kinds: LinkKind[];
   mcp_url: string | null;
+  action_statuses: ActionStatus[];
   categories: { id: number; name: string; active: boolean }[];
   assignees: { id: number; display_name: string; role: Role }[];
 }

@@ -3,7 +3,7 @@ import type { Problem } from '../api';
 import { ageDays, relativeTime } from '../format';
 import { MajorBadge, PriorityBadge, StatusBadge } from './Badges';
 
-export function ProblemTable({ problems, empty = 'No problems found.' }: { problems: Problem[]; empty?: string }) {
+export function ProblemTable({ problems, empty = 'No problems found.', compact }: { problems: Problem[]; empty?: string; compact?: boolean }) {
   if (!problems.length) return <p className="empty">{empty}</p>;
   return (
     <div className="table-wrap">
@@ -14,10 +14,10 @@ export function ProblemTable({ problems, empty = 'No problems found.' }: { probl
             <th>Title</th>
             <th>Priority</th>
             <th>Status</th>
-            <th>Service</th>
-            <th>Assignee</th>
+            {!compact && <th>Service</th>}
+            {!compact && <th>Assignee</th>}
             <th>Age</th>
-            <th>Updated</th>
+            {!compact && <th>Updated</th>}
           </tr>
         </thead>
         <tbody>
@@ -30,10 +30,10 @@ export function ProblemTable({ problems, empty = 'No problems found.' }: { probl
               </td>
               <td><PriorityBadge priority={p.priority} /></td>
               <td><StatusBadge status={p.status} /></td>
-              <td className="muted">{p.affected_service || '–'}</td>
-              <td className={p.assignee ? '' : 'muted'}>{p.assignee ?? 'Unassigned'}</td>
+              {!compact && <td className="muted">{p.affected_service || '–'}</td>}
+              {!compact && <td className={p.assignee ? '' : 'muted'}>{p.assignee ?? 'Unassigned'}</td>}
               <td className="muted">{ageDays(p.created_at)} d</td>
-              <td className="muted">{relativeTime(p.updated_at)}</td>
+              {!compact && <td className="muted">{relativeTime(p.updated_at)}</td>}
             </tr>
           ))}
         </tbody>

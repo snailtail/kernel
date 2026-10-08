@@ -190,6 +190,43 @@ describe('REST API', { skip }, () => {
     });
   });
 
+  describe('follow-up actions', () => {
+    test('adds, completes and lists actions', async () => {
+      const p = await create();
+      const me = (await analyst.get('/api/auth/me')).body;
+      const added = await analyst.post(`/api/problems/${p.ref}/actions`, { title: 'Vendor patch', owner_id: me.id, due_date: '2000-01-01' });
+      assert.equal(added.status, 201);
+      const action = added.body.actions[0];
+      assert.equal(action.due_date, '2000-01-01');
+      assert.equal(action.overdue, true);
+      assert.equal(action.owner, 'Analyst');
+
+      const overdue = await viewer.get(`/api/actions?overdue=true&owner_id=${me.id}`);
+      assert.ok(overdue.body.some((a: any) => a.id === action.id && a.ref === p.ref));
+      const dash = await analyst.get('/api/dashboard');
+      assert.ok(dash.body.my_actions.some((a: any) => a.id === action.id));
+      assert.ok(dash.body.actions.overdue >= 1);
+
+      const done = await analyst.patch(`/api/problems/${p.ref}/actions/${action.id}`, { status: 'done' });
+      assert.equal(done.body.actions[0].status, 'done');
+      assert.ok(done.body.actions[0].completed_at);
+      assert.equal(done.body.activity[0].kind, 'action');
+      assert.equal((await viewer.get('/api/actions?overdue=true')).body.some((a: any) => a.id === action.id), false);
+      assert.equal((await analyst.post(`/api/problems/${p.ref}/actions`, { title: 'x', due_date: 'tomorrow' })).status, 400);
+      assert.equal((await viewer.post(`/api/problems/${p.ref}/actions`, { title: 'x' })).status, 403);
+    });
+
+    test('closing with open actions must be acknowledged', async () => {
+      const p = await create();
+      await pm.post(`/api/problems/${p.ref}/actions`, { title: 'Update runbook' });
+      const blocked = await pm.post(`/api/problems/${p.ref}/transition`, { to: 'closed', closure_code: 'duplicate' });
+      assert.equal(blocked.status, 409);
+      assert.match(blocked.body.error, /open/);
+      const ok = await pm.post(`/api/problems/${p.ref}/transition`, { to: 'closed', closure_code: 'duplicate', acknowledge_open_actions: true });
+      assert.equal(ok.body.status, 'closed');
+    });
+  });
+
   describe('administration', () => {
     test('admins manage users; others cannot', async () => {
       assert.equal((await pm.get('/api/users')).status, 403);

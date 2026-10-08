@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { requireUser } from '../auth.js';
 import { config } from '../config.js';
 import { query } from '../db.js';
+import * as actions from '../actions.js';
 import * as problems from '../problems.js';
 import { CLOSURE_CODES, ROLES, STATUSES, TRANSITIONS } from '../workflow.js';
 
@@ -21,6 +22,7 @@ export async function problemRoutes(app: FastifyInstance) {
       closure_codes: CLOSURE_CODES,
       roles: ROLES,
       link_kinds: problems.LINK_KINDS,
+      action_statuses: actions.ACTION_STATUSES,
       mcp_url: config.mcpUrl,
       categories: categories.rows,
       assignees: users.rows,
@@ -64,6 +66,21 @@ export async function problemRoutes(app: FastifyInstance) {
 
   app.delete<{ Params: { ref: string; id: string } }>('/api/problems/:ref/links/:id', async (req) =>
     problems.removeLink(requireUser(req), req.params.ref, Number(req.params.id)),
+  );
+
+  app.get('/api/actions', async (req) => {
+    requireUser(req);
+    return actions.listActions(actions.listActionsSchema.parse(req.query));
+  });
+
+  app.post<RefParams>('/api/problems/:ref/actions', async (req, reply) => {
+    const result = await actions.createAction(requireUser(req), req.params.ref, actions.createActionSchema.parse(req.body));
+    reply.code(201);
+    return result;
+  });
+
+  app.patch<{ Params: { ref: string; id: string } }>('/api/problems/:ref/actions/:id', async (req) =>
+    actions.updateAction(requireUser(req), req.params.ref, Number(req.params.id), actions.updateActionSchema.parse(req.body)),
   );
 
   app.get('/api/kedb', async (req) => {

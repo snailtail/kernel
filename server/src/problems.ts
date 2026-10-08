@@ -48,6 +48,8 @@ export const transitionSchema = z.object({
   workaround: problemFields.workaround.optional(),
   resolution: problemFields.resolution.optional(),
   major_review: problemFields.major_review.optional(),
+  // Closing with open follow-up actions must be acknowledged explicitly.
+  acknowledge_open_actions: z.boolean().optional(),
 });
 
 export const linkSchema = z.object({
@@ -70,7 +72,7 @@ export const listSchema = z.object({
 });
 
 export type ProblemInput = z.infer<typeof updateProblemSchema>;
-type Db = Pick<pg.PoolClient, 'query'>;
+export type Db = Pick<pg.PoolClient, 'query'>;
 
 const SELECT_PROBLEM = `
   SELECT p.id, p.ref, p.title, p.description, p.status, p.category_id, c.name AS category,
@@ -83,13 +85,23 @@ const SELECT_PROBLEM = `
   LEFT JOIN users a ON a.id = p.assignee_id
   LEFT JOIN users cb ON cb.id = p.created_by`;
 
+export const SELECT_ACTION = `
+  SELECT a.id, a.problem_id, p.ref, p.title AS problem_title, a.title, a.description, a.owner_id,
+         o.display_name AS owner, a.due_date::text AS due_date, a.status, a.change_ref,
+         (a.status = 'open' AND a.due_date < current_date) AS overdue,
+         cb.display_name AS created_by, a.created_at, a.updated_at, a.completed_at
+  FROM problem_actions a
+  JOIN problems p ON p.id = a.problem_id
+  LEFT JOIN users o ON o.id = a.owner_id
+  LEFT JOIN users cb ON cb.id = a.created_by`;
+
 const SHORT_FIELDS = new Set(['title', 'category_id', 'affected_service', 'detection', 'impact', 'urgency', 'is_major', 'assignee_id']);
 
-function requireEditor(user: User) {
+export function requireEditor(user: User) {
   if (!canEdit(user.role)) throw forbidden('Your role cannot change problems');
 }
 
-async function logActivity(db: Db, problemId: number, userId: number, kind: string, body = '', data: object = {}) {
+export async function logActivity(db: Db, problemId: number, userId: number, kind: string, body = '', data: object = {}) {
   await db.query('INSERT INTO problem_activity (problem_id, user_id, kind, body, data) VALUES ($1, $2, $3, $4, $5)', [
     problemId,
     userId,
@@ -99,7 +111,7 @@ async function logActivity(db: Db, problemId: number, userId: number, kind: stri
   ]);
 }
 
-async function loadForUpdate(db: Db, ref: string) {
+export async function loadForUpdate(db: Db, ref: string) {
   const { rows } = await db.query('SELECT * FROM problems WHERE ref = $1 FOR UPDATE', [ref.toUpperCase()]);
   if (!rows[0]) throw notFound(`Problem ${ref} not found`);
   return rows[0];
@@ -152,7 +164,7 @@ export async function getProblem(ref: string) {
   const { rows } = await query(`${SELECT_PROBLEM} WHERE p.ref = $1`, [ref.toUpperCase()]);
   if (!rows[0]) throw notFound(`Problem ${ref} not found`);
   const problem = rows[0];
-  const [links, activity] = await Promise.all([
+  const [links, activity, actions] = await Promise.all([
     query(
       `SELECT l.id, l.kind, l.reference, l.system, l.url, l.note, l.created_at, u.display_name AS created_by
        FROM problem_links l JOIN users u ON u.id = l.created_by WHERE l.problem_id = $1 ORDER BY l.kind, l.created_at`,
@@ -163,8 +175,9 @@ export async function getProblem(ref: string) {
        FROM problem_activity a LEFT JOIN users u ON u.id = a.user_id WHERE a.problem_id = $1 ORDER BY a.created_at DESC, a.id DESC`,
       [problem.id],
     ),
+    query(`${SELECT_ACTION} WHERE a.problem_id = $1 ORDER BY a.status = 'open' DESC, a.due_date NULLS LAST, a.id`, [problem.id]),
   ]);
-  return { ...problem, links: links.rows, activity: activity.rows };
+  return { ...problem, links: links.rows, activity: activity.rows, actions: actions.rows };
 }
 
 export async function createProblem(user: User, input: z.infer<typeof createProblemSchema>) {
@@ -219,6 +232,12 @@ export async function transitionProblem(user: User, ref: string, input: z.infer<
     const closure_code = input.to === 'closed' ? (input.closure_code ?? null) : null;
     const reason = checkTransition({ ...current, ...fields, closure_code }, input.to, user.role);
     if (reason) throw conflict(reason);
+    if (input.to === 'closed' && !input.acknowledge_open_actions) {
+      const { rows } = await db.query("SELECT count(*)::int AS n FROM problem_actions WHERE problem_id = $1 AND status = 'open'", [current.id]);
+      if (rows[0].n > 0) {
+        throw conflict(`${rows[0].n} follow-up action(s) are still open. Complete or cancel them, or set acknowledge_open_actions to close anyway.`);
+      }
+    }
 
     const from = current.status as Status;
     const reopening = input.to === 'analysis' && (from === 'resolved' || from === 'closed');
@@ -292,7 +311,7 @@ export async function searchKnownErrors(q?: string, includeResolved = false) {
 }
 
 export async function dashboard(user: User) {
-  const [byStatus, byPriority, aging, mine, recent, links] = await Promise.all([
+  const [byStatus, byPriority, aging, mine, recent, links, myActions, actionSummary] = await Promise.all([
     query('SELECT status, count(*)::int AS count FROM problems GROUP BY status'),
     query("SELECT priority, count(*)::int AS count FROM problems WHERE status NOT IN ('resolved', 'closed') GROUP BY priority ORDER BY priority"),
     query(`SELECT
@@ -308,6 +327,10 @@ export async function dashboard(user: User) {
            ORDER BY a.created_at DESC, a.id DESC LIMIT 15`),
     query(`SELECT l.kind, count(*)::int AS count FROM problem_links l JOIN problems p ON p.id = l.problem_id
            WHERE p.status NOT IN ('resolved', 'closed') GROUP BY l.kind`),
+    query(`${SELECT_ACTION} WHERE a.owner_id = $1 AND a.status = 'open' ORDER BY a.due_date NULLS LAST, a.id LIMIT 20`, [user.id]),
+    query(`SELECT count(*) FILTER (WHERE status = 'open')::int AS open,
+                  count(*) FILTER (WHERE status = 'open' AND due_date < current_date)::int AS overdue
+           FROM problem_actions`),
   ]);
   return {
     by_status: Object.fromEntries(byStatus.rows.map((r) => [r.status, r.count])),
@@ -315,6 +338,8 @@ export async function dashboard(user: User) {
     open_summary: aging.rows[0],
     open_links_by_kind: Object.fromEntries(links.rows.map((r) => [r.kind, r.count])),
     my_problems: mine.rows,
+    my_actions: myActions.rows,
+    actions: actionSummary.rows[0],
     recent_activity: recent.rows,
   };
 }

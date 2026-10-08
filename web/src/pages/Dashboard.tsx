@@ -1,5 +1,6 @@
 import { Link } from 'react-router';
-import type { Activity, Problem, Status } from '../api';
+import type { Action, Activity, Problem, Status } from '../api';
+import { ActionList } from '../components/Actions';
 import { ProblemTable } from '../components/ProblemTable';
 import { PRIORITY_LABEL, relativeTime, STATUS_LABEL, STATUS_PHASE } from '../format';
 import { useApi } from '../hooks';
@@ -13,12 +14,14 @@ interface Dashboard {
   open_summary: { under_30: number; d30_90: number; over_90: number; major: number; unassigned: number };
   open_links_by_kind: Partial<Record<string, number>>;
   my_problems: Problem[];
+  my_actions: Action[];
+  actions: { open: number; overdue: number };
   recent_activity: Activity[];
 }
 
 export function DashboardPage() {
   const { user } = useSession();
-  const { data, error } = useApi<Dashboard>('/api/dashboard');
+  const { data, error, reload } = useApi<Dashboard>('/api/dashboard');
   const { data: backups } = useApi<BackupStatus>(isManager(user) ? '/api/admin/backups' : null);
   if (error) return <div className="error">{error}</div>;
   if (!data) return null;
@@ -63,6 +66,11 @@ export function DashboardPage() {
           <span className="stat-value">{data.open_summary.unassigned}</span>
           <span className="stat-sub">open</span>
         </div>
+        <Link to="/actions?everyone=1&overdue=true" className={`stat ${data.actions.overdue ? 'stat-alert' : ''}`}>
+          <span className="stat-label">Overdue actions</span>
+          <span className="stat-value">{data.actions.overdue}</span>
+          <span className="stat-sub">of {data.actions.open} open</span>
+        </Link>
       </section>
 
       <div className="grid-2">
@@ -100,10 +108,20 @@ export function DashboardPage() {
         </section>
       </div>
 
-      <section className="card">
-        <h2>Assigned to me</h2>
-        <ProblemTable problems={data.my_problems} empty="Nothing assigned to you." />
-      </section>
+      <div className="grid-2 wide-left">
+        <section className="card">
+          <h2>Problems assigned to me</h2>
+          <ProblemTable problems={data.my_problems} empty="Nothing assigned to you." compact />
+        </section>
+        <section className="card">
+          <div className="section-head">
+            <h2>My open actions</h2>
+            <Link to="/actions" className="small">All actions →</Link>
+          </div>
+          {data.my_actions.length === 0 && <p className="empty">No open actions.</p>}
+          <ActionList actions={data.my_actions} editable showProblem onChange={() => reload()} />
+        </section>
+      </div>
 
       <section className="card">
         <h2>Recent activity</h2>

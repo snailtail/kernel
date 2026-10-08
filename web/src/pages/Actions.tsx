@@ -1,0 +1,76 @@
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router';
+import type { Action } from '../api';
+import { ActionList } from '../components/Actions';
+import { useApi } from '../hooks';
+import { canEdit, useSession } from '../session';
+
+export function ActionsPage() {
+  const { user, meta } = useSession();
+  const [params, setParams] = useSearchParams();
+  const [q, setQ] = useState(params.get('q') ?? '');
+  const setParam = (key: string, value: string) =>
+    setParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (value) next.set(key, value);
+      else next.delete(key);
+      return next;
+    }, { replace: true });
+
+  useEffect(() => {
+    const t = setTimeout(() => setParam('q', q), 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q]);
+
+  const query = new URLSearchParams(params);
+  if (!query.has('owner_id') && !params.has('everyone')) query.set('owner_id', String(user.id));
+  query.delete('everyone');
+  const { data, reload } = useApi<Action[]>(`/api/actions?${query}`);
+  const owner = params.get('owner_id') ?? (params.has('everyone') ? '' : String(user.id));
+
+  return (
+    <>
+      <header className="page-head">
+        <div>
+          <h1>Follow-up actions</h1>
+          <p className="muted">Work that follows from problem analysis, error control and major problem reviews.</p>
+        </div>
+      </header>
+      <div className="filters">
+        <input className="search" placeholder="Search actions or problems…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <select value={params.get('status') ?? 'open'} onChange={(e) => setParam('status', e.target.value === 'open' ? '' : e.target.value)}>
+          <option value="open">Open</option>
+          <option value="done">Done</option>
+          <option value="cancelled">Cancelled</option>
+          <option value="all">All</option>
+        </select>
+        <select
+          value={owner}
+          onChange={(e) =>
+            setParams((prev) => {
+              const next = new URLSearchParams(prev);
+              next.delete('owner_id');
+              next.delete('everyone');
+              if (e.target.value === '') next.set('everyone', '1');
+              else if (e.target.value !== String(user.id)) next.set('owner_id', e.target.value);
+              return next;
+            }, { replace: true })
+          }
+        >
+          <option value={String(user.id)}>Mine</option>
+          <option value="">Everyone</option>
+          {meta.assignees.filter((a) => a.id !== user.id).map((a) => <option key={a.id} value={a.id}>{a.display_name}</option>)}
+        </select>
+        <label className="check">
+          <input type="checkbox" checked={params.get('overdue') === 'true'} onChange={(e) => setParam('overdue', e.target.checked ? 'true' : '')} />
+          Overdue only
+        </label>
+      </div>
+      <section className="card">
+        {data?.length === 0 && <p className="empty">No actions match.</p>}
+        {data && <ActionList actions={data} editable={canEdit(user)} showProblem onChange={() => reload()} />}
+      </section>
+    </>
+  );
+}

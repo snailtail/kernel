@@ -84,6 +84,17 @@ describe('MCP server', { skip }, () => {
     assert.ok(search.data.some((p: any) => p.ref === ref));
   });
 
+  test('manages follow-up actions', async () => {
+    const { data: p } = await call(mcp, 'create_problem', { title: 'Backup job fails weekly' });
+    const added = await call(mcp, 'add_action', { ref: p.ref, title: 'Ask vendor for fix', owner: 'analyst', due_date: '2099-01-31' });
+    assert.equal(added.isError, false, added.text);
+    const id = added.data[0].id;
+    const listed = await call(mcp, 'list_actions', { owner: 'analyst' });
+    assert.ok(listed.data.some((a: any) => a.id === id));
+    const done = await call(mcp, 'update_action', { ref: p.ref, action_id: id, status: 'done' });
+    assert.equal(done.data[0].status, 'done');
+  });
+
   test('reports helpful errors', async () => {
     const unknown = await call(mcp, 'update_problem', { ref: 'PRB000001', category: 'Nope' });
     assert.equal(unknown.isError, true);

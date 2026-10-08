@@ -1,7 +1,8 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
-import { api, type Activity, type LinkKind, type ProblemDetail, type Status } from '../api';
+import { api, type Action, type Activity, type LinkKind, type ProblemDetail, type Status } from '../api';
 import { MajorBadge, PriorityBadge, StatusBadge } from '../components/Badges';
+import { ActionList, ActionModal } from '../components/Actions';
 import { Modal } from '../components/Modal';
 import {
   CLOSURE_LABEL, FIELD_LABEL, formatDate, LEVEL_LABEL, LINK_LABEL, PRIORITY_LABEL, relativeTime,
@@ -82,6 +83,7 @@ export function ProblemPage() {
             <TextSection title="Major problem review" hint="What went well, what could be improved, how to prevent recurrence, follow-up actions"
               value={p.major_review} editable={editable} onSave={(v) => save({ major_review: v })} />
           )}
+          <ActionsSection problem={p} onChange={setData} />
           <ActivitySection problem={p} onChange={setData} />
         </div>
         <aside className="problem-side">
@@ -278,6 +280,33 @@ function LinksPanel({ problem: p, editable, onChange }: { problem: ProblemDetail
   );
 }
 
+function ActionsSection({ problem: p, onChange }: { problem: ProblemDetail; onChange: (p: ProblemDetail) => void }) {
+  const { user } = useSession();
+  const [editing, setEditing] = useState<Action | 'new' | null>(null);
+  const [showClosed, setShowClosed] = useState(false);
+  const open = p.actions.filter((a) => a.status === 'open');
+  const closed = p.actions.filter((a) => a.status !== 'open');
+  const editable = canEdit(user);
+  return (
+    <section className="card">
+      <div className="section-head">
+        <h2>Follow-up actions {open.length > 0 && <span className="count">{open.length} open</span>}</h2>
+        {editable && <button className="btn-link" onClick={() => setEditing('new')}>+ Action</button>}
+      </div>
+      {p.actions.length === 0 && <p className="placeholder">No follow-up actions. Add actions for fixes, vendor follow-ups, monitoring or review outcomes.</p>}
+      <ActionList actions={showClosed ? [...open, ...closed] : open} editable={editable} onChange={onChange} onEdit={setEditing} />
+      {closed.length > 0 && (
+        <button className="btn-link small" onClick={() => setShowClosed(!showClosed)}>
+          {showClosed ? 'Hide' : 'Show'} {closed.length} completed or cancelled
+        </button>
+      )}
+      {editing && (
+        <ActionModal refId={p.ref} action={editing === 'new' ? null : editing} onClose={() => setEditing(null)} onDone={(np) => { onChange(np); setEditing(null); }} />
+      )}
+    </section>
+  );
+}
+
 function ActivitySection({ problem: p, onChange }: { problem: ProblemDetail; onChange: (p: ProblemDetail) => void }) {
   const { user } = useSession();
   const [body, setBody] = useState('');
@@ -347,6 +376,9 @@ export function ActivityLine({ activity: a }: { activity: Activity }) {
       text = `updated ${Object.keys(a.data).map((k) => FIELD_LABEL[k] ?? k).join(', ')}`;
       break;
     case 'link':
+    case 'action':
+    case 'analysis':
+    case 'assessment':
       text = a.body.charAt(0).toLowerCase() + a.body.slice(1);
       break;
   }
@@ -371,6 +403,8 @@ function TransitionModal({ problem: p, to, onClose, onDone }: { problem: Problem
     closure_code: to === 'closed' ? (p.status === 'resolved' ? 'resolved' : p.status === 'new' ? 'duplicate' : '') : '',
     comment: '',
   });
+  const [acknowledge, setAcknowledge] = useState(false);
+  const openActions = p.actions.filter((a) => a.status === 'open').length;
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const set = (k: keyof typeof form) => (e: { target: { value: string } }) => setForm({ ...form, [k]: e.target.value });
@@ -383,7 +417,10 @@ function TransitionModal({ problem: p, to, onClose, onDone }: { problem: Problem
     const body: Record<string, unknown> = { to, comment: form.comment || undefined };
     if (to === 'known_error') Object.assign(body, { root_cause: form.root_cause, workaround: form.workaround });
     if (to === 'resolved') Object.assign(body, { resolution: form.resolution });
-    if (to === 'closed') Object.assign(body, { closure_code: form.closure_code || undefined, ...(p.is_major ? { major_review: form.major_review } : {}) });
+    if (to === 'closed') {
+      Object.assign(body, { closure_code: form.closure_code || undefined, acknowledge_open_actions: acknowledge || undefined });
+      if (p.is_major) body.major_review = form.major_review;
+    }
     try {
       onDone(await api.post<ProblemDetail>(`/api/problems/${p.ref}/transition`, body));
     } catch (err) {
@@ -420,6 +457,12 @@ function TransitionModal({ problem: p, to, onClose, onDone }: { problem: Problem
               <label className="full">Major problem review <span className="req">required</span>
                 <textarea required rows={6} value={form.major_review} onChange={set('major_review')}
                   placeholder="What went well, what could be improved, how to prevent recurrence, follow-up actions" />
+              </label>
+            )}
+            {openActions > 0 && (
+              <label className="check full warn-box">
+                <input type="checkbox" required checked={acknowledge} onChange={(e) => setAcknowledge(e.target.checked)} />
+                {openActions} follow-up action{openActions > 1 ? 's are' : ' is'} still open. Close the problem anyway.
               </label>
             )}
           </>
