@@ -82,6 +82,8 @@ export const updateAnalysisSchema = z.object({
   title: z.string().trim().max(200).optional(),
   data: z.unknown().optional(),
   conclusion: z.string().max(20000).optional(),
+  /** updated_at of the version the edit started from; a newer save by someone else gives 409. */
+  base_updated_at: z.string().optional(),
 });
 
 function parseData(technique: Technique, data: unknown) {
@@ -118,6 +120,14 @@ export async function updateAnalysis(user: User, ref: string, id: number, input:
     const { rows } = await db.query('SELECT * FROM problem_analyses WHERE id = $1 AND problem_id = $2', [id, problem.id]);
     const current = rows[0];
     if (!current) throw notFound('Analysis not found');
+    if (input.base_updated_at && new Date(input.base_updated_at).getTime() !== new Date(current.updated_at).getTime()) {
+      const { rows: by } = await db.query('SELECT display_name FROM users WHERE id = $1', [current.updated_by]);
+      throw conflict(`The analysis was saved by ${by[0]?.display_name ?? 'someone else'} while you were editing`, {
+        current: { title: current.title, data: current.data, conclusion: current.conclusion, updated_at: current.updated_at },
+        changed_by: by[0]?.display_name ?? null,
+        changed_at: current.updated_at,
+      });
+    }
     const data = input.data === undefined ? current.data : parseData(current.technique, input.data);
     await db.query(
       `UPDATE problem_analyses SET title = $2, data = $3, conclusion = $4, updated_by = $5, updated_at = now() WHERE id = $1`,

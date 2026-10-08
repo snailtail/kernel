@@ -1,6 +1,6 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
-import { api, type Action, type Activity, type LinkKind, type ProblemDetail, type Status } from '../api';
+import { api, asConflict, type Action, type Activity, type Conflict, type LinkKind, type ProblemDetail, type Status } from '../api';
 import { MajorBadge, PriorityBadge, StatusBadge } from '../components/Badges';
 import { ActionList, ActionModal } from '../components/Actions';
 import { AnalysesSection } from '../components/Analyses';
@@ -20,7 +20,7 @@ const LIFECYCLE: Status[] = ['new', 'analysis', 'known_error', 'resolved', 'clos
 export function ProblemPage() {
   const { ref } = useParams();
   const { user, meta } = useSession();
-  const { data: p, setData, error } = useApi<ProblemDetail>(`/api/problems/${ref}`);
+  const { data: p, setData, error, reload } = useApi<ProblemDetail>(`/api/problems/${ref}`);
   const [transition, setTransition] = useState<Status | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -28,12 +28,16 @@ export function ProblemPage() {
   if (!p) return null;
 
   const editable = canEdit(user) && p.status !== 'closed';
-  const save = async (fields: Record<string, unknown>) => {
+  /** Saves fields; `base` holds the values the edit started from, so concurrent changes are detected. */
+  const save = async (fields: Record<string, unknown>, base?: Record<string, unknown>, resolvesConflicts = false) => {
     setActionError(null);
     try {
-      setData(await api.patch<ProblemDetail>(`/api/problems/${p.ref}`, fields));
+      setData(await api.patch<ProblemDetail>(`/api/problems/${p.ref}`, base ? { ...fields, base } : fields));
     } catch (err) {
-      setActionError((err as Error).message);
+      const conflict = asConflict(err);
+      // Text sections resolve conflicts with the user; for other fields, show the message and reload the current state.
+      if (!conflict || !resolvesConflicts) setActionError((err as Error).message);
+      if (conflict && !resolvesConflicts) reload();
       throw err;
     }
   };
@@ -55,7 +59,7 @@ export function ProblemPage() {
             <a href={`/api/problems/${p.ref}/export.md`}>Export Markdown</a>
           </span>
         </div>
-        <EditableTitle value={p.title} editable={editable} onSave={(title) => save({ title })} />
+        <EditableTitle value={p.title} editable={editable} onSave={(title) => save({ title }, { title: p.title })} />
         <div className="badges">
           <StatusBadge status={p.status} />
           <PriorityBadge priority={p.priority} />
@@ -87,15 +91,15 @@ export function ProblemPage() {
       <div className="problem-grid">
         <div className="problem-main">
           <GuidePanel guidance={p.next_steps} />
-          <TextSection title="Description" hint="Symptoms, scope and business impact" value={p.description} editable={editable} onSave={(v) => save({ description: v })} />
+          <TextSection title="Description" hint="Symptoms, scope and business impact" value={p.description} editable={editable} onSave={(v, b) => save({ description: v }, { description: b }, true)} />
           {(p.status !== 'new' || p.analyses.length > 0) && <AnalysesSection problem={p} onChange={setData} />}
-          <TextSection title="Root cause" hint="Findings from problem analysis" value={p.root_cause} editable={editable} onSave={(v) => save({ root_cause: v })} />
-          <TextSection title="Workaround" hint="How to reduce or eliminate the impact until resolved" value={p.workaround} editable={editable} onSave={(v) => save({ workaround: v })} />
+          <TextSection title="Root cause" hint="Findings from problem analysis" value={p.root_cause} editable={editable} onSave={(v, b) => save({ root_cause: v }, { root_cause: b }, true)} />
+          <TextSection title="Workaround" hint="How to reduce or eliminate the impact until resolved" value={p.workaround} editable={editable} onSave={(v, b) => save({ workaround: v }, { workaround: b }, true)} />
           {(p.known_error_at || p.status === 'known_error') && <ErrorControlSection problem={p} onChange={setData} />}
-          <TextSection title="Resolution" hint="The permanent solution, usually implemented through a change" value={p.resolution} editable={editable} onSave={(v) => save({ resolution: v })} />
+          <TextSection title="Resolution" hint="The permanent solution, usually implemented through a change" value={p.resolution} editable={editable} onSave={(v, b) => save({ resolution: v }, { resolution: b }, true)} />
           {p.is_major && (
             <TextSection title="Major problem review" hint="What went well, what could be improved, how to prevent recurrence, follow-up actions"
-              value={p.major_review} editable={editable} onSave={(v) => save({ major_review: v })} />
+              value={p.major_review} editable={editable} onSave={(v, b) => save({ major_review: v }, { major_review: b }, true)} />
           )}
           <ActionsSection problem={p} onChange={setData} />
           <ActivitySection problem={p} onChange={setData} />
@@ -145,33 +149,56 @@ function EditableTitle({ value, editable, onSave }: { value: string; editable: b
   );
 }
 
-function TextSection(props: { title: string; hint: string; value: string; editable: boolean; onSave: (v: string) => Promise<void> }) {
+function TextSection(props: { title: string; hint: string; value: string; editable: boolean; onSave: (v: string, base: string) => Promise<void> }) {
   const [draft, setDraft] = useState<string | null>(null);
+  const [base, setBase] = useState('');
   const [busy, setBusy] = useState(false);
-  const commit = async () => {
+  const [conflict, setConflict] = useState<Conflict | null>(null);
+  const start = () => {
+    setBase(props.value);
+    setDraft(props.value);
+    setConflict(null);
+  };
+  const commit = async (against = base) => {
     setBusy(true);
     try {
-      await props.onSave(draft ?? '');
+      await props.onSave(draft ?? '', against);
       setDraft(null);
-    } catch {
-      /* error shown in page header */
+      setConflict(null);
+    } catch (err) {
+      setConflict(asConflict(err));
     } finally {
       setBusy(false);
     }
   };
+  const theirs = conflict?.conflicts?.[0]?.current as string | undefined;
   return (
     <section className="card text-section">
       <div className="section-head">
         <h2>{props.title}</h2>
-        {props.editable && draft === null && <button className="btn-link" onClick={() => setDraft(props.value)}>Edit</button>}
+        {props.editable && draft === null && <button className="btn-link" onClick={start}>Edit</button>}
       </div>
       {draft !== null ? (
         <>
+          {conflict && (
+            <div className="conflict">
+              <strong>{conflict.changed_by ?? 'Someone'} changed this{conflict.changed_at ? ` ${relativeTime(conflict.changed_at)}` : ''} while you were editing.</strong>
+              <div className="conflict-theirs">
+                <span className="muted small">Their version</span>
+                {theirs ? <Markdown text={theirs} /> : <p className="muted">(empty)</p>}
+              </div>
+              <div className="actions">
+                <button className="btn" onClick={() => { setDraft(null); setConflict(null); }}>Discard mine, keep theirs</button>
+                <button className="btn" onClick={() => setDraft(`${theirs ?? ''}\n\n${draft}`)}>Combine both</button>
+                <button className="btn danger" onClick={() => { setBase(theirs ?? ''); commit(theirs ?? ''); }}>Overwrite with mine</button>
+              </div>
+            </div>
+          )}
           <textarea autoFocus rows={Math.max(5, draft.split('\n').length + 1)} value={draft} placeholder={props.hint} onChange={(e) => setDraft(e.target.value)} />
           <span className="muted small">Markdown supported: **bold**, _italic_, `code`, lists, tables, links.</span>
           <div className="actions">
             <button className="btn" onClick={() => setDraft(null)} disabled={busy}>Cancel</button>
-            <button className="btn primary" onClick={commit} disabled={busy}>Save</button>
+            <button className="btn primary" onClick={() => commit()} disabled={busy || !!conflict}>Save</button>
           </div>
         </>
       ) : props.value ? (
@@ -183,7 +210,7 @@ function TextSection(props: { title: string; hint: string; value: string; editab
   );
 }
 
-function DetailsPanel({ problem: p, editable, onSave }: { problem: ProblemDetail; editable: boolean; onSave: (f: Record<string, unknown>) => Promise<void> }) {
+function DetailsPanel({ problem: p, editable, onSave }: { problem: ProblemDetail; editable: boolean; onSave: (f: Record<string, unknown>, base?: Record<string, unknown>) => Promise<void> }) {
   const { user, meta } = useSession();
   const [service, setService] = useState<string | null>(null);
   const field = (label: string, content: ReactNode) => (
@@ -194,7 +221,7 @@ function DetailsPanel({ problem: p, editable, onSave }: { problem: ProblemDetail
   );
   const select = (key: string, value: string | number | null, options: [string | number, string][], allowEmpty?: string) =>
     editable ? (
-      <select value={value ?? ''} onChange={(e) => onSave({ [key]: e.target.value === '' ? null : typeof value === 'number' || key.endsWith('_id') || key === 'impact' || key === 'urgency' ? Number(e.target.value) : e.target.value }).catch(() => {})}>
+      <select value={value ?? ''} onChange={(e) => onSave({ [key]: e.target.value === '' ? null : typeof value === 'number' || key.endsWith('_id') || key === 'impact' || key === 'urgency' ? Number(e.target.value) : e.target.value }, { [key]: value }).catch(() => {})}>
         {allowEmpty !== undefined && <option value="">{allowEmpty}</option>}
         {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
       </select>
@@ -210,14 +237,14 @@ function DetailsPanel({ problem: p, editable, onSave }: { problem: ProblemDetail
         {field('Category', select('category_id', p.category_id, meta.categories.filter((c) => c.active || c.id === p.category_id).map((c) => [c.id, c.name]), '–'))}
         {field('Service / CI', editable ? (
           <input value={service ?? p.affected_service} placeholder="–" onChange={(e) => setService(e.target.value)}
-            onBlur={() => { if (service !== null && service !== p.affected_service) onSave({ affected_service: service }).catch(() => {}); setService(null); }} />
+            onBlur={() => { if (service !== null && service !== p.affected_service) onSave({ affected_service: service }, { affected_service: p.affected_service }).catch(() => {}); setService(null); }} />
         ) : p.affected_service || '–')}
         {field('Detection', select('detection', p.detection, [['reactive', 'Reactive (incidents)'], ['proactive', 'Proactive (events, trends)']]))}
         {field('Impact', select('impact', p.impact, [1, 2, 3].map((l) => [l, `${l} – ${LEVEL_LABEL[l]}`])))}
         {field('Urgency', select('urgency', p.urgency, [1, 2, 3].map((l) => [l, `${l} – ${LEVEL_LABEL[l]}`])))}
         {field('Priority', <strong>P{p.priority} {PRIORITY_LABEL[p.priority]}</strong>)}
         {field('Major problem', editable && isManager(user) ? (
-          <label className="check"><input type="checkbox" checked={p.is_major} onChange={(e) => onSave({ is_major: e.target.checked }).catch(() => {})} /> {p.is_major ? 'Yes' : 'No'}</label>
+          <label className="check"><input type="checkbox" checked={p.is_major} onChange={(e) => onSave({ is_major: e.target.checked }, { is_major: p.is_major }).catch(() => {})} /> {p.is_major ? 'Yes' : 'No'}</label>
         ) : p.is_major ? 'Yes' : 'No')}
         {p.closure_code && field('Closure code', CLOSURE_LABEL[p.closure_code])}
       </dl>
@@ -496,6 +523,41 @@ function ActivitySection({ problem: p, onChange }: { problem: ProblemDetail; onC
   );
 }
 
+const isChange = (v: unknown): v is { from: unknown; to: unknown } => !!v && typeof v === 'object' && 'from' in v && 'to' in v;
+const isLong = (v: unknown) => typeof v === 'string' && (v.length > 60 || v.includes('\n'));
+
+/** Before/after for the fields changed by an activity entry: short values inline, long texts behind a toggle. */
+function Changes({ data, skip = [] }: { data: Record<string, unknown>; skip?: string[] }) {
+  const { meta } = useSession();
+  const [open, setOpen] = useState(false);
+  const fmt = (k: string, v: unknown) => {
+    if (v === null || v === undefined || v === '') return '–';
+    if (k === 'assignee_id') return meta.assignees.find((u) => u.id === v)?.display_name ?? `#${v}`;
+    if (k === 'category_id') return meta.categories.find((c) => c.id === v)?.name ?? `#${v}`;
+    if (typeof v === 'boolean') return v ? 'yes' : 'no';
+    return String(v);
+  };
+  const entries = Object.entries(data).filter(([k, v]) => !skip.includes(k) && isChange(v)) as [string, { from: unknown; to: unknown }][];
+  const short = entries.filter(([, v]) => !isLong(v.from) && !isLong(v.to));
+  const long = entries.filter(([, v]) => isLong(v.from) || isLong(v.to));
+  if (!entries.length) return null;
+  return (
+    <div className="changes">
+      {short.map(([k, v]) => (
+        <span key={k} className="change-chip">{FIELD_LABEL[k] ?? k}: <s>{fmt(k, v.from)}</s> → <strong>{fmt(k, v.to)}</strong></span>
+      ))}
+      {long.length > 0 && <button className="btn-link small" onClick={() => setOpen(!open)}>{open ? 'Hide change' : 'Show change'}</button>}
+      {open && long.map(([k, v]) => (
+        <div key={k} className="text-change">
+          <div className="muted small">{FIELD_LABEL[k] ?? k}</div>
+          <div className="before"><span className="muted small">Before</span>{v.from ? <Markdown text={String(v.from)} /> : <p className="muted">(empty)</p>}</div>
+          <div className="after"><span className="muted small">After</span>{v.to ? <Markdown text={String(v.to)} /> : <p className="muted">(empty)</p>}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function ActivityLine({ activity: a }: { activity: Activity }) {
   let text: ReactNode;
   switch (a.kind) {
@@ -530,6 +592,7 @@ export function ActivityLine({ activity: a }: { activity: Activity }) {
         <time title={formatDate(a.created_at)}>{relativeTime(a.created_at)}</time>
       </div>
       {(a.kind === 'comment' || (a.kind === 'status' && a.body)) && <Markdown text={a.body} className="activity-body" />}
+      {(a.kind === 'update' || a.kind === 'status' || a.kind === 'assessment') && a.data && <Changes data={a.data} skip={['from', 'to']} />}
     </div>
   );
 }

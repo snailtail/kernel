@@ -22,7 +22,10 @@ Rules enforced by the server:
 - **Major problems** need a major problem review before closure (unless closed as duplicate or cancelled).
 - Priority = impact + urgency − 1 (1 Critical … 5 Planning), where impact and urgency are 1 (high) to 3 (low).
 - Closing with closure code *no fix* requires a recorded decision to accept the risk (error control).
-- Every change is written to the activity log of the problem.
+- Every change is written to the activity log of the problem, with full before/after values (also for long texts).
+- Concurrent edits are detected per field: updates may carry `base` (the values the edit started from); if someone else
+  changed those fields meanwhile the server answers `409` with the current values and who changed them, and the UI
+  lets the user keep theirs, combine or overwrite. Analyses use `base_updated_at` the same way.
 
 **Error control**: each known error can be assessed — risk of not fixing, cost of a permanent fix, workaround
 effectiveness — and gets a decision: fix, accept the risk, defer or pending, with a review date. Accepting or

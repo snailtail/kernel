@@ -149,10 +149,22 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    /** The full error body, e.g. { conflicts, changed_by, changed_at } for 409 conflicts. */
+    public details: Record<string, any> = {},
   ) {
     super(message);
   }
 }
+
+export interface Conflict {
+  conflicts?: { field: string; current: unknown }[];
+  current?: any;
+  changed_by: string | null;
+  changed_at: string | null;
+}
+
+export const asConflict = (err: unknown): Conflict | null =>
+  err instanceof ApiError && err.status === 409 && ('conflicts' in err.details || 'current' in err.details) ? (err.details as Conflict) : null;
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, {
@@ -167,7 +179,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   const data = res.status === 204 ? null : await res.json().catch(() => null);
   if (!res.ok) {
     if (res.status === 401 && path !== '/api/auth/login') window.dispatchEvent(new Event('kernel:unauthorized'));
-    throw new ApiError(res.status, data?.error ?? res.statusText);
+    throw new ApiError(res.status, data?.error ?? res.statusText, data ?? {});
   }
   return data as T;
 }

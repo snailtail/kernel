@@ -280,10 +280,17 @@ function buildServer(user: User) {
   tool(
     'update_problem',
     'Update fields on a problem record. Only the fields given are changed. Use transition_problem to change status.',
-    { ref: z.string(), ...optionalEditable },
+    {
+      ref: z.string(),
+      ...optionalEditable,
+      base: z
+        .record(z.string(), z.unknown())
+        .optional()
+        .describe('Optional: the values (as returned by get_problem, e.g. {"root_cause": "..."}) your edit is based on. If someone changed them meanwhile, the update is rejected instead of overwriting their change.'),
+    },
     false,
-    async ({ ref, ...args }) =>
-      compactProblem(await problems.updateProblem(user, ref, problems.updateProblemSchema.parse(await toInput(args))), 5),
+    async ({ ref, base, ...args }) =>
+      compactProblem(await problems.updateProblem(user, ref, problems.updateProblemSchema.parse({ ...(await toInput(args)), base })), 5),
   );
 
   tool(
@@ -394,6 +401,7 @@ function buildServer(user: User) {
       title: z.string().optional(),
       data: z.record(z.string(), z.unknown()).optional(),
       conclusion: z.string().optional().describe('What the analysis concluded about the root cause'),
+      base_updated_at: z.string().optional().describe('updated_at of the analysis you read; protects against overwriting a newer save'),
     },
     false,
     async ({ ref, analysis_id, ...input }) =>

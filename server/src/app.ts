@@ -41,7 +41,7 @@ export async function buildApp(options: { logLevel?: string; serveWeb?: boolean 
     if (err instanceof ZodError) {
       return reply.code(400).send({ error: err.issues.map((i) => (i.path.length ? `${i.path.join('.')}: ` : '') + i.message).join('; ') });
     }
-    if (err instanceof HttpError) return reply.code(err.statusCode).send({ error: err.message });
+    if (err instanceof HttpError) return reply.code(err.statusCode).send({ error: err.message, ...err.details });
     const status = (err as { statusCode?: number }).statusCode;
     if (status && status < 500) return reply.code(status).send({ error: (err as Error).message });
     req.log.error(err);

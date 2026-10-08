@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, type Analysis, type ProblemDetail, type Technique } from '../api';
+import { api, asConflict, type Analysis, type Conflict, type ProblemDetail, type Technique } from '../api';
 import { relativeTime } from '../format';
 import { canEdit, useSession } from '../session';
 
@@ -84,22 +84,38 @@ function AnalysisEditor({ problem: p, analysis, editable, onChange }: { problem:
     return () => window.removeEventListener('beforeunload', onUnload);
   }, [dirty]);
 
-  const save = async () => {
+  const [conflict, setConflict] = useState<Conflict | null>(null);
+  const save = async (base = analysis.updated_at) => {
     setSaving(true);
     setError(null);
     try {
-      onChange(await api.patch<ProblemDetail>(`/api/problems/${p.ref}/analyses/${analysis.id}`, { data, conclusion, title }));
+      onChange(await api.patch<ProblemDetail>(`/api/problems/${p.ref}/analyses/${analysis.id}`, { data, conclusion, title, base_updated_at: base }));
+      setConflict(null);
     } catch (err) {
-      setError((err as Error).message);
+      const c = asConflict(err);
+      if (c) setConflict(c);
+      else setError((err as Error).message);
+      throw err;
     } finally {
       setSaving(false);
     }
+  };
+  const loadTheirs = async () => {
+    const fresh = await api.get<ProblemDetail>(`/api/problems/${p.ref}`);
+    const theirs = fresh.analyses.find((a) => a.id === analysis.id);
+    if (theirs) {
+      setData(theirs.data);
+      setConclusion(theirs.conclusion);
+      setTitle(theirs.title);
+    }
+    setConflict(null);
+    onChange(fresh);
   };
   const useAsRootCause = async () => {
     const text = p.root_cause.trim() ? `${p.root_cause.trim()}\n\n${conclusion.trim()}` : conclusion.trim();
     try {
       if (dirty) await save();
-      onChange(await api.patch<ProblemDetail>(`/api/problems/${p.ref}`, { root_cause: text }));
+      onChange(await api.patch<ProblemDetail>(`/api/problems/${p.ref}`, { root_cause: text, base: { root_cause: p.root_cause } }));
     } catch (err) {
       setError((err as Error).message);
     }
@@ -124,13 +140,22 @@ function AnalysisEditor({ problem: p, analysis, editable, onChange }: { problem:
         <textarea rows={3} value={conclusion} readOnly={!editable} onChange={(e) => setConclusion(e.target.value)} placeholder="What does this analysis tell us about the root cause?" />
       </label>
       {error && <div className="error">{error}</div>}
+      {conflict && (
+        <div className="conflict">
+          <strong>{conflict.changed_by ?? 'Someone'} saved this analysis while you were editing.</strong>
+          <div className="actions">
+            <button className="btn" onClick={loadTheirs}>Discard mine, load theirs</button>
+            <button className="btn danger" onClick={() => save(conflict.current?.updated_at).catch(() => {})}>Overwrite with mine</button>
+          </div>
+        </div>
+      )}
       {editable && (
         <div className="actions">
           <button className="btn-link danger spacer-right" onClick={remove}>Remove</button>
           <button className="btn" disabled={!conclusion.trim()} onClick={useAsRootCause} title="Append the conclusion to the problem's root cause">
             Use as root cause
           </button>
-          <button className="btn primary" disabled={!dirty || saving} onClick={save}>{saving ? 'Saving…' : dirty ? 'Save analysis' : 'Saved'}</button>
+          <button className="btn primary" disabled={!dirty || saving || !!conflict} onClick={() => save().catch(() => {})}>{saving ? 'Saving…' : dirty ? 'Save analysis' : 'Saved'}</button>
         </div>
       )}
     </div>

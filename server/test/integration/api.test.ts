@@ -140,7 +140,7 @@ describe('REST API', { skip }, () => {
       assert.equal(res.body.priority, 1);
       const update = res.body.activity.find((a: any) => a.kind === 'update');
       assert.deepEqual(update.data.impact, { from: 3, to: 1 });
-      assert.deepEqual(update.data.workaround, { edited: true });
+      assert.deepEqual(update.data.workaround, { from: '', to: 'Restart' });
     });
 
     test('unknown problems return 404', async () => {
@@ -459,6 +459,39 @@ describe('REST API', { skip }, () => {
       const create = doc.paths['/api/problems'].post.requestBody.content['application/json'].schema;
       assert.ok(create.required.includes('title'));
       assert.ok(doc.paths['/api/problems'].get.parameters.some((p: any) => p.name === 'status'));
+    });
+  });
+
+  describe('change history and concurrent edits', () => {
+    test('keeps the full previous text of long fields', async () => {
+      const p = await create({ description: 'First version of the description' });
+      const res = await analyst.patch(`/api/problems/${p.ref}`, { description: 'Second version' });
+      const update = res.body.activity.find((a: any) => a.kind === 'update');
+      assert.deepEqual(update.data.description, { from: 'First version of the description', to: 'Second version' });
+    });
+
+    test('rejects edits based on an outdated value, naming who changed it', async () => {
+      const p = await create({ description: 'Original' });
+      await pm.patch(`/api/problems/${p.ref}`, { description: 'Edited by the manager' });
+      const stale = await analyst.patch(`/api/problems/${p.ref}`, { description: 'My edit', base: { description: 'Original' } });
+      assert.equal(stale.status, 409);
+      assert.equal(stale.body.changed_by, 'Pm');
+      assert.deepEqual(stale.body.conflicts, [{ field: 'description', current: 'Edited by the manager' }]);
+      // Unrelated changes do not conflict, and a fresh base succeeds.
+      await pm.post(`/api/problems/${p.ref}/comments`, { body: 'unrelated' });
+      const ok = await analyst.patch(`/api/problems/${p.ref}`, { description: 'My edit', base: { description: 'Edited by the manager' } });
+      assert.equal(ok.body.description, 'My edit');
+      const other = await analyst.patch(`/api/problems/${p.ref}`, { impact: 1, base: { impact: 3 } });
+      assert.equal(other.status, 200);
+    });
+
+    test('analyses reject saves over a newer version', async () => {
+      const p = await create();
+      const a = (await analyst.post(`/api/problems/${p.ref}/analyses`, { technique: 'five_whys' })).body.analyses[0];
+      await pm.patch(`/api/problems/${p.ref}/analyses/${a.id}`, { conclusion: 'PM conclusion' });
+      const stale = await analyst.patch(`/api/problems/${p.ref}/analyses/${a.id}`, { conclusion: 'Mine', base_updated_at: a.updated_at });
+      assert.equal(stale.status, 409);
+      assert.equal(stale.body.current.conclusion, 'PM conclusion');
     });
   });
 

@@ -95,7 +95,7 @@ describe('webhooks and watching', { skip }, () => {
     await deliver();
     const update = JSON.parse(received[0].body);
     assert.deepEqual(update.data.impact, { from: 3, to: 1 });
-    assert.ok(update.data.description, 'the change is reported');
+    assert.deepEqual(update.data.description, { changed: true }, 'long texts never leave Kernel in webhooks');
     assert.ok(!received[0].body.includes('Secret detail'));
     received.length = 0;
 

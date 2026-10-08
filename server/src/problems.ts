@@ -41,7 +41,13 @@ export const createProblemSchema = z.object({
   description: problemFields.description.default(''),
 }).partial().required({ title: true });
 
-export const updateProblemSchema = z.object(problemFields).partial();
+/**
+ * Updates carry an optional `base`: the values the client's edit started from. If someone else has changed one of
+ * those fields since, the update is rejected with 409 and the current values, instead of silently overwriting.
+ */
+export const updateProblemSchema = z.object(problemFields).partial().extend({
+  base: z.object(problemFields).partial().optional(),
+});
 
 export const transitionSchema = z.object({
   to: z.enum(STATUSES),
@@ -77,7 +83,7 @@ export const listSchema = z.object({
   limit: z.coerce.number().int().min(1).max(500).default(200),
 });
 
-export type ProblemInput = z.infer<typeof updateProblemSchema>;
+export type ProblemInput = Omit<z.infer<typeof updateProblemSchema>, 'base'>;
 export type Db = Pick<pg.PoolClient, 'query'>;
 
 const SELECT_PROBLEM = `
@@ -106,7 +112,6 @@ export const SELECT_ACTION = `
   LEFT JOIN users o ON o.id = a.owner_id
   LEFT JOIN users cb ON cb.id = a.created_by`;
 
-const SHORT_FIELDS = new Set(['title', 'category_id', 'affected_service', 'detection', 'impact', 'urgency', 'is_major', 'assignee_id']);
 
 export function requireEditor(user: User) {
   if (!canEdit(user.role)) throw forbidden('Your role cannot change problems');
@@ -263,10 +268,31 @@ export async function createProblem(user: User, input: z.infer<typeof createProb
   return getProblem(ref);
 }
 
-export async function updateProblem(user: User, ref: string, input: ProblemInput) {
+const same = (a: unknown, b: unknown) => (a ?? null) === (b ?? null);
+
+/** Rejects an edit whose base values no longer match the record (someone else changed those fields). */
+export async function checkBase(db: Db, problemId: number, current: Record<string, unknown>, input: object, base?: Record<string, unknown>) {
+  if (!base) return;
+  const fields = Object.keys(base).filter((k) => k in input && !same(current[k], base[k]));
+  if (!fields.length) return;
+  const { rows } = await db.query(
+    `SELECT a.created_at, u.display_name FROM problem_activity a LEFT JOIN users u ON u.id = a.user_id
+     WHERE a.problem_id = $1 AND a.kind IN ('update', 'status', 'assessment') AND a.data ?| $2
+     ORDER BY a.id DESC LIMIT 1`,
+    [problemId, fields],
+  );
+  const by = rows[0];
+  throw conflict(
+    `${fields.join(', ')} ${fields.length > 1 ? 'were' : 'was'} changed${by ? ` by ${by.display_name ?? 'someone'}` : ''} while you were editing`,
+    { conflicts: fields.map((f) => ({ field: f, current: current[f] ?? null })), changed_by: by?.display_name ?? null, changed_at: by?.created_at ?? null },
+  );
+}
+
+export async function updateProblem(user: User, ref: string, { base, ...input }: z.infer<typeof updateProblemSchema>) {
   requireEditor(user);
   await tx(async (db) => {
     const current = await loadForUpdate(db, ref);
+    await checkBase(db, current.id, current, input, base);
     if (current.status === 'closed') throw conflict('Reopen the problem before editing it');
     if (input.is_major !== undefined && input.is_major !== current.is_major && !isManager(user.role)) {
       throw forbidden('Only a problem manager can change the major problem flag');
@@ -278,9 +304,8 @@ export async function updateProblem(user: User, ref: string, input: ProblemInput
       `UPDATE problems SET ${changed.map(([k], i) => `${k} = $${i + 2}`).join(', ')}, updated_at = now() WHERE id = $1`,
       [current.id, ...changed.map(([, v]) => v)],
     );
-    const data = Object.fromEntries(
-      changed.map(([k, v]) => [k, SHORT_FIELDS.has(k) ? { from: current[k], to: v } : { edited: true }]),
-    );
+    // Full before/after, also for long texts, so no earlier version is ever lost.
+    const data = Object.fromEntries(changed.map(([k, v]) => [k, { from: current[k] ?? null, to: v }]));
     if (input.assignee_id) await watch(db, current.id, input.assignee_id);
     await logActivity(db, current.id, user.id, 'update', `Updated ${changed.map(([k]) => k).join(', ')}`, data);
   });
@@ -318,7 +343,12 @@ export async function transitionProblem(user: User, ref: string, input: z.infer<
        WHERE id = $1`,
       [current.id, input.to, fields.root_cause, fields.workaround, fields.resolution, fields.major_review, closure_code, reopening],
     );
-    await logActivity(db, current.id, user.id, 'status', input.comment ?? '', { from, to: input.to, closure_code });
+    const texts = Object.fromEntries(
+      (['root_cause', 'workaround', 'resolution', 'major_review'] as const)
+        .filter((k) => fields[k] !== current[k])
+        .map((k) => [k, { from: current[k], to: fields[k] }]),
+    );
+    await logActivity(db, current.id, user.id, 'status', input.comment ?? '', { from, to: input.to, closure_code, ...texts });
   });
   return getProblem(ref);
 }
@@ -419,7 +449,7 @@ export async function dashboard(user: User) {
   };
 }
 
-export const assessmentSchema = z.object({
+const assessmentFields = {
   ec_risk_level: z.number().int().min(1).max(3).nullable(),
   ec_risk: z.string().max(20000),
   ec_fix_cost: z.string().max(20000),
@@ -427,7 +457,8 @@ export const assessmentSchema = z.object({
   ec_decision_note: z.string().max(20000),
   ec_review_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD').nullable(),
   workaround_effectiveness: z.enum(WORKAROUND_EFFECTIVENESS).nullable(),
-}).partial();
+};
+export const assessmentSchema = z.object(assessmentFields).partial().extend({ base: z.object(assessmentFields).partial().optional() });
 
 const ASSESSMENT_LABELS: Record<string, string> = {
   ec_risk_level: 'risk level',
@@ -443,7 +474,7 @@ const ASSESSMENT_LABELS: Record<string, string> = {
  * Records the error control assessment of a known error. Accepting or deferring the risk is a
  * management decision, so only problem managers can record those.
  */
-export async function assessProblem(user: User, ref: string, input: z.infer<typeof assessmentSchema>) {
+export async function assessProblem(user: User, ref: string, { base, ...input }: z.infer<typeof assessmentSchema>) {
   requireEditor(user);
   if ((input.ec_decision === 'accept' || input.ec_decision === 'defer') && !isManager(user.role)) {
     throw forbidden('Only a problem manager can accept or defer the risk of a known error');
@@ -451,6 +482,7 @@ export async function assessProblem(user: User, ref: string, input: z.infer<type
   await tx(async (db) => {
     const current = await loadForUpdate(db, ref);
     if (current.status === 'closed') throw conflict('Reopen the problem before changing its assessment');
+    await checkBase(db, current.id, { ...current, ec_review_date: current.ec_review_date }, input, base);
     if (current.status === 'new' || current.status === 'analysis') {
       if (input.ec_decision) throw conflict('Raise the problem as a known error before recording a decision');
     }
@@ -467,7 +499,7 @@ export async function assessProblem(user: User, ref: string, input: z.infer<type
     const body = decisionChanged && decided
       ? `Recorded decision: ${input.ec_decision}`
       : `Updated error control assessment (${changed.map(([k]) => ASSESSMENT_LABELS[k]).join(', ')})`;
-    await logActivity(db, current.id, user.id, 'assessment', body, Object.fromEntries(changed));
+    await logActivity(db, current.id, user.id, 'assessment', body, Object.fromEntries(changed.map(([k, v]) => [k, { from: current[k] ?? null, to: v }])));
   });
   return getProblem(ref);
 }
