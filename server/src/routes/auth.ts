@@ -1,37 +1,24 @@
 import type { FastifyInstance } from 'fastify';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
-import { createApiToken, createSession, destroySession, hashPassword, requireUser, verifyLogin } from '../auth.js';
+import { createApiToken, createSession, currentSessionHash, destroySession, guardLogin, hashPassword, listSessions, loginFailed, loginSucceeded, requireUser, revokeSession, verifyLogin } from '../auth.js';
+import { checkPassword } from '../passwords.js';
+import { rateLimit } from '../ratelimit.js';
 import { query } from '../db.js';
 import { badRequest, HttpError, notFound } from '../errors.js';
 
-// Simple in-memory brute force protection: 10 failed logins per IP per 15 minutes.
-const failures = new Map<string, { count: number; until: number }>();
-const WINDOW_MS = 15 * 60 * 1000;
-
-function checkLoginRate(ip: string) {
-  const entry = failures.get(ip);
-  if (entry && entry.until > Date.now() && entry.count >= 10) {
-    throw new HttpError(429, 'Too many failed login attempts, try again later');
-  }
-}
-
-function recordFailure(ip: string) {
-  const entry = failures.get(ip);
-  if (!entry || entry.until < Date.now()) failures.set(ip, { count: 1, until: Date.now() + WINDOW_MS });
-  else entry.count++;
-}
-
 export async function authRoutes(app: FastifyInstance) {
   app.post('/api/auth/login', async (req, reply) => {
-    checkLoginRate(req.ip);
-    const body = z.object({ username: z.string(), password: z.string() }).parse(req.body);
+    const body = z.object({ username: z.string().max(200), password: z.string().max(1000) }).parse(req.body);
+    const account = body.username.trim().toLowerCase();
+    // Brute force protection per client and per account (also for unknown accounts, so nothing is revealed).
+    guardLogin(req.ip, account);
     const user = await verifyLogin(body.username, body.password);
     if (!user) {
-      recordFailure(req.ip);
+      loginFailed(req.ip, account);
       throw new HttpError(401, 'Invalid username or password');
     }
-    failures.delete(req.ip);
+    loginSucceeded(account);
     await createSession(req, reply, user.id);
     return user;
   });
@@ -52,12 +39,27 @@ export async function authRoutes(app: FastifyInstance) {
 
   app.post('/api/auth/password', async (req) => {
     const user = requireUser(req);
-    const body = z.object({ current: z.string(), password: z.string().min(10, 'Use at least 10 characters') }).parse(req.body);
+    const body = z.object({ current: z.string(), password: z.string() }).parse(req.body);
+    rateLimit(`password:${user.id}`, 10, 3600_000);
     const { rows } = await query('SELECT password_hash FROM users WHERE id = $1', [user.id]);
     if (!(await bcrypt.compare(body.current, rows[0].password_hash))) throw badRequest('Current password is incorrect');
     if (body.password === body.current) throw badRequest('Choose a new password');
+    await checkPassword(body.password, user);
     await query('UPDATE users SET password_hash = $2, must_change_password = false WHERE id = $1', [user.id, await hashPassword(body.password)]);
+    // Sign out other sessions after a password change.
+    await query('DELETE FROM sessions WHERE user_id = $1 AND token_hash <> $2', [user.id, currentSessionHash(req)]);
     return { ok: true };
+  });
+
+  app.get('/api/auth/sessions', async (req) => listSessions(requireUser(req), req));
+  app.delete<{ Params: { id: string } }>('/api/auth/sessions/:id', async (req) => {
+    await revokeSession(requireUser(req), req.params.id);
+    return { ok: true };
+  });
+  app.post('/api/auth/sessions/revoke-others', async (req) => {
+    const user = requireUser(req);
+    const { rowCount } = await query('DELETE FROM sessions WHERE user_id = $1 AND token_hash <> $2', [user.id, currentSessionHash(req)]);
+    return { revoked: rowCount };
   });
 
   // Personal API tokens for MCP clients and scripts
@@ -72,6 +74,7 @@ export async function authRoutes(app: FastifyInstance) {
 
   app.post('/api/tokens', async (req) => {
     const user = requireUser(req);
+    rateLimit(`tokens:${user.id}`, 20, 3600_000);
     const body = z
       .object({ name: z.string().trim().min(1).max(100), expires_in_days: z.number().int().min(1).max(3650).optional() })
       .parse(req.body);

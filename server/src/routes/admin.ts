@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { hashPassword, requireRole } from '../auth.js';
 import { backupStatus } from '../backups.js';
+import { checkPassword } from '../passwords.js';
 import { securityStatus } from '../security.js';
 import * as webhooks from '../webhooks.js';
 import { query } from '../db.js';
@@ -15,7 +16,7 @@ const userFields = {
   role: z.enum(ROLES),
   active: z.boolean(),
 };
-const password = z.string().min(10, 'Use at least 10 characters');
+const password = z.string();
 const USER_COLUMNS = 'id, username, display_name, email, role, active, created_at';
 
 export async function adminRoutes(app: FastifyInstance) {
@@ -27,6 +28,7 @@ export async function adminRoutes(app: FastifyInstance) {
   app.post('/api/users', async (req, reply) => {
     requireRole(req, 'admin');
     const body = z.object({ ...userFields, email: userFields.email.default(''), active: userFields.active.default(true), password }).parse(req.body);
+    await checkPassword(body.password, body);
     try {
       const { rows } = await query(
         `INSERT INTO users (username, display_name, email, role, active, password_hash) VALUES ($1, $2, $3, $4, $5, $6) RETURNING ${USER_COLUMNS}`,
@@ -48,6 +50,7 @@ export async function adminRoutes(app: FastifyInstance) {
       throw badRequest('You cannot deactivate or demote yourself');
     }
     const { password: newPassword, ...fields } = body;
+    if (newPassword) await checkPassword(newPassword, fields);
     const sets = Object.entries(fields).filter(([, v]) => v !== undefined);
     if (newPassword) sets.push(['password_hash', await hashPassword(newPassword)]);
     if (!sets.length) throw badRequest('Nothing to update');

@@ -4,7 +4,10 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { config } from './config.js';
 import { query } from './db.js';
 import { forbidden, HttpError } from './errors.js';
+import { logger } from './log.js';
 import { checkSameOrigin } from './security.js';
+
+const securityLog = logger.child({ event: { dataset: 'kernel.security' } });
 import type { Role } from './workflow.js';
 
 export interface User {
@@ -52,11 +55,10 @@ export async function verifyLogin(username: string, password: string): Promise<U
 
 export async function createSession(req: FastifyRequest, reply: FastifyReply, userId: number) {
   const token = randomBytes(32).toString('base64url');
-  await query(`INSERT INTO sessions (token_hash, user_id, expires_at) VALUES ($1, $2, now() + $3 * interval '1 day')`, [
-    sha256(token),
-    userId,
-    config.sessionDays,
-  ]);
+  await query(
+    `INSERT INTO sessions (token_hash, user_id, expires_at, ip, user_agent) VALUES ($1, $2, now() + $3 * interval '1 day', $4, $5)`,
+    [sha256(token), userId, config.sessionDays, req.ip, String(req.headers['user-agent'] ?? '').slice(0, 300)],
+  );
   reply.setCookie(SESSION_COOKIE, token, {
     path: '/',
     httpOnly: true,
@@ -85,12 +87,70 @@ export async function createApiToken(userId: number, name: string, expiresInDays
 }
 
 async function userFromSession(token: string): Promise<User | null> {
+  // Absolute lifetime (expires_at) and idle timeout (last_seen_at); activity is recorded at most once a minute.
   const { rows } = await query(
-    `SELECT ${USER_COLUMNS} FROM sessions s JOIN users u ON u.id = s.user_id
-     WHERE s.token_hash = $1 AND s.expires_at > now() AND u.active`,
-    [sha256(token)],
+    `WITH s AS (
+       UPDATE sessions SET last_seen_at = now()
+       WHERE token_hash = $1 AND expires_at > now() AND last_seen_at > now() - $2 * interval '1 hour'
+         AND last_seen_at < now() - interval '1 minute'
+       RETURNING user_id)
+     SELECT ${USER_COLUMNS} FROM sessions ss JOIN users u ON u.id = ss.user_id
+     WHERE ss.token_hash = $1 AND ss.expires_at > now() AND ss.last_seen_at > now() - $2 * interval '1 hour' AND u.active`,
+    [sha256(token), config.sessionIdleHours],
   );
   return rows[0] ?? null;
+}
+
+export const currentSessionHash = (req: FastifyRequest) => sha256(req.cookies[SESSION_COOKIE] ?? '');
+
+export async function listSessions(user: User, req: FastifyRequest) {
+  const current = currentSessionHash(req);
+  const { rows } = await query(
+    `SELECT left(token_hash, 16) AS id, created_at, last_seen_at, expires_at, ip, user_agent, token_hash = $2 AS current
+     FROM sessions WHERE user_id = $1 AND expires_at > now() ORDER BY last_seen_at DESC`,
+    [user.id, current],
+  );
+  return rows;
+}
+
+export async function revokeSession(user: User, id: string) {
+  const { rowCount } = await query('DELETE FROM sessions WHERE user_id = $1 AND left(token_hash, 16) = $2', [user.id, id]);
+  if (!rowCount) throw new HttpError(404, 'Session not found');
+}
+
+// ---- Brute force protection ------------------------------------------------------------------
+
+const failures = new Map<string, { count: number; until: number }>();
+const WINDOW_MS = 15 * 60 * 1000;
+const MAX_PER_IP = 20;
+const MAX_PER_ACCOUNT = 8;
+
+function count(key: string) {
+  const e = failures.get(key);
+  return e && e.until > Date.now() ? e.count : 0;
+}
+
+/** Rejects a login attempt when the client or the account has had too many recent failures. */
+export function guardLogin(ip: string, account: string) {
+  if (count(`ip:${ip}`) >= MAX_PER_IP || count(`acct:${account}`) >= MAX_PER_ACCOUNT) {
+    throw new HttpError(429, 'Too many failed login attempts, try again in 15 minutes');
+  }
+}
+
+export function loginFailed(ip: string, account: string) {
+  for (const key of [`ip:${ip}`, `acct:${account}`]) {
+    const e = failures.get(key);
+    if (!e || e.until <= Date.now()) failures.set(key, { count: 1, until: Date.now() + WINDOW_MS });
+    else e.count++;
+  }
+  if (count(`acct:${account}`) === MAX_PER_ACCOUNT) {
+    securityLog.warn({ event: { action: 'auth.account_locked', category: ['authentication'] }, user: { name: account }, source: { ip } }, 'Account temporarily locked after failed logins');
+  }
+  if (failures.size > 50_000) for (const [k, v] of failures) if (v.until <= Date.now()) failures.delete(k);
+}
+
+export function loginSucceeded(account: string) {
+  failures.delete(`acct:${account}`);
 }
 
 async function userFromApiToken(token: string): Promise<User | null> {

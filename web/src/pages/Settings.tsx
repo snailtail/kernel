@@ -27,6 +27,7 @@ export function SettingsPage() {
       </header>
       <PreferencesCard />
       <TokensCard />
+      <SessionsCard />
       <PasswordCard />
     </>
   );
@@ -87,7 +88,7 @@ function PasswordCard() {
       <h2>Change password</h2>
       <form className="form narrow" onSubmit={submit}>
         <label className="full">Current password<input type="password" autoComplete="current-password" value={form.current} onChange={(e) => setForm({ ...form, current: e.target.value })} /></label>
-        <label>New password<input type="password" autoComplete="new-password" minLength={10} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></label>
+        <label>New password <span className="muted small">(at least 12 characters; a passphrase works well)</span><input type="password" autoComplete="new-password" minLength={12} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></label>
         <label>Confirm<input type="password" autoComplete="new-password" value={form.confirm} onChange={(e) => setForm({ ...form, confirm: e.target.value })} /></label>
         {message && <div className={`full ${message.ok ? 'success' : 'error'}`}>{message.text}</div>}
         <div className="actions full"><button className="btn primary" disabled={!form.current || !form.password}>Change password</button></div>
@@ -194,5 +195,51 @@ function CopyBlock({ text }: { text: string }) {
         {copied ? 'Copied' : 'Copy'}
       </button>
     </div>
+  );
+}
+
+interface Session { id: string; created_at: string; last_seen_at: string; ip: string; user_agent: string; current: boolean }
+
+/** A short, readable device description from a user agent string. */
+function device(ua: string) {
+  const browser = /Edg\//.test(ua) ? 'Edge' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : ua ? 'Browser' : 'Unknown';
+  const os = /Windows/.test(ua) ? 'Windows' : /Mac OS X/.test(ua) ? 'macOS' : /Android/.test(ua) ? 'Android' : /iPhone|iPad/.test(ua) ? 'iOS' : /Linux/.test(ua) ? 'Linux' : '';
+  return os ? `${browser} on ${os}` : browser;
+}
+
+function SessionsCard() {
+  const { data, reload } = useApi<Session[]>('/api/auth/sessions');
+  const revoke = async (s: Session) => {
+    await api.del(`/api/auth/sessions/${s.id}`);
+    reload();
+  };
+  const revokeOthers = async () => {
+    if (!confirm('Sign out all other sessions?')) return;
+    await api.post('/api/auth/sessions/revoke-others');
+    reload();
+  };
+  return (
+    <section className="card">
+      <div className="section-head">
+        <h2>Active sessions</h2>
+        {data && data.length > 1 && <button className="btn small" onClick={revokeOthers}>Sign out everywhere else</button>}
+      </div>
+      {data && (
+        <table className="table compact">
+          <thead><tr><th>Device</th><th>IP address</th><th>Signed in</th><th>Last active</th><th /></tr></thead>
+          <tbody>
+            {data.map((s) => (
+              <tr key={s.id}>
+                <td>{device(s.user_agent)}{s.current && <span className="tag"> This session</span>}</td>
+                <td className="mono small">{s.ip || '–'}</td>
+                <td>{formatDate(s.created_at)}</td>
+                <td>{relativeTime(s.last_seen_at)}</td>
+                <td>{!s.current && <button className="btn-link danger" onClick={() => revoke(s)}>Sign out</button>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
   );
 }

@@ -75,7 +75,7 @@ export function ChangeInitialPassword({ onDone, onLogout }: { onDone: () => void
         </div>
         <p className="muted small">This account still uses a generated password. Choose your own before continuing; a long passphrase is best.</p>
         <label>Current (generated) password<input type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} /></label>
-        <label>New password<input type="password" autoComplete="new-password" minLength={10} value={password} onChange={(e) => setPassword(e.target.value)} /></label>
+        <label>New password<input type="password" autoComplete="new-password" minLength={12} value={password} onChange={(e) => setPassword(e.target.value)} /></label>
         <label>Confirm new password<input type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} /></label>
         {error && <div className="error">{error}</div>}
         <button className="btn primary" disabled={!current || !password}>Save and continue</button>

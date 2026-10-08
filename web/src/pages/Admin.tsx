@@ -107,7 +107,7 @@ function UserModal({ user, self, roles, onClose, onDone }: { user: AdminUser | n
           </select>
         </label>
         <label className="full">{user ? 'New password (leave empty to keep)' : 'Password'}
-          <input type="password" autoComplete="new-password" required={!user} minLength={10} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+          <input type="password" autoComplete="new-password" required={!user} minLength={12} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
         </label>
         {user && !self && (
           <label className="check full"><input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Active</label>

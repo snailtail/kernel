@@ -113,6 +113,8 @@ Open http://localhost:8080 and sign in as `admin`. Database migrations run autom
 | `KERNEL_SECRET_KEY` | – | Encrypts stored secrets at rest (≥ 32 random characters); required for webhooks |
 | `KERNEL_OUTBOUND_ALLOW` | – | CIDRs/addresses on private networks that webhooks may reach (loopback, link-local and metadata addresses are always blocked) |
 | `KERNEL_WEBHOOK_RETENTION_DAYS` | `30` | Successful deliveries are deleted after this many days, failed after three times as long |
+| `KERNEL_SESSION_IDLE_HOURS` | `12` | Sessions unused for this long expire (absolute lifetime: `KERNEL_SESSION_DAYS`) |
+| `KERNEL_HIBP_CHECK` | `false` | Also check new passwords against Have I Been Pwned (k-anonymity; only a hash prefix leaves Kernel) |
 | `PORT` | `8080` | Listen port inside the container |
 
 To deploy to the test server, push your commits and run `scripts/deploy.sh`. It pulls `main` in `~/kernel` on
@@ -126,6 +128,10 @@ To deploy to the test server, push your commits and run `scripts/deploy.sh`. It 
   `Permissions-Policy`, `Cache-Control: no-store` on API responses and a 256 kB request body limit.
 - Cookie-authenticated writes need the `X-Kernel-Request` header, a same-origin `Origin`/`Sec-Fetch-Site` and a
   JSON body; bearer tokens are exempt. Sessions use `HttpOnly`, `SameSite=Lax` and `Secure` over HTTPS.
+- Passwords follow NIST SP 800-63B: at least 12 characters, no composition rules, rejected if common, containing the
+  user's name, or (optionally) found in breaches. Logins are limited per client and per account (temporary lockout,
+  logged as a security event, identical for unknown accounts). Sessions expire after inactivity and have an absolute
+  lifetime; users see and revoke their sessions in Settings, and a password change signs out other sessions.
 - The generated initial admin password must be changed at first login. **Administration → Security status** lists the
   security-relevant configuration.
 - Containers run with a read-only filesystem, no Linux capabilities beyond what PostgreSQL needs,

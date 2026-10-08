@@ -11,6 +11,8 @@ export const config = {
   // Used only on first start, when the users table is empty.
   adminPassword: process.env.KERNEL_ADMIN_PASSWORD,
   sessionDays: Number(env('KERNEL_SESSION_DAYS', '7')),
+  // Sessions unused for this long expire (absolute lifetime is sessionDays).
+  sessionIdleHours: Number(env('KERNEL_SESSION_IDLE_HOURS', '12')),
   /**
    * KERNEL_TRUST_PROXY: "true" trusts every proxy hop (only safe when Kernel is unreachable except through the proxy),
    * a number trusts that many hops, or a comma-separated list of proxy addresses/CIDRs (recommended).
