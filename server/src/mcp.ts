@@ -8,6 +8,7 @@ import type { User } from './auth.js';
 import { query } from './db.js';
 import { badRequest, HttpError } from './errors.js';
 import * as actions from './actions.js';
+import * as analyses from './analyses.js';
 import * as problems from './problems.js';
 import { CLOSURE_CODES, EC_DECISIONS, STATUSES, TRANSITIONS, WORKAROUND_EFFECTIVENESS } from './workflow.js';
 
@@ -20,6 +21,8 @@ Impact and urgency are 1 (high) to 3 (low); priority = impact + urgency - 1 (1 c
 In error control, assess each known error (risk of not fixing, cost of fixing, workaround effectiveness) and record the
 decision: fix, accept the risk, defer, or pending, with a review date for accepted or deferred risks. Closing with
 closure code no_fix requires an accepted risk.
+Structured root cause analyses (five_whys, ishikawa, kepner_tregoe, timeline) can be attached to a problem with
+start_analysis/update_analysis; when the analysis concludes, write the root cause with update_problem.
 Track follow-up work (vendor patches, monitoring, runbook updates, review actions) as actions with an owner and due date.
 Before creating a problem, search existing problems and the known error database to avoid duplicates.`;
 
@@ -264,6 +267,77 @@ function buildServer(user: User) {
       return Object.fromEntries(Object.entries(p).filter(([k]) => k === 'ref' || k === 'status' || k.startsWith('ec_') || k.startsWith('workaround')));
     },
   );
+
+  const ANALYSIS_FORMATS = `Data formats per technique:
+- five_whys: { problem_statement, whys: [{ why, because }] }
+- ishikawa: { effect, categories: [{ name, causes: [string] }] } (default categories People, Process, Technology, Supplier, Environment, Measurement)
+- kepner_tregoe: { problem_statement, what|where|when|extent: { is, is_not, distinction }, changes, possible_causes: [{ cause, test, result: untested|explains|does_not_explain }] }
+- timeline: { events: [{ at: "YYYY-MM-DDTHH:MM", kind: incident|change|deployment|alert|observation|other, description, reference }] }`;
+
+  tool(
+    'start_analysis',
+    `Start a structured root cause analysis on a problem. Omit data to start from an empty template.\n${ANALYSIS_FORMATS}`,
+    {
+      ref: z.string(),
+      technique: z.enum(analyses.TECHNIQUES),
+      title: z.string().optional(),
+      data: z.record(z.string(), z.unknown()).optional(),
+      conclusion: z.string().optional(),
+    },
+    false,
+    async ({ ref, ...input }) => (await analyses.createAnalysis(user, ref, analyses.createAnalysisSchema.parse(input))).analyses,
+  );
+
+  tool(
+    'update_analysis',
+    `Update an analysis. data replaces the whole data object, so send the complete structure. Get analysis ids from get_problem.\n${ANALYSIS_FORMATS}`,
+    {
+      ref: z.string(),
+      analysis_id: z.number().int(),
+      title: z.string().optional(),
+      data: z.record(z.string(), z.unknown()).optional(),
+      conclusion: z.string().optional().describe('What the analysis concluded about the root cause'),
+    },
+    false,
+    async ({ ref, analysis_id, ...input }) =>
+      (await analyses.updateAnalysis(user, ref, analysis_id, analyses.updateAnalysisSchema.parse(input))).analyses.find(
+        (a: { id: number }) => a.id === analysis_id,
+      ),
+  );
+
+  const prompt = (name: string, title: string, description: string, body: (ref: string) => string) =>
+    server.registerPrompt(name, { title, description, argsSchema: { ref: z.string().describe('Problem reference, e.g. PRB000012') } }, ({ ref }) => ({
+      messages: [{ role: 'user', content: { type: 'text', text: body(ref.toUpperCase()) } }],
+    }));
+
+  prompt('five_whys', '5 Whys analysis', 'Facilitate a 5 Whys root cause analysis on a problem, recording it in Kernel.', (ref) =>
+    `Facilitate a 5 Whys root cause analysis for problem ${ref} in Kernel.
+1. Read the problem with get_problem, including links, notes and any existing analyses.
+2. Agree a precise problem statement with me, then start a five_whys analysis with start_analysis.
+3. Ask one "why?" at a time. Propose a likely "because" based on the evidence, but let me confirm or correct it. Record each step with update_analysis.
+4. Stop when we reach a cause that, if removed, would prevent recurrence and is within our control (usually 4–6 steps). Watch for branches; note them as separate analyses if needed.
+5. Write the conclusion on the analysis, and when I agree, update the problem root cause with update_problem. Suggest follow-up actions with add_action.`);
+
+  prompt('kepner_tregoe', 'Kepner-Tregoe problem analysis', 'Run a Kepner-Tregoe problem analysis (IS / IS NOT) on a problem.', (ref) =>
+    `Run a Kepner-Tregoe problem analysis for problem ${ref} in Kernel.
+1. Read the problem with get_problem, and linked incidents/events/changes.
+2. Start a kepner_tregoe analysis with start_analysis. Work through WHAT, WHERE, WHEN and EXTENT with me: what IS affected, what could be but IS NOT, and the distinctions between them. Record answers with update_analysis as we go.
+3. List changes related to the distinctions, derive possible causes, and for each define a test: does it explain both the IS and the IS NOT? Mark results.
+4. Conclude with the most probable cause and how to verify it. Record the conclusion, update the root cause when I agree, and propose verification steps as actions.`);
+
+  prompt('triage_problem', 'Triage a new problem', 'Check a newly logged problem for duplicates, priority, category and ownership.', (ref) =>
+    `Triage problem ${ref} in Kernel as a problem manager would.
+1. Read it with get_problem.
+2. Search for duplicates and related known errors (search_problems with status "all", search_known_errors) using its key terms.
+3. Assess impact and urgency against the evidence and the ITIL 4 priority matrix; check category, affected service, and detection (reactive/proactive).
+4. Recommend: duplicate or not, priority, category, owner (list_reference_data for users), and first analysis steps. Ask me before changing anything, then apply agreed changes with update_problem and move it to analysis with transition_problem.`);
+
+  prompt('major_problem_review', 'Draft a major problem review', 'Draft the major problem review from the problem record and its history.', (ref) =>
+    `Draft a major problem review for problem ${ref} in Kernel.
+Read it with get_problem (use a large activity_limit), including analyses, actions, links and notes. Write a concise review covering:
+what happened and the business impact; timeline; root cause; what went well; what could be improved; how recurrence is prevented;
+follow-up actions with owners and due dates (existing ones and new ones you recommend).
+Show me the draft first. When I approve it, save it with update_problem (major_review) and create any new actions with add_action.`);
 
   const actionShape = {
     title: z.string().describe('What needs to be done'),

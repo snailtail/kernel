@@ -7,6 +7,7 @@
 import { hashPassword, type User } from '../src/auth.js';
 import { migrate, pool, query } from '../src/db.js';
 import * as actions from '../src/actions.js';
+import * as analyses from '../src/analyses.js';
 import * as problems from '../src/problems.js';
 
 await migrate(console.log);
@@ -57,6 +58,7 @@ interface Demo {
   closure?: 'resolved' | 'workaround_accepted' | 'duplicate' | 'cancelled' | 'no_fix';
   actions?: [title: string, owner: string, dueOffset: number | null, done?: boolean][];
   assessment?: Parameters<typeof problems.assessProblem>[2] & { reviewOffset?: number };
+  analyses?: { technique: analyses.Technique; title?: string; data: unknown; conclusion?: string }[];
 }
 
 const demos: Demo[] = [
@@ -68,6 +70,30 @@ const demos: Demo[] = [
     notes: ['Thread dumps show all workers waiting on the DB connection pool.', 'Pool size is 20 per pod; peak concurrency reaches 35.'],
     rootCause: 'The September release added a synchronous inventory lookup per order line, holding a database connection for the full request. Under peak load the connection pool (20 per pod) is exhausted and requests queue until the gateway times out.',
     workaround: 'Scale order-api to 8 pods before 10:45 on weekdays (runbook RB-112). Reduces failures to < 0.1%.',
+    analyses: [
+      {
+        technique: 'five_whys', title: 'Why do orders time out?',
+        data: { problem_statement: 'Order API returns 504 for ~2% of requests between 11:00 and 13:00', whys: [
+          { why: 'Why do requests return 504?', because: 'The gateway times out waiting for order-api (30 s).' },
+          { why: 'Why is order-api that slow?', because: 'Requests wait for a free database connection.' },
+          { why: 'Why are no connections free?', because: 'Each request holds a connection during the inventory lookup per order line.' },
+          { why: 'Why does it hold the connection that long?', because: 'The September release made the inventory lookup synchronous inside the DB transaction.' },
+          { why: 'Why was that not caught before release?', because: 'Load tests use single-line orders; peak orders average 7 lines.' },
+        ] },
+        conclusion: 'Synchronous inventory lookup inside the DB transaction exhausts the connection pool at peak; load tests did not reflect real order sizes.',
+      },
+      {
+        technique: 'ishikawa', title: 'Contributing factors',
+        data: { effect: 'Order API 504 at peak', categories: [
+          { name: 'People', causes: ['No review of DB usage in PR'] },
+          { name: 'Process', causes: ['Load test profile outdated', 'No perf gate in pipeline'] },
+          { name: 'Technology', causes: ['Sync inventory call', 'Pool size 20/pod', 'Gateway timeout 30 s'] },
+          { name: 'Supplier', causes: [] },
+          { name: 'Environment', causes: ['Lunch-time order peak', 'Campaign traffic'] },
+          { name: 'Measurement', causes: ['No pool saturation alert'] },
+        ] },
+      },
+    ],
     assessment: { ec_risk_level: 1, ec_risk: 'Lost orders at every peak; workaround costs ~4 extra pods per day.', ec_fix_cost: 'One sprint for the order team.', ec_decision: 'fix', workaround_effectiveness: 'effective' },
     actions: [['Make inventory lookup asynchronous', 'erik', 9], ['Raise pool size to 40 as interim measure', 'jonas', -2], ['Add alert on pool saturation > 80%', 'sara', 5, true]],
   },
@@ -75,6 +101,21 @@ const demos: Demo[] = [
     by: 'anna', title: 'Nightly batch overruns into business hours', category: 'Infrastructure', service: 'Billing batch',
     description: 'The nightly billing batch has finished after 07:00 on 6 of the last 20 days, delaying invoice availability for customer service.',
     impact: 2, urgency: 2, assignee: 'jonas', ageDays: 12, status: 'analysis', detection: 'proactive',
+    analyses: [{
+      technique: 'kepner_tregoe', title: 'IS / IS NOT',
+      data: {
+        problem_statement: 'Billing batch finishes after 07:00',
+        what: { is: 'Invoice generation step', is_not: 'Payment import, ledger export', distinction: 'Only step that renders PDFs' },
+        where: { is: 'batch-02', is_not: 'batch-01 (same job, other customers)', distinction: 'batch-02 serves enterprise customers' },
+        when: { is: 'Month end and Mondays', is_not: 'Mid-week', distinction: 'Large invoice volumes' },
+        extent: { is: '6 of 20 nights, getting worse', is_not: '', distinction: 'Correlates with invoice lines' },
+        changes: 'New invoice template with per-line tax breakdown (August).',
+        possible_causes: [
+          { cause: 'PDF rendering of the new template is slow per line', test: 'Explains batch-02 and month end; not mid-week', result: 'explains' },
+          { cause: 'Storage latency on batch-02', test: 'Would affect payment import too', result: 'does_not_explain' },
+        ],
+      },
+    }],
     links: [['event', 'ZBX-88213', 'Zabbix'], ['event', 'ZBX-88457', 'Zabbix']],
     notes: ['Runtime correlates with number of invoice lines, not with load on the cluster.'],
     actions: [['Collect runtime per batch step for 2 weeks', 'jonas', 3]],
@@ -87,6 +128,17 @@ const demos: Demo[] = [
     rootCause: 'Service providers cache the IdP signing certificate. The new certificate was activated before the metadata had been published, so assertions failed validation.',
     workaround: 'Roll back to the previous signing certificate.',
     resolution: 'Rotation procedure changed to publish metadata with both certificates 14 days before switching (CHG0004402).',
+    analyses: [{
+      technique: 'timeline', title: 'Outage timeline',
+      data: { events: [
+        { at: '2026-09-08T06:00', kind: 'change', description: 'Quarterly signing certificate rotation started', reference: 'CHG0004390' },
+        { at: '2026-09-08T06:04', kind: 'alert', description: 'Login error rate > 50%', reference: 'ZBX-87711' },
+        { at: '2026-09-08T06:10', kind: 'incident', description: 'Major incident: nobody can log in', reference: 'INC0011876' },
+        { at: '2026-09-08T06:35', kind: 'observation', description: 'SPs reject assertions: unknown signing key' },
+        { at: '2026-09-08T06:44', kind: 'change', description: 'Rolled back to previous certificate', reference: 'CHG0004390' },
+      ] },
+      conclusion: 'Service providers had cached the old metadata; the new certificate was activated before they had fetched it.',
+    }],
     actions: [['Update certificate rotation runbook', 'sara', -5, true], ['Automate expiry monitoring for all SAML certificates', 'jonas', 20]],
   },
   {
@@ -150,6 +202,7 @@ for (const d of demos) {
   } else if (d.rootCause) {
     await problems.updateProblem(by, p.ref, { root_cause: d.rootCause });
   }
+  for (const a of d.analyses ?? []) await analyses.createAnalysis(by, p.ref, { technique: a.technique, title: a.title, data: a.data, conclusion: a.conclusion });
   if (d.assessment) {
     const { reviewOffset, ...assessment } = d.assessment;
     await problems.assessProblem(pm, p.ref, { ...assessment, ec_review_date: reviewOffset === undefined ? null : day(reviewOffset) });

@@ -29,6 +29,9 @@ effectiveness — and gets a decision: fix, accept the risk, defer or pending, w
 deferring is reserved for problem managers. Dashboards and filters show known errors awaiting a decision or past
 their review date.
 
+**Root cause analysis**: problems can carry structured analyses — 5 Whys, Ishikawa (with a fishbone diagram),
+Kepner-Tregoe (IS / IS NOT and testing possible causes) and timelines — whose conclusion can be copied into the root cause.
+
 **Follow-up actions** track work that follows from a problem (vendor fixes, monitoring, runbook updates, review
 outcomes) with an owner and due date.
 
@@ -79,8 +82,13 @@ claude mcp add --transport http kernel http://dockerhost:8080/mcp \
   --header "Authorization: Bearer krn_..."
 ```
 
+Prompts (slash commands in Claude Code, e.g. `/mcp__kernel__five_whys PRB000012`): `five_whys`, `kepner_tregoe`,
+`triage_problem`, `major_problem_review`. They let Claude facilitate the analysis or review with you and record the
+result in Kernel.
+
 Tools: `whoami`, `list_reference_data`, `search_problems`, `get_problem`, `search_known_errors`, `get_dashboard`,
-`create_problem`, `update_problem`, `transition_problem`, `add_comment`, `link_record`, `unlink_record`.
+`create_problem`, `update_problem`, `transition_problem`, `add_comment`, `link_record`, `unlink_record`,
+`assess_known_error`, `start_analysis`, `update_analysis`, `list_actions`, `add_action`, `update_action`.
 
 ## REST API
 

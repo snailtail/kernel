@@ -4,6 +4,7 @@ import { requireUser } from '../auth.js';
 import { config } from '../config.js';
 import { query } from '../db.js';
 import * as actions from '../actions.js';
+import * as analyses from '../analyses.js';
 import * as problems from '../problems.js';
 import { CLOSURE_CODES, EC_DECISIONS, ROLES, STATUSES, TRANSITIONS, WORKAROUND_EFFECTIVENESS } from '../workflow.js';
 
@@ -23,6 +24,7 @@ export async function problemRoutes(app: FastifyInstance) {
       roles: ROLES,
       link_kinds: problems.LINK_KINDS,
       action_statuses: actions.ACTION_STATUSES,
+      techniques: analyses.TECHNIQUES,
       ec_decisions: EC_DECISIONS,
       workaround_effectiveness: WORKAROUND_EFFECTIVENESS,
       mcp_url: config.mcpUrl,
@@ -87,6 +89,20 @@ export async function problemRoutes(app: FastifyInstance) {
 
   app.patch<{ Params: { ref: string; id: string } }>('/api/problems/:ref/actions/:id', async (req) =>
     actions.updateAction(requireUser(req), req.params.ref, Number(req.params.id), actions.updateActionSchema.parse(req.body)),
+  );
+
+  app.post<RefParams>('/api/problems/:ref/analyses', async (req, reply) => {
+    const result = await analyses.createAnalysis(requireUser(req), req.params.ref, analyses.createAnalysisSchema.parse(req.body));
+    reply.code(201);
+    return result;
+  });
+
+  app.patch<{ Params: { ref: string; id: string } }>('/api/problems/:ref/analyses/:id', async (req) =>
+    analyses.updateAnalysis(requireUser(req), req.params.ref, Number(req.params.id), analyses.updateAnalysisSchema.parse(req.body)),
+  );
+
+  app.delete<{ Params: { ref: string; id: string } }>('/api/problems/:ref/analyses/:id', async (req) =>
+    analyses.deleteAnalysis(requireUser(req), req.params.ref, Number(req.params.id)),
   );
 
   app.get('/api/kedb', async (req) => {

@@ -95,10 +95,24 @@ export interface Action {
   completed_at: string | null;
 }
 
+export type Technique = 'five_whys' | 'ishikawa' | 'kepner_tregoe' | 'timeline';
+
+export interface Analysis {
+  id: number;
+  technique: Technique;
+  title: string;
+  data: any;
+  conclusion: string;
+  created_at: string;
+  updated_at: string;
+  updated_by: string;
+}
+
 export interface ProblemDetail extends Problem {
   links: Link[];
   activity: Activity[];
   actions: Action[];
+  analyses: Analysis[];
 }
 
 export interface Meta {

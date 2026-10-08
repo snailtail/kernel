@@ -105,6 +105,22 @@ describe('MCP server', { skip }, () => {
     assert.equal(res.data.ec_review_date, '2099-06-01');
   });
 
+  test('runs analyses and offers facilitation prompts', async () => {
+    const { data: p } = await call(mcp, 'create_problem', { title: 'Cache stampede after deploy' });
+    const started = await call(mcp, 'start_analysis', { ref: p.ref, technique: 'timeline' });
+    assert.equal(started.isError, false, started.text);
+    const id = started.data[0].id;
+    const events = [{ at: '2026-10-01T10:00', kind: 'deployment', description: 'v2.3 deployed', reference: 'CHG1' }];
+    const updated = await call(mcp, 'update_analysis', { ref: p.ref, analysis_id: id, data: { events }, conclusion: 'Cold cache' });
+    assert.equal(updated.data.data.events[0].kind, 'deployment');
+    assert.equal(updated.data.conclusion, 'Cold cache');
+
+    const { prompts } = await mcp.listPrompts();
+    assert.deepEqual(prompts.map((x) => x.name).sort(), ['five_whys', 'kepner_tregoe', 'major_problem_review', 'triage_problem']);
+    const prompt = await mcp.getPrompt({ name: 'five_whys', arguments: { ref: p.ref.toLowerCase() } });
+    assert.match((prompt.messages[0].content as any).text, new RegExp(p.ref));
+  });
+
   test('reports helpful errors', async () => {
     const unknown = await call(mcp, 'update_problem', { ref: 'PRB000001', category: 'Nope' });
     assert.equal(unknown.isError, true);

@@ -173,7 +173,7 @@ export async function getProblem(ref: string) {
   const { rows } = await query(`${SELECT_PROBLEM} WHERE p.ref = $1`, [ref.toUpperCase()]);
   if (!rows[0]) throw notFound(`Problem ${ref} not found`);
   const problem = rows[0];
-  const [links, activity, actions] = await Promise.all([
+  const [links, activity, actions, analyses] = await Promise.all([
     query(
       `SELECT l.id, l.kind, l.reference, l.system, l.url, l.note, l.created_at, u.display_name AS created_by
        FROM problem_links l JOIN users u ON u.id = l.created_by WHERE l.problem_id = $1 ORDER BY l.kind, l.created_at`,
@@ -185,8 +185,13 @@ export async function getProblem(ref: string) {
       [problem.id],
     ),
     query(`${SELECT_ACTION} WHERE a.problem_id = $1 ORDER BY a.status = 'open' DESC, a.due_date NULLS LAST, a.id`, [problem.id]),
+    query(
+      `SELECT a.id, a.technique, a.title, a.data, a.conclusion, a.created_at, a.updated_at, u.display_name AS updated_by
+       FROM problem_analyses a JOIN users u ON u.id = a.updated_by WHERE a.problem_id = $1 ORDER BY a.created_at`,
+      [problem.id],
+    ),
   ]);
-  return { ...problem, links: links.rows, activity: activity.rows, actions: actions.rows };
+  return { ...problem, links: links.rows, activity: activity.rows, actions: actions.rows, analyses: analyses.rows };
 }
 
 export async function createProblem(user: User, input: z.infer<typeof createProblemSchema>) {

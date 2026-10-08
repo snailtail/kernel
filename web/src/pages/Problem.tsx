@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router';
 import { api, type Action, type Activity, type LinkKind, type ProblemDetail, type Status } from '../api';
 import { MajorBadge, PriorityBadge, StatusBadge } from '../components/Badges';
 import { ActionList, ActionModal } from '../components/Actions';
+import { AnalysesSection } from '../components/Analyses';
 import { Modal } from '../components/Modal';
 import {
   CLOSURE_LABEL, DECISION_LABEL, EFFECTIVENESS_LABEL, FIELD_LABEL, formatDate, formatDay, LEVEL_LABEL, LINK_LABEL, PRIORITY_LABEL, relativeTime, RISK_LABEL,
@@ -76,6 +77,7 @@ export function ProblemPage() {
       <div className="problem-grid">
         <div className="problem-main">
           <TextSection title="Description" hint="Symptoms, scope and business impact" value={p.description} editable={editable} onSave={(v) => save({ description: v })} />
+          {(p.status !== 'new' || p.analyses.length > 0) && <AnalysesSection problem={p} onChange={setData} />}
           <TextSection title="Root cause" hint="Findings from problem analysis" value={p.root_cause} editable={editable} onSave={(v) => save({ root_cause: v })} />
           <TextSection title="Workaround" hint="How to reduce or eliminate the impact until resolved" value={p.workaround} editable={editable} onSave={(v) => save({ workaround: v })} />
           {(p.known_error_at || p.status === 'known_error') && <ErrorControlSection problem={p} onChange={setData} />}

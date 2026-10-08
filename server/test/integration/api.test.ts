@@ -269,6 +269,33 @@ describe('REST API', { skip }, () => {
     });
   });
 
+  describe('root cause analyses', () => {
+    test('creates templates, validates data and logs sparingly', async () => {
+      const p = await create();
+      const created = await analyst.post(`/api/problems/${p.ref}/analyses`, { technique: 'ishikawa' });
+      assert.equal(created.status, 201);
+      const ishikawa = created.body.analyses[0];
+      assert.equal(ishikawa.title, 'Ishikawa');
+      assert.equal(ishikawa.data.categories.length, 6);
+
+      const fw = (await analyst.post(`/api/problems/${p.ref}/analyses`, { technique: 'five_whys', title: 'Why timeouts' })).body.analyses[1];
+      const data = { problem_statement: 'Orders time out', whys: [{ why: 'Why?', because: 'Pool exhausted' }] };
+      const updated = await analyst.patch(`/api/problems/${p.ref}/analyses/${fw.id}`, { data, conclusion: 'Sync lookup' });
+      assert.deepEqual(updated.body.analyses[1].data, data);
+      assert.equal(updated.body.analyses[1].conclusion, 'Sync lookup');
+      await analyst.patch(`/api/problems/${p.ref}/analyses/${fw.id}`, { conclusion: 'Sync lookup holds connections' });
+      const logged = updated.body.activity.filter((a: any) => a.kind === 'analysis' && a.data.analysis_id === fw.id);
+      assert.equal(logged.length, 1, 'edits right after starting are covered by the start entry');
+
+      const bad = await analyst.patch(`/api/problems/${p.ref}/analyses/${fw.id}`, { data: { whys: 'nope' } });
+      assert.equal(bad.status, 400);
+      assert.equal((await analyst.post(`/api/problems/${p.ref}/analyses`, { technique: 'astrology' })).status, 400);
+
+      const removed = await analyst.del(`/api/problems/${p.ref}/analyses/${ishikawa.id}`);
+      assert.equal(removed.body.analyses.length, 1);
+    });
+  });
+
   describe('administration', () => {
     test('admins manage users; others cannot', async () => {
       assert.equal((await pm.get('/api/users')).status, 403);
