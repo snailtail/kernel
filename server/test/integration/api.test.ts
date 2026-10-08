@@ -44,14 +44,29 @@ describe('REST API', { skip }, () => {
     });
 
     test('API tokens authenticate until revoked', async () => {
-      const created = await analyst.post('/api/tokens', { name: 'ci', expires_in_days: 1 });
-      assert.match(created.body.token, /^krn_/);
+      const created = await analyst.post('/api/tokens', { name: 'ci', expires_in_days: 1, scopes: ['read', 'write'] });
+      assert.match(created.body.token, /^kernel_pat_/);
       const bearer = new Client(k.base, created.body.token);
       assert.equal((await bearer.get('/api/auth/me')).body.username, 'analyst');
       // Bearer requests need no CSRF header.
       assert.equal((await bearer.post('/api/problems', { title: 'Via token' })).status, 201);
       await analyst.del(`/api/tokens/${created.body.id}`);
       assert.equal((await bearer.get('/api/auth/me')).status, 401);
+    });
+  });
+
+  describe('token scopes', () => {
+    test('tokens can only do what their scopes allow', async () => {
+      const readOnly = new Client(k.base, (await analyst.post('/api/tokens', { name: 'ro' })).body.token);
+      assert.equal((await readOnly.get('/api/problems')).status, 200, 'read is the default');
+      const denied = await readOnly.post('/api/problems', { title: 'x' });
+      assert.equal(denied.status, 403);
+      assert.match(denied.body.error, /write/);
+      assert.equal((await readOnly.post('/mcp', {})).status, 403, 'no mcp scope');
+      const tokens = (await analyst.get('/api/tokens')).body;
+      assert.deepEqual(tokens.find((t: any) => t.name === 'ro').scopes, ['read']);
+      assert.ok(tokens.find((t: any) => t.name === 'ro').last_used_ip);
+      assert.equal((await analyst.post('/api/tokens', { name: 'forever', expires_in_days: 5000 })).status, 400, 'expiry is capped');
     });
   });
 

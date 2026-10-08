@@ -7,6 +7,8 @@ import { TwoFactor } from '../components/TwoFactor';
 import { useSession } from '../session';
 
 interface Token {
+  scopes?: string[];
+  last_used_ip?: string;
   id: number;
   name: string;
   prefix: string;
@@ -73,15 +75,16 @@ function PreferencesCard() {
 }
 
 function PasswordCard() {
-  const [form, setForm] = useState({ current: '', password: '', confirm: '', revoke_tokens: false });
+  const { user } = useSession();
+  const [form, setForm] = useState({ current: '', password: '', confirm: '', revoke_tokens: false, code: '' });
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (form.password !== form.confirm) return setMessage({ ok: false, text: 'Passwords do not match' });
     try {
-      await api.post('/api/auth/password', { current: form.current, password: form.password, revoke_tokens: form.revoke_tokens });
-      setForm({ current: '', password: '', confirm: '', revoke_tokens: false });
+      await api.post('/api/auth/password', { current: form.current, password: form.password, revoke_tokens: form.revoke_tokens, code: form.code || undefined });
+      setForm({ current: '', password: '', confirm: '', revoke_tokens: false, code: '' });
       setMessage({ ok: true, text: 'Password changed' });
     } catch (err) {
       setMessage({ ok: false, text: (err as Error).message });
@@ -95,6 +98,9 @@ function PasswordCard() {
         <label className="full">Current password<input type="password" autoComplete="current-password" value={form.current} onChange={(e) => setForm({ ...form, current: e.target.value })} /></label>
         <label>New password <span className="muted small">(at least 12 characters; a passphrase works well)</span><input type="password" autoComplete="new-password" minLength={12} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></label>
         <label>Confirm<input type="password" autoComplete="new-password" value={form.confirm} onChange={(e) => setForm({ ...form, confirm: e.target.value })} /></label>
+        {user.mfa_enabled && (
+          <label className="full">Code from your authenticator app<input inputMode="numeric" autoComplete="one-time-code" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} /></label>
+        )}
         <label className="check full"><input type="checkbox" checked={form.revoke_tokens} onChange={(e) => setForm({ ...form, revoke_tokens: e.target.checked })} /> Also revoke all my API tokens (other sessions are always signed out)</label>
         {message && <div className={`full ${message.ok ? 'success' : 'error'}`}>{message.text}</div>}
         <div className="actions full"><button className="btn primary" disabled={!form.current || !form.password}>Change password</button></div>
@@ -108,6 +114,8 @@ function TokensCard() {
   const { data: tokens, reload } = useApi<Token[]>('/api/tokens');
   const [name, setName] = useState('');
   const [expires, setExpires] = useState('90');
+  const [scopes, setScopes] = useState<string[]>(['read', 'mcp']);
+  const toggleScope = (s: string) => setScopes(scopes.includes(s) ? scopes.filter((x) => x !== s) : [...scopes, s]);
   const [created, setCreated] = useState<Token | null>(null);
   const [error, setError] = useState<string | null>(null);
   const mcpUrl = meta.mcp_url ?? `${window.location.origin}/mcp`;
@@ -116,7 +124,7 @@ function TokensCard() {
     e.preventDefault();
     setError(null);
     try {
-      setCreated(await api.post<Token>('/api/tokens', { name, expires_in_days: expires ? Number(expires) : undefined }));
+      setCreated(await api.post<Token>('/api/tokens', { name, expires_in_days: Number(expires), scopes }));
       setName('');
       reload();
     } catch (err) {
@@ -147,10 +155,22 @@ function TokensCard() {
           <option value="30">Expires in 30 days</option>
           <option value="90">Expires in 90 days</option>
           <option value="365">Expires in 1 year</option>
-          <option value="">Never expires</option>
         </select>
-        <button className="btn primary">Create token</button>
+        <button className="btn primary" disabled={!scopes.length}>Create token</button>
       </form>
+      <fieldset className="scope-picker">
+        <legend>Scopes <span className="muted small">(give a token only what it needs)</span></legend>
+        {[
+          ['read', 'Read', 'Read problems, actions, reports'],
+          ['write', 'Write', 'Create and change records'],
+          ['mcp', 'MCP', 'Use the MCP endpoint (Claude Code, Claude…) with the read/write scopes above'],
+          ['ingest', 'Ingest', 'Report incidents and events from other systems'],
+        ].map(([value, label, hint]) => (
+          <label key={value} className="check" title={hint}>
+            <input type="checkbox" checked={scopes.includes(value)} onChange={() => toggleScope(value)} /> {label} <span className="muted small">{hint}</span>
+          </label>
+        ))}
+      </fieldset>
       {error && <div className="error">{error}</div>}
       {created && (
         <div className="token-created">
@@ -173,14 +193,15 @@ function TokensCard() {
 
       {tokens && tokens.length > 0 && (
         <table className="table compact">
-          <thead><tr><th>Name</th><th>Token</th><th>Created</th><th>Last used</th><th>Expires</th><th /></tr></thead>
+          <thead><tr><th>Name</th><th>Token</th><th>Scopes</th><th>Created</th><th>Last used</th><th>Expires</th><th /></tr></thead>
           <tbody>
             {tokens.map((t) => (
               <tr key={t.id}>
                 <td>{t.name}</td>
                 <td className="mono">{t.prefix}…</td>
+                <td className="small">{t.scopes?.join(', ')}</td>
                 <td>{formatDate(t.created_at)}</td>
-                <td>{t.last_used_at ? relativeTime(t.last_used_at) : 'Never'}</td>
+                <td>{t.last_used_at ? `${relativeTime(t.last_used_at)}${t.last_used_ip ? ` from ${t.last_used_ip}` : ''}` : 'Never'}</td>
                 <td>{t.expires_at ? formatDate(t.expires_at) : 'Never'}</td>
                 <td><button className="btn-link danger" onClick={() => revoke(t)}>Revoke</button></td>
               </tr>

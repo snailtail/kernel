@@ -101,7 +101,7 @@ export async function startKernel(): Promise<Harness> {
     login,
     async tokenFor(user) {
       const client = await login(user);
-      return (await client.post('/api/tokens', { name: 'test' })).body.token;
+      return (await client.post('/api/tokens', { name: 'test', scopes: ['read', 'write', 'mcp'] })).body.token;
     },
     async close() {
       await app.close();

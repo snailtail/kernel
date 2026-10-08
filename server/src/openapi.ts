@@ -35,7 +35,7 @@ export const OPERATIONS: Op[] = [
   { method: 'post', path: '/api/auth/login', tag: 'Authentication', summary: 'Sign in with username and password (sets a session cookie)', body: z.object({ username: z.string(), password: z.string() }), public: true },
   { method: 'post', path: '/api/auth/logout', tag: 'Authentication', summary: 'Sign out' },
   { method: 'get', path: '/api/auth/me', tag: 'Authentication', summary: 'The signed-in user, with preferences' },
-  { method: 'post', path: '/api/auth/password', tag: 'Authentication', summary: 'Change your password', body: z.object({ current: z.string(), password: z.string().min(12), revoke_tokens: z.boolean().optional() }) },
+  { method: 'post', path: '/api/auth/password', tag: 'Authentication', summary: 'Change your password', body: z.object({ current: z.string(), password: z.string().min(12), revoke_tokens: z.boolean().optional(), code: z.string().optional() }) },
   { method: 'put', path: '/api/auth/preferences', tag: 'Authentication', summary: 'Update your preferences (merged)', body: z.object({ theme: z.enum(['system', 'light', 'dark']).optional(), guided: z.boolean().optional(), intro_seen: z.boolean().optional() }) },
   { method: 'post', path: '/api/auth/login/mfa', tag: 'Authentication', summary: 'Second sign-in step: TOTP or recovery code for the mfa_token from login', body: z.object({ mfa_token: z.string(), code: z.string() }), public: true },
   { method: 'post', path: '/api/auth/reauth', tag: 'Authentication', summary: 'Confirm it is you (password + code) before sensitive actions', body: z.object({ password: z.string(), code: z.string().optional() }) },
@@ -51,7 +51,7 @@ export const OPERATIONS: Op[] = [
   { method: 'delete', path: '/api/auth/sessions/:id', tag: 'Authentication', summary: 'Sign out a session' },
   { method: 'post', path: '/api/auth/sessions/revoke-others', tag: 'Authentication', summary: 'Sign out all other sessions' },
   { method: 'get', path: '/api/tokens', tag: 'Authentication', summary: 'Your personal API tokens' },
-  { method: 'post', path: '/api/tokens', tag: 'Authentication', summary: 'Create a personal API token (returned once)', body: z.object({ name: z.string().min(1).max(100), expires_in_days: z.number().int().min(1).max(3650).optional() }) },
+  { method: 'post', path: '/api/tokens', tag: 'Authentication', summary: 'Create a personal API token (returned once). Scopes: read, write, mcp, ingest', body: z.object({ name: z.string().min(1).max(100), expires_in_days: z.number().int().min(1).max(3650).optional(), scopes: z.array(z.enum(['read', 'write', 'mcp', 'ingest'])).optional() }) },
   { method: 'delete', path: '/api/tokens/:id', tag: 'Authentication', summary: 'Revoke a token' },
 
   { method: 'get', path: '/api/meta', tag: 'Reference data', summary: 'Statuses, transitions, closure codes, categories, assignees and other reference data' },

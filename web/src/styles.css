@@ -729,3 +729,6 @@ a.stat:hover { border-color: var(--accent); text-decoration: none; }
 .chip-row { display: flex; flex-wrap: wrap; gap: 8px 18px; }
 .mfa-policy { border-top: 1px solid var(--border); padding-top: 12px; display: flex; flex-direction: column; gap: 6px; }
 .mfa-policy p { margin: 0; }
+
+.scope-picker { border: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.scope-picker legend { font-weight: 550; font-size: 13px; margin-bottom: 4px; padding: 0; }

@@ -32,6 +32,8 @@ export interface Preferences {
 declare module 'fastify' {
   interface FastifyRequest {
     user?: User;
+    /** Scopes of the API token used, if the request was token-authenticated. */
+    tokenScopes?: string[];
   }
 }
 
@@ -77,13 +79,18 @@ export async function destroySession(req: FastifyRequest, reply: FastifyReply) {
   reply.clearCookie(SESSION_COOKIE, { path: '/' });
 }
 
-export async function createApiToken(userId: number, name: string, expiresInDays?: number) {
-  const token = 'krn_' + randomBytes(24).toString('base64url');
+export const TOKEN_SCOPES = ['read', 'write', 'mcp', 'ingest'] as const;
+export type TokenScope = (typeof TOKEN_SCOPES)[number];
+export const TOKEN_MAX_DAYS = Number(process.env.KERNEL_TOKEN_MAX_DAYS ?? 365);
+
+/** Creates a personal API token. The kernel_pat_ prefix makes leaked tokens recognisable for secret scanners. */
+export async function createApiToken(userId: number, name: string, expiresInDays: number, scopes: TokenScope[]) {
+  const token = 'kernel_pat_' + randomBytes(32).toString('base64url');
   const { rows } = await query(
-    `INSERT INTO api_tokens (user_id, name, token_hash, prefix, expires_at)
-     VALUES ($1, $2, $3, $4, CASE WHEN $5::int IS NULL THEN NULL ELSE now() + $5 * interval '1 day' END)
-     RETURNING id, name, prefix, created_at, last_used_at, expires_at`,
-    [userId, name, sha256(token), token.slice(0, 8), expiresInDays ?? null],
+    `INSERT INTO api_tokens (user_id, name, token_hash, prefix, expires_at, scopes)
+     VALUES ($1, $2, $3, $4, now() + $5 * interval '1 day', $6)
+     RETURNING id, name, prefix, created_at, last_used_at, expires_at, scopes`,
+    [userId, name, sha256(token), token.slice(0, 16), expiresInDays, scopes],
   );
   return { ...rows[0], token };
 }
@@ -158,14 +165,31 @@ export function loginSucceeded(account: string) {
   failures.delete(`acct:${account}`);
 }
 
-async function userFromApiToken(token: string): Promise<User | null> {
+async function userFromApiToken(token: string, ip: string): Promise<(User & { scopes: TokenScope[] }) | null> {
   const { rows } = await query(
-    `UPDATE api_tokens t SET last_used_at = now() FROM users u
+    `UPDATE api_tokens t SET last_used_at = now(), last_used_ip = $2 FROM users u
      WHERE u.id = t.user_id AND t.token_hash = $1 AND u.active AND (t.expires_at IS NULL OR t.expires_at > now())
-     RETURNING ${USER_COLUMNS}`,
-    [sha256(token)],
+     RETURNING ${USER_COLUMNS}, t.scopes`,
+    [sha256(token), ip],
   );
   return rows[0] ?? null;
+}
+
+/**
+ * What a token may do: GET needs read, other methods need write, /mcp needs mcp (plus read/write per tool),
+ * and reporting records needs ingest (or write). /api/auth/me is always allowed so clients can check who they are.
+ */
+export function checkTokenScope(req: FastifyRequest) {
+  const scopes = req.tokenScopes;
+  if (!scopes) return;
+  const path = req.url.split('?')[0];
+  if (path === '/api/auth/me') return;
+  const need =
+    path === '/mcp' ? 'mcp'
+    : path === '/api/integrations/records' && req.method === 'POST' ? (scopes.includes('write') ? 'write' : 'ingest')
+    : ['GET', 'HEAD', 'OPTIONS'].includes(req.method) ? 'read'
+    : 'write';
+  if (!scopes.includes(need)) throw forbidden(`This API token lacks the "${need}" scope`);
 }
 
 /**
@@ -175,7 +199,13 @@ async function userFromApiToken(token: string): Promise<User | null> {
 export async function authenticate(req: FastifyRequest) {
   const bearer = req.headers.authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
   if (bearer) {
-    req.user = (await userFromApiToken(bearer)) ?? undefined;
+    const found = await userFromApiToken(bearer, req.ip);
+    if (found) {
+      const { scopes, ...user } = found;
+      req.user = user;
+      req.tokenScopes = scopes;
+      checkTokenScope(req);
+    }
     return;
   }
   const cookie = req.cookies[SESSION_COOKIE];

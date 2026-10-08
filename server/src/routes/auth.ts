@@ -1,14 +1,14 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
-import { createApiToken, createSession, currentSessionHash, destroySession, guardLogin, hashPassword, listSessions, loginFailed, loginSucceeded, requireUser, revokeSession, verifyLogin } from '../auth.js';
+import { TOKEN_MAX_DAYS, TOKEN_SCOPES, createApiToken, createSession, currentSessionHash, destroySession, guardLogin, hashPassword, listSessions, loginFailed, loginSucceeded, requireUser, revokeSession, verifyLogin } from '../auth.js';
 import { config } from '../config.js';
 import * as mfa from '../mfa.js';
 import { mfaRequiredFor } from '../mfapolicy.js';
 import { checkPassword } from '../passwords.js';
 import { rateLimit } from '../ratelimit.js';
 import { query } from '../db.js';
-import { badRequest, HttpError, notFound } from '../errors.js';
+import { badRequest, forbidden, HttpError, notFound } from '../errors.js';
 
 export async function authRoutes(app: FastifyInstance) {
   app.post('/api/auth/login', async (req, reply) => {
@@ -98,16 +98,21 @@ export async function authRoutes(app: FastifyInstance) {
 
   app.post('/api/auth/password', async (req) => {
     const user = requireUser(req);
-    const body = z.object({ current: z.string(), password: z.string(), revoke_tokens: z.boolean().optional() }).parse(req.body);
+    if (req.headers.authorization) throw forbidden('Change your password when signed in to the web UI');
+    const body = z.object({ current: z.string(), password: z.string(), revoke_tokens: z.boolean().optional(), code: z.string().max(40).optional() }).parse(req.body);
     rateLimit(`password:${user.id}`, 10, 3600_000);
     const { rows } = await query('SELECT password_hash FROM users WHERE id = $1', [user.id]);
     if (!(await bcrypt.compare(body.current, rows[0].password_hash))) throw badRequest('Current password is incorrect');
     if (body.password === body.current) throw badRequest('Choose a new password');
+    if (user.mfa_enabled && !(body.code && (await mfa.checkSecondFactor(user.id, body.code)))) {
+      throw new HttpError(400, 'Enter a code from your authenticator app to change the password', { code_required: true });
+    }
     await checkPassword(body.password, user);
     await query('UPDATE users SET password_hash = $2, must_change_password = false WHERE id = $1', [user.id, await hashPassword(body.password)]);
     // Sign out other sessions after a password change, and optionally revoke API tokens too.
     await query('DELETE FROM sessions WHERE user_id = $1 AND token_hash <> $2', [user.id, currentSessionHash(req)]);
     if (body.revoke_tokens) await query('DELETE FROM api_tokens WHERE user_id = $1', [user.id]);
+    await mfa.forgetDevices(user.id, req.cookies[mfa.DEVICE_COOKIE]);
     return { ok: true };
   });
 
@@ -126,7 +131,7 @@ export async function authRoutes(app: FastifyInstance) {
   app.get('/api/tokens', async (req) => {
     const user = requireUser(req);
     const { rows } = await query(
-      'SELECT id, name, prefix, created_at, last_used_at, expires_at FROM api_tokens WHERE user_id = $1 ORDER BY created_at DESC',
+      'SELECT id, name, prefix, scopes, created_at, last_used_at, last_used_ip, expires_at FROM api_tokens WHERE user_id = $1 ORDER BY created_at DESC',
       [user.id],
     );
     return rows;
@@ -137,9 +142,16 @@ export async function authRoutes(app: FastifyInstance) {
     rateLimit(`tokens:${user.id}`, 20, 3600_000);
     await mfa.requireStepUp(req);
     const body = z
-      .object({ name: z.string().trim().min(1).max(100), expires_in_days: z.number().int().min(1).max(3650).optional() })
+      .object({
+        name: z.string().trim().min(1).max(100),
+        expires_in_days: z.number().int().min(1).max(TOKEN_MAX_DAYS).default(90),
+        // Least privilege by default: read only (integration accounts: ingest only).
+        scopes: z.array(z.enum(TOKEN_SCOPES)).min(1).optional(),
+      })
       .parse(req.body);
-    return createApiToken(user.id, body.name, body.expires_in_days);
+    const scopes = body.scopes ?? (user.role === 'integration' ? ['ingest'] : ['read']);
+    if (user.role === 'integration' && scopes.some((s) => s !== 'ingest' && s !== 'read')) throw badRequest('Integration accounts can only have read and ingest tokens');
+    return createApiToken(user.id, body.name, body.expires_in_days, [...new Set(scopes)]);
   });
 
   app.delete<{ Params: { id: string } }>('/api/tokens/:id', async (req) => {

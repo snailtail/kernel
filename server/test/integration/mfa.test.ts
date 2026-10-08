@@ -36,12 +36,24 @@ describe('two-factor authentication and step-up', { skip }, () => {
     assert.equal(ok.status, 200);
     assert.equal((await c.get('/api/auth/me')).body.username, 'analyst');
 
+    // Changing the password needs a code when 2FA is on.
+    const noCode = await c.post('/api/auth/password', { current: PASSWORD, password: 'another long passphrase' });
+    assert.equal(noCode.body.code_required, true);
+
     const r = new Client(k.base);
     const second = await login(r, 'analyst');
     const recovery = enabled.body.recovery_codes[0];
     assert.equal((await r.post('/api/auth/login/mfa', { mfa_token: second.body.mfa_token, code: recovery })).status, 200);
     const third = await login(new Client(k.base), 'analyst');
     assert.equal((await new Client(k.base).post('/api/auth/login/mfa', { mfa_token: third.body.mfa_token, code: recovery })).status, 401, 'recovery codes are single use');
+  });
+
+  test('a login challenge ends after five wrong codes', async () => {
+    const c = new Client(k.base);
+    const first = (await login(c, 'analyst')).body;
+    for (let i = 0; i < 5; i++) await c.post('/api/auth/login/mfa', { mfa_token: first.mfa_token, code: '000000' });
+    const after5 = await c.post('/api/auth/login/mfa', { mfa_token: first.mfa_token, code: '000000' });
+    assert.match(after5.body.error ?? '', /expired|Too many/);
   });
 
   test('sensitive actions need a recent re-authentication and are not available to tokens', async () => {

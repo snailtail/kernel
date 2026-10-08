@@ -85,9 +85,13 @@ export async function createChallenge(userId: number) {
 
 /** Consumes a login challenge when the code is right; returns the user id. */
 export async function completeChallenge(token: string, code: string): Promise<number | null> {
-  const { rows } = await query('SELECT user_id FROM mfa_challenges WHERE token_hash = $1 AND expires_at > now()', [sha256(token)]);
+  const { rows } = await query('SELECT user_id FROM mfa_challenges WHERE token_hash = $1 AND expires_at > now() AND attempts < 5', [sha256(token)]);
   if (!rows[0]) throw new HttpError(401, 'The sign-in has expired; start again');
-  if (!(await checkSecondFactor(rows[0].user_id, code))) return null;
+  if (!(await checkSecondFactor(rows[0].user_id, code))) {
+    // Five wrong codes end the challenge; the password has to be entered again.
+    await query('UPDATE mfa_challenges SET attempts = attempts + 1 WHERE token_hash = $1', [sha256(token)]);
+    return null;
+  }
   await query('DELETE FROM mfa_challenges WHERE token_hash = $1 OR expires_at < now()', [sha256(token)]);
   return rows[0].user_id;
 }
@@ -146,6 +150,7 @@ export async function disable(actor: User, userId: number) {
   }
   await query('UPDATE users SET mfa_secret = NULL, mfa_enabled_at = NULL, mfa_last_step = 0 WHERE id = $1', [userId]);
   await query('DELETE FROM mfa_recovery_codes WHERE user_id = $1', [userId]);
+  if (actor.id !== userId) await forgetDevices(userId);
   auditLog(actor, actor.id === userId ? 'mfa.disable' : 'mfa.reset', { user_id: userId });
 }
 
@@ -196,4 +201,9 @@ export async function isKnownDevice(token: string | undefined, username: string)
     [sha256(token), username],
   );
   return !!rows[0];
+}
+
+/** Forgets the user's known devices (all, or all but the current one). */
+export async function forgetDevices(userId: number, keep?: string) {
+  await query('DELETE FROM known_devices WHERE user_id = $1 AND token_hash <> $2', [userId, keep ? sha256(keep) : '']);
 }

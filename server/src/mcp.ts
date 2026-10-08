@@ -89,7 +89,7 @@ async function toInput(args: Partial<Record<keyof typeof editable, unknown>>) {
   return input;
 }
 
-function buildServer(user: User) {
+function buildServer(user: User, scopes?: string[]) {
   const server = new McpServer({ name: 'kernel', version: '0.1.0' }, { instructions: INSTRUCTIONS });
 
   const tool = <S extends z.ZodRawShape>(
@@ -103,6 +103,10 @@ function buildServer(user: User) {
       name,
       { description, inputSchema, annotations: { readOnlyHint: readOnly, destructiveHint: false } },
       (async (args: any) => {
+        const need = readOnly ? 'read' : 'write';
+        if (scopes && !scopes.includes(need)) {
+          return { isError: true, content: [{ type: 'text' as const, text: `This API token lacks the "${need}" scope needed for ${name}.` }] };
+        }
         try {
           return json(await traceTool(name, () => run(args)));
         } catch (err) {
@@ -510,7 +514,7 @@ export async function mcpRoutes(app: FastifyInstance) {
       reply.header('WWW-Authenticate', 'Bearer realm="kernel"');
       throw new HttpError(401, 'Send a Kernel API token as "Authorization: Bearer krn_..."');
     }
-    const server = buildServer(req.user);
+    const server = buildServer(req.user, req.tokenScopes);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     reply.raw.on('close', () => {
       transport.close();

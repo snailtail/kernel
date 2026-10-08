@@ -136,6 +136,17 @@ describe('MCP server', { skip }, () => {
     assert.equal(missing.isError, true);
   });
 
+  test('read-only tokens cannot use write tools', async () => {
+    const pmClient = await k.login('pm');
+    const token = (await pmClient.post('/api/tokens', { name: 'mcp-ro', scopes: ['read', 'mcp'] })).body.token;
+    const ro = await connect(token);
+    assert.equal((await call(ro, 'search_problems', {})).isError, false);
+    const res = await call(ro, 'create_problem', { title: 'Nope' });
+    assert.equal(res.isError, true);
+    assert.match(res.text, /write/);
+    await ro.close();
+  });
+
   test('enforces the token owner role', async () => {
     const res = await call(viewerMcp, 'create_problem', { title: 'Nope' });
     assert.equal(res.isError, true);

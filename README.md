@@ -135,6 +135,8 @@ To deploy to the test server, push your commits and run `scripts/deploy.sh`. It 
 - Two-factor authentication with any TOTP authenticator app, plus single-use recovery codes; replayed codes are
   rejected and the secret is encrypted with `KERNEL_SECRET_KEY`. Administrators can require it per role
   (Administration → Security status) and reset it for a user.
+- API tokens (`kernel_pat_…`) have scopes — `read`, `write`, `mcp`, `ingest`, read-only by default — and a mandatory
+  expiry (at most `KERNEL_TOKEN_MAX_DAYS`, 365); the last used time and address are shown.
 - Sensitive actions (creating API tokens, managing users and roles, webhooks, two-factor settings) need a
   re-authentication within the last 10 minutes (`KERNEL_STEPUP_MINUTES`) and are not available with API tokens.
 - A device where the account signed in before can still sign in while the account is locked by failed attempts
@@ -196,11 +198,12 @@ filebeat.inputs:
 ## MCP
 
 The MCP endpoint is `http://<host>:8080/mcp` (Streamable HTTP, stateless). Clients authenticate with a personal
-API token, created under **Settings → API tokens & MCP**, and act as that user with that user's role.
+API token with the `mcp` scope (plus `read`, and `write` for tools that change data), created under **Settings → API
+tokens & MCP**, and act as that user with that user's role.
 
 ```sh
 claude mcp add --transport http kernel http://dockerhost:8080/mcp \
-  --header "Authorization: Bearer krn_..."
+  --header "Authorization: Bearer kernel_pat_..."
 ```
 
 Prompts (slash commands in Claude Code, e.g. `/mcp__kernel__five_whys PRB000012`): `five_whys`, `kepner_tregoe`,
