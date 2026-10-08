@@ -296,6 +296,33 @@ describe('REST API', { skip }, () => {
     });
   });
 
+  describe('reports', () => {
+    test('summarises flow, lead times and hotspots for a period', async () => {
+      const p = await create({ title: 'Report me', affected_service: 'Reporting', impact: 1, urgency: 1 });
+      await analyst.post(`/api/problems/${p.ref}/links`, { kind: 'incident', reference: 'INC-R1' });
+      await analyst.post(`/api/problems/${p.ref}/transition`, { to: 'analysis' });
+      await analyst.post(`/api/problems/${p.ref}/transition`, { to: 'known_error', root_cause: 'x' });
+      const today = new Date().toISOString().slice(0, 10);
+      const r = await viewer.get(`/api/reports?from=${today}&to=${today}`);
+      assert.equal(r.status, 200);
+      assert.equal(r.body.period.bucket, 'week');
+      assert.ok(r.body.summary.opened >= 1);
+      assert.ok(r.body.summary.known_errors_raised >= 1);
+      assert.equal(r.body.flow.reduce((n: number, b: any) => n + b.opened, 0), r.body.summary.opened);
+      assert.ok(r.body.lead_times.some((l: any) => l.priority === 1 && l.known_error_count >= 1));
+      assert.ok(r.body.hotspots.services.some((s: any) => s.name === 'Reporting' && s.incidents === 1));
+      assert.equal((await viewer.get('/api/reports?from=2026-02-01&to=2026-01-01')).status, 400);
+    });
+
+    test('exports problems as CSV', async () => {
+      const res = await fetch(`${k.base}/api/reports/problems.csv`, { headers: { Cookie: viewer.cookie! } });
+      assert.match(res.headers.get('content-type') ?? '', /text\/csv/);
+      const lines = (await res.text()).trim().split('\r\n');
+      assert.match(lines[0], /^ref,title,status,priority/);
+      assert.ok(lines.length > 1);
+    });
+  });
+
   describe('administration', () => {
     test('admins manage users; others cannot', async () => {
       assert.equal((await pm.get('/api/users')).status, 403);

@@ -121,6 +121,13 @@ describe('MCP server', { skip }, () => {
     assert.match((prompt.messages[0].content as any).text, new RegExp(p.ref));
   });
 
+  test('returns a period report', async () => {
+    const r = await call(mcp, 'get_report', { bucket: 'month' });
+    assert.equal(r.isError, false, r.text);
+    assert.equal(r.data.period.bucket, 'month');
+    assert.ok(Array.isArray(r.data.flow));
+  });
+
   test('reports helpful errors', async () => {
     const unknown = await call(mcp, 'update_problem', { ref: 'PRB000001', category: 'Nope' });
     assert.equal(unknown.isError, true);

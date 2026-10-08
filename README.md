@@ -32,6 +32,10 @@ their review date.
 **Root cause analysis**: problems can carry structured analyses — 5 Whys, Ishikawa (with a fishbone diagram),
 Kepner-Tregoe (IS / IS NOT and testing possible causes) and timelines — whose conclusion can be copied into the root cause.
 
+**Reports** show flow (logged vs resolved), backlog over time, lead times per priority, reopened problems,
+proactive share, service and category hotspots, known error health and action follow-up for any period, with CSV
+export and a print layout.
+
 **Follow-up actions** track work that follows from a problem (vendor fixes, monitoring, runbook updates, review
 outcomes) with an owner and due date.
 
@@ -88,7 +92,7 @@ result in Kernel.
 
 Tools: `whoami`, `list_reference_data`, `search_problems`, `get_problem`, `search_known_errors`, `get_dashboard`,
 `create_problem`, `update_problem`, `transition_problem`, `add_comment`, `link_record`, `unlink_record`,
-`assess_known_error`, `start_analysis`, `update_analysis`, `list_actions`, `add_action`, `update_action`.
+`assess_known_error`, `start_analysis`, `update_analysis`, `list_actions`, `add_action`, `update_action`, `get_report`.
 
 ## REST API
 
@@ -105,6 +109,8 @@ Cookie-authenticated requests that change data must send the header `X-Kernel-Re
 | POST / DELETE | `/api/problems/:ref/links[/:id]` | Link or unlink an incident, event, change or problem |
 | GET | `/api/kedb?q=&include_resolved=` | Known error database |
 | GET | `/api/dashboard` | Backlog summary |
+| GET | `/api/reports?from=&to=&bucket=` | KPIs and trends for a period |
+| GET | `/api/reports/problems.csv?from=&to=` | Problems active in the period as CSV |
 
 ## Development
 

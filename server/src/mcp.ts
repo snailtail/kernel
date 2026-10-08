@@ -10,6 +10,7 @@ import { badRequest, HttpError } from './errors.js';
 import * as actions from './actions.js';
 import * as analyses from './analyses.js';
 import * as problems from './problems.js';
+import * as reports from './reports.js';
 import { CLOSURE_CODES, EC_DECISIONS, STATUSES, TRANSITIONS, WORKAROUND_EFFECTIVENESS } from './workflow.js';
 
 const INSTRUCTIONS = `Kernel is a problem management system following the ITIL 4 problem management practice.
@@ -178,6 +179,18 @@ function buildServer(user: User) {
 
   tool('get_dashboard', 'Summary of the problem backlog: counts by status and priority, aging, my open problems and recent activity.', {}, true, () =>
     problems.dashboard(user),
+  );
+
+  tool(
+    'get_report',
+    'Problem management KPIs for a period: flow (opened, known errors, resolved, closed per week/month), backlog over time, lead times per priority (hours), closures, reopened, proactive vs reactive, service and category hotspots, known error health and action follow-up. Use it to write monthly reports or spot trends.',
+    {
+      from: z.string().optional().describe('YYYY-MM-DD, default 90 days before to'),
+      to: z.string().optional().describe('YYYY-MM-DD, default today'),
+      bucket: z.enum(['week', 'month']).optional(),
+    },
+    true,
+    async (args) => reports.report(reports.reportSchema.parse(args)),
   );
 
   tool(

@@ -6,6 +6,7 @@ import { query } from '../db.js';
 import * as actions from '../actions.js';
 import * as analyses from '../analyses.js';
 import * as problems from '../problems.js';
+import * as reports from '../reports.js';
 import { CLOSURE_CODES, EC_DECISIONS, ROLES, STATUSES, TRANSITIONS, WORKAROUND_EFFECTIVENESS } from '../workflow.js';
 
 type RefParams = { Params: { ref: string } };
@@ -104,6 +105,19 @@ export async function problemRoutes(app: FastifyInstance) {
   app.delete<{ Params: { ref: string; id: string } }>('/api/problems/:ref/analyses/:id', async (req) =>
     analyses.deleteAnalysis(requireUser(req), req.params.ref, Number(req.params.id)),
   );
+
+  app.get('/api/reports', async (req) => {
+    requireUser(req);
+    return reports.report(reports.reportSchema.parse(req.query));
+  });
+
+  app.get('/api/reports/problems.csv', async (req, reply) => {
+    requireUser(req);
+    const params = reports.reportSchema.parse(req.query);
+    reply.header('Content-Type', 'text/csv; charset=utf-8');
+    reply.header('Content-Disposition', `attachment; filename="kernel-problems-${params.from}-${params.to}.csv"`);
+    return reports.problemsCsv(params);
+  });
 
   app.get('/api/kedb', async (req) => {
     requireUser(req);

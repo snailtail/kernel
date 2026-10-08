@@ -10,6 +10,7 @@ import { LoginPage } from './pages/Login';
 import { NewProblemPage } from './pages/NewProblem';
 import { ProblemPage } from './pages/Problem';
 import { ProblemsPage } from './pages/Problems';
+import { ReportsPage } from './pages/Reports';
 import { SettingsPage } from './pages/Settings';
 import { SessionContext, canEdit, isManager } from './session';
 
@@ -56,6 +57,7 @@ export function App() {
             <NavLink to="/problems">Problems</NavLink>
             <NavLink to="/kedb">Known Errors</NavLink>
             <NavLink to="/actions">Actions</NavLink>
+            <NavLink to="/reports">Reports</NavLink>
             {canEdit(user) && <NavLink to="/problems/new" className="nav-cta">+ Log problem</NavLink>}
             {isManager(user) && <NavLink to="/admin">Administration</NavLink>}
           </nav>
@@ -78,6 +80,7 @@ export function App() {
             <Route path="/problems/:ref" element={<ProblemPage />} />
             <Route path="/kedb" element={<KedbPage />} />
             <Route path="/actions" element={<ActionsPage />} />
+            <Route path="/reports" element={<ReportsPage />} />
             <Route path="/admin" element={<AdminPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
