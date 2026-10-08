@@ -19,14 +19,14 @@ export async function integrationRoutes(app: FastifyInstance) {
   );
 
   // Inbound records from ITSM and monitoring tools.
-  app.post('/api/integrations/records', async (req) => integrations.ingestRecords(requireUser(req), integrations.ingestSchema.parse(req.body)));
+  app.post('/api/integrations/records', { bodyLimit: 4 * 1024 * 1024 }, async (req) => integrations.ingestRecords(requireUser(req), integrations.ingestSchema.parse(req.body)));
 
   app.get('/api/candidates', async (req) => {
     requireUser(req);
     return integrations.listCandidates();
   });
   app.put('/api/candidates/rule', async (req) => integrations.setRule(requireRole(req, 'admin', 'problem_manager'), integrations.ruleSchema.parse(req.body)));
-  app.post('/api/candidates/create', async (req, reply) => {
+  app.post('/api/candidates/create', { bodyLimit: 2 * 1024 * 1024 }, async (req, reply) => {
     const body = integrations.candidateActionSchema.extend({ problem: createProblemSchema }).parse(req.body);
     const created = await integrations.createFromCandidate(requireUser(req), body);
     reply.code(201);

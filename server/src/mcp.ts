@@ -505,7 +505,7 @@ Show me the draft first. When I approve it, save it with update_problem (major_r
 }
 
 export async function mcpRoutes(app: FastifyInstance) {
-  app.post('/mcp', async (req, reply) => {
+  app.post('/mcp', { bodyLimit: 4 * 1024 * 1024 }, async (req, reply) => {
     if (!req.user || !req.headers.authorization) {
       reply.header('WWW-Authenticate', 'Bearer realm="kernel"');
       throw new HttpError(401, 'Send a Kernel API token as "Authorization: Bearer krn_..."');

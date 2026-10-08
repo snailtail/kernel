@@ -28,7 +28,8 @@ export async function buildApp(options: { logLevel?: string; serveWeb?: boolean 
     loggerInstance: options.logLevel ? createLogger({ level: options.logLevel }) : logger,
     // A hop count is supported at runtime (proxy-addr) but missing from Fastify's types.
     trustProxy: config.trustProxy as boolean | string[],
-    bodyLimit: 256 * 1024,
+    // JSON bodies up to 1 MB (long texts plus their `base` values); bulk ingest and MCP allow more per route.
+    bodyLimit: 1024 * 1024,
   });
 
   await app.register(cookie);

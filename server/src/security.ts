@@ -6,6 +6,7 @@ import { config } from './config.js';
 import { query } from './db.js';
 import { forbidden } from './errors.js';
 import { logger } from './log.js';
+import { rateLimit } from './ratelimit.js';
 import { secretsConfigured } from './secrets.js';
 
 const securityLog = logger.child({ event: { dataset: 'kernel.security' } });
@@ -52,8 +53,26 @@ export async function registerSecurity(app: FastifyInstance<any, any, any, any>)
     });
   }
   app.post('/api/csp-report', async (req, reply) => {
-    const report = (req.body as any)?.['csp-report'] ?? req.body;
-    securityLog.warn({ event: { action: 'csp.violation', category: ['web'] }, csp: report }, 'Content Security Policy violation');
+    rateLimit(`csp:${req.ip}`, 30, 60_000);
+    const body = req.body as any;
+    const report = (Array.isArray(body) ? body[0]?.body : body?.['csp-report'] ?? body?.body ?? body) ?? {};
+    const pick = (...keys: string[]) => {
+      for (const k of keys) if (typeof report[k] === 'string') return report[k].slice(0, 200);
+      return undefined;
+    };
+    // Only the key fields, truncated: reports are attacker-controllable input.
+    securityLog.warn(
+      {
+        event: { action: 'csp.violation', category: ['web'] },
+        csp: {
+          directive: pick('effective-directive', 'effectiveDirective', 'violated-directive'),
+          blocked: pick('blocked-uri', 'blockedURL'),
+          document: pick('document-uri', 'documentURL'),
+        },
+        source: { ip: req.ip },
+      },
+      'Content Security Policy violation',
+    );
     reply.code(204);
   });
 }
@@ -67,7 +86,9 @@ export function checkSameOrigin(req: FastifyRequest) {
   if (site && site !== 'same-origin' && site !== 'none') throw forbidden('Cross-site request rejected');
   const origin = req.headers.origin;
   if (origin) {
-    const host = req.headers['x-forwarded-host'] && config.trustProxy ? String(req.headers['x-forwarded-host']) : req.headers.host;
+    // X-Forwarded-Host may list several hops; the first is the client-facing host.
+    const forwarded = config.trustProxy ? String(req.headers['x-forwarded-host'] ?? '').split(',')[0].trim() : '';
+    const host = forwarded || req.headers.host;
     let originHost: string;
     try {
       originHost = new URL(origin).host;
@@ -93,10 +114,18 @@ export async function securityStatus(): Promise<{ checks: SecurityCheck[] }> {
     query('SELECT count(*)::int AS n FROM api_tokens WHERE expires_at IS NULL'),
     backupStatus(),
   ]);
-  const https = config.secureCookies || config.trustProxy !== false;
+  // A trusted proxy does not by itself mean TLS; require an https public URL or explicitly secure cookies.
+  const https = config.secureCookies || /^https:\/\//i.test(config.publicUrl ?? '');
   return {
     checks: [
-      { id: 'https', label: 'HTTPS', ok: https, detail: https ? 'Session cookies are marked Secure over HTTPS (behind a trusted proxy).' : 'Set KERNEL_TRUST_PROXY behind a TLS proxy, or KERNEL_SECURE_COOKIES=true.' },
+      {
+        id: 'https',
+        label: 'HTTPS',
+        ok: https,
+        detail: https
+          ? 'Kernel is published over HTTPS; session cookies are Secure for HTTPS requests.'
+          : 'Set KERNEL_PUBLIC_URL to the https:// address (behind a TLS proxy with KERNEL_TRUST_PROXY) or KERNEL_SECURE_COOKIES=true.',
+      },
       { id: 'secret_key', label: 'Secrets encryption key', ok: secretsConfigured(), detail: secretsConfigured() ? 'KERNEL_SECRET_KEY is set; stored secrets are encrypted.' : 'Set KERNEL_SECRET_KEY (≥ 32 random characters).' },
       { id: 'initial_password', label: 'Initial passwords changed', ok: mustChange.rows[0].n === 0, detail: mustChange.rows[0].n ? `${mustChange.rows[0].n} account(s) still use a generated password.` : 'No account uses a generated password.' },
       { id: 'admins', label: 'Administrators', ok: admins.rows[0].n >= 1 && admins.rows[0].n <= 3, detail: `${admins.rows[0].n} active administrator(s); keep it small but more than one person able to recover.` },
@@ -114,7 +143,7 @@ export function checkConfiguration(log: (msg: string) => void) {
   if (key && key.length < 32) throw new Error('KERNEL_SECRET_KEY must be at least 32 characters');
   if (process.env.NODE_ENV === 'production') {
     if (!key) log('Security: KERNEL_SECRET_KEY is not set; webhooks and other secrets cannot be stored.');
-    if (!config.secureCookies && config.trustProxy === false) log('Security: neither KERNEL_TRUST_PROXY nor KERNEL_SECURE_COOKIES is set; serve Kernel over HTTPS in production.');
+    if (!config.secureCookies && !/^https:/i.test(config.publicUrl ?? '')) log('Security: KERNEL_PUBLIC_URL is not an https:// address and KERNEL_SECURE_COOKIES is not set; serve Kernel over HTTPS in production.');
     if ((process.env.LOG_LEVEL ?? '').match(/debug|trace/)) log('Security: debug logging is enabled; do not use it in production.');
   }
 }

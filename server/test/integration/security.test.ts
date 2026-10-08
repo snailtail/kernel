@@ -44,6 +44,23 @@ describe('HTTP security', { skip }, () => {
     assert.equal(res.status, 415);
   });
 
+  test('valid large requests fit the body limits', async () => {
+    const summary = 'å'.repeat(2000);
+    const records = Array.from({ length: 500 }, (_, i) => ({ system: 'Big', kind: 'event', reference: `BIG-${i}`, service: 'Bulk', summary }));
+    const ingest = await analyst.post('/api/integrations/records', { records });
+    assert.equal(ingest.status, 200, JSON.stringify(ingest.body).slice(0, 200));
+    assert.equal(ingest.body.stored, 500);
+
+    const p = (await analyst.post('/api/problems', { title: 'Long texts' })).body;
+    const long = 'ö'.repeat(20000);
+    const fields = { description: long, root_cause: long, workaround: long, resolution: long, major_review: long };
+    const base = { description: '', root_cause: '', workaround: '', resolution: '', major_review: '' };
+    const res = await analyst.patch(`/api/problems/${p.ref}`, { ...fields, base });
+    assert.equal(res.status, 200);
+    const again = await analyst.patch(`/api/problems/${p.ref}`, { ...Object.fromEntries(Object.keys(fields).map((k) => [k, long.slice(1) + '!'])), base: fields });
+    assert.equal(again.status, 200);
+  });
+
   test('accepts CSP violation reports', async () => {
     const res = await fetch(`${k.base}/api/csp-report`, {
       method: 'POST',

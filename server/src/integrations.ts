@@ -78,31 +78,37 @@ async function linkRecord(db: Db, user: User, problem: { id: number; ref: string
 /** Upserts reported records; records with problem_ref are linked to that problem (idempotent). */
 export async function ingestRecords(user: User, input: z.infer<typeof ingestSchema>) {
   requireIntegrationAccess(user);
-  let stored = 0, linked = 0;
+  // One multi-row upsert for the whole batch; duplicates within the batch collapse (last one wins).
+  const unique = [...new Map(input.records.map((r) => [`${r.system}\u0000${r.kind}\u0000${r.reference}`, r])).values()];
+  const col = <K extends keyof (typeof unique)[number]>(k: K) => unique.map((r) => r[k] ?? null);
+  let linked = 0;
   const errors: { reference: string; error: string }[] = [];
-  for (const r of input.records) {
-    await tx(async (db) => {
-      await db.query(
-        `INSERT INTO external_records (system, kind, reference, service, category, summary, occurred_at)
-         VALUES ($1, $2, $3, $4, $5, $6, coalesce($7::timestamptz, now()))
-         ON CONFLICT (system, kind, reference) DO UPDATE SET
-           service = coalesce(nullif(excluded.service, ''), external_records.service),
-           category = coalesce(nullif(excluded.category, ''), external_records.category),
-           summary = coalesce(nullif(excluded.summary, ''), external_records.summary)`,
-        [r.system, r.kind, r.reference, r.service, r.category, r.summary, r.occurred_at ?? null],
-      );
-      stored++;
-      if (r.problem_ref) {
-        try {
-          const problem = await loadForUpdate(db, r.problem_ref);
-          if (await linkRecord(db, user, problem, r)) linked++;
-        } catch (err) {
-          errors.push({ reference: r.reference, error: (err as Error).message });
-        }
+  await tx(async (db) => {
+    await db.query(
+      `INSERT INTO external_records (system, kind, reference, service, category, summary, occurred_at)
+       SELECT system, kind, reference, service, category, summary, coalesce(occurred_at, now())
+       FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::text[], $7::timestamptz[])
+         AS r(system, kind, reference, service, category, summary, occurred_at)
+       ON CONFLICT (system, kind, reference) DO UPDATE SET
+         service = coalesce(nullif(excluded.service, ''), external_records.service),
+         category = coalesce(nullif(excluded.category, ''), external_records.category),
+         summary = coalesce(nullif(excluded.summary, ''), external_records.summary)`,
+      [col('system'), col('kind'), col('reference'), col('service'), col('category'), col('summary'), col('occurred_at')],
+    );
+    for (const r of unique.filter((r) => r.problem_ref)) {
+      // A savepoint per link, so one bad problem_ref does not undo the batch.
+      await db.query('SAVEPOINT link');
+      try {
+        const problem = await loadForUpdate(db, r.problem_ref!);
+        if (await linkRecord(db, user, problem, r)) linked++;
+        await db.query('RELEASE SAVEPOINT link');
+      } catch (err) {
+        await db.query('ROLLBACK TO SAVEPOINT link');
+        errors.push({ reference: r.reference, error: (err as Error).message });
       }
-    });
-  }
-  return { stored, linked, errors };
+    }
+  });
+  return { stored: unique.length, linked, errors };
 }
 
 // ---- Problem candidates ---------------------------------------------------------------------
