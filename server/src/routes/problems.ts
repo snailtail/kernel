@@ -5,7 +5,7 @@ import { config } from '../config.js';
 import { query } from '../db.js';
 import * as actions from '../actions.js';
 import * as problems from '../problems.js';
-import { CLOSURE_CODES, ROLES, STATUSES, TRANSITIONS } from '../workflow.js';
+import { CLOSURE_CODES, EC_DECISIONS, ROLES, STATUSES, TRANSITIONS, WORKAROUND_EFFECTIVENESS } from '../workflow.js';
 
 type RefParams = { Params: { ref: string } };
 
@@ -23,6 +23,8 @@ export async function problemRoutes(app: FastifyInstance) {
       roles: ROLES,
       link_kinds: problems.LINK_KINDS,
       action_statuses: actions.ACTION_STATUSES,
+      ec_decisions: EC_DECISIONS,
+      workaround_effectiveness: WORKAROUND_EFFECTIVENESS,
       mcp_url: config.mcpUrl,
       categories: categories.rows,
       assignees: users.rows,
@@ -53,6 +55,10 @@ export async function problemRoutes(app: FastifyInstance) {
 
   app.post<RefParams>('/api/problems/:ref/transition', async (req) =>
     problems.transitionProblem(requireUser(req), req.params.ref, problems.transitionSchema.parse(req.body)),
+  );
+
+  app.put<RefParams>('/api/problems/:ref/assessment', async (req) =>
+    problems.assessProblem(requireUser(req), req.params.ref, problems.assessmentSchema.parse(req.body)),
   );
 
   app.post<RefParams>('/api/problems/:ref/comments', async (req) => {

@@ -391,3 +391,21 @@ a.stat:hover { border-color: var(--accent); text-decoration: none; }
 .grid-2.wide-left { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
 .warn-box { padding: 10px 12px; border-radius: 8px; background: var(--s-known-bg); color: var(--s-known); }
 @media (max-width: 820px) { .grid-2.wide-left { grid-template-columns: 1fr; } }
+
+/* Error control */
+.ec-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.ec-grid { display: grid; grid-template-columns: 150px 1fr; gap: 8px 14px; margin: 0; }
+.ec-grid dt { color: var(--text-2); font-size: 13px; }
+.ec-grid dd { margin: 0; }
+.badge.neutral { background: var(--surface-2); color: var(--text-2); }
+.decision-pending { background: var(--s-new-bg); color: var(--s-new); }
+.decision-fix { background: var(--s-analysis-bg); color: var(--s-analysis); }
+.decision-accept { background: var(--s-resolved-bg); color: var(--s-resolved); }
+.decision-defer { background: var(--s-known-bg); color: var(--s-known); }
+.risk-1 { background: var(--danger-soft); color: var(--danger); }
+.risk-2 { background: var(--s-known-bg); color: var(--s-known); }
+.risk-3 { background: var(--surface-2); color: var(--text-2); }
+.eff-effective { background: var(--s-resolved-bg); color: var(--s-resolved); }
+.eff-partial { background: var(--s-known-bg); color: var(--s-known); }
+.eff-ineffective { background: var(--danger-soft); color: var(--danger); }
+@media (max-width: 820px) { .ec-grid { grid-template-columns: 1fr; } }

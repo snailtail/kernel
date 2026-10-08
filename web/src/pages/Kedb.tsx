@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import type { Problem } from '../api';
 import { PriorityBadge, StatusBadge } from '../components/Badges';
-import { formatDate } from '../format';
+import { DECISION_LABEL, EFFECTIVENESS_LABEL, formatDate } from '../format';
 import { useApi } from '../hooks';
 
 export function KedbPage() {
@@ -48,6 +48,10 @@ export function KedbPage() {
               {p.affected_service && <span>Service: {p.affected_service}</span>}
               {p.category && <span>Category: {p.category}</span>}
               <span>Known error since {formatDate(p.known_error_at)}</span>
+            </div>
+            <div className="ec-chips">
+              <span className={`badge decision-${p.ec_decision ?? 'pending'}`}>{DECISION_LABEL[p.ec_decision ?? 'pending']}</span>
+              {p.workaround_effectiveness && <span className={`badge eff-${p.workaround_effectiveness}`}>{EFFECTIVENESS_LABEL[p.workaround_effectiveness]}</span>}
             </div>
             <div className="kedb-cols">
               <div>

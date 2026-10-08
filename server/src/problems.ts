@@ -5,7 +5,7 @@ import type pg from 'pg';
 import type { User } from './auth.js';
 import { query, tx } from './db.js';
 import { badRequest, conflict, forbidden, notFound } from './errors.js';
-import { canEdit, checkTransition, CLOSURE_CODES, isManager, STATUSES, type Status } from './workflow.js';
+import { canEdit, checkTransition, CLOSURE_CODES, EC_DECISIONS, isManager, STATUSES, WORKAROUND_EFFECTIVENESS, type Status } from './workflow.js';
 
 export const LINK_KINDS = ['incident', 'event', 'change', 'problem'] as const;
 
@@ -67,6 +67,8 @@ export const listSchema = z.object({
   priority: z.coerce.number().int().min(1).max(5).optional(),
   category_id: z.coerce.number().int().optional(),
   is_major: z.preprocess((v) => (v === 'true' ? true : v === 'false' ? false : v), z.boolean().optional()),
+  needs_decision: z.preprocess((v) => v === 'true' || v === true, z.boolean()).default(false),
+  review_due: z.preprocess((v) => v === 'true' || v === true, z.boolean()).default(false),
   sort: z.enum(['priority', 'updated', 'created', 'ref']).default('priority'),
   limit: z.coerce.number().int().min(1).max(500).default(200),
 });
@@ -79,11 +81,16 @@ const SELECT_PROBLEM = `
          p.affected_service, p.detection, p.impact, p.urgency, p.priority, p.is_major,
          p.assignee_id, a.display_name AS assignee, p.created_by, cb.display_name AS created_by_name,
          p.root_cause, p.workaround, p.resolution, p.closure_code, p.major_review,
-         p.known_error_at, p.resolved_at, p.closed_at, p.created_at, p.updated_at
+         p.known_error_at, p.resolved_at, p.closed_at, p.created_at, p.updated_at,
+         p.ec_risk_level, p.ec_risk, p.ec_fix_cost, p.ec_decision, p.ec_decision_note, p.ec_decided_by,
+         db.display_name AS ec_decided_by_name, p.ec_decided_at, p.ec_review_date::text AS ec_review_date,
+         p.workaround_effectiveness, p.workaround_reviewed_at,
+         (p.status = 'known_error' AND p.ec_review_date <= current_date) AS ec_review_due
   FROM problems p
   LEFT JOIN categories c ON c.id = p.category_id
   LEFT JOIN users a ON a.id = p.assignee_id
-  LEFT JOIN users cb ON cb.id = p.created_by`;
+  LEFT JOIN users cb ON cb.id = p.created_by
+  LEFT JOIN users db ON db.id = p.ec_decided_by`;
 
 export const SELECT_ACTION = `
   SELECT a.id, a.problem_id, p.ref, p.title AS problem_title, a.title, a.description, a.owner_id,
@@ -141,6 +148,8 @@ export async function listProblems(filter: z.infer<typeof listSchema>) {
   if (filter.priority !== undefined) add('p.priority = ?', filter.priority);
   if (filter.category_id !== undefined) add('p.category_id = ?', filter.category_id);
   if (filter.is_major !== undefined) add('p.is_major = ?', filter.is_major);
+  if (filter.needs_decision) where.push("p.status = 'known_error' AND coalesce(p.ec_decision, 'pending') = 'pending'");
+  if (filter.review_due) where.push("p.status = 'known_error' AND p.ec_review_date <= current_date");
   if (filter.q) {
     // Prefix match on every word, so "data cor" finds "database corruption".
     const terms = filter.q.split(/\s+/).map((t) => t.replace(/[^\p{L}\p{N}_-]/gu, '')).filter(Boolean);
@@ -319,7 +328,9 @@ export async function dashboard(user: User) {
              count(*) FILTER (WHERE now() - created_at BETWEEN interval '30 days' AND interval '90 days')::int AS d30_90,
              count(*) FILTER (WHERE now() - created_at > interval '90 days')::int AS over_90,
              count(*) FILTER (WHERE is_major)::int AS major,
-             count(*) FILTER (WHERE assignee_id IS NULL)::int AS unassigned
+             count(*) FILTER (WHERE assignee_id IS NULL)::int AS unassigned,
+             count(*) FILTER (WHERE status = 'known_error' AND coalesce(ec_decision, 'pending') = 'pending')::int AS needs_decision,
+             count(*) FILTER (WHERE status = 'known_error' AND ec_review_date <= current_date)::int AS review_due
            FROM problems WHERE status NOT IN ('resolved', 'closed')`),
     query(`${SELECT_PROBLEM} WHERE p.assignee_id = $1 AND p.status NOT IN ('resolved', 'closed') ORDER BY p.priority, p.updated_at DESC LIMIT 20`, [user.id]),
     query(`SELECT a.id, a.kind, a.body, a.data, a.created_at, u.display_name AS user_name, p.ref, p.title
@@ -342,4 +353,55 @@ export async function dashboard(user: User) {
     actions: actionSummary.rows[0],
     recent_activity: recent.rows,
   };
+}
+
+export const assessmentSchema = z.object({
+  ec_risk_level: z.number().int().min(1).max(3).nullable(),
+  ec_risk: z.string().max(20000),
+  ec_fix_cost: z.string().max(20000),
+  ec_decision: z.enum(EC_DECISIONS).nullable(),
+  ec_decision_note: z.string().max(20000),
+  ec_review_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD').nullable(),
+  workaround_effectiveness: z.enum(WORKAROUND_EFFECTIVENESS).nullable(),
+}).partial();
+
+const ASSESSMENT_LABELS: Record<string, string> = {
+  ec_risk_level: 'risk level',
+  ec_risk: 'risk',
+  ec_fix_cost: 'cost of fixing',
+  ec_decision: 'decision',
+  ec_decision_note: 'decision rationale',
+  ec_review_date: 'review date',
+  workaround_effectiveness: 'workaround effectiveness',
+};
+
+/**
+ * Records the error control assessment of a known error. Accepting or deferring the risk is a
+ * management decision, so only problem managers can record those.
+ */
+export async function assessProblem(user: User, ref: string, input: z.infer<typeof assessmentSchema>) {
+  requireEditor(user);
+  if ((input.ec_decision === 'accept' || input.ec_decision === 'defer') && !isManager(user.role)) {
+    throw forbidden('Only a problem manager can accept or defer the risk of a known error');
+  }
+  await tx(async (db) => {
+    const current = await loadForUpdate(db, ref);
+    if (current.status === 'closed') throw conflict('Reopen the problem before changing its assessment');
+    if (current.status === 'new' || current.status === 'analysis') {
+      if (input.ec_decision) throw conflict('Raise the problem as a known error before recording a decision');
+    }
+    const currentReview = current.ec_review_date;
+    const changed = Object.entries(input).filter(([k, v]) => v !== undefined && (k === 'ec_review_date' ? currentReview : current[k]) !== v);
+    if (!changed.length) return;
+    const sets = changed.map(([k], i) => `${k} = $${i + 2}`);
+    const decisionChanged = input.ec_decision !== undefined && input.ec_decision !== current.ec_decision;
+    if (decisionChanged) sets.push(`ec_decided_by = ${input.ec_decision ? user.id : 'NULL'}`, `ec_decided_at = ${input.ec_decision ? 'now()' : 'NULL'}`);
+    if (input.workaround_effectiveness !== undefined) sets.push('workaround_reviewed_at = now()');
+    await db.query(`UPDATE problems SET ${sets.join(', ')}, updated_at = now() WHERE id = $1`, [current.id, ...changed.map(([, v]) => v)]);
+    const body = decisionChanged && input.ec_decision
+      ? `Recorded decision: ${input.ec_decision}`
+      : `Updated error control assessment (${changed.map(([k]) => ASSESSMENT_LABELS[k]).join(', ')})`;
+    await logActivity(db, current.id, user.id, 'assessment', body, Object.fromEntries(changed));
+  });
+  return getProblem(ref);
 }

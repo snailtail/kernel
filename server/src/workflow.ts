@@ -7,6 +7,9 @@ export type Status = (typeof STATUSES)[number];
 export const ROLES = ['admin', 'problem_manager', 'analyst', 'viewer'] as const;
 export type Role = (typeof ROLES)[number];
 
+export const EC_DECISIONS = ['pending', 'fix', 'accept', 'defer'] as const;
+export const WORKAROUND_EFFECTIVENESS = ['effective', 'partial', 'ineffective'] as const;
+
 export const CLOSURE_CODES = ['resolved', 'workaround_accepted', 'duplicate', 'cancelled', 'no_fix'] as const;
 export type ClosureCode = (typeof CLOSURE_CODES)[number];
 
@@ -38,6 +41,7 @@ export interface TransitionSubject {
   resolution: string;
   closure_code: ClosureCode | null;
   major_review: string;
+  ec_decision?: string | null;
 }
 
 /** Returns a reason the transition is not allowed, or null if it is. */
@@ -59,6 +63,9 @@ export function checkTransition(p: TransitionSubject, to: Status, role: Role): s
       const dismissed = p.closure_code === 'duplicate' || p.closure_code === 'cancelled';
       if (p.is_major && !dismissed && !p.major_review.trim()) {
         return 'A major problem review is required before closing a major problem';
+      }
+      if (p.closure_code === 'no_fix' && p.ec_decision !== 'accept') {
+        return 'Closing without a fix requires a recorded decision to accept the risk (error control assessment)';
       }
       break;
     }

@@ -5,7 +5,7 @@ import { MajorBadge, PriorityBadge, StatusBadge } from '../components/Badges';
 import { ActionList, ActionModal } from '../components/Actions';
 import { Modal } from '../components/Modal';
 import {
-  CLOSURE_LABEL, FIELD_LABEL, formatDate, LEVEL_LABEL, LINK_LABEL, PRIORITY_LABEL, relativeTime,
+  CLOSURE_LABEL, DECISION_LABEL, EFFECTIVENESS_LABEL, FIELD_LABEL, formatDate, formatDay, LEVEL_LABEL, LINK_LABEL, PRIORITY_LABEL, relativeTime, RISK_LABEL,
   STATUS_LABEL, STATUS_PHASE, TRANSITION_LABEL,
 } from '../format';
 import { useApi } from '../hooks';
@@ -78,6 +78,7 @@ export function ProblemPage() {
           <TextSection title="Description" hint="Symptoms, scope and business impact" value={p.description} editable={editable} onSave={(v) => save({ description: v })} />
           <TextSection title="Root cause" hint="Findings from problem analysis" value={p.root_cause} editable={editable} onSave={(v) => save({ root_cause: v })} />
           <TextSection title="Workaround" hint="How to reduce or eliminate the impact until resolved" value={p.workaround} editable={editable} onSave={(v) => save({ workaround: v })} />
+          {(p.known_error_at || p.status === 'known_error') && <ErrorControlSection problem={p} onChange={setData} />}
           <TextSection title="Resolution" hint="The permanent solution, usually implemented through a change" value={p.resolution} editable={editable} onSave={(v) => save({ resolution: v })} />
           {p.is_major && (
             <TextSection title="Major problem review" hint="What went well, what could be improved, how to prevent recurrence, follow-up actions"
@@ -280,6 +281,116 @@ function LinksPanel({ problem: p, editable, onChange }: { problem: ProblemDetail
   );
 }
 
+function ErrorControlSection({ problem: p, onChange }: { problem: ProblemDetail; onChange: (p: ProblemDetail) => void }) {
+  const { user } = useSession();
+  const [editing, setEditing] = useState(false);
+  const editable = canEdit(user) && p.status !== 'closed';
+  const decision = p.ec_decision ?? 'pending';
+  const empty = !p.ec_risk && !p.ec_fix_cost && !p.ec_decision_note && !p.ec_risk_level && !p.workaround_effectiveness;
+  return (
+    <section className="card error-control">
+      <div className="section-head">
+        <h2>Error control</h2>
+        {editable && <button className="btn-link" onClick={() => setEditing(true)}>{empty ? 'Assess' : 'Edit'}</button>}
+      </div>
+      <div className="ec-chips">
+        <span className={`badge decision-${decision}`}>{DECISION_LABEL[decision]}</span>
+        {p.ec_risk_level && <span className={`badge risk-${p.ec_risk_level}`}>{RISK_LABEL[p.ec_risk_level]}</span>}
+        {p.workaround_effectiveness && <span className={`badge eff-${p.workaround_effectiveness}`}>{EFFECTIVENESS_LABEL[p.workaround_effectiveness]}</span>}
+        {p.ec_review_date && (
+          <span className={`badge ${p.ec_review_due ? 'major' : 'neutral'}`}>{p.ec_review_due ? 'Review overdue' : 'Review'} {formatDay(p.ec_review_date)}</span>
+        )}
+      </div>
+      {empty ? (
+        <p className="placeholder">Assess the risk of not fixing this known error against the cost of a permanent fix, and record the decision.</p>
+      ) : (
+        <dl className="ec-grid">
+          {p.ec_risk && (<><dt>Risk of not fixing</dt><dd className="prose">{p.ec_risk}</dd></>)}
+          {p.ec_fix_cost && (<><dt>Cost of fixing</dt><dd className="prose">{p.ec_fix_cost}</dd></>)}
+          {p.ec_decision_note && (<><dt>Rationale</dt><dd className="prose">{p.ec_decision_note}</dd></>)}
+        </dl>
+      )}
+      {p.ec_decided_by_name && p.ec_decided_at && (
+        <p className="muted small">Decided by {p.ec_decided_by_name} {relativeTime(p.ec_decided_at)}{p.workaround_reviewed_at ? ` · workaround reviewed ${relativeTime(p.workaround_reviewed_at)}` : ''}</p>
+      )}
+      {editing && <AssessmentModal problem={p} onClose={() => setEditing(false)} onDone={(np) => { onChange(np); setEditing(false); }} />}
+    </section>
+  );
+}
+
+function AssessmentModal({ problem: p, onClose, onDone }: { problem: ProblemDetail; onClose: () => void; onDone: (p: ProblemDetail) => void }) {
+  const { user, meta } = useSession();
+  const [form, setForm] = useState({
+    ec_risk_level: p.ec_risk_level ? String(p.ec_risk_level) : '',
+    ec_risk: p.ec_risk,
+    ec_fix_cost: p.ec_fix_cost,
+    ec_decision: p.ec_decision ?? '',
+    ec_decision_note: p.ec_decision_note,
+    ec_review_date: p.ec_review_date ?? '',
+    workaround_effectiveness: p.workaround_effectiveness ?? '',
+  });
+  const [error, setError] = useState<string | null>(null);
+  const set = (k: keyof typeof form) => (e: { target: { value: string } }) => setForm({ ...form, [k]: e.target.value });
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    try {
+      onDone(await api.put<ProblemDetail>(`/api/problems/${p.ref}/assessment`, {
+        ...form,
+        ec_risk_level: form.ec_risk_level ? Number(form.ec_risk_level) : null,
+        ec_decision: form.ec_decision || null,
+        ec_review_date: form.ec_review_date || null,
+        workaround_effectiveness: form.workaround_effectiveness || null,
+      }));
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+  const managerOnly = (d: string) => (d === 'accept' || d === 'defer') && !isManager(user);
+  return (
+    <Modal title={`Error control – ${p.ref}`} onClose={onClose}>
+      <form className="form" onSubmit={submit}>
+        <p className="hint full">Weigh the risk of living with this known error against the cost of a permanent fix. Accepting or deferring the risk is a decision for the problem manager.</p>
+        <label>Risk of not fixing
+          <select value={form.ec_risk_level} onChange={set('ec_risk_level')}>
+            <option value="">Not assessed</option>
+            {[1, 2, 3].map((l) => <option key={l} value={l}>{RISK_LABEL[l]}</option>)}
+          </select>
+        </label>
+        <label>Workaround
+          <select value={form.workaround_effectiveness} onChange={set('workaround_effectiveness')}>
+            <option value="">Not reviewed</option>
+            {meta.workaround_effectiveness.map((w) => <option key={w} value={w}>{EFFECTIVENESS_LABEL[w]}</option>)}
+          </select>
+        </label>
+        <label className="full">Risk and impact if it recurs
+          <textarea rows={3} value={form.ec_risk} onChange={set('ec_risk')} placeholder="How often, how many users, cost of applying the workaround each time" />
+        </label>
+        <label className="full">Cost of a permanent fix
+          <textarea rows={3} value={form.ec_fix_cost} onChange={set('ec_fix_cost')} placeholder="Effort, vendor dependency, change risk" />
+        </label>
+        <label>Decision
+          <select value={form.ec_decision} onChange={set('ec_decision')}>
+            <option value="">–</option>
+            {meta.ec_decisions.map((d) => <option key={d} value={d} disabled={managerOnly(d)}>{DECISION_LABEL[d]}{managerOnly(d) ? ' (problem manager)' : ''}</option>)}
+          </select>
+        </label>
+        <label>Review date
+          <input type="date" value={form.ec_review_date} onChange={set('ec_review_date')} />
+        </label>
+        <label className="full">Rationale
+          <textarea rows={3} value={form.ec_decision_note} onChange={set('ec_decision_note')} />
+        </label>
+        {error && <div className="error full">{error}</div>}
+        <div className="actions full">
+          <button type="button" className="btn" onClick={onClose}>Cancel</button>
+          <button className="btn primary">Save assessment</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 function ActionsSection({ problem: p, onChange }: { problem: ProblemDetail; onChange: (p: ProblemDetail) => void }) {
   const { user } = useSession();
   const [editing, setEditing] = useState<Action | 'new' | null>(null);
@@ -453,6 +564,9 @@ function TransitionModal({ problem: p, to, onClose, onDone }: { problem: Problem
                 {meta.closure_codes.map((c) => <option key={c} value={c}>{CLOSURE_LABEL[c]}</option>)}
               </select>
             </label>
+            {form.closure_code === 'no_fix' && p.ec_decision !== 'accept' && (
+              <p className="warn-box full">Closing without a fix requires an accepted risk. Record the decision under Error control first.</p>
+            )}
             {p.is_major && form.closure_code !== 'duplicate' && form.closure_code !== 'cancelled' && (
               <label className="full">Major problem review <span className="req">required</span>
                 <textarea required rows={6} value={form.major_review} onChange={set('major_review')}

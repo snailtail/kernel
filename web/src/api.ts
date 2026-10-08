@@ -37,7 +37,21 @@ export interface Problem {
   closed_at: string | null;
   created_at: string;
   updated_at: string;
+  ec_risk_level: number | null;
+  ec_risk: string;
+  ec_fix_cost: string;
+  ec_decision: EcDecision | null;
+  ec_decision_note: string;
+  ec_decided_by_name: string | null;
+  ec_decided_at: string | null;
+  ec_review_date: string | null;
+  ec_review_due: boolean;
+  workaround_effectiveness: Effectiveness | null;
+  workaround_reviewed_at: string | null;
 }
+
+export type EcDecision = 'pending' | 'fix' | 'accept' | 'defer';
+export type Effectiveness = 'effective' | 'partial' | 'ineffective';
 
 export interface Link {
   id: number;
@@ -95,6 +109,8 @@ export interface Meta {
   link_kinds: LinkKind[];
   mcp_url: string | null;
   action_statuses: ActionStatus[];
+  ec_decisions: EcDecision[];
+  workaround_effectiveness: Effectiveness[];
   categories: { id: number; name: string; active: boolean }[];
   assignees: { id: number; display_name: string; role: Role }[];
 }
@@ -130,5 +146,6 @@ export const api = {
   get: <T>(path: string) => request<T>('GET', path),
   post: <T>(path: string, body: unknown = {}) => request<T>('POST', path, body),
   patch: <T>(path: string, body: unknown) => request<T>('PATCH', path, body),
+  put: <T>(path: string, body: unknown) => request<T>('PUT', path, body),
   del: <T>(path: string) => request<T>('DELETE', path),
 };

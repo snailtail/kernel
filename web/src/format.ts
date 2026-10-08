@@ -113,3 +113,18 @@ export function daysUntil(value: string) {
   const today = new Date();
   return Math.round((new Date(y, m - 1, d).getTime() - new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()) / 86400000);
 }
+
+export const DECISION_LABEL: Record<string, string> = {
+  pending: 'Decision pending',
+  fix: 'Fix permanently',
+  accept: 'Risk accepted',
+  defer: 'Deferred',
+};
+
+export const EFFECTIVENESS_LABEL: Record<string, string> = {
+  effective: 'Workaround effective',
+  partial: 'Workaround partly effective',
+  ineffective: 'Workaround ineffective',
+};
+
+export const RISK_LABEL: Record<number, string> = { 1: 'High risk', 2: 'Medium risk', 3: 'Low risk' };

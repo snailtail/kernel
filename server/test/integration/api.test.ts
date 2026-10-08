@@ -227,6 +227,48 @@ describe('REST API', { skip }, () => {
     });
   });
 
+  describe('error control', () => {
+    const knownError = async () => {
+      const p = await create();
+      await analyst.post(`/api/problems/${p.ref}/transition`, { to: 'analysis' });
+      return (await analyst.post(`/api/problems/${p.ref}/transition`, { to: 'known_error', root_cause: 'Vendor bug', workaround: 'Restart' })).body;
+    };
+
+    test('records the assessment and decision', async () => {
+      const p = await knownError();
+      assert.equal((await analyst.get(`/api/problems?needs_decision=true`)).body.some((x: any) => x.ref === p.ref), true);
+      const assessed = await analyst.put(`/api/problems/${p.ref}/assessment`, {
+        ec_risk_level: 2, ec_risk: 'Monthly outage of 10 min', ec_fix_cost: 'Vendor upgrade, 3 weeks', workaround_effectiveness: 'partial',
+      });
+      assert.equal(assessed.body.ec_risk_level, 2);
+      assert.ok(assessed.body.workaround_reviewed_at);
+      assert.equal(assessed.body.activity[0].kind, 'assessment');
+
+      assert.equal((await analyst.put(`/api/problems/${p.ref}/assessment`, { ec_decision: 'accept' })).status, 403, 'analysts cannot accept risk');
+      const fix = await analyst.put(`/api/problems/${p.ref}/assessment`, { ec_decision: 'fix' });
+      assert.equal(fix.body.ec_decided_by_name, 'Analyst');
+      const accepted = await pm.put(`/api/problems/${p.ref}/assessment`, { ec_decision: 'accept', ec_decision_note: 'Cheaper to live with', ec_review_date: '2000-01-01' });
+      assert.equal(accepted.body.ec_decision, 'accept');
+      assert.equal(accepted.body.ec_decided_by_name, 'Pm');
+      assert.equal(accepted.body.ec_review_due, true);
+      assert.ok((await pm.get('/api/problems?review_due=true')).body.some((x: any) => x.ref === p.ref));
+      assert.equal((await pm.get('/api/problems?needs_decision=true')).body.some((x: any) => x.ref === p.ref), false);
+    });
+
+    test('closing without a fix needs an accepted risk', async () => {
+      const p = await knownError();
+      const blocked = await pm.post(`/api/problems/${p.ref}/transition`, { to: 'closed', closure_code: 'no_fix' });
+      assert.equal(blocked.status, 409);
+      await pm.put(`/api/problems/${p.ref}/assessment`, { ec_decision: 'accept' });
+      assert.equal((await pm.post(`/api/problems/${p.ref}/transition`, { to: 'closed', closure_code: 'no_fix' })).body.status, 'closed');
+    });
+
+    test('decisions require a known error', async () => {
+      const p = await create();
+      assert.equal((await pm.put(`/api/problems/${p.ref}/assessment`, { ec_decision: 'fix' })).status, 409);
+    });
+  });
+
   describe('administration', () => {
     test('admins manage users; others cannot', async () => {
       assert.equal((await pm.get('/api/users')).status, 403);

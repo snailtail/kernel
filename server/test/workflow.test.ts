@@ -55,3 +55,9 @@ test('only managers reopen closed problems', () => {
   assert.match(checkTransition(closed, 'analysis', 'analyst')!, /reopen/);
   assert.equal(checkTransition(closed, 'analysis', 'problem_manager'), null);
 });
+
+test('closing without a fix requires an accepted risk', () => {
+  const p = { ...base, status: 'known_error' as const, closure_code: 'no_fix' as const };
+  assert.match(checkTransition(p, 'closed', 'problem_manager')!, /accept the risk/);
+  assert.equal(checkTransition({ ...p, ec_decision: 'accept' }, 'closed', 'problem_manager'), null);
+});

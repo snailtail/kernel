@@ -60,6 +60,20 @@ export function ProblemsPage() {
           <option value="">Any category</option>
           {meta.categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
+        <select
+          value={params.get('needs_decision') ? 'needs_decision' : params.get('review_due') ? 'review_due' : ''}
+          onChange={(e) => setParams((prev) => {
+            const next = new URLSearchParams(prev);
+            next.delete('needs_decision');
+            next.delete('review_due');
+            if (e.target.value) next.set(e.target.value, 'true');
+            return next;
+          }, { replace: true })}
+        >
+          <option value="">Any decision state</option>
+          <option value="needs_decision">Awaiting decision</option>
+          <option value="review_due">Decision review due</option>
+        </select>
         <label className="check">
           <input type="checkbox" checked={params.get('is_major') === 'true'} onChange={(e) => setParam('is_major', e.target.checked ? 'true' : '')} />
           Major only

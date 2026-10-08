@@ -9,7 +9,7 @@ import { query } from './db.js';
 import { badRequest, HttpError } from './errors.js';
 import * as actions from './actions.js';
 import * as problems from './problems.js';
-import { CLOSURE_CODES, STATUSES, TRANSITIONS } from './workflow.js';
+import { CLOSURE_CODES, EC_DECISIONS, STATUSES, TRANSITIONS, WORKAROUND_EFFECTIVENESS } from './workflow.js';
 
 const INSTRUCTIONS = `Kernel is a problem management system following the ITIL 4 problem management practice.
 Lifecycle: new (problem identification) -> analysis (problem control) -> known_error (error control) -> resolved -> closed.
@@ -17,6 +17,9 @@ A known error requires a documented root cause; resolving requires a resolution;
 and, for major problems, a major problem review. Problems are identified reactively (from incidents) or proactively
 (from events, trends). Link incidents, events and changes in external systems with link_record.
 Impact and urgency are 1 (high) to 3 (low); priority = impact + urgency - 1 (1 critical .. 5 planning).
+In error control, assess each known error (risk of not fixing, cost of fixing, workaround effectiveness) and record the
+decision: fix, accept the risk, defer, or pending, with a review date for accepted or deferred risks. Closing with
+closure code no_fix requires an accepted risk.
 Track follow-up work (vendor patches, monitoring, runbook updates, review actions) as actions with an owner and due date.
 Before creating a problem, search existing problems and the known error database to avoid duplicates.`;
 
@@ -114,6 +117,8 @@ function buildServer(user: User) {
         statuses: STATUSES,
         transitions: TRANSITIONS,
         closure_codes: CLOSURE_CODES,
+        ec_decisions: EC_DECISIONS,
+        workaround_effectiveness: WORKAROUND_EFFECTIVENESS,
         link_kinds: problems.LINK_KINDS,
         categories: categories.rows.map((r) => r.name),
         assignees: users.rows,
@@ -130,6 +135,8 @@ function buildServer(user: User) {
       assignee: z.string().optional().describe('Username'),
       priority: z.number().int().min(1).max(5).optional(),
       is_major: z.boolean().optional(),
+      needs_decision: z.boolean().optional().describe('Known errors without a fix/accept decision'),
+      review_due: z.boolean().optional().describe('Known errors whose decision review date has passed'),
       sort: z.enum(['priority', 'updated', 'created', 'ref']).optional(),
       limit: z.number().int().min(1).max(100).optional().describe('Default 25'),
     },
@@ -162,6 +169,7 @@ function buildServer(user: User) {
       (await problems.searchKnownErrors(q, include_resolved)).map((p) => ({
         ref: p.ref, title: p.title, status: p.status, priority: p.priority, affected_service: p.affected_service,
         root_cause: p.root_cause, workaround: p.workaround, known_error_at: p.known_error_at,
+        workaround_effectiveness: p.workaround_effectiveness, decision: p.ec_decision, review_date: p.ec_review_date,
       })),
   );
 
@@ -228,6 +236,33 @@ function buildServer(user: User) {
     },
     false,
     async ({ ref, ...link }) => (await problems.addLink(user, ref, problems.linkSchema.parse(link))).links,
+  );
+
+  tool(
+    'assess_known_error',
+    'Record the error control assessment of a known error: risk of not fixing, cost of fixing, decision (fix/accept/defer/pending), rationale, review date and workaround effectiveness. Accept/defer require a problem manager.',
+    {
+      ref: z.string(),
+      risk_level: z.number().int().min(1).max(3).nullable().optional().describe('Risk of not fixing: 1 high, 2 medium, 3 low'),
+      risk: z.string().optional().describe('Impact if it recurs, how often, cost of living with the workaround'),
+      fix_cost: z.string().optional().describe('Cost/effort/risk of a permanent fix'),
+      decision: z.enum(EC_DECISIONS).nullable().optional(),
+      decision_note: z.string().optional().describe('Rationale for the decision'),
+      review_date: z.string().nullable().optional().describe('YYYY-MM-DD, when to reconsider an accepted or deferred risk'),
+      workaround_effectiveness: z.enum(WORKAROUND_EFFECTIVENESS).nullable().optional(),
+    },
+    false,
+    async ({ ref, risk_level, risk, fix_cost, decision, decision_note, review_date, workaround_effectiveness }) => {
+      const p = await problems.assessProblem(
+        user,
+        ref,
+        problems.assessmentSchema.parse({
+          ec_risk_level: risk_level, ec_risk: risk, ec_fix_cost: fix_cost, ec_decision: decision,
+          ec_decision_note: decision_note, ec_review_date: review_date, workaround_effectiveness,
+        }),
+      );
+      return Object.fromEntries(Object.entries(p).filter(([k]) => k === 'ref' || k === 'status' || k.startsWith('ec_') || k.startsWith('workaround')));
+    },
   );
 
   const actionShape = {

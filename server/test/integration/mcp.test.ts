@@ -95,6 +95,16 @@ describe('MCP server', { skip }, () => {
     assert.equal(done.data[0].status, 'done');
   });
 
+  test('assesses a known error', async () => {
+    const { data: p } = await call(mcp, 'create_problem', { title: 'Printer queue stalls' });
+    await call(mcp, 'transition_problem', { ref: p.ref, to: 'analysis' });
+    await call(mcp, 'transition_problem', { ref: p.ref, to: 'known_error', root_cause: 'Driver leak' });
+    const res = await call(mcp, 'assess_known_error', { ref: p.ref, risk_level: 3, decision: 'accept', review_date: '2099-06-01' });
+    assert.equal(res.isError, false, res.text);
+    assert.equal(res.data.ec_decision, 'accept');
+    assert.equal(res.data.ec_review_date, '2099-06-01');
+  });
+
   test('reports helpful errors', async () => {
     const unknown = await call(mcp, 'update_problem', { ref: 'PRB000001', category: 'Nope' });
     assert.equal(unknown.isError, true);

@@ -21,7 +21,16 @@ Rules enforced by the server:
 - Closing and reopening a closed problem require the Problem Manager (or Administrator) role and a closure code.
 - **Major problems** need a major problem review before closure (unless closed as duplicate or cancelled).
 - Priority = impact + urgency − 1 (1 Critical … 5 Planning), where impact and urgency are 1 (high) to 3 (low).
+- Closing with closure code *no fix* requires a recorded decision to accept the risk (error control).
 - Every change is written to the activity log of the problem.
+
+**Error control**: each known error can be assessed — risk of not fixing, cost of a permanent fix, workaround
+effectiveness — and gets a decision: fix, accept the risk, defer or pending, with a review date. Accepting or
+deferring is reserved for problem managers. Dashboards and filters show known errors awaiting a decision or past
+their review date.
+
+**Follow-up actions** track work that follows from a problem (vendor fixes, monitoring, runbook updates, review
+outcomes) with an owner and due date.
 
 **Linked records** connect a problem to records in other systems: *incidents* (reactive), *events* (proactive),
 *changes* (implementing the fix) and other *problems*. Each link can have the source system name and a URL.
@@ -104,6 +113,9 @@ TEST_DATABASE_URL=postgres://kernel:kernel@localhost:5432/kernel_test npm test  
 
 Layout: `server/` (Fastify, TypeScript, PostgreSQL, MCP SDK) and `web/` (React, Vite). Business rules live in
 `server/src/workflow.ts` and `server/src/problems.ts`, which both the REST API and the MCP server use.
+`npm run seed:demo -w server` fills an **empty** database (from `DATABASE_URL`) with realistic demo users and problems,
+useful for trying Kernel out or demonstrating problem management. Demo users have the password `demo-password`.
+
 Schema changes go in a new numbered file in `server/migrations/`.
 
 Integration tests (`server/test/integration/`) start Kernel against `TEST_DATABASE_URL` and exercise the REST API and the

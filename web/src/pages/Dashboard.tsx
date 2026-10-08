@@ -11,7 +11,7 @@ import { ActivityLine } from './Problem';
 interface Dashboard {
   by_status: Partial<Record<Status, number>>;
   open_by_priority: { priority: number; count: number }[];
-  open_summary: { under_30: number; d30_90: number; over_90: number; major: number; unassigned: number };
+  open_summary: { under_30: number; d30_90: number; over_90: number; major: number; unassigned: number; needs_decision: number; review_due: number };
   open_links_by_kind: Partial<Record<string, number>>;
   my_problems: Problem[];
   my_actions: Action[];
@@ -66,6 +66,11 @@ export function DashboardPage() {
           <span className="stat-value">{data.open_summary.unassigned}</span>
           <span className="stat-sub">open</span>
         </div>
+        <Link to="/problems?needs_decision=true" className="stat">
+          <span className="stat-label">Awaiting decision</span>
+          <span className="stat-value">{data.open_summary.needs_decision}</span>
+          <span className="stat-sub">known errors{data.open_summary.review_due ? ` · ${data.open_summary.review_due} review due` : ''}</span>
+        </Link>
         <Link to="/actions?everyone=1&overdue=true" className={`stat ${data.actions.overdue ? 'stat-alert' : ''}`}>
           <span className="stat-label">Overdue actions</span>
           <span className="stat-value">{data.actions.overdue}</span>
