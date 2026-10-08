@@ -16,5 +16,5 @@ export function useSession() {
   return session;
 }
 
-export const canEdit = (user: User) => user.role !== 'viewer';
+export const canEdit = (user: User) => user.role !== 'viewer' && user.role !== 'integration';
 export const isManager = (user: User) => user.role === 'admin' || user.role === 'problem_manager';

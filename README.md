@@ -36,6 +36,13 @@ Kepner-Tregoe (IS / IS NOT and testing possible causes) and timelines — whose 
 proactive share, service and category hotspots, known error health and action follow-up for any period, with CSV
 export and a print layout.
 
+**Integrations**: external systems get URL templates per record kind, so a linked `INC0012345` becomes a link into
+ServiceNow (or Jira, Zabbix…). ITSM and monitoring tools report incidents and events through
+`POST /api/integrations/records`, using a token of a user with the *Integration* role (which can report and link
+records, nothing else). Records with a `problem_ref` are linked to that problem; unlinked records feed the
+**problem candidates** list — services with at least N records in M days — from which a problem can be logged or
+linked in one step.
+
 **Follow-up actions** track work that follows from a problem (vendor fixes, monitoring, runbook updates, review
 outcomes) with an owner and due date.
 
@@ -47,6 +54,7 @@ outcomes) with an owner and due date.
 | Role | Can |
 | --- | --- |
 | Viewer | Read everything |
+| Integration | Report incidents/events and link them to problems via the API (for ITSM and monitoring tools) |
 | Problem Analyst | Log and work problems, add notes and links, resolve |
 | Problem Manager | Also close/reopen, flag major problems, manage categories |
 | Administrator | Also manage users |
@@ -92,7 +100,8 @@ result in Kernel.
 
 Tools: `whoami`, `list_reference_data`, `search_problems`, `get_problem`, `search_known_errors`, `get_dashboard`,
 `create_problem`, `update_problem`, `transition_problem`, `add_comment`, `link_record`, `unlink_record`,
-`assess_known_error`, `start_analysis`, `update_analysis`, `list_actions`, `add_action`, `update_action`, `get_report`.
+`assess_known_error`, `start_analysis`, `update_analysis`, `list_actions`, `add_action`, `update_action`, `get_report`,
+`list_problem_candidates`, `create_problem_from_candidate`, `link_candidate_records`, `report_records`.
 
 ## REST API
 
@@ -108,6 +117,8 @@ Cookie-authenticated requests that change data must send the header `X-Kernel-Re
 | POST | `/api/problems/:ref/comments` | Add a work note |
 | POST / DELETE | `/api/problems/:ref/links[/:id]` | Link or unlink an incident, event, change or problem |
 | GET | `/api/kedb?q=&include_resolved=` | Known error database |
+| POST | `/api/integrations/records` | Report incidents/events: `{ records: [{ system, kind, reference, service?, summary?, occurred_at?, problem_ref? }] }` |
+| GET | `/api/candidates` | Problem candidates; `POST /api/candidates/create`, `/link`, `/dismiss` act on them |
 | GET | `/api/dashboard` | Backlog summary |
 | GET | `/api/reports?from=&to=&bucket=` | KPIs and trends for a period |
 | GET | `/api/reports/problems.csv?from=&to=` | Problems active in the period as CSV |

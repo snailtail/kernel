@@ -126,7 +126,7 @@ export async function loadForUpdate(db: Db, ref: string) {
 
 async function validateReferences(db: Db, input: ProblemInput) {
   if (input.assignee_id != null) {
-    const { rows } = await db.query("SELECT 1 FROM users WHERE id = $1 AND active AND role <> 'viewer'", [input.assignee_id]);
+    const { rows } = await db.query("SELECT 1 FROM users WHERE id = $1 AND active AND role NOT IN ('viewer', 'integration')", [input.assignee_id]);
     if (!rows[0]) throw badRequest('Assignee must be an active user who can work on problems');
   }
   if (input.category_id != null) {
@@ -191,7 +191,8 @@ export async function getProblem(ref: string) {
       [problem.id],
     ),
   ]);
-  return { ...problem, links: links.rows, activity: activity.rows, actions: actions.rows, analyses: analyses.rows };
+  const { resolveLinkUrls } = await import('./integrations.js');
+  return { ...problem, links: await resolveLinkUrls(links.rows), activity: activity.rows, actions: actions.rows, analyses: analyses.rows };
 }
 
 export async function createProblem(user: User, input: z.infer<typeof createProblemSchema>) {

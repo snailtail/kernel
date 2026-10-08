@@ -16,7 +16,7 @@ export async function problemRoutes(app: FastifyInstance) {
     requireUser(req);
     const [categories, users] = await Promise.all([
       query('SELECT id, name, active FROM categories ORDER BY name'),
-      query("SELECT id, display_name, role FROM users WHERE active AND role <> 'viewer' ORDER BY display_name"),
+      query("SELECT id, display_name, role FROM users WHERE active AND role NOT IN ('viewer', 'integration') ORDER BY display_name"),
     ]);
     return {
       statuses: STATUSES,

@@ -4,6 +4,7 @@ import { api, type Meta, type User } from './api';
 import { ROLE_LABEL } from './format';
 import { ActionsPage } from './pages/Actions';
 import { AdminPage } from './pages/Admin';
+import { CandidatesPage } from './pages/Candidates';
 import { DashboardPage } from './pages/Dashboard';
 import { KedbPage } from './pages/Kedb';
 import { LoginPage } from './pages/Login';
@@ -55,6 +56,7 @@ export function App() {
           <nav>
             <NavLink to="/" end>Dashboard</NavLink>
             <NavLink to="/problems">Problems</NavLink>
+            <NavLink to="/candidates">Candidates</NavLink>
             <NavLink to="/kedb">Known Errors</NavLink>
             <NavLink to="/actions">Actions</NavLink>
             <NavLink to="/reports">Reports</NavLink>
@@ -78,6 +80,7 @@ export function App() {
             <Route path="/problems" element={<ProblemsPage />} />
             <Route path="/problems/new" element={<NewProblemPage />} />
             <Route path="/problems/:ref" element={<ProblemPage />} />
+            <Route path="/candidates" element={<CandidatesPage />} />
             <Route path="/kedb" element={<KedbPage />} />
             <Route path="/actions" element={<ActionsPage />} />
             <Route path="/reports" element={<ReportsPage />} />

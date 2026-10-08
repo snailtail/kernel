@@ -10,6 +10,7 @@ import { HttpError } from './errors.js';
 import { mcpRoutes } from './mcp.js';
 import { adminRoutes } from './routes/admin.js';
 import { authRoutes } from './routes/auth.js';
+import { integrationRoutes } from './routes/integrations.js';
 import { problemRoutes } from './routes/problems.js';
 
 /** Builds the HTTP application: API, MCP endpoint and (if built) the web UI. */
@@ -44,6 +45,7 @@ export async function buildApp(options: { logLevel?: string; serveWeb?: boolean 
   await app.register(authRoutes);
   await app.register(problemRoutes);
   await app.register(adminRoutes);
+  await app.register(integrationRoutes);
   await app.register(mcpRoutes);
 
   app.all('/api/*', async (_req, reply) => reply.code(404).send({ error: 'Not found' }));

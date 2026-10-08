@@ -4,7 +4,7 @@
 export const STATUSES = ['new', 'analysis', 'known_error', 'resolved', 'closed'] as const;
 export type Status = (typeof STATUSES)[number];
 
-export const ROLES = ['admin', 'problem_manager', 'analyst', 'viewer'] as const;
+export const ROLES = ['admin', 'problem_manager', 'analyst', 'viewer', 'integration'] as const;
 export type Role = (typeof ROLES)[number];
 
 export const EC_DECISIONS = ['pending', 'fix', 'accept', 'defer'] as const;
@@ -27,7 +27,7 @@ export function priorityOf(impact: number, urgency: number): number {
 }
 
 export function canEdit(role: Role) {
-  return role !== 'viewer';
+  return role !== 'viewer' && role !== 'integration';
 }
 
 export function isManager(role: Role) {

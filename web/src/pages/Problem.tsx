@@ -212,6 +212,8 @@ function LinksPanel({ problem: p, editable, onChange }: { problem: ProblemDetail
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState({ kind: (p.detection === 'proactive' ? 'event' : 'incident') as LinkKind, reference: '', system: '', url: '', note: '' });
   const [error, setError] = useState<string | null>(null);
+  const { data: systems } = useApi<{ id: number; name: string; url_templates: Record<string, string>; active: boolean }[]>(adding ? '/api/systems' : null);
+  const templated = !!systems?.find((s) => s.name.toLowerCase() === form.system.toLowerCase())?.url_templates[form.kind];
 
   const add = async (e: FormEvent) => {
     e.preventDefault();
@@ -247,8 +249,9 @@ function LinksPanel({ problem: p, editable, onChange }: { problem: ProblemDetail
             </select>
             <input required autoFocus placeholder="Reference, e.g. INC0012345" value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} />
           </div>
-          <input placeholder="System (ServiceNow, Jira, Zabbix…)" value={form.system} onChange={(e) => setForm({ ...form, system: e.target.value })} />
-          <input type="url" placeholder="https://… (link to the record)" value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} />
+          <input placeholder="System (ServiceNow, Jira, Zabbix…)" list="link-systems" value={form.system} onChange={(e) => setForm({ ...form, system: e.target.value })} />
+          <datalist id="link-systems">{systems?.filter((s) => s.active).map((s) => <option key={s.id} value={s.name} />)}</datalist>
+          <input type="url" placeholder={templated ? 'Link generated from the system template' : 'https://… (link to the record)'} value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} />
           <input placeholder="Note" value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} />
           <div className="actions">
             <button type="button" className="btn" onClick={() => setAdding(false)}>Cancel</button>

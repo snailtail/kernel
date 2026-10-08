@@ -231,5 +231,31 @@ for (const d of demos) {
   );
   console.log(`${p.ref} ${d.status.padEnd(12)} ${d.title}`);
 }
+// External systems and recent unlinked records, so the problem candidates list has content.
+await query(`INSERT INTO external_systems (name, url_templates) VALUES
+  ('ServiceNow', '{"incident": "https://example.service-now.com/incident.do?sysparm_query=number={ref}", "change": "https://example.service-now.com/change_request.do?sysparm_query=number={ref}"}'),
+  ('Zabbix', '{"event": "https://zabbix.example.com/tr_events.php?eventid={ref}"}')
+  ON CONFLICT (name) DO NOTHING`);
+const recent = [
+  ['ServiceNow', 'incident', 'Payments', 'Card payment declined with timeout'],
+  ['ServiceNow', 'incident', 'Payments', 'Customer charged twice'],
+  ['Zabbix', 'event', 'Payments', 'PSP latency > 2 s'],
+  ['ServiceNow', 'incident', 'Payments', 'Checkout spinner never finishes'],
+  ['Zabbix', 'event', 'Payments', 'PSP latency > 2 s'],
+  ['ServiceNow', 'incident', 'Payments', 'Refund stuck in pending'],
+  ['ServiceNow', 'incident', 'Customer portal', 'Login loop after password reset'],
+  ['ServiceNow', 'incident', 'Customer portal', 'Password reset email not received'],
+  ['ServiceNow', 'incident', 'Customer portal', 'Stuck on MFA screen'],
+  ['ServiceNow', 'incident', 'Customer portal', 'Login loop on Safari'],
+  ['ServiceNow', 'incident', 'Customer portal', 'Session expires immediately'],
+  ['ServiceNow', 'incident', 'HR system', 'Payslip PDF blank'],
+];
+for (const [i, [system, kind, service, summary]] of recent.entries()) {
+  await query(
+    `INSERT INTO external_records (system, kind, reference, service, summary, occurred_at) VALUES ($1, $2, $3, $4, $5, now() - $6 * interval '9 hours')`,
+    [system, kind, kind === 'incident' ? `INC00130${String(i).padStart(2, '0')}` : `ZBX-9${4100 + i}`, service, summary, i],
+  );
+}
+
 await pool.end();
 console.log('Demo users: anna (problem manager), erik, sara, jonas (analysts), lena (viewer) – password "demo-password"');

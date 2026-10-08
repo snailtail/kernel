@@ -323,6 +323,57 @@ describe('REST API', { skip }, () => {
     });
   });
 
+  describe('integrations', () => {
+    test('external systems turn references into links', async () => {
+      assert.equal((await analyst.post('/api/systems', { name: 'Jira' })).status, 403);
+      const bad = await pm.post('/api/systems', { name: 'Bad', url_templates: { incident: 'https://x.example/no-placeholder' } });
+      assert.equal(bad.status, 400);
+      const sys = await pm.post('/api/systems', { name: 'ServiceDesk', url_templates: { incident: 'https://sd.example/inc/{ref}' } });
+      assert.equal(sys.status, 201);
+      const p = await create();
+      const res = await analyst.post(`/api/problems/${p.ref}/links`, { kind: 'incident', reference: 'INC 7', system: 'servicedesk' });
+      assert.equal(res.body.links[0].url, 'https://sd.example/inc/INC%207');
+    });
+
+    test('integration accounts report and link records, and candidates appear', async () => {
+      await admin.post('/api/users', { username: 'monitor', display_name: 'Monitoring', role: 'integration', password: 'integration-pw-123' });
+      const bot = new Client(k.base);
+      await bot.post('/api/auth/login', { username: 'monitor', password: 'integration-pw-123' });
+      const token = (await bot.post('/api/tokens', { name: 'zabbix' })).body.token;
+      const integration = new Client(k.base, token);
+      assert.equal((await integration.post('/api/problems', { title: 'x' })).status, 403, 'cannot log problems');
+
+      await pm.put('/api/candidates/rule', { min_records: 3, window_days: 7 });
+      const records = [1, 2, 3].map((n) => ({ system: 'Zabbix', kind: 'event', reference: `ZBX-${n}`, service: 'Payments', summary: `Alert ${n}` }));
+      const ingested = await integration.post('/api/integrations/records', { records });
+      assert.deepEqual(ingested.body, { stored: 3, linked: 0, errors: [] });
+      // Re-sending is idempotent.
+      assert.equal((await integration.post('/api/integrations/records', { records })).body.stored, 3);
+
+      const cands = await analyst.get('/api/candidates');
+      const payments = cands.body.candidates.find((c: any) => c.service === 'Payments');
+      assert.equal(payments.count, 3);
+
+      const created = await analyst.post('/api/candidates/create', {
+        record_ids: payments.records.map((r: any) => r.id),
+        problem: { title: 'Recurring payment alerts', detection: 'proactive', affected_service: 'Payments' },
+      });
+      assert.equal(created.status, 201);
+      assert.equal(created.body.links.length, 3);
+      assert.equal((await analyst.get('/api/candidates')).body.candidates.some((c: any) => c.service === 'Payments'), false);
+
+      const linked = await integration.post('/api/integrations/records', {
+        records: [{ system: 'Zabbix', kind: 'incident', reference: 'INC-99', service: 'Payments', problem_ref: created.body.ref }],
+      });
+      assert.equal(linked.body.linked, 1);
+      assert.equal((await analyst.get(`/api/problems/${created.body.ref}`)).body.links.length, 4);
+      const missing = await integration.post('/api/integrations/records', {
+        records: [{ system: 'Zabbix', kind: 'incident', reference: 'INC-100', problem_ref: 'PRB999999' }],
+      });
+      assert.equal(missing.body.errors.length, 1);
+    });
+  });
+
   describe('administration', () => {
     test('admins manage users; others cannot', async () => {
       assert.equal((await pm.get('/api/users')).status, 403);

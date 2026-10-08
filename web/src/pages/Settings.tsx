@@ -88,6 +88,7 @@ function TokensCard() {
 
   const token = created?.token ?? '<your-token>';
   const claudeCode = `claude mcp add --transport http kernel ${mcpUrl} \\\n  --header "Authorization: Bearer ${token}"`;
+  const ingestExample = `curl -X POST ${window.location.origin}/api/integrations/records \\\n  -H "Authorization: Bearer ${token}" -H "Content-Type: application/json" \\\n  -d '{"records": [{"system": "Zabbix", "kind": "event", "reference": "ZBX-4711",\n                    "service": "Payments", "summary": "Queue depth > 1000"}]}'`;
   const jsonConfig = JSON.stringify({ mcpServers: { kernel: { type: 'http', url: mcpUrl, headers: { Authorization: `Bearer ${token}` } } } }, null, 2);
 
   return (
@@ -118,6 +119,12 @@ function TokensCard() {
       <CopyBlock text={claudeCode} />
       <h3>Other MCP clients (JSON config)</h3>
       <CopyBlock text={jsonConfig} />
+      <h3>Report incidents and events from other systems</h3>
+      <p className="muted small">
+        Use a token belonging to a user with the Integration role. Records with a <code>problem_ref</code> are linked to that problem;
+        unlinked records feed the problem candidates list. Sending the same record again is harmless.
+      </p>
+      <CopyBlock text={ingestExample} />
 
       {tokens && tokens.length > 0 && (
         <table className="table compact">

@@ -1,4 +1,4 @@
-export type Role = 'admin' | 'problem_manager' | 'analyst' | 'viewer';
+export type Role = 'admin' | 'problem_manager' | 'analyst' | 'viewer' | 'integration';
 export type Status = 'new' | 'analysis' | 'known_error' | 'resolved' | 'closed';
 export type LinkKind = 'incident' | 'event' | 'change' | 'problem';
 

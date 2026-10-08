@@ -40,6 +40,7 @@ export const ROLE_LABEL: Record<Role, string> = {
   problem_manager: 'Problem Manager',
   analyst: 'Problem Analyst',
   viewer: 'Viewer',
+  integration: 'Integration (API only)',
 };
 
 export const LINK_LABEL: Record<LinkKind, string> = {

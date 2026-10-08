@@ -9,6 +9,7 @@ import { query } from './db.js';
 import { badRequest, HttpError } from './errors.js';
 import * as actions from './actions.js';
 import * as analyses from './analyses.js';
+import * as integrations from './integrations.js';
 import * as problems from './problems.js';
 import * as reports from './reports.js';
 import { CLOSURE_CODES, EC_DECISIONS, STATUSES, TRANSITIONS, WORKAROUND_EFFECTIVENESS } from './workflow.js';
@@ -24,6 +25,8 @@ decision: fix, accept the risk, defer, or pending, with a review date for accept
 closure code no_fix requires an accepted risk.
 Structured root cause analyses (five_whys, ishikawa, kepner_tregoe, timeline) can be attached to a problem with
 start_analysis/update_analysis; when the analysis concludes, write the root cause with update_problem.
+Problem candidates are services with many recent incidents/events not linked to any problem; review them with
+list_problem_candidates and turn them into problems (create_problem_from_candidate) or link them to an existing one.
 Track follow-up work (vendor patches, monitoring, runbook updates, review actions) as actions with an owner and due date.
 Before creating a problem, search existing problems and the known error database to avoid duplicates.`;
 
@@ -115,7 +118,7 @@ function buildServer(user: User) {
     async () => {
       const [categories, users] = await Promise.all([
         query('SELECT name FROM categories WHERE active ORDER BY name'),
-        query("SELECT username, display_name, role FROM users WHERE active AND role <> 'viewer' ORDER BY username"),
+        query("SELECT username, display_name, role FROM users WHERE active AND role NOT IN ('viewer', 'integration') ORDER BY username"),
       ]);
       return {
         statuses: STATUSES,
@@ -179,6 +182,39 @@ function buildServer(user: User) {
 
   tool('get_dashboard', 'Summary of the problem backlog: counts by status and priority, aging, my open problems and recent activity.', {}, true, () =>
     problems.dashboard(user),
+  );
+
+  tool(
+    'list_problem_candidates',
+    'Proactive problem detection: services with at least N recent incidents/events (reported by integrations) that are not linked to any problem. Includes the rule and the records.',
+    {},
+    true,
+    () => integrations.listCandidates(),
+  );
+
+  tool(
+    'create_problem_from_candidate',
+    'Log a new problem from a candidate and link the given records to it.',
+    { record_ids: z.array(z.number().int()).min(1), ...optionalEditable, title: editable.title },
+    false,
+    async ({ record_ids, ...fields }) =>
+      compactProblem(await integrations.createFromCandidate(user, { record_ids, problem: problems.createProblemSchema.parse(await toInput(fields)) }), 5),
+  );
+
+  tool(
+    'link_candidate_records',
+    'Link candidate records (incidents/events) to an existing problem.',
+    { ref: z.string(), record_ids: z.array(z.number().int()).min(1) },
+    false,
+    async ({ ref, record_ids }) => (await integrations.linkCandidate(user, ref, record_ids)).links,
+  );
+
+  tool(
+    'report_records',
+    'Report incidents or events from another system (e.g. while handling an incident). Optionally link each to a problem via problem_ref. Idempotent per system+kind+reference.',
+    { records: z.array(integrations.recordSchema).min(1).max(100) },
+    false,
+    async (args) => integrations.ingestRecords(user, integrations.ingestSchema.parse(args)),
   );
 
   tool(
