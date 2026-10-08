@@ -18,6 +18,7 @@ if ((await query('SELECT count(*)::int AS n FROM problems')).rows[0].n > 0) {
 
 const hash = await hashPassword('demo-password');
 const people = [
+  ['admin', 'Administrator', 'admin'],
   ['anna', 'Anna Lindqvist', 'problem_manager'],
   ['erik', 'Erik Johansson', 'analyst'],
   ['sara', 'Sara Ahmed', 'analyst'],
@@ -258,4 +259,4 @@ for (const [i, [system, kind, service, summary]] of recent.entries()) {
 }
 
 await pool.end();
-console.log('Demo users: anna (problem manager), erik, sara, jonas (analysts), lena (viewer) – password "demo-password"');
+console.log('Demo users: admin, anna (problem manager), erik, sara, jonas (analysts), lena (viewer) – password "demo-password"');

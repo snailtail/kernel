@@ -15,6 +15,8 @@ export const config = {
   // MCP endpoint shown to users in Settings; defaults to the URL the UI is opened on.
   // Where the backup service writes dumps (mounted read only), used to report backup health.
   backupDir: process.env.KERNEL_BACKUP_DIR || null,
+  // Public base URL of the web UI, used for links in webhook payloads.
+  publicUrl: process.env.KERNEL_PUBLIC_URL || null,
   mcpUrl: process.env.KERNEL_MCP_URL || null,
   webDist: env('KERNEL_WEB_DIST', new URL('../../web/dist', import.meta.url).pathname),
 };

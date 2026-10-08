@@ -21,6 +21,7 @@ export function AdminPage() {
   return (
     <>
       <header className="page-head"><h1>Administration</h1></header>
+      {user.role === 'admin' && <WebhooksCard />}
       <SystemsCard />
       <BackupsCard />
       {user.role === 'admin' && <UsersCard />}
@@ -271,6 +272,151 @@ function SystemModal({ system, onClose, onDone }: { system: ExternalSystem | nul
           <button className="btn primary">Save</button>
         </div>
       </form>
+    </Modal>
+  );
+}
+
+interface Webhook { id: number; name: string; url: string; format: string; events: string[]; active: boolean; failed: number; last_delivered_at: string | null; secret?: string }
+interface Delivery { id: number; event: string; status: string; attempts: number; response_status: number | null; last_error: string | null; created_at: string; summary: string | null; ref: string | null }
+
+function WebhooksCard() {
+  const { data, reload } = useApi<{ webhooks: Webhook[]; events: string[]; formats: string[] }>('/api/webhooks');
+  const [editing, setEditing] = useState<Webhook | 'new' | null>(null);
+  const [log, setLog] = useState<Webhook | null>(null);
+  const [secret, setSecret] = useState<{ name: string; secret: string } | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const ping = async (w: Webhook) => {
+    const d = await api.post<Delivery>(`/api/webhooks/${w.id}/ping`);
+    setMessage(d.status === 'ok' ? `Test delivery to ${w.name} succeeded (HTTP ${d.response_status}).` : `Test delivery to ${w.name} failed: ${d.last_error}`);
+    reload();
+  };
+  const reveal = async (w: Webhook) => setSecret({ name: w.name, secret: (await api.get<{ secret: string }>(`/api/webhooks/${w.id}/secret`)).secret });
+
+  return (
+    <section className="card">
+      <div className="section-head">
+        <h2>Webhooks</h2>
+        <button className="btn primary small" onClick={() => setEditing('new')}>Add webhook</button>
+      </div>
+      <p className="muted small">
+        Kernel POSTs problem events to these URLs. Payloads are signed: <code>X-Kernel-Signature: sha256=HMAC(secret, body)</code>.
+        Failed deliveries are retried with backoff. Slack and Teams formats work with their incoming webhooks.
+      </p>
+      {message && <div className={message.includes('failed') ? 'error' : 'success'}>{message}</div>}
+      {data?.webhooks.length === 0 && <p className="empty">No webhooks yet.</p>}
+      {data && data.webhooks.length > 0 && (
+        <table className="table compact">
+          <thead><tr><th>Name</th><th>URL</th><th>Format</th><th>Events</th><th>Last delivery</th><th /></tr></thead>
+          <tbody>
+            {data.webhooks.map((w) => (
+              <tr key={w.id} className={w.active ? '' : 'inactive'}>
+                <td>{w.name}{w.failed > 0 && <span className="badge major" title="Failed deliveries"> {w.failed} failed</span>}</td>
+                <td className="mono small url-cell">{w.url}</td>
+                <td>{w.format}</td>
+                <td className="small">{w.events.length ? w.events.join(', ') : 'All'}</td>
+                <td className="nowrap">{w.last_delivered_at ? relativeTime(w.last_delivered_at) : '–'}</td>
+                <td className="nowrap row-links">
+                  <button className="btn-link" onClick={() => ping(w)}>Test</button>
+                  <button className="btn-link" onClick={() => setLog(w)}>Log</button>
+                  <button className="btn-link" onClick={() => reveal(w)}>Secret</button>
+                  <button className="btn-link" onClick={() => setEditing(w)}>Edit</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {editing && data && (
+        <WebhookModal
+          hook={editing === 'new' ? null : editing}
+          events={data.events}
+          formats={data.formats}
+          onClose={() => setEditing(null)}
+          onDone={(created) => { setEditing(null); reload(); if (created?.secret) setSecret({ name: created.name, secret: created.secret }); }}
+        />
+      )}
+      {log && <DeliveriesModal hook={log} onClose={() => setLog(null)} />}
+      {secret && (
+        <Modal title={`Signing secret – ${secret.name}`} onClose={() => setSecret(null)}>
+          <p className="muted">Use this to verify the <code>X-Kernel-Signature</code> header on received deliveries.</p>
+          <pre className="secret">{secret.secret}</pre>
+        </Modal>
+      )}
+    </section>
+  );
+}
+
+function WebhookModal({ hook, events, formats, onClose, onDone }: { hook: Webhook | null; events: string[]; formats: string[]; onClose: () => void; onDone: (w?: Webhook) => void }) {
+  const [form, setForm] = useState({ name: hook?.name ?? '', url: hook?.url ?? '', format: hook?.format ?? 'json', events: hook?.events ?? [], active: hook?.active ?? true });
+  const [error, setError] = useState<string | null>(null);
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    try {
+      onDone(hook ? await api.put<Webhook>(`/api/webhooks/${hook.id}`, form) : await api.post<Webhook>('/api/webhooks', form));
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+  const remove = async () => {
+    if (hook && confirm(`Delete webhook ${hook.name}?`)) {
+      await api.del(`/api/webhooks/${hook.id}`);
+      onDone();
+    }
+  };
+  const toggle = (ev: string) => setForm({ ...form, events: form.events.includes(ev) ? form.events.filter((x) => x !== ev) : [...form.events, ev] });
+  return (
+    <Modal title={hook ? `Edit ${hook.name}` : 'Add webhook'} onClose={onClose}>
+      <form className="form" onSubmit={submit}>
+        <label>Name<input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Team chat" /></label>
+        <label>Format
+          <select value={form.format} onChange={(e) => setForm({ ...form, format: e.target.value })}>
+            {formats.map((f) => <option key={f} value={f}>{f === 'json' ? 'Generic JSON' : f === 'slack' ? 'Slack' : 'Microsoft Teams'}</option>)}
+          </select>
+        </label>
+        <label className="full">URL<input required type="url" value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} placeholder="https://hooks.slack.com/services/…" /></label>
+        <fieldset className="full event-picker">
+          <legend>Events <span className="muted small">(none selected = all)</span></legend>
+          {events.map((ev) => (
+            <label key={ev} className="check"><input type="checkbox" checked={form.events.includes(ev)} onChange={() => toggle(ev)} /> {ev}</label>
+          ))}
+        </fieldset>
+        <label className="check full"><input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Active</label>
+        {error && <div className="error full">{error}</div>}
+        <div className="actions full">
+          {hook && <button type="button" className="btn-link danger spacer-right" onClick={remove}>Delete</button>}
+          <button type="button" className="btn" onClick={onClose}>Cancel</button>
+          <button className="btn primary">Save</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function DeliveriesModal({ hook, onClose }: { hook: Webhook; onClose: () => void }) {
+  const { data } = useApi<Delivery[]>(`/api/webhooks/${hook.id}/deliveries`);
+  return (
+    <Modal title={`Deliveries – ${hook.name}`} onClose={onClose}>
+      {data?.length === 0 && <p className="empty">No deliveries yet.</p>}
+      {data && data.length > 0 && (
+        <table className="table compact">
+          <thead><tr><th>When</th><th>Event</th><th>Problem</th><th>Status</th></tr></thead>
+          <tbody>
+            {data.map((d) => (
+              <tr key={d.id}>
+                <td className="nowrap">{relativeTime(d.created_at)}</td>
+                <td>{d.event}</td>
+                <td className="mono">{d.ref ?? '–'}</td>
+                <td title={d.last_error ?? undefined}>
+                  <span className={`badge ${d.status === 'ok' ? 'status-resolved' : d.status === 'failed' ? 'major' : 'status-known_error'}`}>{d.status}</span>
+                  {d.attempts > 1 && <span className="muted small"> {d.attempts} attempts</span>}
+                  {d.last_error && d.status !== 'ok' && <div className="muted small">{d.last_error}</div>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </Modal>
   );
 }

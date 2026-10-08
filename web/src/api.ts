@@ -128,6 +128,7 @@ export interface ProblemDetail extends Problem {
   actions: Action[];
   analyses: Analysis[];
   next_steps: Guidance;
+  watchers: { id: number; display_name: string }[];
 }
 
 export interface Meta {

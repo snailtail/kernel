@@ -17,6 +17,7 @@ interface Dashboard {
   my_problems: Problem[];
   my_actions: Action[];
   actions: { open: number; overdue: number };
+  watched_activity: Activity[];
   recent_activity: Activity[];
 }
 
@@ -140,6 +141,20 @@ export function DashboardPage() {
           <ActionList actions={data.my_actions} editable showProblem onChange={() => reload()} />
         </section>
       </div>
+
+      {data.watched_activity.length > 0 && (
+        <section className="card">
+          <h2>Changes on problems I watch</h2>
+          <ul className="activity">
+            {data.watched_activity.map((a) => (
+              <li key={a.id}>
+                <ActivityLine activity={a} />
+                <Link className="activity-ref" to={`/problems/${a.ref}`}><span className="mono">{a.ref}</span> {a.title}</Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section className="card">
         <h2>Recent activity</h2>

@@ -6,6 +6,7 @@ import type { User } from './auth.js';
 import { query, tx } from './db.js';
 import { badRequest, conflict, forbidden, notFound } from './errors.js';
 import { guidanceFor } from './guidance.js';
+import { enqueue as enqueueWebhooks, eventFor } from './webhooks.js';
 import { canEdit, checkTransition, CLOSURE_CODES, EC_DECISIONS, isManager, STATUSES, WORKAROUND_EFFECTIVENESS, type Status } from './workflow.js';
 
 export const LINK_KINDS = ['incident', 'event', 'change', 'problem'] as const;
@@ -117,6 +118,26 @@ export async function logActivity(db: Db, problemId: number, userId: number, kin
     body,
     JSON.stringify(data),
   ]);
+  await enqueueWebhooks(db, eventFor(kind, data), problemId, userId, body || defaultSummary(kind, data), data);
+}
+
+function defaultSummary(kind: string, data: any) {
+  if (kind === 'status') return `Moved from ${data.from} to ${data.to}`;
+  if (kind === 'comment') return 'Added a note';
+  return kind;
+}
+
+export async function watch(db: Db, problemId: number, userId: number | null | undefined) {
+  if (userId) await db.query('INSERT INTO problem_watchers (problem_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [problemId, userId]);
+}
+
+export async function setWatching(user: User, ref: string, watching: boolean) {
+  await tx(async (db) => {
+    const p = await loadForUpdate(db, ref);
+    if (watching) await watch(db, p.id, user.id);
+    else await db.query('DELETE FROM problem_watchers WHERE problem_id = $1 AND user_id = $2', [p.id, user.id]);
+  });
+  return getProblem(ref);
 }
 
 export async function loadForUpdate(db: Db, ref: string) {
@@ -174,7 +195,7 @@ export async function getProblem(ref: string) {
   const { rows } = await query(`${SELECT_PROBLEM} WHERE p.ref = $1`, [ref.toUpperCase()]);
   if (!rows[0]) throw notFound(`Problem ${ref} not found`);
   const problem = rows[0];
-  const [links, activity, actions, analyses] = await Promise.all([
+  const [links, activity, actions, analyses, watchers] = await Promise.all([
     query(
       `SELECT l.id, l.kind, l.reference, l.system, l.url, l.note, l.created_at, u.display_name AS created_by
        FROM problem_links l JOIN users u ON u.id = l.created_by WHERE l.problem_id = $1 ORDER BY l.kind, l.created_at`,
@@ -191,9 +212,13 @@ export async function getProblem(ref: string) {
        FROM problem_analyses a JOIN users u ON u.id = a.updated_by WHERE a.problem_id = $1 ORDER BY a.created_at`,
       [problem.id],
     ),
+    query(
+      `SELECT u.id, u.display_name FROM problem_watchers w JOIN users u ON u.id = w.user_id WHERE w.problem_id = $1 ORDER BY u.display_name`,
+      [problem.id],
+    ),
   ]);
   const { resolveLinkUrls } = await import('./integrations.js');
-  const detail = { ...problem, links: await resolveLinkUrls(links.rows), activity: activity.rows, actions: actions.rows, analyses: analyses.rows };
+  const detail = { ...problem, links: await resolveLinkUrls(links.rows), activity: activity.rows, actions: actions.rows, analyses: analyses.rows, watchers: watchers.rows };
   return { ...detail, next_steps: guidanceFor(detail) };
 }
 
@@ -208,6 +233,8 @@ export async function createProblem(user: User, input: z.infer<typeof createProb
        VALUES (${[...cols, 'created_by'].map((_, i) => `$${i + 1}`).join(', ')}) RETURNING id, ref`,
       [...Object.values(input), user.id],
     );
+    await watch(db, rows[0].id, user.id);
+    await watch(db, rows[0].id, input.assignee_id);
     await logActivity(db, rows[0].id, user.id, 'created', `Problem record ${rows[0].ref} logged`);
     return rows[0].ref as string;
   });
@@ -232,6 +259,7 @@ export async function updateProblem(user: User, ref: string, input: ProblemInput
     const data = Object.fromEntries(
       changed.map(([k, v]) => [k, SHORT_FIELDS.has(k) ? { from: current[k], to: v } : { edited: true }]),
     );
+    if (input.assignee_id) await watch(db, current.id, input.assignee_id);
     await logActivity(db, current.id, user.id, 'update', `Updated ${changed.map(([k]) => k).join(', ')}`, data);
   });
   return getProblem(ref);
@@ -328,7 +356,7 @@ export async function searchKnownErrors(q?: string, includeResolved = false) {
 }
 
 export async function dashboard(user: User) {
-  const [byStatus, byPriority, aging, mine, recent, links, myActions, actionSummary] = await Promise.all([
+  const [byStatus, byPriority, aging, mine, recent, links, myActions, actionSummary, watched] = await Promise.all([
     query('SELECT status, count(*)::int AS count FROM problems GROUP BY status'),
     query("SELECT priority, count(*)::int AS count FROM problems WHERE status NOT IN ('resolved', 'closed') GROUP BY priority ORDER BY priority"),
     query(`SELECT
@@ -350,6 +378,11 @@ export async function dashboard(user: User) {
     query(`SELECT count(*) FILTER (WHERE status = 'open')::int AS open,
                   count(*) FILTER (WHERE status = 'open' AND due_date < current_date)::int AS overdue
            FROM problem_actions`),
+    query(`SELECT a.id, a.kind, a.body, a.data, a.created_at, u.display_name AS user_name, p.ref, p.title
+           FROM problem_activity a JOIN problems p ON p.id = a.problem_id LEFT JOIN users u ON u.id = a.user_id
+           JOIN problem_watchers w ON w.problem_id = a.problem_id AND w.user_id = $1
+           WHERE a.user_id IS DISTINCT FROM $1 AND a.created_at > now() - interval '14 days'
+           ORDER BY a.created_at DESC, a.id DESC LIMIT 10`, [user.id]),
   ]);
   return {
     by_status: Object.fromEntries(byStatus.rows.map((r) => [r.status, r.count])),
@@ -359,6 +392,7 @@ export async function dashboard(user: User) {
     my_problems: mine.rows,
     my_actions: myActions.rows,
     actions: actionSummary.rows[0],
+    watched_activity: watched.rows,
     recent_activity: recent.rows,
   };
 }

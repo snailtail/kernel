@@ -85,6 +85,9 @@ export async function problemRoutes(app: FastifyInstance) {
     problems.assessProblem(requireUser(req), req.params.ref, problems.assessmentSchema.parse(req.body)),
   );
 
+  app.put<RefParams>('/api/problems/:ref/watch', async (req) => problems.setWatching(requireUser(req), req.params.ref, true));
+  app.delete<RefParams>('/api/problems/:ref/watch', async (req) => problems.setWatching(requireUser(req), req.params.ref, false));
+
   app.post<RefParams>('/api/problems/:ref/comments', async (req) => {
     const body = z.object({ body: z.string().max(20000) }).parse(req.body);
     return problems.addComment(requireUser(req), req.params.ref, body.body);

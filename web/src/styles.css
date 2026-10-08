@@ -671,3 +671,12 @@ a.stat:hover { border-color: var(--accent); text-decoration: none; }
 .document .markdown table { width: 100%; }
 @media print { .document { padding: 0; border: none; } .print-page { max-width: none; } }
 .markdown hr { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
+
+/* Watching and webhooks */
+.btn-link.watch { color: var(--text-2); font-weight: 500; }
+.btn-link.watch.on { color: var(--warn); }
+.url-cell { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-links { display: flex; gap: 10px; }
+.event-picker { border: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 12px; }
+.event-picker legend { font-weight: 550; font-size: 13px; margin-bottom: 6px; padding: 0; }
+.secret { background: var(--surface-2); padding: 10px 12px; border-radius: 8px; font-family: var(--mono); overflow-x: auto; margin: 0; }

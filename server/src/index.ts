@@ -2,6 +2,7 @@ import { buildApp } from './app.js';
 import { bootstrapAdmin } from './auth.js';
 import { config } from './config.js';
 import { migrate, pool, query, waitForDb } from './db.js';
+import { startWorker } from './webhooks.js';
 
 const app = await buildApp();
 const log = (msg: string) => app.log.info(msg);
@@ -10,6 +11,7 @@ await waitForDb(log);
 await migrate(log);
 await bootstrapAdmin(log);
 setInterval(() => query('DELETE FROM sessions WHERE expires_at < now()').catch(() => {}), 3600_000).unref();
+startWorker(log);
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, async () => {

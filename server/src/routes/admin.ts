@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { hashPassword, requireRole } from '../auth.js';
 import { backupStatus } from '../backups.js';
+import * as webhooks from '../webhooks.js';
 import { query } from '../db.js';
 import { badRequest, conflict, notFound } from '../errors.js';
 import { ROLES } from '../workflow.js';
@@ -62,6 +63,38 @@ export async function adminRoutes(app: FastifyInstance) {
   app.get('/api/admin/backups', async (req) => {
     requireRole(req, 'admin', 'problem_manager');
     return backupStatus();
+  });
+
+  type Id = { Params: { id: string } };
+  app.get('/api/webhooks', async (req) => {
+    requireRole(req, 'admin');
+    return { webhooks: await webhooks.listWebhooks(), events: webhooks.EVENTS, formats: webhooks.FORMATS };
+  });
+  app.post('/api/webhooks', async (req, reply) => {
+    requireRole(req, 'admin');
+    reply.code(201);
+    return webhooks.createWebhook(webhooks.webhookSchema.parse(req.body));
+  });
+  app.put<Id>('/api/webhooks/:id', async (req) => {
+    requireRole(req, 'admin');
+    return webhooks.updateWebhook(Number(req.params.id), webhooks.webhookSchema.parse(req.body));
+  });
+  app.delete<Id>('/api/webhooks/:id', async (req) => {
+    requireRole(req, 'admin');
+    await webhooks.deleteWebhook(Number(req.params.id));
+    return { ok: true };
+  });
+  app.get<Id>('/api/webhooks/:id/secret', async (req) => {
+    requireRole(req, 'admin');
+    return { secret: await webhooks.revealSecret(Number(req.params.id)) };
+  });
+  app.get<Id>('/api/webhooks/:id/deliveries', async (req) => {
+    requireRole(req, 'admin');
+    return webhooks.deliveries(Number(req.params.id));
+  });
+  app.post<Id>('/api/webhooks/:id/ping', async (req) => {
+    requireRole(req, 'admin');
+    return webhooks.ping(Number(req.params.id));
   });
 
   app.post('/api/categories', async (req, reply) => {

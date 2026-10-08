@@ -304,6 +304,14 @@ function buildServer(user: User) {
   );
 
   tool(
+    'watch_problem',
+    'Watch (or stop watching) a problem: watched problems appear under "Changes on problems I watch" on the dashboard.',
+    { ref: z.string(), watching: z.boolean().optional().describe('Default true; false to stop watching') },
+    false,
+    async ({ ref, watching }) => (await problems.setWatching(user, ref, watching ?? true)).watchers,
+  );
+
+  tool(
     'add_comment',
     'Add a work note to the problem activity log (findings, analysis steps, decisions).',
     { ref: z.string(), body: z.string() },

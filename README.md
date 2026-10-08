@@ -59,6 +59,13 @@ actions — with quick assignment, Markdown export and a print layout (MCP: `get
 problem can be exported as a Markdown document or printed / saved as PDF from its print view — handy for major
 problem reviews and known error articles (MCP: `export_problem`).
 
+**Webhooks and watching**: administrators register webhooks (generic JSON, Slack or Teams) for problem events —
+created, status changed, assigned, updated, commented, linked, assessed, analysis, action changed/overdue. Deliveries
+are queued in the same transaction as the change, signed with `X-Kernel-Signature: sha256=HMAC(secret, body)` and
+retried with backoff; each webhook has a test button and a delivery log. Creators and assignees watch problems
+automatically, anyone can watch or unwatch, and the dashboard shows changes on watched problems
+(MCP: `watch_problem`).
+
 **Follow-up actions** track work that follows from a problem (vendor fixes, monitoring, runbook updates, review
 outcomes) with an owner and due date.
 
@@ -93,6 +100,7 @@ Open http://localhost:8080 and sign in as `admin`. Database migrations run autom
 | `KERNEL_SECURE_COOKIES` | `false` | Always mark the session cookie Secure. Without it, the cookie is Secure whenever the request arrived over HTTPS (needs `KERNEL_TRUST_PROXY` behind a proxy) |
 | `KERNEL_TRUST_PROXY` | `false` | Set `true` behind a reverse proxy or Cloudflare Tunnel, so `X-Forwarded-*` headers give the client IP and protocol |
 | `KERNEL_MCP_URL` | UI origin + `/mcp` | MCP endpoint shown in Settings, e.g. a LAN address when the public hostname is behind Cloudflare Access |
+| `KERNEL_PUBLIC_URL` | – | Public URL of the UI, used for links in webhook messages |
 | `PORT` | `8080` | Listen port inside the container |
 
 To deploy to the test server, push your commits and run `scripts/deploy.sh`. It pulls `main` in `~/kernel` on
@@ -118,7 +126,7 @@ Tools: `whoami`, `list_reference_data`, `search_problems`, `get_problem`, `searc
 `create_problem`, `update_problem`, `transition_problem`, `add_comment`, `link_record`, `unlink_record`,
 `assess_known_error`, `start_analysis`, `update_analysis`, `list_actions`, `add_action`, `update_action`, `get_report`,
 `list_problem_candidates`, `create_problem_from_candidate`, `link_candidate_records`, `report_records`,
-`find_similar_problems`, `mark_duplicate`, `get_review_agenda`, `export_problem`.
+`find_similar_problems`, `mark_duplicate`, `get_review_agenda`, `export_problem`, `watch_problem`.
 
 ## REST API
 
