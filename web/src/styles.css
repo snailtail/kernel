@@ -592,3 +592,30 @@ a.stat:hover { border-color: var(--accent); text-decoration: none; }
 .switch input::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform .15s; }
 .switch input:checked { background: var(--accent); }
 .switch input:checked::after { transform: translateX(16px); }
+
+/* Guided mode */
+.guide { border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); background: linear-gradient(var(--accent-soft), var(--surface) 70%); }
+.guide h2 { display: flex; align-items: center; gap: 8px; }
+.guide h2 .icon { color: var(--accent); }
+.guide-purpose { margin: 0; color: var(--text-2); }
+.guide-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.guide-steps li { display: flex; gap: 10px; align-items: flex-start; }
+.guide-check { flex: none; width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--border-strong); display: grid; place-items: center; font-size: 12px; font-weight: 700; margin-top: 1px; background: var(--surface); }
+.guide-steps li.done .guide-check { background: var(--success); border-color: var(--success); color: var(--surface); }
+.guide-steps li.done .guide-label { color: var(--text-2); text-decoration: line-through; text-decoration-color: var(--text-3); }
+.guide-steps li.advice .guide-check { border-style: dashed; color: var(--text-3); }
+.guide-label { font-weight: 550; }
+.guide-next { margin: 0; padding: 10px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+.guide p.muted.small { margin: 0; }
+.hint-box { margin: 0; padding: 10px 12px; border-left: 3px solid var(--accent); background: var(--accent-soft); border-radius: 0 8px 8px 0; font-weight: 400; color: var(--text); font-size: 13px; }
+.banner.intro { display: flex; justify-content: space-between; align-items: center; gap: 16px; background: var(--accent-soft); color: var(--text); border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border)); font-weight: 400; }
+.banner-actions { display: flex; gap: 8px; flex: none; }
+.help-link { display: flex; align-items: center; gap: 8px; color: var(--text-2); padding: 6px 8px; font-size: 13px; }
+.guide-page { display: flex; flex-direction: column; gap: 14px; max-width: 860px; }
+.prose-card p, .prose-card ul { margin: 0; }
+.prose-card ul { padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
+.phase-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.phase-list li { flex-direction: row; gap: 14px; }
+.phase-list p { margin: 4px 0 0; color: var(--text-2); }
+.phase-n { flex: none; width: 30px; height: 30px; border-radius: 50%; background: var(--accent); color: var(--on-accent); display: grid; place-items: center; font-weight: 700; }
+@media (max-width: 820px) { .banner.intro { flex-direction: column; align-items: flex-start; } .help-link { display: none; } }

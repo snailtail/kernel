@@ -43,6 +43,10 @@ records, nothing else). Records with a `problem_ref` are linked to that problem;
 **problem candidates** list — services with at least N records in M days — from which a problem can be logged or
 linked in one step.
 
+**Guided mode** (on by default, switchable under Settings → Preferences) explains each phase on the problem page and
+shows a checklist of the next steps, derived from the record itself; the same guidance is returned to MCP clients as
+`next_steps` in `get_problem`. New users are offered a short introduction, "Problem management in 5 minutes".
+
 **Follow-up actions** track work that follows from a problem (vendor fixes, monitoring, runbook updates, review
 outcomes) with an owner and due date.
 

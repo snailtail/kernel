@@ -28,6 +28,8 @@ start_analysis/update_analysis; when the analysis concludes, write the root caus
 Problem candidates are services with many recent incidents/events not linked to any problem; review them with
 list_problem_candidates and turn them into problems (create_problem_from_candidate) or link them to an existing one.
 Track follow-up work (vendor patches, monitoring, runbook updates, review actions) as actions with an owner and due date.
+get_problem returns next_steps: the current phase, its purpose and the remaining process steps. Use it to guide the
+user through the process and to decide what to do next.
 Before creating a problem, search existing problems and the known error database to avoid duplicates.`;
 
 const json = (value: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(value, null, 2) }] });

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router';
 import { api, type LinkKind, type ProblemDetail } from '../api';
 import { LEVEL_LABEL, LINK_LABEL, PRIORITY_LABEL } from '../format';
 import { canEdit, isManager, useSession } from '../session';
+import { Hint } from '../components/Guide';
 
 export function NewProblemPage() {
   const { user, meta } = useSession();
@@ -68,6 +69,12 @@ export function NewProblemPage() {
           <textarea rows={6} value={form.description} onChange={(e) => set('description', e.target.value)}
             placeholder="Symptoms, scope, business impact, what is known so far" />
         </label>
+        <div className="full">
+          <Hint>
+            A problem is the underlying cause of one or more incidents. Describe what you observe and its impact; the cause is found later, in analysis.
+            Before logging, search <a href="/problems?status=all">existing problems</a> and the <a href="/kedb">known error database</a>.
+          </Hint>
+        </div>
         <fieldset className="full segmented">
           <legend>Detection</legend>
           <label className={form.detection === 'reactive' ? 'on' : ''}>
@@ -108,6 +115,12 @@ export function NewProblemPage() {
             {[1, 2, 3].map((l) => <option key={l} value={l}>{l} – {LEVEL_LABEL[l]}</option>)}
           </select>
         </label>
+        <div className="full">
+          <Hint>
+            <strong>Impact</strong> is how much harm the problem causes (users, services, money). <strong>Urgency</strong> is how quickly it must be
+            dealt with. Together they give the priority.
+          </Hint>
+        </div>
         <div className="computed">
           Priority: <strong>P{form.impact + form.urgency - 1} {PRIORITY_LABEL[form.impact + form.urgency - 1]}</strong>
         </div>

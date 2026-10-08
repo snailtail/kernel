@@ -19,6 +19,7 @@ export interface Preferences {
   theme?: 'system' | 'light' | 'dark';
   /** Step-by-step guidance through the process; on unless turned off. */
   guided?: boolean;
+  intro_seen?: boolean;
 }
 
 declare module 'fastify' {

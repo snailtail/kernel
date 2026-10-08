@@ -7,6 +7,7 @@ import { ActionsPage } from './pages/Actions';
 import { AdminPage } from './pages/Admin';
 import { CandidatesPage } from './pages/Candidates';
 import { DashboardPage } from './pages/Dashboard';
+import { GuidePage } from './pages/Guide';
 import { KedbPage } from './pages/Kedb';
 import { LoginPage } from './pages/Login';
 import { NewProblemPage } from './pages/NewProblem';
@@ -77,6 +78,7 @@ export function App() {
             {isManager(user) && <NavLink to="/admin">{icons.admin}Administration</NavLink>}
           </nav>
           <div className="sidebar-foot">
+            <NavLink to="/guide" className="help-link">{icons.help}How it works</NavLink>
             <NavLink to="/settings" className="user-chip">
               <span className="avatar">{user.display_name.slice(0, 1).toUpperCase()}</span>
               <span>
@@ -99,6 +101,7 @@ export function App() {
             <Route path="/reports" element={<ReportsPage />} />
             <Route path="/admin" element={<AdminPage />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/guide" element={<GuidePage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>

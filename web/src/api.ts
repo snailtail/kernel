@@ -14,6 +14,14 @@ export interface User {
 export interface Preferences {
   theme?: 'system' | 'light' | 'dark';
   guided?: boolean;
+  intro_seen?: boolean;
+}
+
+export interface Guidance {
+  phase: string;
+  purpose: string;
+  steps: { id: string; label: string; hint: string; done: boolean | null }[];
+  next: string;
 }
 
 export interface Problem {
@@ -119,6 +127,7 @@ export interface ProblemDetail extends Problem {
   activity: Activity[];
   actions: Action[];
   analyses: Analysis[];
+  next_steps: Guidance;
 }
 
 export interface Meta {

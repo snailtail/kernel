@@ -374,6 +374,28 @@ describe('REST API', { skip }, () => {
     });
   });
 
+  describe('guidance', () => {
+    test('next steps follow the record', async () => {
+      const p = await create();
+      assert.equal(p.next_steps.phase, 'Problem identification');
+      const link = p.next_steps.steps.find((s: any) => s.id === 'link');
+      assert.equal(link.done, false);
+      const linked = await analyst.post(`/api/problems/${p.ref}/links`, { kind: 'incident', reference: 'INC-G1' });
+      assert.equal(linked.body.next_steps.steps.find((s: any) => s.id === 'link').done, true);
+      const analysing = await analyst.post(`/api/problems/${p.ref}/transition`, { to: 'analysis' });
+      assert.equal(analysing.body.next_steps.phase, 'Problem control');
+    });
+
+    test('preferences are stored per user', async () => {
+      const me = (await viewer.get('/api/auth/me')).body;
+      assert.deepEqual(me.preferences, {});
+      const saved = await viewer.put('/api/auth/preferences', { guided: false, theme: 'dark' });
+      assert.deepEqual(saved.body, { guided: false, theme: 'dark' });
+      assert.equal((await viewer.get('/api/auth/me')).body.preferences.theme, 'dark');
+      assert.equal((await viewer.put('/api/auth/preferences', { colour: 'pink' })).status, 400);
+    });
+  });
+
   describe('administration', () => {
     test('admins manage users; others cannot', async () => {
       assert.equal((await pm.get('/api/users')).status, 403);

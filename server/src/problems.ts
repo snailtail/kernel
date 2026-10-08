@@ -5,6 +5,7 @@ import type pg from 'pg';
 import type { User } from './auth.js';
 import { query, tx } from './db.js';
 import { badRequest, conflict, forbidden, notFound } from './errors.js';
+import { guidanceFor } from './guidance.js';
 import { canEdit, checkTransition, CLOSURE_CODES, EC_DECISIONS, isManager, STATUSES, WORKAROUND_EFFECTIVENESS, type Status } from './workflow.js';
 
 export const LINK_KINDS = ['incident', 'event', 'change', 'problem'] as const;
@@ -192,7 +193,8 @@ export async function getProblem(ref: string) {
     ),
   ]);
   const { resolveLinkUrls } = await import('./integrations.js');
-  return { ...problem, links: await resolveLinkUrls(links.rows), activity: activity.rows, actions: actions.rows, analyses: analyses.rows };
+  const detail = { ...problem, links: await resolveLinkUrls(links.rows), activity: activity.rows, actions: actions.rows, analyses: analyses.rows };
+  return { ...detail, next_steps: guidanceFor(detail) };
 }
 
 export async function createProblem(user: User, input: z.infer<typeof createProblemSchema>) {
@@ -401,10 +403,12 @@ export async function assessProblem(user: User, ref: string, input: z.infer<type
     if (!changed.length) return;
     const sets = changed.map(([k], i) => `${k} = $${i + 2}`);
     const decisionChanged = input.ec_decision !== undefined && input.ec_decision !== current.ec_decision;
-    if (decisionChanged) sets.push(`ec_decided_by = ${input.ec_decision ? user.id : 'NULL'}`, `ec_decided_at = ${input.ec_decision ? 'now()' : 'NULL'}`);
+    // Only actual decisions (not "pending") record who decided and when.
+    const decided = !!input.ec_decision && input.ec_decision !== 'pending';
+    if (decisionChanged) sets.push(`ec_decided_by = ${decided ? user.id : 'NULL'}`, `ec_decided_at = ${decided ? 'now()' : 'NULL'}`);
     if (input.workaround_effectiveness !== undefined) sets.push('workaround_reviewed_at = now()');
     await db.query(`UPDATE problems SET ${sets.join(', ')}, updated_at = now() WHERE id = $1`, [current.id, ...changed.map(([, v]) => v)]);
-    const body = decisionChanged && input.ec_decision
+    const body = decisionChanged && decided
       ? `Recorded decision: ${input.ec_decision}`
       : `Updated error control assessment (${changed.map(([k]) => ASSESSMENT_LABELS[k]).join(', ')})`;
     await logActivity(db, current.id, user.id, 'assessment', body, Object.fromEntries(changed));

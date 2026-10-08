@@ -6,6 +6,7 @@ import { PRIORITY_LABEL, relativeTime, STATUS_LABEL, STATUS_PHASE } from '../for
 import { useApi } from '../hooks';
 import { isManager, useSession } from '../session';
 import type { BackupStatus } from './Admin';
+import { isGuided } from '../components/Guide';
 import { ActivityLine } from './Problem';
 
 interface Dashboard {
@@ -20,7 +21,7 @@ interface Dashboard {
 }
 
 export function DashboardPage() {
-  const { user } = useSession();
+  const { user, setPreferences } = useSession();
   const { data, error, reload } = useApi<Dashboard>('/api/dashboard');
   const { data: backups } = useApi<BackupStatus>(isManager(user) ? '/api/admin/backups' : null);
   if (error) return <div className="error">{error}</div>;
@@ -37,6 +38,18 @@ export function DashboardPage() {
           <p className="muted">Welcome back, {user.display_name}.</p>
         </div>
       </header>
+
+      {isGuided(user.preferences) && !user.preferences.intro_seen && (
+        <div className="banner intro">
+          <div>
+            <strong>New to problem management?</strong> Take five minutes to see how the process works and how Kernel guides you through it.
+          </div>
+          <div className="banner-actions">
+            <Link className="btn primary small" to="/guide">Show me</Link>
+            <button className="btn small" onClick={() => setPreferences({ intro_seen: true })}>Dismiss</button>
+          </div>
+        </div>
+      )}
 
       {backups?.configured && !backups.healthy && (
         <Link to="/admin" className="banner warn">
