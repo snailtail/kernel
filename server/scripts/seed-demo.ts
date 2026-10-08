@@ -28,7 +28,7 @@ const users: Record<string, User> = {};
 for (const [username, name, role] of people) {
   const { rows } = await query(
     `INSERT INTO users (username, display_name, email, password_hash, role) VALUES ($1, $2, $3, $4, $5)
-     ON CONFLICT (username) DO UPDATE SET display_name = excluded.display_name RETURNING id, username, display_name, email, role`,
+     ON CONFLICT (username) DO UPDATE SET display_name = excluded.display_name RETURNING id, username, display_name, email, role, preferences`,
     [username, name, `${username}@example.com`, hash, role],
   );
   users[username] = rows[0];

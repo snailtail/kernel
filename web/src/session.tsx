@@ -1,11 +1,12 @@
 import { createContext, useContext } from 'react';
-import type { Meta, User } from './api';
+import type { Meta, Preferences, User } from './api';
 
 export interface Session {
   user: User;
   meta: Meta;
   reloadMeta: () => Promise<void>;
   logout: () => Promise<void>;
+  setPreferences: (p: Preferences) => Promise<void>;
 }
 
 export const SessionContext = createContext<Session | null>(null);

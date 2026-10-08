@@ -43,6 +43,13 @@ export async function authRoutes(app: FastifyInstance) {
 
   app.get('/api/auth/me', async (req) => requireUser(req));
 
+  app.put('/api/auth/preferences', async (req) => {
+    const user = requireUser(req);
+    const body = z.object({ theme: z.enum(['system', 'light', 'dark']).optional(), guided: z.boolean().optional() }).strict().parse(req.body);
+    const { rows } = await query('UPDATE users SET preferences = preferences || $2 WHERE id = $1 RETURNING preferences', [user.id, body]);
+    return rows[0].preferences;
+  });
+
   app.post('/api/auth/password', async (req) => {
     const user = requireUser(req);
     const body = z.object({ current: z.string(), password: z.string().min(10, 'Use at least 10 characters') }).parse(req.body);

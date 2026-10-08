@@ -13,8 +13,16 @@ export const STATUS_PHASE: Record<Status, string> = {
   new: 'Problem identification',
   analysis: 'Problem control',
   known_error: 'Error control',
-  resolved: 'Resolved',
-  closed: 'Closed',
+  resolved: 'Permanent fix in place',
+  closed: 'Record closed',
+};
+
+/** The natural next step from each status; other transitions are shown as secondary. */
+export const NEXT_STATUS: Partial<Record<Status, Status>> = {
+  new: 'analysis',
+  analysis: 'known_error',
+  known_error: 'resolved',
+  resolved: 'closed',
 };
 
 export const TRANSITION_LABEL: Record<Status, string> = {

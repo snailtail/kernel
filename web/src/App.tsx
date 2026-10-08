@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Navigate, NavLink, Route, Routes } from 'react-router';
-import { api, type Meta, type User } from './api';
+import { api, type Meta, type Preferences, type User } from './api';
+import { icons } from './components/Icons';
 import { ROLE_LABEL } from './format';
 import { ActionsPage } from './pages/Actions';
 import { AdminPage } from './pages/Admin';
@@ -32,6 +33,18 @@ export function App() {
     if (user) reloadMeta().catch(() => {});
   }, [user, reloadMeta]);
 
+  // Apply the chosen theme; "system" follows the OS via prefers-color-scheme.
+  useEffect(() => {
+    const theme = user?.preferences?.theme;
+    if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
+    else delete document.documentElement.dataset.theme;
+  }, [user?.preferences?.theme]);
+
+  const setPreferences = async (prefs: Preferences) => {
+    const preferences = await api.put<Preferences>('/api/auth/preferences', prefs);
+    setUser((u) => (u ? { ...u, preferences } : u));
+  };
+
   const logout = async () => {
     await api.post('/api/auth/logout').catch(() => {});
     setUser(null);
@@ -43,7 +56,7 @@ export function App() {
   if (!meta) return <div className="loading-screen">Loading…</div>;
 
   return (
-    <SessionContext.Provider value={{ user, meta, reloadMeta, logout }}>
+    <SessionContext.Provider value={{ user, meta, reloadMeta, logout, setPreferences }}>
       <div className="shell">
         <aside className="sidebar">
           <div className="brand">
@@ -54,14 +67,14 @@ export function App() {
             </div>
           </div>
           <nav>
-            <NavLink to="/" end>Dashboard</NavLink>
-            <NavLink to="/problems">Problems</NavLink>
-            <NavLink to="/candidates">Candidates</NavLink>
-            <NavLink to="/kedb">Known Errors</NavLink>
-            <NavLink to="/actions">Actions</NavLink>
-            <NavLink to="/reports">Reports</NavLink>
-            {canEdit(user) && <NavLink to="/problems/new" className="nav-cta">+ Log problem</NavLink>}
-            {isManager(user) && <NavLink to="/admin">Administration</NavLink>}
+            <NavLink to="/" end>{icons.dashboard}Dashboard</NavLink>
+            <NavLink to="/problems" end>{icons.problems}Problems</NavLink>
+            <NavLink to="/candidates">{icons.candidates}Candidates</NavLink>
+            <NavLink to="/kedb">{icons.kedb}Known Errors</NavLink>
+            <NavLink to="/actions">{icons.actions}Actions</NavLink>
+            <NavLink to="/reports">{icons.reports}Reports</NavLink>
+            {canEdit(user) && <NavLink to="/problems/new" className="nav-cta">{icons.plus}Log problem</NavLink>}
+            {isManager(user) && <NavLink to="/admin">{icons.admin}Administration</NavLink>}
           </nav>
           <div className="sidebar-foot">
             <NavLink to="/settings" className="user-chip">
@@ -71,7 +84,7 @@ export function App() {
                 <span className="user-role">{ROLE_LABEL[user.role]}</span>
               </span>
             </NavLink>
-            <button className="btn-link" onClick={logout}>Sign out</button>
+            <button className="btn-link signout" onClick={logout}>{icons.signout}Sign out</button>
           </div>
         </aside>
         <main className="main">

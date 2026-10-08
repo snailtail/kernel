@@ -7,7 +7,7 @@ import { AnalysesSection } from '../components/Analyses';
 import { Modal } from '../components/Modal';
 import {
   CLOSURE_LABEL, DECISION_LABEL, EFFECTIVENESS_LABEL, FIELD_LABEL, formatDate, formatDay, LEVEL_LABEL, LINK_LABEL, PRIORITY_LABEL, relativeTime, RISK_LABEL,
-  STATUS_LABEL, STATUS_PHASE, TRANSITION_LABEL,
+  NEXT_STATUS, STATUS_LABEL, STATUS_PHASE, TRANSITION_LABEL,
 } from '../format';
 import { useApi } from '../hooks';
 import { canEdit, isManager, useSession } from '../session';
@@ -35,7 +35,7 @@ export function ProblemPage() {
     }
   };
 
-  const allowed = meta.transitions[p.status].filter((to) => {
+  const allowed = [...meta.transitions[p.status]].sort((a, b) => Number(b === NEXT_STATUS[p.status]) - Number(a === NEXT_STATUS[p.status])).filter((to) => {
     if (!canEdit(user)) return false;
     if ((to === 'closed' || p.status === 'closed') && !isManager(user)) return false;
     return true;
@@ -65,7 +65,7 @@ export function ProblemPage() {
         {allowed.length > 0 && (
           <div className="transitions">
             {allowed.map((to) => (
-              <button key={to} className={`btn ${LIFECYCLE.indexOf(to) > LIFECYCLE.indexOf(p.status) ? 'primary' : ''}`} onClick={() => setTransition(to)}>
+              <button key={to} className={`btn ${NEXT_STATUS[p.status] === to ? 'primary' : ''}`} onClick={() => setTransition(to)}>
                 {LIFECYCLE.indexOf(to) < LIFECYCLE.indexOf(p.status) ? 'Reopen analysis' : TRANSITION_LABEL[to]}
               </button>
             ))}

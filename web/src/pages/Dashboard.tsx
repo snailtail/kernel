@@ -50,7 +50,7 @@ export function DashboardPage() {
           <span className="stat-value">{open}</span>
         </Link>
         {(['new', 'analysis', 'known_error'] as Status[]).map((s) => (
-          <Link to={`/problems?status=${s}`} key={s} className="stat">
+          <Link to={`/problems?status=${s}`} key={s} className={`stat stat-${s}`}>
             <span className="stat-label">{STATUS_LABEL[s]}</span>
             <span className="stat-value">{data.by_status[s] ?? 0}</span>
             <span className="stat-sub">{STATUS_PHASE[s]}</span>
@@ -132,7 +132,7 @@ export function DashboardPage() {
         <h2>Recent activity</h2>
         {data.recent_activity.length === 0 && <p className="empty">No activity yet.</p>}
         <ul className="activity">
-          {data.recent_activity.map((a) => (
+          {data.recent_activity.slice(0, 10).map((a) => (
             <li key={a.id}>
               <ActivityLine activity={a} />
               <Link className="activity-ref" to={`/problems/${a.ref}`}>

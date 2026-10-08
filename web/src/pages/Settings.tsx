@@ -24,9 +24,44 @@ export function SettingsPage() {
           <p className="muted">{user.display_name} · {user.username} · {ROLE_LABEL[user.role]}</p>
         </div>
       </header>
+      <PreferencesCard />
       <TokensCard />
       <PasswordCard />
     </>
+  );
+}
+
+function PreferencesCard() {
+  const { user, setPreferences } = useSession();
+  const theme = user.preferences.theme ?? 'system';
+  const guided = user.preferences.guided ?? true;
+  return (
+    <section className="card">
+      <h2>Preferences</h2>
+      <div className="pref-row">
+        <div>
+          <strong>Theme</strong>
+          <p className="muted small">System follows your operating system's light or dark setting.</p>
+        </div>
+        <div className="toggle" role="radiogroup" aria-label="Theme">
+          {(['system', 'light', 'dark'] as const).map((t) => (
+            <button key={t} role="radio" aria-checked={theme === t} className={theme === t ? 'on' : ''} onClick={() => setPreferences({ theme: t })}>
+              {t.charAt(0).toUpperCase() + t.slice(1)}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="pref-row">
+        <div>
+          <strong>Guided mode</strong>
+          <p className="muted small">Explains each step of the problem management process and suggests what to do next.</p>
+        </div>
+        <label className="switch">
+          <input type="checkbox" checked={guided} onChange={(e) => setPreferences({ guided: e.target.checked })} />
+          <span>{guided ? 'On' : 'Off'}</span>
+        </label>
+      </div>
+    </section>
   );
 }
 

@@ -8,6 +8,12 @@ export interface User {
   display_name: string;
   email: string;
   role: Role;
+  preferences: Preferences;
+}
+
+export interface Preferences {
+  theme?: 'system' | 'light' | 'dark';
+  guided?: boolean;
 }
 
 export interface Problem {

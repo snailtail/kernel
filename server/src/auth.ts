@@ -12,6 +12,13 @@ export interface User {
   display_name: string;
   email: string;
   role: Role;
+  preferences: Preferences;
+}
+
+export interface Preferences {
+  theme?: 'system' | 'light' | 'dark';
+  /** Step-by-step guidance through the process; on unless turned off. */
+  guided?: boolean;
 }
 
 declare module 'fastify' {
@@ -21,7 +28,7 @@ declare module 'fastify' {
 }
 
 export const SESSION_COOKIE = 'kernel_session';
-const USER_COLUMNS = 'u.id, u.username, u.display_name, u.email, u.role';
+const USER_COLUMNS = 'u.id, u.username, u.display_name, u.email, u.role, u.preferences';
 
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
 
