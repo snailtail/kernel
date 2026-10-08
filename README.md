@@ -97,10 +97,15 @@ Requires Node.js 24 and PostgreSQL.
 npm install
 DATABASE_URL=postgres://kernel:kernel@localhost:5432/kernel npm run dev:server   # API on :8080
 npm run dev:web                                                                   # UI on :5173, proxies /api and /mcp
-npm test
 npm run typecheck
+npm run test:unit                                                                 # unit tests only
+TEST_DATABASE_URL=postgres://kernel:kernel@localhost:5432/kernel_test npm test   # all tests; WIPES that database
 ```
 
 Layout: `server/` (Fastify, TypeScript, PostgreSQL, MCP SDK) and `web/` (React, Vite). Business rules live in
 `server/src/workflow.ts` and `server/src/problems.ts`, which both the REST API and the MCP server use.
 Schema changes go in a new numbered file in `server/migrations/`.
+
+Integration tests (`server/test/integration/`) start Kernel against `TEST_DATABASE_URL` and exercise the REST API and the
+MCP server through the official MCP client. CI (`.github/workflows/ci.yml`) runs typecheck, all tests, the build and a
+Docker image build on every push and pull request.

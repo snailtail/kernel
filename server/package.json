@@ -7,8 +7,9 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
-    "test": "tsx --test test/*.test.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "test": "tsx --test --test-concurrency=1 test/*.test.ts test/integration/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test:unit": "tsx --test test/*.test.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.2",
