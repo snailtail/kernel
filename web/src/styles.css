@@ -745,3 +745,4 @@ a.stat:hover { border-color: var(--accent); text-decoration: none; }
 .audit-changes .before { color: var(--danger); text-decoration: line-through; }
 .audit-changes .after { color: var(--success); }
 .audit-changes-cell { max-width: 520px; }
+.integration-only { margin: 0 auto; }

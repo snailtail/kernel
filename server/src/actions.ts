@@ -3,7 +3,8 @@ import { z } from 'zod';
 import type { User } from './auth.js';
 import { query, tx } from './db.js';
 import { badRequest, notFound } from './errors.js';
-import { getProblem, loadForUpdate, logActivity, requireEditor, SELECT_ACTION, type Db } from './problems.js';
+import { authorize } from './policy.js';
+import { getProblem, loadForUpdate, logActivity, SELECT_ACTION, type Db } from './problems.js';
 
 export const ACTION_STATUSES = ['open', 'done', 'cancelled'] as const;
 
@@ -58,7 +59,7 @@ export async function listActions(filter: z.infer<typeof listActionsSchema>) {
 }
 
 export async function createAction(user: User, ref: string, input: z.infer<typeof createActionSchema>) {
-  requireEditor(user);
+  authorize(user, 'action.write');
   await tx(async (db) => {
     const problem = await loadForUpdate(db, ref);
     await validateOwner(db, input.owner_id);
@@ -75,7 +76,7 @@ export async function createAction(user: User, ref: string, input: z.infer<typeo
 }
 
 export async function updateAction(user: User, ref: string, actionId: number, input: z.infer<typeof updateActionSchema>) {
-  requireEditor(user);
+  authorize(user, 'action.write');
   await tx(async (db) => {
     const problem = await loadForUpdate(db, ref);
     const { rows } = await db.query('SELECT * FROM problem_actions WHERE id = $1 AND problem_id = $2', [actionId, problem.id]);

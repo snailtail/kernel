@@ -5,6 +5,7 @@ import type pg from 'pg';
 import type { User } from './auth.js';
 import { afterCommit, query, tx } from './db.js';
 import { audit } from './audit.js';
+import { authorize } from './policy.js';
 import { logDomainEvent } from './log.js';
 import { recordActivity } from './metrics.js';
 import { badRequest, conflict, forbidden, notFound } from './errors.js';
@@ -114,9 +115,6 @@ export const SELECT_ACTION = `
   LEFT JOIN users cb ON cb.id = a.created_by`;
 
 
-export function requireEditor(user: User) {
-  if (!canEdit(user.role)) throw forbidden('Your role cannot change problems');
-}
 
 export async function logActivity(db: Db, problemId: number, userId: number, kind: string, body = '', data: object = {}) {
   await db.query('INSERT INTO problem_activity (problem_id, user_id, kind, body, data) VALUES ($1, $2, $3, $4, $5)', [
@@ -162,6 +160,7 @@ export async function watch(db: Db, problemId: number, userId: number | null | u
 }
 
 export async function setWatching(user: User, ref: string, watching: boolean) {
+  authorize(user, 'problem.watch');
   await tx(async (db) => {
     const p = await loadForUpdate(db, ref);
     if (watching) await watch(db, p.id, user.id);
@@ -253,8 +252,8 @@ export async function getProblem(ref: string) {
 }
 
 export async function createProblem(user: User, input: z.infer<typeof createProblemSchema>) {
-  requireEditor(user);
-  if (input.is_major && !isManager(user.role)) throw forbidden('Only a problem manager can flag a major problem');
+  authorize(user, 'problem.create');
+  if (input.is_major) authorize(user, 'problem.flag_major');
   const ref = await tx(async (db) => {
     await validateReferences(db, input);
     const cols = Object.keys(input);
@@ -292,14 +291,12 @@ export async function checkBase(db: Db, problemId: number, current: Record<strin
 }
 
 export async function updateProblem(user: User, ref: string, { base, ...input }: z.infer<typeof updateProblemSchema>) {
-  requireEditor(user);
+  authorize(user, 'problem.update');
   await tx(async (db) => {
     const current = await loadForUpdate(db, ref);
     await checkBase(db, current.id, current, input, base);
     if (current.status === 'closed') throw conflict('Reopen the problem before editing it');
-    if (input.is_major !== undefined && input.is_major !== current.is_major && !isManager(user.role)) {
-      throw forbidden('Only a problem manager can change the major problem flag');
-    }
+    if (input.is_major !== undefined && input.is_major !== current.is_major) authorize(user, 'problem.flag_major');
     await validateReferences(db, input);
     const changed = Object.entries(input).filter(([k, v]) => v !== undefined && current[k] !== v);
     if (!changed.length) return;
@@ -316,6 +313,7 @@ export async function updateProblem(user: User, ref: string, { base, ...input }:
 }
 
 export async function transitionProblem(user: User, ref: string, input: z.infer<typeof transitionSchema>) {
+  authorize(user, 'problem.transition');
   await tx(async (db) => {
     const current = await loadForUpdate(db, ref);
     const fields = {
@@ -357,7 +355,7 @@ export async function transitionProblem(user: User, ref: string, input: z.infer<
 }
 
 export async function addComment(user: User, ref: string, body: string) {
-  requireEditor(user);
+  authorize(user, 'problem.comment');
   if (!body.trim()) throw badRequest('Comment cannot be empty');
   await tx(async (db) => {
     const current = await loadForUpdate(db, ref);
@@ -368,7 +366,7 @@ export async function addComment(user: User, ref: string, body: string) {
 }
 
 export async function addLink(user: User, ref: string, input: z.infer<typeof linkSchema>) {
-  requireEditor(user);
+  authorize(user, 'problem.link');
   await tx(async (db) => {
     const current = await loadForUpdate(db, ref);
     const { rowCount } = await db.query(
@@ -384,7 +382,7 @@ export async function addLink(user: User, ref: string, input: z.infer<typeof lin
 }
 
 export async function removeLink(user: User, ref: string, linkId: number) {
-  requireEditor(user);
+  authorize(user, 'problem.link');
   await tx(async (db) => {
     const current = await loadForUpdate(db, ref);
     const { rows } = await db.query('DELETE FROM problem_links WHERE id = $1 AND problem_id = $2 RETURNING kind, reference', [
@@ -478,10 +476,8 @@ const ASSESSMENT_LABELS: Record<string, string> = {
  * management decision, so only problem managers can record those.
  */
 export async function assessProblem(user: User, ref: string, { base, ...input }: z.infer<typeof assessmentSchema>) {
-  requireEditor(user);
-  if ((input.ec_decision === 'accept' || input.ec_decision === 'defer') && !isManager(user.role)) {
-    throw forbidden('Only a problem manager can accept or defer the risk of a known error');
-  }
+  authorize(user, 'problem.assess');
+  if (input.ec_decision === 'accept' || input.ec_decision === 'defer') authorize(user, 'problem.accept_risk');
   await tx(async (db) => {
     const current = await loadForUpdate(db, ref);
     if (current.status === 'closed') throw conflict('Reopen the problem before changing its assessment');
@@ -535,7 +531,7 @@ export async function findSimilar(text: string, excludeRef?: string, limit = 5) 
  * and closes it with closure code "duplicate". Closing is reserved for problem managers.
  */
 export async function markDuplicate(user: User, ref: string, ofRef: string) {
-  if (!isManager(user.role)) throw forbidden('Only a problem manager can mark duplicates (it closes the problem)');
+  authorize(user, 'problem.mark_duplicate');
   if (ref.toUpperCase() === ofRef.toUpperCase()) throw badRequest('A problem cannot be a duplicate of itself');
   await tx(async (db) => {
     const dup = await loadForUpdate(db, ref);

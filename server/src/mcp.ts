@@ -13,6 +13,7 @@ import * as integrations from './integrations.js';
 import * as problems from './problems.js';
 import * as reports from './reports.js';
 import { traceTool } from './metrics.js';
+import { can, type Action } from './policy.js';
 import { auditQuerySchema, queryAudit } from './audit.js';
 import { problemMarkdown } from './export.js';
 import * as review from './review.js';
@@ -93,21 +94,37 @@ async function toInput(args: Partial<Record<keyof typeof editable, unknown>>) {
 function buildServer(user: User, scopes?: string[]) {
   const server = new McpServer({ name: 'kernel', version: '0.1.0' }, { instructions: INSTRUCTIONS });
 
+  // Every tool maps to a policy action; tools the user's role cannot use are not listed at all.
+  const TOOL_ACTIONS: Record<string, Action> = {
+    whoami: 'meta.read', list_reference_data: 'meta.read',
+    search_problems: 'problem.read', get_problem: 'problem.read', get_history: 'problem.read', find_similar_problems: 'problem.read',
+    export_problem: 'problem.read', list_actions: 'problem.read', get_dashboard: 'problem.read',
+    search_known_errors: 'kedb.read', get_report: 'report.read', get_review_agenda: 'review.read',
+    list_problem_candidates: 'candidate.read', query_audit_log: 'audit.read',
+    create_problem: 'problem.create', update_problem: 'problem.update', transition_problem: 'problem.transition',
+    assess_known_error: 'problem.assess', add_comment: 'problem.comment', link_record: 'problem.link', unlink_record: 'problem.link',
+    watch_problem: 'problem.watch', mark_duplicate: 'problem.mark_duplicate',
+    add_action: 'action.write', update_action: 'action.write', start_analysis: 'analysis.write', update_analysis: 'analysis.write',
+    create_problem_from_candidate: 'candidate.act', link_candidate_records: 'candidate.act', report_records: 'record.ingest',
+  };
+
   const tool = <S extends z.ZodRawShape>(
     name: string,
     description: string,
     inputSchema: S,
     readOnly: boolean,
     run: (args: z.infer<z.ZodObject<S>>) => Promise<unknown>,
-  ) =>
+  ) => {
+    const action = TOOL_ACTIONS[name];
+    if (!action) throw new Error(`MCP tool ${name} has no policy action`);
+    if (!can(user.role, action)) return;
+    // Token scopes: write tools need the write scope, read tools the read scope (ingest-only tokens may report).
+    const scope = action === 'record.ingest' ? 'ingest' : readOnly ? 'read' : 'write';
+    if (scopes && !scopes.includes(scope) && !(scope === 'ingest' && scopes.includes('write'))) return;
     server.registerTool(
       name,
       { description, inputSchema, annotations: { readOnlyHint: readOnly, destructiveHint: false } },
       (async (args: any) => {
-        const need = readOnly ? 'read' : 'write';
-        if (scopes && !scopes.includes(need)) {
-          return { isError: true, content: [{ type: 'text' as const, text: `This API token lacks the "${need}" scope needed for ${name}.` }] };
-        }
         try {
           return json(await traceTool(name, () => run(args)));
         } catch (err) {
@@ -117,6 +134,7 @@ function buildServer(user: User, scopes?: string[]) {
         }
       }) as any,
     );
+  };
 
   tool('whoami', 'Show the Kernel user this connection acts as, and its role.', {}, true, async () => user);
 
@@ -201,7 +219,7 @@ function buildServer(user: User, scopes?: string[]) {
     async ({ ref, limit }) => (await queryAudit(auditQuerySchema.parse({ entity_type: 'problem', entity_ref: ref.toUpperCase(), limit: limit ?? 100 }))).map(({ user_agent, ...e }) => e),
   );
 
-  if (user.role === 'admin') {
+  {
     tool(
       'query_audit_log',
       'Search the audit trail across everything (admins): filter by actor, actor_type (user, api_token, mcp, integration, system, anonymous), entity_type (problem, user, api_token, webhook, session, setting…), entity_ref, action, date range or IP.',

@@ -81,10 +81,14 @@ outcomes) with an owner and due date.
 
 ### Roles
 
+Permissions are defined in one place (`server/src/policy.ts`, deny by default) and enforced the same way for the web
+UI, REST and MCP; MCP lists only the tools a role and token may use. An authorisation test matrix covers every role
+against every endpoint, plus mass assignment and IDOR cases.
+
 | Role | Can |
 | --- | --- |
 | Viewer | Read everything |
-| Integration | Report incidents/events and link them to problems via the API (for ITSM and monitoring tools) |
+| Integration | Only report incidents/events (and link them to problems) via the API; cannot read the rest of Kernel |
 | Problem Analyst | Log and work problems, add notes and links, resolve |
 | Problem Manager | Also close/reopen, flag major problems, manage categories |
 | Administrator | Also manage users |

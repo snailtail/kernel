@@ -146,7 +146,7 @@ describe('REST API', { skip }, () => {
       assert.equal((await viewer.post('/api/problems', { title: 'x' })).status, 403);
       assert.equal((await viewer.patch(`/api/problems/${p.ref}`, { title: 'x' })).status, 403);
       assert.equal((await viewer.post(`/api/problems/${p.ref}/comments`, { body: 'x' })).status, 403);
-      assert.equal((await viewer.post(`/api/problems/${p.ref}/transition`, { to: 'analysis' })).status, 409);
+      assert.equal((await viewer.post(`/api/problems/${p.ref}/transition`, { to: 'analysis' })).status, 403);
     });
 
     test('updates record field changes in the activity log', async () => {

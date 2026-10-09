@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { hashPassword, requireRole } from '../auth.js';
+import { hashPassword, requireUser } from '../auth.js';
 import { backupStatus } from '../backups.js';
 import { disable as disableMfa, requiredRoles, requireStepUp, setRequiredRoles } from '../mfa.js';
 import { checkPassword } from '../passwords.js';
@@ -24,12 +24,12 @@ const USER_COLUMNS = 'id, username, display_name, email, role, active, created_a
 
 export async function adminRoutes(app: FastifyInstance) {
   app.get('/api/users', async (req) => {
-    requireRole(req, 'admin');
+    requireUser(req, 'user.manage');
     return (await query(`SELECT ${USER_COLUMNS} FROM users ORDER BY username`)).rows;
   });
 
   app.post('/api/users', async (req, reply) => {
-    requireRole(req, 'admin');
+    requireUser(req, 'user.manage');
     await requireStepUp(req);
     const body = z.object({ ...userFields, email: userFields.email.default(''), active: userFields.active.default(true), password }).parse(req.body);
     await checkPassword(body.password, body);
@@ -48,7 +48,7 @@ export async function adminRoutes(app: FastifyInstance) {
   });
 
   app.patch<{ Params: { id: string } }>('/api/users/:id', async (req) => {
-    const admin = requireRole(req, 'admin');
+    const admin = requireUser(req, 'user.manage');
     await requireStepUp(req);
     const id = Number(req.params.id);
     const body = z.object({ ...userFields, password, reason: z.string().max(1000).optional() }).partial().omit({ username: true }).parse(req.body);
@@ -81,58 +81,58 @@ export async function adminRoutes(app: FastifyInstance) {
   });
 
   app.get('/api/admin/backups', async (req) => {
-    requireRole(req, 'admin', 'problem_manager');
+    requireUser(req, 'backup.read');
     return backupStatus();
   });
 
   type Id = { Params: { id: string } };
   app.get('/api/webhooks', async (req) => {
-    requireRole(req, 'admin');
+    requireUser(req, 'webhook.manage');
     return { webhooks: await webhooks.listWebhooks(), events: webhooks.EVENTS, formats: webhooks.FORMATS };
   });
   app.post('/api/webhooks', async (req, reply) => {
-    const admin = requireRole(req, 'admin');
+    const admin = requireUser(req, 'webhook.manage');
     await requireStepUp(req);
     reply.code(201);
     return webhooks.createWebhook(admin, webhooks.webhookSchema.parse(req.body));
   });
   app.put<Id>('/api/webhooks/:id', async (req) => {
-    const admin = requireRole(req, 'admin');
+    const admin = requireUser(req, 'webhook.manage');
     await requireStepUp(req);
     return webhooks.updateWebhook(admin, Number(req.params.id), webhooks.webhookSchema.parse(req.body));
   });
   app.delete<Id & { Querystring: { reason?: string } }>('/api/webhooks/:id', async (req) => {
-    const admin = requireRole(req, 'admin');
+    const admin = requireUser(req, 'webhook.manage');
     await requireStepUp(req);
     await webhooks.deleteWebhook(admin, Number(req.params.id), requireReason(req.query.reason));
     return { ok: true };
   });
   app.post<Id>('/api/webhooks/:id/rotate', async (req) => {
-    const admin = requireRole(req, 'admin');
+    const admin = requireUser(req, 'webhook.manage');
     await requireStepUp(req);
     return webhooks.rotateSecret(admin, Number(req.params.id));
   });
   app.get<Id>('/api/webhooks/:id/deliveries', async (req) => {
-    requireRole(req, 'admin');
+    requireUser(req, 'webhook.manage');
     return webhooks.deliveries(Number(req.params.id));
   });
   app.post<Id>('/api/webhooks/:id/ping', async (req) => {
-    const admin = requireRole(req, 'admin');
+    const admin = requireUser(req, 'webhook.manage');
     return webhooks.ping(admin, Number(req.params.id));
   });
 
   app.get('/api/admin/mfa-policy', async (req) => {
-    requireRole(req, 'admin');
+    requireUser(req, 'mfa.policy');
     return { required_roles: await requiredRoles() };
   });
   app.put('/api/admin/mfa-policy', async (req) => {
-    const admin = requireRole(req, 'admin');
+    const admin = requireUser(req, 'mfa.policy');
     await requireStepUp(req);
     const body = z.object({ required_roles: z.array(z.enum(ROLES)).max(10), reason: z.string().max(1000).optional() }).parse(req.body);
     return { required_roles: await setRequiredRoles(admin, body.required_roles, requireReason(body.reason)) };
   });
   app.post<{ Params: { id: string } }>('/api/users/:id/mfa/reset', async (req) => {
-    const admin = requireRole(req, 'admin');
+    const admin = requireUser(req, 'user.manage');
     await requireStepUp(req);
     const body = z.object({ reason: z.string().max(1000).optional() }).parse(req.body ?? {});
     await disableMfa(admin, Number(req.params.id), requireReason(body.reason));
@@ -140,12 +140,12 @@ export async function adminRoutes(app: FastifyInstance) {
   });
 
   app.get('/api/admin/security', async (req) => {
-    requireRole(req, 'admin');
+    requireUser(req, 'security.read');
     return securityStatus();
   });
 
   app.post('/api/categories', async (req, reply) => {
-    requireRole(req, 'admin', 'problem_manager');
+    requireUser(req, 'category.manage');
     const body = z.object({ name: z.string().trim().min(1).max(100) }).parse(req.body);
     const { rows } = await query('INSERT INTO categories (name) VALUES ($1) ON CONFLICT (name) DO NOTHING RETURNING *', [body.name]);
     if (!rows[0]) throw conflict('Category already exists');
@@ -155,7 +155,7 @@ export async function adminRoutes(app: FastifyInstance) {
   });
 
   app.patch<{ Params: { id: string } }>('/api/categories/:id', async (req) => {
-    requireRole(req, 'admin', 'problem_manager');
+    requireUser(req, 'category.manage');
     const body = z.object({ name: z.string().trim().min(1).max(100).optional(), active: z.boolean().optional() }).parse(req.body);
     const { rows: before } = await query('SELECT * FROM categories WHERE id = $1', [Number(req.params.id)]);
     if (!before[0]) throw notFound();
@@ -174,11 +174,11 @@ export async function adminRoutes(app: FastifyInstance) {
 
   // ---- Audit trail ----------------------------------------------------------------------------
   app.get('/api/audit', async (req) => {
-    requireRole(req, 'admin');
+    requireUser(req, 'audit.read');
     return queryAudit(auditQuerySchema.parse(req.query));
   });
   app.get('/api/audit.csv', async (req, reply) => {
-    requireRole(req, 'admin');
+    requireUser(req, 'audit.read');
     const filter = auditQuerySchema.parse({ ...(req.query as object), limit: 1000 });
     const rows = await queryAudit(filter);
     await audit(null, { entity_type: 'audit_log', action: 'export', changes: { filter, rows: rows.length } });
@@ -188,7 +188,7 @@ export async function adminRoutes(app: FastifyInstance) {
     return [cols.join(','), ...rows.map((r) => cols.map((c) => csvCell(c === 'changes' ? JSON.stringify(r[c]) : c === 'at' ? (r.at as Date).toISOString() : r[c])).join(','))].join('\r\n') + '\r\n';
   });
   app.get('/api/audit/verify', async (req) => {
-    requireRole(req, 'admin');
+    requireUser(req, 'audit.read');
     return verifyChain();
   });
 }

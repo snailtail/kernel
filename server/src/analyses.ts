@@ -3,7 +3,8 @@ import { z } from 'zod';
 import type { User } from './auth.js';
 import { tx } from './db.js';
 import { badRequest, conflict, notFound } from './errors.js';
-import { getProblem, loadForUpdate, logActivity, requireEditor } from './problems.js';
+import { authorize } from './policy.js';
+import { getProblem, loadForUpdate, logActivity } from './problems.js';
 
 export const TECHNIQUES = ['five_whys', 'ishikawa', 'kepner_tregoe', 'timeline'] as const;
 export type Technique = (typeof TECHNIQUES)[number];
@@ -95,7 +96,7 @@ function parseData(technique: Technique, data: unknown) {
 }
 
 export async function createAnalysis(user: User, ref: string, input: z.infer<typeof createAnalysisSchema>) {
-  requireEditor(user);
+  authorize(user, 'analysis.write');
   const data = parseData(input.technique, input.data ?? emptyData(input.technique));
   await tx(async (db) => {
     const problem = await loadForUpdate(db, ref);
@@ -113,7 +114,7 @@ export async function createAnalysis(user: User, ref: string, input: z.infer<typ
 }
 
 export async function updateAnalysis(user: User, ref: string, id: number, input: z.infer<typeof updateAnalysisSchema>) {
-  requireEditor(user);
+  authorize(user, 'analysis.write');
   await tx(async (db) => {
     const problem = await loadForUpdate(db, ref);
     if (problem.status === 'closed') throw conflict('Reopen the problem before editing analyses');
@@ -148,7 +149,7 @@ export async function updateAnalysis(user: User, ref: string, id: number, input:
 }
 
 export async function deleteAnalysis(user: User, ref: string, id: number) {
-  requireEditor(user);
+  authorize(user, 'analysis.write');
   await tx(async (db) => {
     const problem = await loadForUpdate(db, ref);
     const { rows } = await db.query('DELETE FROM problem_analyses WHERE id = $1 AND problem_id = $2 RETURNING technique, title', [id, problem.id]);

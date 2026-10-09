@@ -2,10 +2,10 @@
 import { z } from 'zod';
 import type { User } from './auth.js';
 import { audit } from './audit.js';
+import { authorize } from './policy.js';
 import { query, tx } from './db.js';
-import { badRequest, conflict, forbidden, notFound } from './errors.js';
+import { badRequest, conflict, notFound } from './errors.js';
 import { createProblem, createProblemSchema, getProblem, LINK_KINDS, loadForUpdate, logActivity, type Db } from './problems.js';
-import { canEdit, isManager } from './workflow.js';
 
 // ---- External systems ------------------------------------------------------------------------
 
@@ -21,7 +21,7 @@ export async function listSystems() {
 }
 
 export async function saveSystem(user: User, id: number | null, input: z.infer<typeof systemSchema>) {
-  if (!isManager(user.role)) throw forbidden();
+  authorize(user, 'system.manage');
   const templates = Object.fromEntries(Object.entries(input.url_templates).filter(([, v]) => v));
   try {
     const { rows } = id
@@ -60,9 +60,6 @@ export const recordSchema = z.object({
 });
 export const ingestSchema = z.object({ records: z.array(recordSchema).min(1).max(500) });
 
-function requireIntegrationAccess(user: User) {
-  if (user.role !== 'integration' && !canEdit(user.role)) throw forbidden('Your role cannot report records');
-}
 
 async function linkRecord(db: Db, user: User, problem: { id: number; ref: string }, r: { kind: string; reference: string; system: string; summary?: string }) {
   const { rowCount } = await db.query(
@@ -79,7 +76,7 @@ async function linkRecord(db: Db, user: User, problem: { id: number; ref: string
 
 /** Upserts reported records; records with problem_ref are linked to that problem (idempotent). */
 export async function ingestRecords(user: User, input: z.infer<typeof ingestSchema>) {
-  requireIntegrationAccess(user);
+  authorize(user, 'record.ingest');
   // One multi-row upsert for the whole batch; duplicates within the batch collapse (last one wins).
   const unique = [...new Map(input.records.map((r) => [`${r.system}\u0000${r.kind}\u0000${r.reference}`, r])).values()];
   const col = <K extends keyof (typeof unique)[number]>(k: K) => unique.map((r) => r[k] ?? null);
@@ -123,7 +120,7 @@ export async function getRule(): Promise<z.infer<typeof ruleSchema>> {
 }
 
 export async function setRule(user: User, rule: z.infer<typeof ruleSchema>) {
-  if (!isManager(user.role)) throw forbidden();
+  authorize(user, 'candidate.rule');
   const before = await getRule();
   await query("INSERT INTO settings (key, value) VALUES ('candidate_rule', $1) ON CONFLICT (key) DO UPDATE SET value = excluded.value", [rule]);
   await audit(null, { entity_type: 'setting', entity_ref: 'candidate_rule', action: 'update', changes: { rule: { from: before, to: rule } } });
@@ -162,7 +159,7 @@ export async function createFromCandidate(user: User, input: z.infer<typeof cand
 }
 
 export async function linkCandidate(user: User, ref: string, recordIds: number[]) {
-  if (!canEdit(user.role)) throw forbidden();
+  authorize(user, 'candidate.act');
   await tx(async (db) => {
     const problem = await loadForUpdate(db, ref);
     for (const r of await recordsById(db, recordIds)) await linkRecord(db, user, problem, r);
@@ -171,7 +168,7 @@ export async function linkCandidate(user: User, ref: string, recordIds: number[]
 }
 
 export async function dismissRecords(user: User, recordIds: number[]) {
-  if (!canEdit(user.role)) throw forbidden();
+  authorize(user, 'candidate.act');
   const { rowCount } = await query('UPDATE external_records SET dismissed = true WHERE id = ANY($1) AND problem_id IS NULL', [recordIds]);
   await audit(null, { entity_type: 'external_record', action: 'dismiss', changes: { record_ids: recordIds, dismissed: rowCount } });
   return { dismissed: rowCount };

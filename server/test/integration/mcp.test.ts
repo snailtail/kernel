@@ -153,15 +153,17 @@ describe('MCP server', { skip }, () => {
     const token = (await pmClient.post('/api/tokens', { name: 'mcp-ro', scopes: ['read', 'mcp'] })).body.token;
     const ro = await connect(token);
     assert.equal((await call(ro, 'search_problems', {})).isError, false);
+    const names = (await ro.listTools()).tools.map((t) => t.name);
+    assert.ok(!names.includes('create_problem'), 'write tools are not even listed');
     const res = await call(ro, 'create_problem', { title: 'Nope' });
     assert.equal(res.isError, true);
-    assert.match(res.text, /write/);
     await ro.close();
   });
 
   test('enforces the token owner role', async () => {
-    const res = await call(viewerMcp, 'create_problem', { title: 'Nope' });
-    assert.equal(res.isError, true);
-    assert.match(res.text, /role/);
+    const names = (await viewerMcp.listTools()).tools.map((t) => t.name);
+    assert.ok(names.includes('search_problems'));
+    assert.ok(!names.includes('create_problem') && !names.includes('mark_duplicate'), 'a viewer sees no write tools');
+    assert.equal((await call(viewerMcp, 'create_problem', { title: 'Nope' })).isError, true);
   });
 });

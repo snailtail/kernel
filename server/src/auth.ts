@@ -7,6 +7,7 @@ import { forbidden, HttpError } from './errors.js';
 import { audit } from './audit.js';
 import { logger } from './log.js';
 import { mfaRequiredFor } from './mfapolicy.js';
+import { authorize, type Action } from './policy.js';
 import { checkSameOrigin } from './security.js';
 
 const securityLog = logger.child({ event: { dataset: 'kernel.security' } });
@@ -229,16 +230,13 @@ export async function authenticate(req: FastifyRequest) {
   }
 }
 
-export function requireUser(req: FastifyRequest): User {
+/** The signed-in user; with an action, also checks that their role allows it (see policy.ts). */
+export function requireUser(req: FastifyRequest, action?: Action): User {
   if (!req.user) throw new HttpError(401, 'Not authenticated');
+  if (action) authorize(req.user, action);
   return req.user;
 }
 
-export function requireRole(req: FastifyRequest, ...roles: Role[]): User {
-  const user = requireUser(req);
-  if (!roles.includes(user.role)) throw forbidden();
-  return user;
-}
 
 /** Creates the initial admin account when the database has no users. */
 export async function bootstrapAdmin(log: (msg: string) => void) {

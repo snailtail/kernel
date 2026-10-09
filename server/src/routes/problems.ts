@@ -15,7 +15,7 @@ type RefParams = { Params: { ref: string } };
 
 export async function problemRoutes(app: FastifyInstance) {
   app.get('/api/meta', async (req) => {
-    requireUser(req);
+    requireUser(req, 'meta.read');
     const [categories, users] = await Promise.all([
       query('SELECT id, name, active FROM categories ORDER BY name'),
       query("SELECT id, display_name, role FROM users WHERE active AND role NOT IN ('viewer', 'integration') ORDER BY display_name"),
@@ -36,10 +36,10 @@ export async function problemRoutes(app: FastifyInstance) {
     };
   });
 
-  app.get('/api/dashboard', async (req) => problems.dashboard(requireUser(req)));
+  app.get('/api/dashboard', async (req) => problems.dashboard(requireUser(req, 'problem.read')));
 
   app.get('/api/problems', async (req) => {
-    requireUser(req);
+    requireUser(req, 'problem.read');
     return problems.listProblems(problems.listSchema.parse(req.query));
   });
 
@@ -50,7 +50,7 @@ export async function problemRoutes(app: FastifyInstance) {
   });
 
   app.get('/api/problems/similar', async (req) => {
-    requireUser(req);
+    requireUser(req, 'problem.read');
     const q = z.object({ text: z.string().max(5000), exclude: z.string().max(20).optional(), limit: z.coerce.number().int().min(1).max(20).default(5) }).parse(req.query);
     return problems.findSimilar(q.text, q.exclude, q.limit);
   });
@@ -61,12 +61,12 @@ export async function problemRoutes(app: FastifyInstance) {
   });
 
   app.get<RefParams>('/api/problems/:ref', async (req) => {
-    requireUser(req);
+    requireUser(req, 'problem.read');
     return problems.getProblem(req.params.ref);
   });
 
   app.get<RefParams>('/api/problems/:ref/export.md', async (req, reply) => {
-    requireUser(req);
+    requireUser(req, 'problem.read');
     const md = await problemMarkdown(req.params.ref);
     reply.header('Content-Type', 'text/markdown; charset=utf-8');
     reply.header('Content-Disposition', `attachment; filename="${req.params.ref.toUpperCase()}.md"`);
@@ -102,7 +102,7 @@ export async function problemRoutes(app: FastifyInstance) {
   );
 
   app.get('/api/actions', async (req) => {
-    requireUser(req);
+    requireUser(req, 'problem.read');
     return actions.listActions(actions.listActionsSchema.parse(req.query));
   });
 
@@ -131,12 +131,12 @@ export async function problemRoutes(app: FastifyInstance) {
   );
 
   app.get('/api/reports', async (req) => {
-    requireUser(req);
+    requireUser(req, 'report.read');
     return reports.report(reports.reportSchema.parse(req.query));
   });
 
   app.get('/api/reports/problems.csv', async (req, reply) => {
-    requireUser(req);
+    requireUser(req, 'report.read');
     const params = reports.reportSchema.parse(req.query);
     reply.header('Content-Type', 'text/csv; charset=utf-8');
     reply.header('Content-Disposition', `attachment; filename="kernel-problems-${params.from}-${params.to}.csv"`);
@@ -144,12 +144,12 @@ export async function problemRoutes(app: FastifyInstance) {
   });
 
   app.get('/api/review', async (req) => {
-    requireUser(req);
+    requireUser(req, 'review.read');
     return review.reviewAgenda(review.agendaSchema.parse(req.query));
   });
 
   app.get('/api/review/agenda.md', async (req, reply) => {
-    requireUser(req);
+    requireUser(req, 'review.read');
     const agenda = await review.reviewAgenda(review.agendaSchema.parse(req.query));
     reply.header('Content-Type', 'text/markdown; charset=utf-8');
     reply.header('Content-Disposition', `attachment; filename="problem-review-${agenda.generated_at.slice(0, 10)}.md"`);
@@ -157,7 +157,7 @@ export async function problemRoutes(app: FastifyInstance) {
   });
 
   app.get('/api/kedb', async (req) => {
-    requireUser(req);
+    requireUser(req, 'kedb.read');
     const q = z.object({ q: z.string().max(200).optional(), include_resolved: z.enum(['true', 'false']).optional() }).parse(req.query);
     return problems.searchKnownErrors(q.q, q.include_resolved === 'true');
   });

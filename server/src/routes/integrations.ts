@@ -1,12 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { requireRole, requireUser } from '../auth.js';
+import { requireUser } from '../auth.js';
 import * as integrations from '../integrations.js';
 import { createProblemSchema } from '../problems.js';
 
 export async function integrationRoutes(app: FastifyInstance) {
   app.get('/api/systems', async (req) => {
-    requireUser(req);
+    requireUser(req, 'system.read');
     return integrations.listSystems();
   });
   app.post('/api/systems', async (req, reply) => {
@@ -22,10 +22,10 @@ export async function integrationRoutes(app: FastifyInstance) {
   app.post('/api/integrations/records', { bodyLimit: 4 * 1024 * 1024 }, async (req) => integrations.ingestRecords(requireUser(req), integrations.ingestSchema.parse(req.body)));
 
   app.get('/api/candidates', async (req) => {
-    requireUser(req);
+    requireUser(req, 'candidate.read');
     return integrations.listCandidates();
   });
-  app.put('/api/candidates/rule', async (req) => integrations.setRule(requireRole(req, 'admin', 'problem_manager'), integrations.ruleSchema.parse(req.body)));
+  app.put('/api/candidates/rule', async (req) => integrations.setRule(requireUser(req, 'candidate.rule'), integrations.ruleSchema.parse(req.body)));
   app.post('/api/candidates/create', { bodyLimit: 2 * 1024 * 1024 }, async (req, reply) => {
     const body = integrations.candidateActionSchema.extend({ problem: createProblemSchema }).parse(req.body);
     const created = await integrations.createFromCandidate(requireUser(req), body);

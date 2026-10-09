@@ -1,3 +1,5 @@
+import { can } from './policy.js';
+
 // Problem lifecycle modelled on the ITIL 4 problem management practice:
 //   Problem identification -> Problem control -> Error control -> resolved -> closed
 
@@ -26,12 +28,13 @@ export function priorityOf(impact: number, urgency: number): number {
   return impact + urgency - 1;
 }
 
+/** Workflow rules ask the policy layer, so roles are defined in one place (policy.ts). */
 export function canEdit(role: Role) {
-  return role !== 'viewer' && role !== 'integration';
+  return can(role, 'problem.transition');
 }
 
 export function isManager(role: Role) {
-  return role === 'admin' || role === 'problem_manager';
+  return can(role, 'problem.close');
 }
 
 export interface TransitionSubject {

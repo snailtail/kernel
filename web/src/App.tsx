@@ -64,6 +64,22 @@ export function App() {
   if (user.mfa_enrollment_required) return (<><ReauthPrompt /><EnrollTwoFactor onDone={() => setUser({ ...user, mfa_enrollment_required: false, mfa_enabled: true })} onLogout={logout} /></>);
   if (!meta) return <div className="loading-screen">Loading…</div>;
 
+  // Integration accounts only report records through the API; in the browser they manage their tokens.
+  if (user.role === 'integration') {
+    return (
+      <SessionContext.Provider value={{ user, meta, reloadMeta, logout, setPreferences }}>
+        <ReauthPrompt />
+        <main className="main integration-only">
+          <div className="banner intro">
+            <div><strong>Integration account.</strong> This account reports incidents and events through the API; create its tokens below.</div>
+            <button className="btn small" onClick={logout}>Sign out</button>
+          </div>
+          <SettingsPage />
+        </main>
+      </SessionContext.Provider>
+    );
+  }
+
   return (
     <SessionContext.Provider value={{ user, meta, reloadMeta, logout, setPreferences }}>
       <ReauthPrompt />

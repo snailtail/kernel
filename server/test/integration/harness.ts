@@ -12,6 +12,7 @@ export const USERS = {
   analyst: 'analyst',
   analyst2: 'analyst',
   viewer: 'viewer',
+  integration: 'integration',
 } as const;
 
 export interface Response<T = any> {
@@ -47,7 +48,13 @@ export class Client {
       else this.cookies.delete(name);
     }
     const text = await res.text();
-    return { status: res.status, body: text ? JSON.parse(text) : null };
+    let parsed: any = null;
+    try {
+      parsed = text ? JSON.parse(text) : null;
+    } catch {
+      parsed = text; // CSV, Markdown…
+    }
+    return { status: res.status, body: parsed };
   }
 
   get = <T = any>(path: string) => this.request<T>('GET', path);
