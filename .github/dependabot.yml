@@ -15,6 +15,11 @@ updates:
   - package-ecosystem: docker
     directory: /
     schedule: { interval: weekly, day: monday }
+    ignore:
+      # Stay on the active LTS line: odd-numbered Node releases never become LTS, and the next LTS (26) is adopted
+      # deliberately once it is promoted.
+      - dependency-name: node
+        update-types: [version-update:semver-major]
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly, day: monday }
