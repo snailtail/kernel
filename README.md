@@ -88,6 +88,11 @@ problems and actions, and changes on what you watch. Ctrl+K or `/` opens a comma
 `PRB000012` to jump, search everything, or run a command); `g` + a letter goes to a page, `n` logs a problem and `?`
 shows all shortcuts. List filters can be saved as named views.
 
+**CMDB**: configuration items and services as pointers to where they really live (vCenter, Azure, OP5…), with
+typed attributes per CI type, source links, linked records and history. Source systems report CIs through
+`POST /api/cis/upsert` (or the `upsert_cis` MCP tool), matched by source system and id; an integration account can
+only update the source records it created.
+
 **Follow-up actions** track work that follows from a problem (vendor fixes, monitoring, runbook updates, review
 outcomes) with an owner and due date.
 

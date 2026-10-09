@@ -23,7 +23,7 @@ interface Entry {
 
 const FILTERS = ['actor', 'actor_type', 'entity_type', 'entity_ref', 'action', 'from', 'to', 'ip'] as const;
 const ACTOR_TYPES = ['user', 'api_token', 'mcp', 'integration', 'system', 'anonymous'];
-const ENTITY_TYPES = ['problem', 'user', 'session', 'api_token', 'webhook', 'setting', 'category', 'external_system', 'external_record', 'audit_log'];
+const ENTITY_TYPES = ['problem', 'user', 'session', 'api_token', 'webhook', 'setting', 'category', 'external_system', 'external_record', 'audit_log', 'ci', 'service', 'ci_type'];
 
 const isChange = (v: unknown): v is { from: unknown; to: unknown } => !!v && typeof v === 'object' && 'from' in (v as object) && 'to' in (v as object);
 const show = (v: unknown) => (v === null || v === undefined || v === '' ? '–' : typeof v === 'object' ? JSON.stringify(v) : String(v));

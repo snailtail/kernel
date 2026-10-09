@@ -17,7 +17,8 @@ describe('API and MCP parity', { skip }, () => {
     analyst = await k.login('analyst');
     doc = (await analyst.get('/api/openapi.json')).body;
     mcp = new McpClient({ name: 'parity', version: '1' });
-    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
+    // An administrator sees every tool, so the parity check covers all of them.
+    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('admin')}` } } }));
   });
   after(async () => {
     await mcp?.close();

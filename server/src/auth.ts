@@ -191,7 +191,7 @@ export function checkTokenScope(req: FastifyRequest) {
   if (path === '/api/auth/me') return;
   const need =
     path === '/mcp' ? 'mcp'
-    : path === '/api/integrations/records' && req.method === 'POST' ? (scopes.includes('write') ? 'write' : 'ingest')
+    : (path === '/api/integrations/records' || path === '/api/cis/upsert') && req.method === 'POST' ? (scopes.includes('write') ? 'write' : 'ingest')
     : ['GET', 'HEAD', 'OPTIONS'].includes(req.method) ? 'read'
     : 'write';
   if (!scopes.includes(need)) throw forbidden(`This API token lacks the "${need}" scope`);

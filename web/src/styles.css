@@ -802,3 +802,22 @@ kbd { font: 11px var(--mono); padding: 1px 6px; border: 1px solid var(--border-s
 .approval-details dd { margin: 0; }
 .approval-details p { margin: 0; }
 .work-list li > div { min-width: 0; }
+
+/* CMDB (#16) */
+.ci-status { text-transform: capitalize; }
+.ci-active { background: var(--success-soft); color: var(--success); }
+.ci-planned { background: var(--accent-soft); color: var(--accent); }
+.ci-maintenance { background: var(--s-known-bg); color: var(--s-known); }
+.ci-retired { background: var(--surface-2); color: var(--text-3); }
+.ci-missing { background: var(--danger-soft); color: var(--danger); }
+.crit { font-size: 12.5px; white-space: nowrap; }
+.crit-1 { color: var(--danger); font-weight: 600; }
+.crit-2 { color: var(--warn); font-weight: 600; }
+.crit-4 { color: var(--text-3); }
+.ci-attrs dd { font-weight: 500; }
+.sources { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.sources li { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; }
+.source-fields { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.source-fields legend { padding: 0 4px; }
+.ci-head-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
+.ci-head-actions select { width: auto; }

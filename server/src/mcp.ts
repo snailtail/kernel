@@ -9,7 +9,9 @@ import { query } from './db.js';
 import { badRequest, HttpError } from './errors.js';
 import * as actions from './actions.js';
 import * as analyses from './analyses.js';
+import * as cmdb from './cmdb.js';
 import * as generic from './generic.js';
+import { typeForRef } from './records.js';
 import { GUIDES, guideMarkdown } from './methods.js';
 import { problemContext } from './problem-context.js';
 import * as integrations from './integrations.js';
@@ -108,6 +110,8 @@ function buildServer(user: User, scopes?: string[]) {
   // Every tool maps to a policy action; tools the user's role cannot use are not listed at all.
   const TOOL_ACTIONS: Record<string, Action> = {
     check_analysis: 'problem.read', get_problem_context: 'problem.read',
+    search_cis: 'ci.read', get_ci: 'ci.read', list_ci_types: 'ci.read', create_ci: 'ci.manage', update_ci: 'ci.manage',
+    transition_ci: 'ci.manage', upsert_cis: 'ci.ingest',
     whoami: 'meta.read', list_reference_data: 'meta.read', search: 'meta.read', get_record: 'meta.read', next_steps: 'meta.read',
     my_work: 'problem.read', link_records: 'problem.link',
     search_problems: 'problem.read', get_problem: 'problem.read', get_history: 'problem.read', find_similar_problems: 'problem.read',
@@ -286,6 +290,71 @@ function buildServer(user: User, scopes?: string[]) {
     async ({ from, to, ...options }) => generic.linkRecords(user, from, to, options),
   );
 
+  // ---- CMDB ----
+  const ciEditable = {
+    name: z.string().describe('Name, e.g. the host name or application name'),
+    ci_type: z.string().describe('Type, see list_ci_types (e.g. virtual_machine, database, business_service)'),
+    environment: z.enum(cmdb.ENVIRONMENTS),
+    criticality: z.number().int().min(1).max(4).describe('1 business critical … 4 low'),
+    team: z.string().describe('Owning team'),
+    description: z.string(),
+    tags: z.array(z.string()),
+    attributes: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).describe('Typed attributes of the CI type, e.g. { "os": "Ubuntu 24.04", "ip": "10.0.0.5" }'),
+  };
+  const ciOptional = Object.fromEntries(Object.entries(ciEditable).map(([k, v]) => [k, v.optional()])) as { [K in keyof typeof ciEditable]: z.ZodOptional<(typeof ciEditable)[K]> };
+
+  tool('list_ci_types', 'CI and service types with their attributes.', {}, true, () => cmdb.listTypes());
+  tool(
+    'search_cis',
+    'Search configuration items (servers, VMs, databases, applications…) and services by name, type, team, tag or attribute (IP, FQDN). CIs are pointers: each has links to where it really lives (vCenter, Azure, OP5…).',
+    {
+      q: z.string().optional(),
+      class: z.enum(['ci', 'service', 'all']).optional(),
+      type: z.string().optional(),
+      status: z.enum([...cmdb.CI_STATUSES, 'current', 'all']).optional(),
+      environment: z.enum(cmdb.ENVIRONMENTS).optional(),
+      team: z.string().optional(),
+      tag: z.string().optional(),
+      source: z.string().optional().describe('Source system, e.g. vCenter'),
+      limit: z.number().int().min(1).max(200).optional(),
+    },
+    true,
+    async (args) =>
+      (await cmdb.listCis(user, cmdb.listCisSchema.parse({ ...args, limit: args.limit ?? 50 }))).map((c) => ({
+        ref: c.ref, type: c.type, name: c.name, ci_type: c.ci_type, status: c.status, environment: c.environment,
+        criticality: c.criticality, team: c.team, sources: c.source_systems, url: c.url,
+      })),
+  );
+  tool('get_ci', 'Get a CI or service by ref (CI000012, SVC000003) with attributes, source links, relationships, linked records and history.', { ref: z.string() }, true, async ({ ref }) => {
+    const ci: any = await cmdb.getCi(user, ref);
+    return { ...ci, activity: ci.activity.slice(0, 20) };
+  });
+  tool(
+    'create_ci',
+    'Create a CI or service (problem managers). Prefer connectors/upsert_cis for CIs that exist in a source system.',
+    { ...ciOptional, name: ciEditable.name, ci_type: ciEditable.ci_type, source_system: z.string().optional(), source_id: z.string().optional(), source_url: z.string().optional() },
+    false,
+    async ({ source_system, source_id, source_url, ...fields }) =>
+      cmdb.createCi(user, cmdb.createCiSchema.parse({ ...fields, ...(source_system && source_id ? { source: { system: source_system, id: source_id, url: source_url ?? '' } } : {}) })),
+  );
+  tool('update_ci', 'Update fields on a CI or service. Use transition_ci for the status.', { ref: z.string(), ...ciOptional }, false, async ({ ref, ...fields }) =>
+    cmdb.updateCi(user, ref, cmdb.updateCiSchema.parse(fields)),
+  );
+  tool(
+    'transition_ci',
+    'Change the status of a CI or service: planned, active, maintenance, retired, missing.',
+    { ref: z.string(), to: z.enum(cmdb.CI_STATUSES), comment: z.string().optional() },
+    false,
+    async ({ ref, ...args }) => cmdb.transitionCi(user, ref, cmdb.transitionCiSchema.parse(args)),
+  );
+  tool(
+    'upsert_cis',
+    'Report CIs from a source system (inventory, monitoring, cloud). Matched by source_system + source_id; new ones are created. Idempotent.',
+    { items: cmdb.upsertSchema.shape.items },
+    false,
+    async (args) => cmdb.upsertCis(user, cmdb.upsertSchema.parse(args)),
+  );
+
   tool(
     'get_history',
     'Who changed what on a problem, when, through which channel (web, API, MCP) and why, with before/after values, newest first.',
@@ -456,12 +525,13 @@ function buildServer(user: User, scopes?: string[]) {
 
   tool(
     'add_comment',
-    'Add a work note to the problem activity log (findings, analysis steps, decisions).',
+    'Add a work note to any record (problem, CI, service): findings, analysis steps, decisions.',
     { ref: z.string(), body: z.string(), idempotency_key: z.string().max(200).optional().describe('Retry-safe key') },
     false,
     async ({ ref, body, idempotency_key }) =>
       idempotent(user.id, idempotency_key, `add_comment ${ref}`, { body }, async () => {
-        await problems.addComment(user, ref, body);
+        if (typeForRef(ref).type === 'problem') await problems.addComment(user, ref, body);
+        else await cmdb.addCiComment(user, ref, body);
         return { ok: true };
       }),
   );

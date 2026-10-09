@@ -14,6 +14,7 @@ const PAGES: [string, string, string][] = [
   ['Candidates', '/candidates', 'g c'],
   ['Known errors', '/kedb', 'g k'],
   ['Actions', '/actions', 'g a'],
+  ['Configuration items', '/cis', 'g i'],
   ['Review', '/review', 'g v'],
   ['Reports', '/reports', 'g r'],
   ['Settings', '/settings', 'g s'],
@@ -39,7 +40,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     const go = (path: string) => () => { navigate(path); onClose(); };
     const out: Item[] = [];
     const ref = q.trim().toUpperCase();
-    if (/^[A-Z]{2,5}\d{1,9}$/.test(ref)) out.push({ id: 'ref', label: `Open ${ref}`, hint: 'Enter', go: go(`/problems/${ref}`) });
+    if (/^[A-Z]{2,5}\d{1,9}$/.test(ref)) out.push({ id: 'ref', label: `Open ${ref}`, hint: 'Enter', go: go(/^(CI|SVC)\d/.test(ref) ? `/cis/${ref}` : `/problems/${ref}`) });
     for (const h of hits) out.push({ id: `${h.type}-${h.ref}`, label: `${h.ref} ${h.title}`, hint: h.status.replace('_', ' '), go: go(new URL(h.url, location.origin).pathname) });
     const needle = q.trim().toLowerCase();
     const commands: Item[] = [
@@ -81,7 +82,7 @@ const SHORTCUTS: [string, string][] = [
   ['Ctrl+K or /', 'Search and go to…'],
   ['n', 'Log a problem'],
   ['g m', 'My work'], ['g d', 'Dashboard'], ['g p', 'Problems'], ['g c', 'Candidates'], ['g k', 'Known errors'],
-  ['g a', 'Actions'], ['g v', 'Review'], ['g r', 'Reports'], ['g s', 'Settings'],
+  ['g a', 'Actions'], ['g i', 'CMDB'], ['g v', 'Review'], ['g r', 'Reports'], ['g s', 'Settings'],
   ['?', 'This help'],
 ];
 
@@ -95,7 +96,7 @@ export function ShortcutHelp({ onClose }: { onClose: () => void }) {
   );
 }
 
-const GOTO: Record<string, string> = { m: '/', d: '/dashboard', p: '/problems', c: '/candidates', k: '/kedb', a: '/actions', v: '/review', r: '/reports', s: '/settings' };
+const GOTO: Record<string, string> = { m: '/', d: '/dashboard', p: '/problems', c: '/candidates', k: '/kedb', a: '/actions', i: '/cis', v: '/review', r: '/reports', s: '/settings' };
 
 /** Global keyboard shortcuts; ignored while typing in a field. */
 export function useShortcuts(open: (what: 'palette' | 'help') => void) {

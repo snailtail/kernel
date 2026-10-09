@@ -2,6 +2,7 @@
 // A test checks that every registered /api route is listed here.
 import { z } from 'zod';
 import * as actions from './actions.js';
+import * as cmdb from './cmdb.js';
 import { auditQuerySchema } from './audit.js';
 import { searchSchema } from './generic.js';
 import * as analyses from './analyses.js';
@@ -98,6 +99,17 @@ export const OPERATIONS: Op[] = [
   { method: 'post', path: '/api/approvals/:id/reject', tag: 'Problems', summary: 'Reject a requested decision (web UI only)', body: z.object({ note: z.string().optional() }) },
   { method: 'get', path: '/api/admin/mcp-approvals', tag: 'Administration', summary: 'Whether decisions through MCP need approval in the web UI' },
   { method: 'put', path: '/api/admin/mcp-approvals', tag: 'Administration', summary: 'Require (or not) approval of MCP decisions; reason required', body: z.object({ required: z.boolean(), reason: z.string() }) },
+  { method: 'get', path: '/api/ci-types', tag: 'CMDB', summary: 'CI and service types with their attribute schemas' },
+  { method: 'put', path: '/api/ci-types', tag: 'CMDB', summary: 'Create or update a CI type (problem managers)', body: cmdb.typeSchema },
+  { method: 'get', path: '/api/cis', tag: 'CMDB', summary: 'Search configuration items and services', query: cmdb.listCisSchema },
+  { method: 'post', path: '/api/cis', tag: 'CMDB', summary: 'Create a CI or service (problem managers)', body: cmdb.createCiSchema },
+  { method: 'post', path: '/api/cis/upsert', tag: 'CMDB', summary: 'Upsert CIs from a source system (connectors/integrations), matched by source_system + source_id', body: cmdb.upsertSchema },
+  { method: 'get', path: '/api/cis/:ref', tag: 'CMDB', summary: 'A CI or service with sources, links, relationships and history' },
+  { method: 'patch', path: '/api/cis/:ref', tag: 'CMDB', summary: 'Update a CI or service', body: cmdb.updateCiSchema },
+  { method: 'post', path: '/api/cis/:ref/transition', tag: 'CMDB', summary: 'Change status (planned, active, maintenance, retired, missing)', body: cmdb.transitionCiSchema },
+  { method: 'post', path: '/api/cis/:ref/comments', tag: 'CMDB', summary: 'Add a note', body: z.object({ body: z.string() }) },
+  { method: 'post', path: '/api/cis/:ref/links', tag: 'CMDB', summary: 'Link a problem, incident, event, change or document', body: cmdb.ciLinkSchema },
+  { method: 'delete', path: '/api/cis/:ref/links/:id', tag: 'CMDB', summary: 'Remove a link' },
   { method: 'get', path: '/api/kedb', tag: 'Known errors', summary: 'Search the known error database', query: z.object({ q: z.string().optional(), include_resolved: z.enum(['true', 'false']).optional() }) },
 
   { method: 'get', path: '/api/reports', tag: 'Reports', summary: 'KPIs and trends for a period', query: reports.reportSchema },

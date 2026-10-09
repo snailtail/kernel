@@ -5,6 +5,7 @@ import { query } from './db.js';
 import { badRequest } from './errors.js';
 import { authorize, can } from './policy.js';
 import { listApprovals } from './approvals.js';
+import { addCiLink, CI_LINK_KINDS } from './cmdb.js';
 import { addLink, LINK_KINDS, SELECT_ACTION } from './problems.js';
 import { recordTypes, recordUrl, typeForRef, type SearchHit } from './records.js';
 
@@ -37,13 +38,16 @@ export async function nextSteps(user: User, ref: string) {
 /** Links a record to another Kernel record or to an external record. */
 export async function linkRecords(user: User, from: string, to: string, options: { kind?: string; system?: string; url?: string; note?: string }) {
   const source = typeForRef(from);
-  if (source.type !== 'problem') throw badRequest(`Links from ${source.type} records are not supported yet`);
   let kind = options.kind;
   try {
     const target = typeForRef(to);
     kind ??= target.type;
   } catch {
     if (!kind) throw badRequest('Give the kind (incident, event, change, problem) for an external reference');
+  }
+  if (source.type === 'ci' || source.type === 'service') {
+    if (!(CI_LINK_KINDS as readonly string[]).includes(kind!)) throw badRequest(`A CI cannot link a ${kind}; use a CI relationship instead`);
+    return (await addCiLink(user, from, { kind: kind as (typeof CI_LINK_KINDS)[number], reference: to, system: options.system ?? '', url: options.url ?? '', note: options.note ?? '' })).links;
   }
   if (!(LINK_KINDS as readonly string[]).includes(kind!)) throw badRequest(`Unknown link kind ${kind}`);
   const result = await addLink(user, from, { kind: kind as (typeof LINK_KINDS)[number], reference: to, system: options.system ?? '', url: options.url ?? '', note: options.note ?? '' });

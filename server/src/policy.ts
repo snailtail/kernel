@@ -6,23 +6,23 @@ import type { Role } from './workflow.js';
 
 export const ACTIONS = [
   // Reading
-  'meta.read', 'problem.read', 'kedb.read', 'report.read', 'review.read', 'candidate.read', 'system.read',
+  'meta.read', 'problem.read', 'kedb.read', 'report.read', 'review.read', 'candidate.read', 'system.read', 'ci.read',
   // Problem work
   'problem.create', 'problem.update', 'problem.transition', 'problem.comment', 'problem.link', 'problem.watch',
-  'problem.assess', 'action.write', 'analysis.write', 'candidate.act',
+  'problem.assess', 'action.write', 'analysis.write', 'candidate.act', 'ci.annotate',
   // Problem management decisions
   'problem.close', 'problem.reopen_closed', 'problem.flag_major', 'problem.accept_risk', 'problem.mark_duplicate',
-  'candidate.rule', 'category.manage', 'system.manage', 'backup.read',
+  'candidate.rule', 'category.manage', 'system.manage', 'backup.read', 'ci.manage',
   // Administration
   'user.manage', 'webhook.manage', 'audit.read', 'security.read', 'mfa.policy',
   // Integrations
-  'record.ingest',
+  'record.ingest', 'ci.ingest',
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 
-const READ: Action[] = ['meta.read', 'problem.read', 'kedb.read', 'report.read', 'review.read', 'candidate.read', 'system.read'];
-const WORK: Action[] = ['problem.create', 'problem.update', 'problem.transition', 'problem.comment', 'problem.link', 'problem.watch', 'problem.assess', 'action.write', 'analysis.write', 'candidate.act', 'record.ingest'];
-const MANAGE: Action[] = ['problem.close', 'problem.reopen_closed', 'problem.flag_major', 'problem.accept_risk', 'problem.mark_duplicate', 'candidate.rule', 'category.manage', 'system.manage', 'backup.read'];
+const READ: Action[] = ['meta.read', 'problem.read', 'kedb.read', 'report.read', 'review.read', 'candidate.read', 'system.read', 'ci.read'];
+const WORK: Action[] = ['problem.create', 'problem.update', 'problem.transition', 'problem.comment', 'problem.link', 'problem.watch', 'problem.assess', 'action.write', 'analysis.write', 'candidate.act', 'record.ingest', 'ci.annotate'];
+const MANAGE: Action[] = ['problem.close', 'problem.reopen_closed', 'problem.flag_major', 'problem.accept_risk', 'problem.mark_duplicate', 'candidate.rule', 'category.manage', 'system.manage', 'backup.read', 'ci.manage', 'ci.ingest'];
 const ADMIN: Action[] = ['user.manage', 'webhook.manage', 'audit.read', 'security.read', 'mfa.policy'];
 
 export const PERMISSIONS: Record<Role, ReadonlySet<Action>> = {
@@ -31,7 +31,7 @@ export const PERMISSIONS: Record<Role, ReadonlySet<Action>> = {
   problem_manager: new Set([...READ, ...WORK, ...MANAGE]),
   admin: new Set([...READ, ...WORK, ...MANAGE, ...ADMIN]),
   // Integration accounts report records; they cannot read the rest of Kernel.
-  integration: new Set(['meta.read', 'record.ingest']),
+  integration: new Set(['meta.read', 'record.ingest', 'ci.ingest']),
 };
 
 const MESSAGES: Partial<Record<Action, string>> = {
