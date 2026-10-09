@@ -107,8 +107,8 @@ const weekdayIn = (year: number, month: number, fromDay: number, weekday: number
   throw new Error('unreachable');
 };
 
-/** Swedish public holidays and the de facto closed eves (midsummer, Christmas and New Year's Eve). */
-export function swedishHolidays(year: number): { day: string; name: string }[] {
+/** Swedish public holidays, and the customary days off (midsummer, Christmas and New Year's Eve) marked as such. */
+export function swedishHolidays(year: number): { day: string; name: string; customary?: true }[] {
   const e = easter(year);
   return [
     { day: `${year}-01-01`, name: 'Nyårsdagen' },
@@ -120,12 +120,12 @@ export function swedishHolidays(year: number): { day: string; name: string }[] {
     { day: iso(e + 39 * DAY), name: 'Kristi himmelsfärdsdag' },
     { day: iso(e + 49 * DAY), name: 'Pingstdagen' },
     { day: `${year}-06-06`, name: 'Sveriges nationaldag' },
-    { day: iso(weekdayIn(year, 6, 19, 5)), name: 'Midsommarafton' },
+    { day: iso(weekdayIn(year, 6, 19, 5)), name: 'Midsommarafton', customary: true },
     { day: iso(weekdayIn(year, 6, 20, 6)), name: 'Midsommardagen' },
     { day: iso(weekdayIn(year, 10, 31, 6)), name: 'Alla helgons dag' },
-    { day: `${year}-12-24`, name: 'Julafton' },
+    { day: `${year}-12-24`, name: 'Julafton', customary: true },
     { day: `${year}-12-25`, name: 'Juldagen' },
     { day: `${year}-12-26`, name: 'Annandag jul' },
-    { day: `${year}-12-31`, name: 'Nyårsafton' },
+    { day: `${year}-12-31`, name: 'Nyårsafton', customary: true },
   ];
 }

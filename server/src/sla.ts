@@ -28,7 +28,7 @@ export async function loadCalendar(db: Db, id: number, now = Date.now()) {
   const holidays = new Set<string>(days.map((d) => d.day));
   if (rows[0].holiday_preset === 'SE') {
     const year = new Date(now).getUTCFullYear();
-    for (let y = year - 2; y <= year + 3; y++) swedishHolidays(y).forEach((h) => holidays.add(h.day));
+    for (let y = year - 2; y <= year + 3; y++) swedishHolidays(y).filter((h) => !h.customary || rows[0].include_customary).forEach((h) => holidays.add(h.day));
   }
   const cal = { id: rows[0].id, name: rows[0].name, timezone: rows[0].timezone, always: rows[0].always, hours: rows[0].hours, holidays };
   calendarCache.set(id, { at: now, cal });
@@ -41,6 +41,8 @@ export const calendarSchema = z.object({
   always: z.boolean().default(false),
   hours: z.partialRecord(z.enum(['1', '2', '3', '4', '5', '6', '7']), z.array(z.tuple([z.number().int().min(0).max(1440), z.number().int().min(0).max(1440)]).refine(([s, e]) => e > s, 'end after start')).max(4)).default({}),
   holiday_preset: z.enum(['SE']).nullable().default(null),
+  /** Also close on customary days off (Julafton, Nyårsafton, Midsommarafton). */
+  include_customary: z.boolean().default(true),
   holidays: z.array(z.object({ day: z.iso.date(), name: z.string().max(100).default('') })).max(200).default([]),
 });
 
@@ -58,8 +60,8 @@ export async function saveCalendar(user: User, id: number | null, input: z.infer
   const saved = await tx(async (db) => {
     const { holidays, ...c } = input;
     const { rows } = id
-      ? await db.query('UPDATE business_calendars SET name = $2, timezone = $3, always = $4, hours = $5, holiday_preset = $6 WHERE id = $1 RETURNING id', [id, c.name, c.timezone, c.always, JSON.stringify(c.hours), c.holiday_preset])
-      : await db.query('INSERT INTO business_calendars (name, timezone, always, hours, holiday_preset) VALUES ($1, $2, $3, $4, $5) RETURNING id', [c.name, c.timezone, c.always, JSON.stringify(c.hours), c.holiday_preset]);
+      ? await db.query('UPDATE business_calendars SET name = $2, timezone = $3, always = $4, hours = $5, holiday_preset = $6, include_customary = $7 WHERE id = $1 RETURNING id', [id, c.name, c.timezone, c.always, JSON.stringify(c.hours), c.holiday_preset, c.include_customary])
+      : await db.query('INSERT INTO business_calendars (name, timezone, always, hours, holiday_preset, include_customary) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id', [c.name, c.timezone, c.always, JSON.stringify(c.hours), c.holiday_preset, c.include_customary]);
     if (!rows[0]) throw notFound('Calendar not found');
     await db.query('DELETE FROM calendar_holidays WHERE calendar_id = $1', [rows[0].id]);
     for (const h of holidays) await db.query('INSERT INTO calendar_holidays (calendar_id, day, name) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [rows[0].id, h.day, h.name]);

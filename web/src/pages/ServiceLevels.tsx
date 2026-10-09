@@ -7,7 +7,7 @@ import { useSession } from '../session';
 import { duration } from '../format';
 
 interface Sla { id: number; name: string; description: string; calendar_id: number; calendar: string; response_minutes: Record<string, number>; resolution_minutes: Record<string, number>; availability_target: number | null; is_default: boolean; services: number }
-interface Cal { id: number; name: string; timezone: string; always: boolean; hours: Record<string, [number, number][]>; holiday_preset: string | null; holidays: { day: string; name: string }[] }
+interface Cal { id: number; name: string; timezone: string; always: boolean; include_customary: boolean; hours: Record<string, [number, number][]>; holiday_preset: string | null; holidays: { day: string; name: string }[] }
 interface Service { ref: string; name: string; status: string; criticality: number; team: string; owner: string | null; user_description: string; how_to_get_help: string; in_catalogue: boolean; sla: string | null; support_hours: string | null; response_minutes: Record<string, number> | null; resolution_minutes: Record<string, number> | null; open_incidents: number }
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -161,7 +161,7 @@ function Calendars() {
         {data?.map((c) => (
           <button key={c.id} className="card group-card" disabled={!manager} onClick={() => setEditing(c)}>
             <strong>{c.name}</strong>
-            <span className="muted small">{c.timezone}{c.holiday_preset === 'SE' && ' · Swedish public holidays'}{c.holidays.length > 0 && ` · ${c.holidays.length} extra closed days`}</span>
+            <span className="muted small">{c.timezone}{c.holiday_preset === 'SE' && ` · Swedish public holidays${c.include_customary ? ' and customary days off' : ''}`}{c.holidays.length > 0 && ` · ${c.holidays.length} extra closed days`}</span>
             <span className="small">{c.always ? 'Around the clock' : DAYS.map((d, n) => (c.hours[n + 1]?.length ? `${d} ${c.hours[n + 1].map(([s, e]) => `${hm(s)}–${hm(e)}`).join(', ')}` : null)).filter(Boolean).join(' · ') || 'Always closed'}</span>
           </button>
         ))}
@@ -174,7 +174,7 @@ function Calendars() {
 function CalendarEditor({ cal, onClose, onDone }: { cal: Partial<Cal>; onClose: () => void; onDone: () => void }) {
   const toText = (v: [number, number][] | undefined) => (v ?? []).map(([s, e]) => `${hm(s)}-${hm(e)}`).join(', ');
   const [form, setForm] = useState({
-    name: cal.name ?? '', timezone: cal.timezone ?? 'Europe/Stockholm', always: !!cal.always, holiday_preset: cal.holiday_preset ?? '',
+    name: cal.name ?? '', timezone: cal.timezone ?? 'Europe/Stockholm', always: !!cal.always, holiday_preset: cal.holiday_preset ?? '', include_customary: cal.include_customary ?? true,
     hours: Object.fromEntries(DAYS.map((_, n) => [n + 1, toText(cal.hours?.[n + 1])])) as Record<number, string>,
     holidays: (cal.holidays ?? []).map((h) => `${h.day} ${h.name}`).join('\n'),
   });
@@ -189,7 +189,7 @@ function CalendarEditor({ cal, onClose, onDone }: { cal: Partial<Cal>; onClose: 
     e.preventDefault();
     try {
       const body = {
-        name: form.name, timezone: form.timezone, always: form.always, holiday_preset: form.holiday_preset || null,
+        name: form.name, timezone: form.timezone, always: form.always, holiday_preset: form.holiday_preset || null, include_customary: form.include_customary,
         hours: Object.fromEntries(Object.entries(form.hours).map(([d, t]) => [d, parse(t)]).filter(([, v]) => (v as unknown[]).length)),
         holidays: form.holidays.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => ({ day: l.slice(0, 10), name: l.slice(11).trim() })),
       };
@@ -210,6 +210,7 @@ function CalendarEditor({ cal, onClose, onDone }: { cal: Partial<Cal>; onClose: 
           <>
             {DAYS.map((d, n) => <label key={d}>{d}<input placeholder="closed" value={form.hours[n + 1]} onChange={(e) => setForm({ ...form, hours: { ...form.hours, [n + 1]: e.target.value } })} /></label>)}
             <label>Public holidays<select value={form.holiday_preset} onChange={(e) => setForm({ ...form, holiday_preset: e.target.value })}><option value="">None</option><option value="SE">Sweden</option></select></label>
+            {form.holiday_preset === 'SE' && <label className="check"><input type="checkbox" checked={form.include_customary} onChange={(e) => setForm({ ...form, include_customary: e.target.checked })} /> Also closed on customary days off (Julafton, Nyårsafton, Midsommarafton – not public holidays)</label>}
             <label className="full">Extra closed days <span className="muted small">(one per line: 2026-12-23 Inventory)</span><textarea rows={3} value={form.holidays} onChange={(e) => setForm({ ...form, holidays: e.target.value })} /></label>
           </>
         )}

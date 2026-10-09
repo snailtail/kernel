@@ -52,6 +52,7 @@ test('Swedish holidays include the movable ones', () => {
   assert.equal(days['Kristi himmelsfärdsdag'], '2026-05-14');
   assert.equal(days['Midsommarafton'], '2026-06-19');
   assert.equal(days['Alla helgons dag'], '2026-10-31');
+  assert.deepEqual(swedishHolidays(2026).filter((h) => h.customary).map((h) => h.name), ['Midsommarafton', 'Julafton', 'Nyårsafton']);
   assert.equal(Object.fromEntries(swedishHolidays(2027).map((h) => [h.name, h.day]))['Midsommarafton'], '2027-06-25');
   assert.equal(Object.fromEntries(swedishHolidays(2027).map((h) => [h.name, h.day]))['Alla helgons dag'], '2027-11-06');
 });
