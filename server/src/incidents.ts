@@ -15,6 +15,7 @@ import { logIncident } from './incident-log.js';
 import { recomputeSla, slaClock, slaOnTransition } from './sla.js';
 import { incidentPeople, namePeople, personRefSchema, resolvePerson } from './people.js';
 import { incidentArticles, suggestArticles } from './knowledge.js';
+import { checkAssigneeInTeam, defaultTeamFor, nameTeams, notifyTeamQueue, pickAssignee, validTeam } from './teams.js';
 import { managers, notify } from './notifications.js';
 import { pool } from './db.js';
 
@@ -40,6 +41,7 @@ export const incidentFields = {
   urgency: level,
   category_id: z.number().int().nullable(),
   assignment_group: z.string().trim().max(100),
+  team_id: z.number().int().nullable(),
   assignee_id: z.number().int().nullable(),
   reporter: z.string().trim().max(200),
   is_major: z.boolean(),
@@ -63,6 +65,8 @@ export const listIncidentsSchema = z.object({
   assignee: z.union([z.literal('me'), z.literal('none'), z.coerce.number().int()]).optional(),
   major: z.coerce.boolean().optional(),
   ci: z.string().max(30).optional(),
+  /** A team id, or "mine" for the teams the user belongs to. */
+  team: z.union([z.literal('mine'), z.coerce.number().int()]).optional(),
   /** Open incidents whose resolution target falls within this many minutes (or is already breached). */
   breaching_within: z.coerce.number().int().min(0).max(100_000).optional(),
   limit: z.coerce.number().int().min(1).max(500).default(200),
@@ -122,6 +126,8 @@ export async function listIncidents(user: User, f: z.infer<typeof listIncidentsS
   else if (f.assignee === 'none') where.push('i.assignee_id IS NULL');
   else if (typeof f.assignee === 'number') add('i.assignee_id = ?', f.assignee);
   if (f.major) where.push('i.is_major');
+  if (f.team === 'mine') add('i.team_id IN (SELECT team_id FROM team_members WHERE user_id = ?)', user.id);
+  else if (typeof f.team === 'number') add('i.team_id = ?', f.team);
   if (f.breaching_within !== undefined) {
     where.push("i.status NOT IN ('resolved', 'closed') AND i.sla_paused_since IS NULL");
     add("(i.resolution_breached_at IS NOT NULL OR i.resolution_due_at < now() + ? * interval '1 minute')", f.breaching_within);
@@ -133,7 +139,7 @@ export async function listIncidents(user: User, f: z.infer<typeof listIncidentsS
   }
   params.push(f.limit);
   const { rows } = await query(
-    `SELECT i.id, i.ref, i.title, i.status, i.priority, i.impact, i.urgency, i.is_major, i.assignment_group, a.display_name AS assignee,
+    `SELECT i.id, i.ref, i.title, i.status, i.priority, i.impact, i.urgency, i.is_major, i.assignment_group, i.team_id, a.display_name AS assignee,
             i.source, i.created_at, i.updated_at, i.resolved_at, p.ref AS problem_ref, i.resolution_due_at,
             CASE WHEN i.sla_id IS NULL OR i.resolution_due_at IS NULL THEN NULL
                  WHEN i.resolution_breached_at IS NOT NULL THEN 'breached'
@@ -198,7 +204,7 @@ export async function getIncident(user: User, ref: string) {
   // Affected users are only asked for when a service involved has end users (#39: keep it optional).
   const refs = [...cis.rows.map((c) => c.ref), ...affected.affected_services.map((s) => s.ref)];
   const { rows: endUsers } = await query('SELECT 1 FROM configuration_items WHERE ref = ANY($1) AND has_end_users LIMIT 1', [refs]);
-  const detail = { ...i, ...affected, activity: await namePeople(activity.rows), links: links.rows, known_errors: knownErrors.rows, alerts: alerts.rows, possible_change_causes: possibleChanges, sla, ...people, asks_affected_users: !!endUsers[0] || people.affected_people.length > 0, articles_used: articlesUsed, suggested_articles: suggested };
+  const detail = { ...i, ...affected, activity: await nameTeams(await namePeople(activity.rows)), links: links.rows, known_errors: knownErrors.rows, alerts: alerts.rows, possible_change_causes: possibleChanges, sla, ...people, asks_affected_users: !!endUsers[0] || people.affected_people.length > 0, articles_used: articlesUsed, suggested_articles: suggested };
   return { type: 'incident', ...detail, url: incidentUrl(i.ref), next_steps: incidentGuidance(detail) };
 }
 
@@ -264,6 +270,16 @@ export async function insertIncident(
   extra: { event_rule_id?: number; event_group_key?: string } = {},
 ) {
   const values: Record<string, unknown> = { ...fields, ...extra, source, created_by: actorId };
+  // Teams (#42): the named team, else the team that supports the CI or its service; round robin if the team uses it.
+  await validTeam(db, fields.team_id);
+  if (!values.team_id && !String(fields.assignment_group ?? '').trim()) values.team_id = (await defaultTeamFor(db, ciIds)) ?? undefined;
+  if (!values.team_id && String(fields.assignment_group ?? '').trim()) {
+    const { rows: named } = await db.query('SELECT id FROM teams WHERE lower(name) = lower($1) AND active', [String(fields.assignment_group).trim()]);
+    values.team_id = named[0]?.id;
+  }
+  if (values.team_id && !values.assignee_id) values.assignee_id = (await pickAssignee(db, values.team_id as number)) ?? undefined;
+  await checkAssigneeInTeam(db, values.team_id as number | undefined, values.assignee_id as number | undefined);
+  if (values.assignee_id) fields = { ...fields, assignee_id: values.assignee_id as number };
   const cols = Object.keys(values).filter((k) => values[k] !== undefined);
   const { rows } = await db.query(
     `INSERT INTO incidents (${cols.join(', ')}) VALUES (${cols.map((_, n) => `$${n + 1}`).join(', ')}) RETURNING id, ref`,
@@ -278,13 +294,15 @@ export async function insertIncident(
   if (fields.assignee_id) {
     await notify(db, { users: [fields.assignee_id], event: 'assigned', ref: rows[0].ref, title: fields.title, summary: 'An incident was assigned to you.', path, dedupe: `assigned:${rows[0].ref}:${Date.now()}`, actorId });
   }
+  else if (values.team_id) await notifyTeamQueue(db, values.team_id as number, { ref: rows[0].ref, title: fields.title, path }, actorId);
   if (fields.is_major) {
     await notify(db, { users: await managers(db), event: 'major_incident', ref: rows[0].ref, title: fields.title, summary: 'A major incident was declared.', path, dedupe: `major:${rows[0].ref}`, actorId });
   }
   return rows[0] as { id: number; ref: string };
 }
 
-export async function updateIncident(user: User, ref: string, { base, caller, ...input }: z.infer<typeof updateIncidentSchema>) {
+export async function updateIncident(user: User, ref: string, { base, caller, ...rawInput }: z.infer<typeof updateIncidentSchema>) {
+  let input = rawInput;
   authorize(user, 'incident.update');
   await tx(async (db) => {
     const current = await loadIncident(db, ref);
@@ -303,6 +321,14 @@ export async function updateIncident(user: User, ref: string, { base, caller, ..
     if (current.status === 'closed') throw conflict('A closed incident cannot be edited');
     if (input.is_major !== undefined && input.is_major !== current.is_major) authorize(user, 'incident.flag_major');
     await validateRefs(db, input);
+    await validTeam(db, input.team_id);
+    // Moving to another team hands the incident to that team's queue unless the person is in it too.
+    const teamAfter = input.team_id !== undefined ? input.team_id : current.team_id;
+    if (input.team_id !== undefined && input.team_id !== current.team_id && input.assignee_id === undefined && current.assignee_id) {
+      const { rows: member } = await db.query('SELECT 1 FROM team_members WHERE team_id = $1 AND user_id = $2', [input.team_id, current.assignee_id]);
+      if (input.team_id && !member[0]) input = { ...input, assignee_id: null };
+    }
+    await checkAssigneeInTeam(db, teamAfter, input.assignee_id !== undefined ? input.assignee_id : current.assignee_id);
     const changed = Object.entries(input).filter(([k, v]) => v !== undefined && current[k] !== v);
     if (!changed.length) return;
     await db.query(`UPDATE incidents SET ${changed.map(([k], n) => `${k} = $${n + 2}`).join(', ')} WHERE id = $1`, [current.id, ...changed.map(([, v]) => v)]);
@@ -317,7 +343,14 @@ export async function updateIncident(user: User, ref: string, { base, caller, ..
     if ((input.impact !== undefined && input.impact !== current.impact) || (input.urgency !== undefined && input.urgency !== current.urgency)) {
       await recomputeSla(db, current.id, { reason: 'Priority changed' });
     }
-    await logIncident(db, current.id, user.id, 'update', `Updated ${changed.map(([k]) => k).join(', ')}`, Object.fromEntries(changed.map(([k, v]) => [k, { from: current[k] ?? null, to: v }])));
+    const teamChanged = input.team_id !== undefined && input.team_id !== current.team_id;
+    if (teamChanged && input.team_id && !(input.assignee_id ?? (input.assignee_id === null ? null : current.assignee_id))) {
+      await notifyTeamQueue(db, input.team_id, { ref: current.ref, title: input.title ?? current.title, path }, user.id);
+    }
+    // Histories name teams by id ("team #3") and show the current name when read.
+    const rest = changed.filter(([k]) => k !== 'team_id');
+    if (teamChanged) await logIncident(db, current.id, user.id, 'update', input.team_id ? `Moved to team #${input.team_id}` : 'Removed from its team', { team_id: { from: current.team_id ?? null, to: input.team_id } });
+    if (rest.length) await logIncident(db, current.id, user.id, 'update', `Updated ${rest.map(([k]) => k).join(', ')}`, Object.fromEntries(rest.map(([k, v]) => [k, { from: current[k] ?? null, to: v }])));
   });
   return getIncident(user, ref);
 }

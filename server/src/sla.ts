@@ -10,6 +10,7 @@ import { query, tx } from './db.js';
 import { conflict, notFound } from './errors.js';
 import { logIncident } from './incident-log.js';
 import { managers, notify } from './notifications.js';
+import { teamMembers } from './teams.js';
 import { moduleEnabled } from './modules.js';
 import { authorize } from './policy.js';
 import type { Db } from './problems.js';
@@ -233,8 +234,11 @@ export async function checkSlaEvents(now = Date.now()) {
           if (!rowCount) continue;
           fired++;
           if (kind === 'breach') await db.query(`UPDATE incidents SET ${target}_breached_at = now() WHERE id = $1 AND ${target}_breached_at IS NULL`, [i.id]);
+          // Escalation (#42): the assignee; the team lead when no one is assigned (and on a breach); else the managers.
+          const leads = i.team_id ? await teamMembers(db, i.team_id, 'lead') : [];
+          const recipients: number[] = i.assignee_id ? [i.assignee_id as number, ...(kind === 'breach' ? leads : [])] : leads.length ? leads : await managers(db);
           await notify(db, {
-            users: i.assignee_id ? [i.assignee_id] : await managers(db), event: kind === 'breach' ? 'sla_breach' : 'sla_warning', ref: i.ref, title: i.title,
+            users: [...new Set(recipients)], event: kind === 'breach' ? 'sla_breach' : 'sla_warning', ref: i.ref, title: i.title,
             summary: `${target === 'response' ? 'Response' : 'Resolution'} target ${kind === 'breach' ? 'breached' : 'at risk (75 % used)'}.`,
             path: `/incidents/${i.ref}`, dedupe: `sla:${kind}:${i.ref}:${target}`,
           });
@@ -287,7 +291,8 @@ export async function slaCompliance(from: string, to: string) {
   const [overall, byPriority, byGroup, byService] = await Promise.all([
     query(`SELECT ${metrics} ${base}`, [from, to]),
     query(`SELECT i.priority, ${metrics} ${base} GROUP BY i.priority ORDER BY i.priority`, [from, to]),
-    query(`SELECT coalesce(nullif(i.assignment_group, ''), 'Unassigned') AS name, ${metrics} ${base} GROUP BY 1 ORDER BY 2 DESC LIMIT 20`, [from, to]),
+    // Per team by id (#42): renamed teams keep their history; incidents without a team are "No team".
+    query(`SELECT i.team_id, coalesce(t.name, 'No team') AS name, ${metrics} ${base.replace('FROM incidents i', 'FROM incidents i LEFT JOIN teams t ON t.id = i.team_id')} GROUP BY i.team_id, t.name ORDER BY 3 DESC LIMIT 20`, [from, to]),
     query(
       `SELECT svc.name, ${metrics} FROM incidents i
        JOIN LATERAL (SELECT c.name FROM incident_cis x JOIN configuration_items c ON c.id = x.ci_id WHERE x.incident_id = i.id ORDER BY c.class DESC, c.criticality LIMIT 1) svc ON true

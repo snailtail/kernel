@@ -23,6 +23,7 @@ import * as flow from './flow.js';
 import * as people from './people.js';
 import * as attachments from './attachments.js';
 import * as knowledge from './knowledge.js';
+import * as teams from './teams.js';
 import * as generic from './generic.js';
 import { typeForRef } from './records.js';
 import { GUIDES, guideMarkdown } from './methods.js';
@@ -129,6 +130,7 @@ function buildServer(user: User, scopes?: string[]) {
     transition_ci: 'ci.manage', upsert_cis: 'ci.ingest',
     link_ci_to_problem: 'problem.link', unlink_ci_from_problem: 'problem.link',
     list_attachments: 'meta.read', read_attachment: 'meta.read', add_attachment: 'attachment.add',
+    list_teams: 'team.read',
     search_knowledge: 'article.read', get_article: 'article.read', create_article: 'article.write', update_article: 'article.write', transition_article: 'article.write', use_article: 'incident.update',
     search_people: 'person.read', get_person: 'person.read', add_affected_person: 'incident.update',
     get_process_map: 'meta.read', get_health_tips: 'meta.read',
@@ -407,7 +409,8 @@ function buildServer(user: User, scopes?: string[]) {
     impact: z.number().int().min(1).max(3).describe('1 high … 3 low'),
     urgency: z.number().int().min(1).max(3).describe('1 high … 3 low'),
     category_id: z.number().int().nullable(),
-    assignment_group: z.string(),
+    assignment_group: z.string().describe('Team name (compatibility); prefer team_id from list_teams'),
+    team_id: z.number().int().nullable().describe('Team (from list_teams); work on a CI goes to the team that supports it by default'),
     assignee_id: z.number().int().nullable(),
     reporter: z.string().describe('Who reported it'),
     is_major: z.boolean().describe('Major incident (problem managers only)'),
@@ -418,7 +421,7 @@ function buildServer(user: User, scopes?: string[]) {
   const incidentForAgent = (i: any) => ({
     notice: incidentNotice,
     ref: i.ref, url: i.url, status: i.status, priority: i.priority, impact: i.impact, urgency: i.urgency, is_major: i.is_major,
-    source: i.source, assignee: i.assignee, assignment_group: i.assignment_group, category: i.category,
+    source: i.source, assignee: i.assignee, assignment_group: i.assignment_group, team_id: i.team_id, team_hops: i.team_hops, category: i.category,
     created_at: i.created_at, responded_at: i.responded_at, resolved_at: i.resolved_at, reopen_count: i.reopen_count,
     resolution_code: i.resolution_code, problem: i.problem_ref ? { ref: i.problem_ref, status: i.problem_status } : null,
     affected_cis: i.affected_cis.map((c: any) => ({ ref: c.ref, type: c.type, ci_type: c.ci_type, criticality: c.criticality, status: c.status })),
@@ -498,6 +501,11 @@ function buildServer(user: User, scopes?: string[]) {
       const p: any = await incidents.createProblemFromIncident(user, ref, incidents.problemFromIncidentSchema.parse(overrides));
       return { ref: p.ref, url: p.url, status: p.status, affected_cis: p.affected_cis.map((c: any) => c.ref) };
     },
+  );
+
+  // ---- Teams (#42) ----
+  tool('list_teams', "Teams (assignment groups): members, the services and CIs they support, and how much open and unassigned work they have. Use a team's id as team_id on incidents, problems and changes.", {}, true, async () =>
+    (await teams.listTeams(user)).filter((t: any) => t.active).map((t: any) => ({ id: t.id, name: t.name, members: t.members.map((m: any) => ({ id: m.user_id, name: m.name, role: m.role })), supports: t.supports.map((c: any) => c.ref), open_incidents: t.open_incidents, unassigned: t.unassigned })),
   );
 
   // ---- Knowledge (#47) ----

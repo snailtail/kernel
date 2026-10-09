@@ -11,6 +11,8 @@ import { useSession } from '../session';
 interface MyWork {
   problems: { ref: string; title: string; status: Status; priority: number; updated_at: string; url: string }[];
   incidents: { ref: string; title: string; status: string; priority: number; is_major: boolean; created_at: string }[];
+  teams?: { id: number; name: string; role: string; unassigned: number }[];
+  team_queue?: { ref: string; title: string; status: string; priority: number; is_major: boolean; created_at: string; team: string }[];
   change_votes: { ref: string; title: string; change_type: string; planned_start: string | null }[];
   changes: { ref: string; title: string; status: string; change_type: string; planned_start: string | null }[];
   actions: Action[];
@@ -28,7 +30,7 @@ export function MyWorkPage() {
     await api.post<ProblemDetail>(`/api/approvals/${id}/${approve ? 'approve' : 'reject'}`, {});
     reload();
   };
-  const nothing = !data.problems.length && !data.incidents.length && !data.change_votes.length && !data.changes.length && !data.actions.length && !data.decisions.length && !data.approvals.length;
+  const nothing = !data.problems.length && !data.incidents.length && !data.team_queue?.length && !data.change_votes.length && !data.changes.length && !data.actions.length && !data.decisions.length && !data.approvals.length;
   return (
     <>
       <header className="page-head">
@@ -111,6 +113,20 @@ export function MyWorkPage() {
               <li key={i.ref}>
                 <div><Link to={`/incidents/${i.ref}`} className="mono">{i.ref}</Link> <Link to={`/incidents/${i.ref}`} className="work-title">{i.title}</Link></div>
                 <span className="work-meta">{i.is_major && <span className="badge major">Major</span>}<PriorityBadge priority={i.priority} /><span className="muted small">{i.status.replace('_', ' ')}</span></span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {!!data.team_queue?.length && (
+        <section className="card">
+          <h2>Waiting in my teams' queues <span className="count">{data.team_queue.length}</span> <Link to="/teams" className="btn-link small">Teams</Link></h2>
+          <ul className="work-list">
+            {data.team_queue.map((i) => (
+              <li key={i.ref}>
+                <div><Link to={`/incidents/${i.ref}`} className="mono">{i.ref}</Link> <Link to={`/incidents/${i.ref}`} className="work-title">{i.title}</Link></div>
+                <span className="work-meta">{i.is_major && <span className="badge major">Major</span>}<PriorityBadge priority={i.priority} /><span className="muted small">{i.team}</span></span>
               </li>
             ))}
           </ul>

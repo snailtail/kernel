@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { api, type Guidance } from '../api';
 import { GuidePanel } from '../components/Guide';
 import { richPaste } from '../components/RichPaste';
+import { TeamAndAssignee, useTeams } from './Teams';
 import { ArticleSuggestions, IncidentKnowledgePanel, type ArticleRow } from './Knowledge';
 import { AttachmentsPanel } from '../components/Attachments';
 import { IncidentPeoplePanel, PersonPicker, type PersonLite, type PersonRef } from '../components/People';
@@ -23,7 +24,7 @@ interface IncidentRow {
   sla_state?: string | null; resolution_due_at?: string | null;
 }
 interface Incident extends IncidentRow {
-  description: string; impact: number; urgency: number; category_id: number | null; category: string | null; assignee_id: number | null;
+  description: string; impact: number; urgency: number; category_id: number | null; category: string | null; assignee_id: number | null; team_id: number | null; team_hops: number;
   reporter: string; hold_reason: string; resolution_code: string | null; resolution: string; reopen_count: number;
   responded_at: string | null; closed_at: string | null; problem_title: string | null; problem_status: string | null;
   affected_cis: AffectedCi[]; affected_services: AffectedService[]; impact_hint: ImpactHint | null; impact_incomplete: boolean;
@@ -51,6 +52,7 @@ export function IncidentStatusBadge({ status }: { status: IncidentStatus }) {
 }
 
 export function IncidentsPage() {
+  const teams = useTeams();
   const { user } = useSession();
   const [params, setParams] = useSearchParams();
   const [q, setQ] = useState(params.get('q') ?? '');
@@ -82,6 +84,12 @@ export function IncidentsPage() {
         <select value={params.get('assignee') ?? ''} onChange={(e) => set('assignee', e.target.value)}>
           <option value="">Anyone</option><option value="me">Assigned to me</option><option value="none">Unassigned</option>
         </select>
+        {teams.length > 0 && (
+          <select value={params.get('team') ?? ''} onChange={(e) => set('team', e.target.value)} aria-label="Team">
+            <option value="">Any team</option><option value="mine">My teams</option>
+            {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        )}
         <label className="check"><input type="checkbox" checked={params.get('major') === 'true'} onChange={(e) => set('major', e.target.checked ? 'true' : '')} /> Major only</label>
       </div>
       <section className={`card flush ${loading ? 'is-loading' : ''}`}>
@@ -115,7 +123,8 @@ export function IncidentsPage() {
 
 function NewIncident({ onClose, onDone }: { onClose: () => void; onDone: (ref: string) => void }) {
   const { meta } = useSession();
-  const [form, setForm] = useState({ title: '', description: '', impact: 3, urgency: 3, category_id: '', assignee_id: '', assignment_group: '', reporter: '', cis: '' });
+  const [form, setForm] = useState({ title: '', description: '', impact: 3, urgency: 3, category_id: '', assignee_id: '', assignment_group: '', team_id: '', reporter: '', cis: '' });
+  const teams = useTeams();
   const [more, setMore] = useState(false);
   const [caller, setCaller] = useState<PersonRef | null>(null);
   const { data: templates } = useApi<{ id: number; name: string; fields: Record<string, any>; active: boolean }[]>('/api/templates?kind=incident');
@@ -133,7 +142,7 @@ function NewIncident({ onClose, onDone }: { onClose: () => void; onDone: (ref: s
       const created = await api.post<Incident>('/api/incidents', {
         title: form.title, description: form.description, impact: Number(form.impact), urgency: Number(form.urgency),
         category_id: form.category_id ? Number(form.category_id) : null, assignee_id: form.assignee_id ? Number(form.assignee_id) : null,
-        assignment_group: form.assignment_group, reporter: form.reporter,
+        ...(form.team_id ? { team_id: Number(form.team_id) } : form.assignment_group ? { assignment_group: form.assignment_group } : {}), reporter: form.reporter,
         cis: form.cis.split(/[\s,]+/).map((c) => c.trim()).filter(Boolean),
         ...(caller ? { caller: 'id' in caller ? { id: caller.id } : caller } : {}),
       });
@@ -161,12 +170,12 @@ function NewIncident({ onClose, onDone }: { onClose: () => void; onDone: (ref: s
         {meta.modules?.cmdb !== false && <label className="full">Affected CIs or services <span className="muted small">(refs, e.g. CI000012 SVC000003; shows impact and known workarounds)</span><input value={form.cis} onChange={(e) => setForm({ ...form, cis: e.target.value })} /></label>}
         <div className="full more-toggle">
           <button type="button" className="btn-link" aria-expanded={more} onClick={() => setMore(!more)}>{more ? '− Fewer details' : '+ More details'}</button>
-          {!more && <span className="muted small"> assignee, group, category, reporter – all optional</span>}
+          {!more && <span className="muted small"> team, assignee, category, reporter – all optional</span>}
         </div>
         {more && (
           <>
             <label>Assignee<select value={form.assignee_id} onChange={(e) => setForm({ ...form, assignee_id: e.target.value })}><option value="">–</option>{meta.assignees.map((a) => <option key={a.id} value={a.id}>{a.display_name}</option>)}</select></label>
-            <label>Assignment group<input value={form.assignment_group} onChange={(e) => setForm({ ...form, assignment_group: e.target.value })} /></label>
+            <label>Team<select value={form.team_id} onChange={(e) => setForm({ ...form, team_id: e.target.value, assignment_group: '' })}><option value="">{form.assignment_group ? `${form.assignment_group} (from the template)` : 'From the CI or service'}</option>{teams.filter((t) => t.active).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
             <label>Category<select value={form.category_id} onChange={(e) => setForm({ ...form, category_id: e.target.value })}><option value="">–</option>{meta.categories.filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
             <label>Reported by<input value={form.reporter} onChange={(e) => setForm({ ...form, reporter: e.target.value })} /></label>
           </>
@@ -337,9 +346,10 @@ export function IncidentPage() {
               <dd>{editable ? <select value={i.impact} onChange={(e) => save({ impact: Number(e.target.value) })}>{[1, 2, 3].map((n) => <option key={n} value={n}>{n} – {LEVEL[n]}</option>)}</select> : LEVEL[i.impact]}</dd>
               <dt>Urgency</dt>
               <dd>{editable ? <select value={i.urgency} onChange={(e) => save({ urgency: Number(e.target.value) })}>{[1, 2, 3].map((n) => <option key={n} value={n}>{n} – {LEVEL[n]}</option>)}</select> : LEVEL[i.urgency]}</dd>
-              <dt>Assignee</dt>
-              <dd>{editable ? <select value={i.assignee_id ?? ''} onChange={(e) => save({ assignee_id: e.target.value ? Number(e.target.value) : null })}><option value="">–</option>{meta.assignees.map((a) => <option key={a.id} value={a.id}>{a.display_name}</option>)}</select> : i.assignee ?? '–'}</dd>
-              <dt>Group</dt><dd>{i.assignment_group || '–'}</dd>
+              {editable
+                ? <TeamAndAssignee teamId={i.team_id} assigneeId={i.assignee_id} onTeam={(team_id) => save({ team_id })} onAssignee={(assignee_id) => save({ assignee_id })} />
+                : <><dt>Team</dt><dd>{i.assignment_group || '–'}</dd><dt>Assignee</dt><dd>{i.assignee ?? '–'}</dd></>}
+              {i.team_hops > 0 && <><dt>Reassigned</dt><dd>{i.team_hops} time{i.team_hops === 1 ? '' : 's'} between teams</dd></>}
               <dt>Category</dt>
               <dd>{editable ? <select value={i.category_id ?? ''} onChange={(e) => save({ category_id: e.target.value ? Number(e.target.value) : null })}><option value="">–</option>{meta.categories.filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select> : i.category ?? '–'}</dd>
               {i.reporter && <><dt>Reported by</dt><dd>{i.reporter}</dd></>}
