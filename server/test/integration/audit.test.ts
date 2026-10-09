@@ -62,6 +62,28 @@ describe('audit trail', { skip }, () => {
     assert.ok(verify.broken_at);
   });
 
+  test('keyed entries cannot be forged without the secret key', async () => {
+    const { hashOf } = await import('../../src/audit.js');
+    process.env.KERNEL_SECRET_KEY = 'audit-test-key-0123456789abcdefghijklmn';
+    const { pool } = await import('../../src/db.js');
+    // Start a fresh chain for this test (owner rights bypass the trigger, as an attacker with superuser would).
+    await pool.query('ALTER TABLE audit_log DISABLE TRIGGER audit_log_no_truncate');
+    await pool.query('TRUNCATE audit_log');
+    await pool.query('ALTER TABLE audit_log ENABLE TRIGGER audit_log_no_truncate');
+    await analyst.post('/api/problems', { title: 'Keyed' });
+    const last = (await pool.query('SELECT hash, hash_version FROM audit_log ORDER BY id DESC LIMIT 1')).rows[0];
+    assert.equal(last.hash_version, 2);
+    assert.equal((await admin.get('/api/audit/verify')).body.ok, true);
+    // An attacker with only database access appends an entry with a plain SHA-256 hash.
+    const row = { at: new Date().toISOString(), actor_user_id: null, actor_name: 'forger', actor_type: 'system', channel: '', token_prefix: '', ip: '', request_id: '', entity_type: 'user', entity_ref: 'admin', action: 'update', changes: {}, reason: '' };
+    await pool.query(
+      `INSERT INTO audit_log (at, actor_name, actor_type, entity_type, entity_ref, action, prev_hash, hash, hash_version) VALUES ($1, 'forger', 'system', 'user', 'admin', 'update', $2, $3, 1)`,
+      [row.at, last.hash, hashOf(last.hash, row, 1)],
+    );
+    assert.equal((await admin.get('/api/audit/verify')).body.ok, false);
+    delete process.env.KERNEL_SECRET_KEY;
+  });
+
   test('exports are audited too', async () => {
     const res = await fetch(`${k.base}/api/audit.csv?entity_type=user`, { headers: { Cookie: admin.cookie! } });
     assert.match(await res.text(), /^id,at,actor_name/);

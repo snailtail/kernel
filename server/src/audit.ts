@@ -1,5 +1,5 @@
 // The unified audit trail: every change writes an entry in the same transaction, chained by hash.
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import { z } from 'zod';
 import { currentContext } from './context.js';
 import { afterCommit, query, tx } from './db.js';
@@ -38,7 +38,21 @@ export function stableStringify(v: unknown): string {
 const canonical = (r: Record<string, unknown>) =>
   stableStringify([r.at, r.actor_user_id, r.actor_name, r.actor_type, r.channel, r.token_prefix, r.ip, r.request_id, r.entity_type, r.entity_ref, r.action, r.changes, r.reason]);
 
-export const hashOf = (prev: string, row: Record<string, unknown>) => createHash('sha256').update(prev).update(canonical(row)).digest('hex');
+/**
+ * Version 2 entries use HMAC-SHA-256 keyed from KERNEL_SECRET_KEY, so someone with only database access cannot
+ * append or rewrite entries with valid hashes. Version 1 (plain SHA-256) is used when no key is configured.
+ */
+const hmacKey = () => (process.env.KERNEL_SECRET_KEY ? createHash('sha256').update('kernel-audit-chain:' + process.env.KERNEL_SECRET_KEY).digest() : null);
+export const currentHashVersion = () => (hmacKey() ? 2 : 1);
+
+export function hashOf(prev: string, row: Record<string, unknown>, version = 1) {
+  if (version === 2) {
+    const key = hmacKey();
+    if (!key) throw new Error('KERNEL_SECRET_KEY is required to verify HMAC audit entries');
+    return createHmac('sha256', key).update(prev).update(canonical(row)).digest('hex');
+  }
+  return createHash('sha256').update(prev).update(canonical(row)).digest('hex');
+}
 
 /** Secrets never enter the audit trail, only the fact that they changed. */
 function redact(changes: Record<string, unknown>) {
@@ -72,13 +86,14 @@ export async function audit(db: Db | null, entry: AuditEntry) {
       changes: JSON.parse(JSON.stringify(redact(entry.changes ?? {}))),
       reason: entry.reason ?? '',
     };
-    const hash = hashOf(prev, row);
+    const version = currentHashVersion();
+    const hash = hashOf(prev, row, version);
     const { rows: inserted } = await client.query(
       `INSERT INTO audit_log (at, actor_user_id, actor_name, actor_type, channel, token_prefix, ip, user_agent, request_id,
-         entity_type, entity_ref, action, changes, reason, prev_hash, hash)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING id`,
+         entity_type, entity_ref, action, changes, reason, prev_hash, hash, hash_version)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING id`,
       [row.at, row.actor_user_id, row.actor_name, row.actor_type, row.channel, row.token_prefix, row.ip, ctx.userAgent, row.request_id,
-        row.entity_type, row.entity_ref, row.action, JSON.stringify(row.changes), row.reason, prev, hash],
+        row.entity_type, row.entity_ref, row.action, JSON.stringify(row.changes), row.reason, prev, hash, version],
     );
     // A copy for the SIEM / Elasticsearch (#8): no field values, which may be long or sensitive. The id and hash
     // give an external anchor, so a rewritten chain in the database can be detected against Elasticsearch.
@@ -140,24 +155,28 @@ export async function queryAudit(f: z.infer<typeof auditQuerySchema>) {
 }
 
 /** Recomputes the hash chain; returns the first broken entry, if any. */
-export async function verifyChain(): Promise<{ ok: boolean; checked: number; broken_at?: number }> {
+export async function verifyChain(): Promise<{ ok: boolean; checked: number; broken_at?: number; error?: string }> {
   let prev = GENESIS;
   let checked = 0;
   let after = 0;
+  let sawKeyed = false;
   for (;;) {
     const { rows } = await query(
-      `SELECT id, at, actor_user_id, actor_name, actor_type, channel, token_prefix, ip, request_id, entity_type, entity_ref, action, changes, reason, prev_hash, hash
+      `SELECT id, at, actor_user_id, actor_name, actor_type, channel, token_prefix, ip, request_id, entity_type, entity_ref, action, changes, reason, prev_hash, hash, hash_version
        FROM audit_log WHERE id > $1 ORDER BY id LIMIT 5000`,
       [after],
     );
     if (!rows.length) return { ok: true, checked };
     for (const r of rows) {
       const row = { ...r, at: (r.at as Date).toISOString() };
-      if (r.prev_hash !== prev || hashOf(prev, row) !== r.hash) {
+      if (r.hash_version === 2 && !hmacKey()) return { ok: false, checked, broken_at: Number(r.id), error: 'KERNEL_SECRET_KEY is needed to verify keyed entries' };
+      // A version 1 entry after keyed ones means someone appended without the key.
+      if (r.prev_hash !== prev || hashOf(prev, row, r.hash_version) !== r.hash || (r.hash_version === 1 && sawKeyed)) {
         logger.error({ event: { dataset: 'kernel.security', action: 'audit.chain_broken' }, audit_id: r.id }, 'Audit trail hash chain mismatch');
         return { ok: false, checked, broken_at: Number(r.id) };
       }
       prev = r.hash;
+      if (r.hash_version === 2) sawKeyed = true;
       checked++;
       after = Number(r.id);
     }

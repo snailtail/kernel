@@ -1,4 +1,5 @@
 import { readdir, readFile } from 'node:fs/promises';
+import { createHash, createHmac, pbkdf2Sync, randomBytes } from 'node:crypto';
 import pg from 'pg';
 import { config } from './config.js';
 
@@ -57,6 +58,16 @@ export async function tx<T>(fn: (client: pg.PoolClient) => Promise<T>): Promise<
   }
 }
 
+/** PostgreSQL SCRAM-SHA-256 password verifier (RFC 5802/7677), as stored in pg_authid. */
+export function scramVerifier(password: string, iterations = 4096) {
+  const salt = randomBytes(16);
+  const salted = pbkdf2Sync(password.normalize('NFKC'), salt, iterations, 32, 'sha256');
+  const clientKey = createHmac('sha256', salted).update('Client Key').digest();
+  const storedKey = createHash('sha256').update(clientKey).digest();
+  const serverKey = createHmac('sha256', salted).update('Server Key').digest();
+  return `SCRAM-SHA-256$${iterations}:${salt.toString('base64')}$${storedKey.toString('base64')}:${serverKey.toString('base64')}`;
+}
+
 /**
  * Creates or updates the least-privilege runtime role: data access only, read/insert-only on audit_log, no DDL,
  * no ownership (so it cannot disable the audit triggers). Idempotent; runs after every migration.
@@ -64,10 +75,12 @@ export async function tx<T>(fn: (client: pg.PoolClient) => Promise<T>): Promise<
 export async function ensureAppRole(client: pg.PoolClient | pg.Client, user: string, password: string) {
   const role = client.escapeIdentifier(user);
   await client.query(`DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = ${client.escapeLiteral(user)}) THEN CREATE ROLE ${role}; END IF; END $$`);
-  await client.query(`ALTER ROLE ${role} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD ${client.escapeLiteral(password)}`);
+  // A SCRAM verifier, not the password itself, so it never appears in PostgreSQL's statement log.
+  await client.query(`ALTER ROLE ${role} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD ${client.escapeLiteral(scramVerifier(password))}`);
   await client.query(`DO $$ BEGIN EXECUTE format('GRANT CONNECT ON DATABASE %I TO ${role}', current_database()); END $$`);
   await client.query(`GRANT USAGE ON SCHEMA public TO ${role}`);
   await client.query(`REVOKE CREATE ON SCHEMA public FROM ${role}`);
+  await client.query('REVOKE CREATE ON SCHEMA public FROM PUBLIC'); // default before PostgreSQL 15
   await client.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${role}`);
   await client.query(`GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ${role}`);
   await client.query(`REVOKE UPDATE, DELETE, TRUNCATE ON audit_log FROM ${role}`);
