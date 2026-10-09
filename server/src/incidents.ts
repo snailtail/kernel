@@ -14,6 +14,7 @@ import { recordUrl, registerRecordType, type RecordType } from './records.js';
 import { logIncident } from './incident-log.js';
 import { recomputeSla, slaClock, slaOnTransition } from './sla.js';
 import { incidentPeople, namePeople, personRefSchema, resolvePerson } from './people.js';
+import { incidentArticles, suggestArticles } from './knowledge.js';
 import { managers, notify } from './notifications.js';
 import { pool } from './db.js';
 
@@ -188,10 +189,16 @@ export async function getIncident(user: User, ref: string) {
   const possibleChanges = await possibleCausesForIncident({ created_at: i.created_at, affected_cis: cis.rows });
   const sla = await slaClock(pool, i);
   const people = await incidentPeople(i, user);
+  // Knowledge (#47): articles used to resolve it, and published ones that fit while it is open.
+  const knowledgeOn = can(user.role, 'article.read');
+  const articlesUsed = knowledgeOn ? await incidentArticles(i.id) : [];
+  const suggested = knowledgeOn && !['resolved', 'closed'].includes(i.status)
+    ? (await suggestArticles(user, `${i.title} ${i.description ?? ''}`, cis.rows.map((c: any) => c.ref), 3)).filter((a: any) => !articlesUsed.some((u: any) => u.ref === a.ref))
+    : [];
   // Affected users are only asked for when a service involved has end users (#39: keep it optional).
   const refs = [...cis.rows.map((c) => c.ref), ...affected.affected_services.map((s) => s.ref)];
   const { rows: endUsers } = await query('SELECT 1 FROM configuration_items WHERE ref = ANY($1) AND has_end_users LIMIT 1', [refs]);
-  const detail = { ...i, ...affected, activity: await namePeople(activity.rows), links: links.rows, known_errors: knownErrors.rows, alerts: alerts.rows, possible_change_causes: possibleChanges, sla, ...people, asks_affected_users: !!endUsers[0] || people.affected_people.length > 0 };
+  const detail = { ...i, ...affected, activity: await namePeople(activity.rows), links: links.rows, known_errors: knownErrors.rows, alerts: alerts.rows, possible_change_causes: possibleChanges, sla, ...people, asks_affected_users: !!endUsers[0] || people.affected_people.length > 0, articles_used: articlesUsed, suggested_articles: suggested };
   return { type: 'incident', ...detail, url: incidentUrl(i.ref), next_steps: incidentGuidance(detail) };
 }
 

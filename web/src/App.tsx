@@ -31,6 +31,8 @@ const CmdbListPage = lazy(() => import('./pages/Cmdb').then((m) => ({ default: m
 const AdminPage = lazy(() => import('./pages/Admin').then((m) => ({ default: m.AdminPage })));
 const ApiDocsPage = lazy(() => import('./pages/ApiDocs').then((m) => ({ default: m.ApiDocsPage })));
 const GuidePage = lazy(() => import('./pages/Guide').then((m) => ({ default: m.GuidePage })));
+const KnowledgePage = lazy(() => import('./pages/Knowledge').then((m) => ({ default: m.KnowledgePage })));
+const ArticlePage = lazy(() => import('./pages/Knowledge').then((m) => ({ default: m.ArticlePage })));
 const PeoplePage = lazy(() => import('./pages/People').then((m) => ({ default: m.PeoplePage })));
 const PersonPage = lazy(() => import('./pages/People').then((m) => ({ default: m.PersonPage })));
 const AuditPage = lazy(() => import('./pages/Audit').then((m) => ({ default: m.AuditPage })));
@@ -127,6 +129,7 @@ export function App() {
             <NavLink to="/problems" end>{icons.problems}Problems</NavLink>
             <NavLink to="/candidates">{icons.candidates}Candidates</NavLink>
             <NavLink to="/kedb">{icons.kedb}Known Errors</NavLink>
+            {on('knowledge') && <NavLink to="/knowledge">{icons.knowledge}Knowledge</NavLink>}
             <NavLink to="/actions">{icons.actions}Actions</NavLink>
             {on('cmdb') && <NavLink to="/cis">{icons.cmdb}CMDB</NavLink>}
             {on('incident') && <NavLink to="/people">{icons.people}People</NavLink>}
@@ -170,6 +173,8 @@ export function App() {
             <Route path="/cis" element={<CmdbListPage />} />
             <Route path="/cis/groups" element={<CiGroupsPage />} />
             <Route path="/cis/:ref" element={<CiPage />} />
+            <Route path="/knowledge" element={<KnowledgePage />} />
+            <Route path="/knowledge/:ref" element={<ArticlePage />} />
             <Route path="/people" element={<PeoplePage />} />
             <Route path="/people/:id" element={<PersonPage />} />
             <Route path="/actions" element={<ActionsPage />} />

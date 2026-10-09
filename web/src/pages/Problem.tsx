@@ -130,6 +130,16 @@ export function ProblemPage() {
           {(p.status !== 'new' || p.analyses.length > 0) && <AnalysesSection problem={p} onChange={setData} />}
           <TextSection recordRef={p.ref} title="Root cause" hint="Findings from problem analysis" value={p.root_cause} editable={editable} onSave={(v, b) => save({ root_cause: v }, { root_cause: b }, true)} proposed={p.mcp_proposed?.includes('root_cause')} onConfirm={() => confirmFields(['root_cause'])} />
           <TextSection recordRef={p.ref} title="Workaround" hint="How to reduce or eliminate the impact until resolved" value={p.workaround} editable={editable} onSave={(v, b) => save({ workaround: v }, { workaround: b }, true)} proposed={p.mcp_proposed?.includes('workaround')} onConfirm={() => confirmFields(['workaround'])} />
+          {meta.modules?.knowledge !== false && (p.status === 'known_error' || p.knowledge_article) && (
+            <section className="card kb-publish">
+              {p.knowledge_article
+                ? <span>Published as knowledge article <Link to={`/knowledge/${p.knowledge_article.ref}`} className="mono">{p.knowledge_article.ref}</Link> <span className="muted small">({p.knowledge_article.status}; it follows this problem)</span></span>
+                : <>
+                    <span>Share the workaround: publish this known error as a knowledge article. It follows the problem and is retired when it is resolved.</span>
+                    {canEdit(user) && <button className="btn" onClick={async () => { try { const a = await api.post<{ ref: string }>(`/api/problems/${p.ref}/article`, {}); setData({ ...p, knowledge_article: { ref: a.ref, status: 'published' } }); } catch (err) { alert((err as Error).message); } }}>Publish as article</button>}
+                  </>}
+            </section>
+          )}
           {(p.known_error_at || p.status === 'known_error') && <ErrorControlSection problem={p} onChange={setData} />}
           <TextSection recordRef={p.ref} title="Resolution" hint="The permanent solution, usually implemented through a change" value={p.resolution} editable={editable} onSave={(v, b) => save({ resolution: v }, { resolution: b }, true)} proposed={p.mcp_proposed?.includes('resolution')} onConfirm={() => confirmFields(['resolution'])} />
           {p.is_major && (

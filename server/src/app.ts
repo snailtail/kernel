@@ -27,6 +27,7 @@ import { setupRoutes } from './routes/setup.js';
 import { connectorRoutes } from './routes/connectors.js';
 import { peopleRoutes } from './routes/people.js';
 import { attachmentRoutes } from './routes/attachments.js';
+import { knowledgeRoutes } from './routes/knowledge.js';
 import { problemRoutes } from './routes/problems.js';
 
 declare module 'fastify' {
@@ -112,6 +113,7 @@ export async function buildApp(options: { logLevel?: string; serveWeb?: boolean 
   await app.register(connectorRoutes);
   await app.register(peopleRoutes);
   await app.register(attachmentRoutes);
+  await app.register(knowledgeRoutes);
   await app.register(mcpRoutes);
 
   app.get('/api/openapi.json', async (req) => openApiDocument(config.publicUrl ?? `${req.protocol}://${req.host}`));

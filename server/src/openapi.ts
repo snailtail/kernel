@@ -14,6 +14,7 @@ import * as slaMod from './sla.js';
 import * as notif from './notifications.js';
 import * as setupMod from './setup.js';
 import * as ppl from './people.js';
+import * as kb from './knowledge.js';
 import * as hooks from './event-hooks.js';
 import { auditQuerySchema } from './audit.js';
 import { searchSchema } from './generic.js';
@@ -131,6 +132,19 @@ export const OPERATIONS: Op[] = [
   { method: 'get', path: '/api/templates', tag: 'Reference data', summary: 'Templates for new incidents and problems' },
   { method: 'post', path: '/api/templates', tag: 'Reference data', summary: 'Create a template (problem managers)', body: setupMod.templateSchema },
   { method: 'put', path: '/api/templates/:id', tag: 'Reference data', summary: 'Update a template', body: setupMod.templateSchema },
+  { method: 'get', path: '/api/articles', tag: 'Knowledge', summary: 'Search knowledge articles (published by default; drafts for roles that write articles)', query: kb.listArticlesSchema },
+  { method: 'post', path: '/api/articles', tag: 'Knowledge', summary: 'Draft an article', body: kb.createArticleSchema },
+  { method: 'get', path: '/api/articles/:ref', tag: 'Knowledge', summary: 'An article with its CIs, history, feedback and where it was used' },
+  { method: 'patch', path: '/api/articles/:ref', tag: 'Knowledge', summary: 'Update an article (articles that follow a known error change with the problem)', body: kb.updateArticleSchema },
+  { method: 'post', path: '/api/articles/:ref/transition', tag: 'Knowledge', summary: 'Publish, retire or return an article to draft', body: kb.transitionArticleSchema },
+  { method: 'post', path: '/api/articles/:ref/comments', tag: 'Knowledge', summary: 'Add a note to an article' },
+  { method: 'post', path: '/api/articles/:ref/links', tag: 'Knowledge', summary: 'Say which CI or service the article applies to' },
+  { method: 'delete', path: '/api/articles/:ref/links/:ci', tag: 'Knowledge', summary: 'Remove a CI or service from an article' },
+  { method: 'post', path: '/api/articles/:ref/feedback', tag: 'Knowledge', summary: 'Was this helpful? (once per person; can be changed)' },
+  { method: 'get', path: '/api/knowledge/suggest', tag: 'Knowledge', summary: 'Published articles that fit an incident being logged (?text=&cis=)' },
+  { method: 'post', path: '/api/problems/:ref/article', tag: 'Knowledge', summary: 'Publish a known error as an article that follows the problem and retires when it is resolved' },
+  { method: 'post', path: '/api/incidents/:ref/article', tag: 'Knowledge', summary: "Draft a troubleshooting article from an incident's resolution" },
+  { method: 'post', path: '/api/incidents/:ref/articles-used', tag: 'Knowledge', summary: 'Record that an article was used to resolve the incident' },
   { method: 'get', path: '/api/admin/ai-data', tag: 'Administration', summary: 'What attachments may be sent to AI agents through MCP' },
   { method: 'put', path: '/api/admin/ai-data', tag: 'Administration', summary: 'Allow or refuse images and flagged text for AI agents (with a reason)' },
   { method: 'get', path: '/api/records/:ref/attachments', tag: 'Attachments', summary: 'Attachments of a record (problem, incident, change, CI)' },
