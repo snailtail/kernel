@@ -13,6 +13,7 @@ import { insertIncident, logIncident } from './incidents.js';
 import { slaOnTransition } from './sla.js';
 import type { Db } from './problems.js';
 import { logger } from './log.js';
+import { moduleEnabled } from './modules.js';
 import { authorize } from './policy.js';
 
 export const SEVERITIES = ['info', 'warning', 'minor', 'major', 'critical'] as const;
@@ -418,7 +419,8 @@ async function processOne(db: Db, source: string, ciSourceSystem: string, e: Nor
   if (fresh && hasIncident) {
     await logIncident(db, alert.incident_id, null, 'link', `Alert fired again: ${e.check}`, { kind: 'event', alert_id: alert.id });
   }
-  if (!alert.suppressed && !hasIncident) {
+  // Rules only open incidents while the incident module is on (#36); alerts are still recorded.
+  if (!alert.suppressed && !hasIncident && moduleEnabled('incident')) {
     const facts: AlertFacts = { severity: alert.severity, source, check_key: e.check, count: alert.count, ci };
     const rule = rules.find((r) => ruleMatches(r.conditions, facts));
     if (rule) {
@@ -467,7 +469,7 @@ export async function purgeEvents() {
 }
 
 export function startEventWorker(log: (msg: string) => void) {
-  setInterval(() => autoResolveIncidents().catch((err) => log(`event auto-resolve failed: ${err.message}`)), 60_000).unref();
+  setInterval(() => moduleEnabled('event') && moduleEnabled('incident') && autoResolveIncidents().catch((err) => log(`event auto-resolve failed: ${err.message}`)), 60_000).unref();
   setInterval(() => purgeEvents().catch((err) => log(`event purge failed: ${err.message}`)), 3600_000).unref();
 }
 

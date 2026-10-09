@@ -23,6 +23,7 @@ import { SessionContext, canEdit, isManager } from './session';
 const ChangesPage = lazy(() => import('./pages/Changes').then((m) => ({ default: m.ChangesPage })));
 const ChangePage = lazy(() => import('./pages/Changes').then((m) => ({ default: m.ChangePage })));
 const ServiceLevelsPage = lazy(() => import('./pages/ServiceLevels').then((m) => ({ default: m.ServiceLevelsPage })));
+const SetupPage = lazy(() => import('./pages/Setup').then((m) => ({ default: m.SetupPage })));
 const EventsPage = lazy(() => import('./pages/Events').then((m) => ({ default: m.EventsPage })));
 const CiGroupsPage = lazy(() => import('./pages/Cmdb').then((m) => ({ default: m.CiGroupsPage })));
 const CiPage = lazy(() => import('./pages/Cmdb').then((m) => ({ default: m.CiPage })));
@@ -94,6 +95,8 @@ export function App() {
     );
   }
 
+  /** Switched-off modules disappear from the navigation (#36). */
+  const on = (m: keyof Meta['modules']) => meta?.modules?.[m] !== false;
   return (
     <SessionContext.Provider value={{ user, meta, reloadMeta, logout, setPreferences }}>
       <ReauthPrompt />
@@ -116,14 +119,14 @@ export function App() {
           <nav>
             <NavLink to="/" end>{icons.actions}My work</NavLink>
             <NavLink to="/dashboard">{icons.dashboard}Dashboard</NavLink>
-            <NavLink to="/events">{icons.events}Events</NavLink>
-            <NavLink to="/incidents">{icons.incidents}Incidents</NavLink>
-            <NavLink to="/changes">{icons.changes}Changes</NavLink>
+            {on('event') && <NavLink to="/events">{icons.events}Events</NavLink>}
+            {on('incident') && <NavLink to="/incidents">{icons.incidents}Incidents</NavLink>}
+            {on('change') && <NavLink to="/changes">{icons.changes}Changes</NavLink>}
             <NavLink to="/problems" end>{icons.problems}Problems</NavLink>
             <NavLink to="/candidates">{icons.candidates}Candidates</NavLink>
             <NavLink to="/kedb">{icons.kedb}Known Errors</NavLink>
             <NavLink to="/actions">{icons.actions}Actions</NavLink>
-            <NavLink to="/cis">{icons.cmdb}CMDB</NavLink>
+            {on('cmdb') && <NavLink to="/cis">{icons.cmdb}CMDB</NavLink>}
             <NavLink to="/review">{icons.review}Review</NavLink>
             <NavLink to="/reports">{icons.reports}Reports</NavLink>
             {canEdit(user) && <NavLink to="/problems/new" className="nav-cta">{icons.plus}Log problem</NavLink>}
@@ -153,6 +156,7 @@ export function App() {
             <Route path="/problems/:ref/print" element={<ProblemPrintPage />} />
             <Route path="/candidates" element={<CandidatesPage />} />
             <Route path="/kedb" element={<KedbPage />} />
+            <Route path="/setup" element={<SetupPage />} />
             <Route path="/events" element={<EventsPage />} />
             <Route path="/notifications" element={<NotificationsPage />} />
             <Route path="/services" element={<ServiceLevelsPage />} />

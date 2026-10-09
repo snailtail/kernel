@@ -1,8 +1,9 @@
 // The one authorisation layer: what each role may do, deny by default. Routes, services and MCP all ask can() /
 // authorize(); there are no ad hoc role checks elsewhere. Object-level scoping (teams, restricted records) comes
 // with #53 and will extend can() with the resource.
-import { forbidden } from './errors.js';
+import { forbidden, notFound } from './errors.js';
 import type { Role } from './workflow.js';
+import { actionEnabled, moduleEnabled, moduleOfAction, MODULES } from './modules.js';
 
 export const ACTIONS = [
   // Reading
@@ -45,11 +46,14 @@ const MESSAGES: Partial<Record<Action, string>> = {
 };
 
 export function can(role: Role, action: Action): boolean {
-  return PERMISSIONS[role]?.has(action) ?? false;
+  return (PERMISSIONS[role]?.has(action) ?? false) && actionEnabled(action);
 }
 
 /** Throws 403 unless the user's role allows the action. */
 export function authorize(user: { role: Role }, action: Action) {
+  // A switched-off module does not exist for anyone (#36): 404, not 403.
+  const module = moduleOfAction(action);
+  if (module && !moduleEnabled(module)) throw notFound(`The ${MODULES[module].label} module is turned off`);
   if (!can(user.role, action)) {
     throw forbidden(MESSAGES[action] ?? (action.endsWith('.read') ? 'Your role cannot see this' : 'Your role cannot do this'));
   }

@@ -7,20 +7,20 @@ import { Modal } from './Modal';
 interface Hit { type: string; ref: string; title: string; status: string; url: string; summary?: string }
 interface Item { id: string; label: string; hint?: string; go: () => void }
 
-const PAGES: [string, string, string][] = [
+const PAGES: [string, string, string, string?][] = [
   ['My work', '/', 'g m'],
   ['Dashboard', '/dashboard', 'g d'],
-  ['Events', '/events', 'g e'],
-  ['Incidents', '/incidents', 'g t'],
-  ['Changes', '/changes', 'g h'],
-  ['Change schedule', '/changes?tab=schedule', ''],
-  ['Service catalogue', '/services', ''],
-  ['Service levels (SLAs)', '/services?tab=slas', ''],
+  ['Events', '/events', 'g e', 'event'],
+  ['Incidents', '/incidents', 'g t', 'incident'],
+  ['Changes', '/changes', 'g h', 'change'],
+  ['Change schedule', '/changes?tab=schedule', '', 'change'],
+  ['Service catalogue', '/services', '', 'sla'],
+  ['Service levels (SLAs)', '/services?tab=slas', '', 'sla'],
   ['Problems', '/problems', 'g p'],
   ['Candidates', '/candidates', 'g c'],
   ['Known errors', '/kedb', 'g k'],
   ['Actions', '/actions', 'g a'],
-  ['Configuration items', '/cis', 'g i'],
+  ['Configuration items', '/cis', 'g i', 'cmdb'],
   ['Review', '/review', 'g v'],
   ['Reports', '/reports', 'g r'],
   ['Settings', '/settings', 'g s'],
@@ -30,7 +30,7 @@ const PAGES: [string, string, string][] = [
 /** Ctrl+K / "/": jump to a record by ref, search everything, or go anywhere. */
 export function CommandPalette({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate();
-  const { user } = useSession();
+  const { user, meta } = useSession();
   const [q, setQ] = useState('');
   const [hits, setHits] = useState<Hit[]>([]);
   const [active, setActive] = useState(0);
@@ -51,11 +51,11 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     const needle = q.trim().toLowerCase();
     const commands: Item[] = [
       ...(user.role !== 'viewer' ? [{ id: 'new', label: 'Log a problem', hint: 'n', go: go('/problems/new') }] : []),
-      ...PAGES.map(([label, path, key]) => ({ id: path, label: `Go to ${label}`, hint: key, go: go(path) })),
+      ...PAGES.filter(([, , , mod]) => !mod || meta.modules?.[mod as 'incident'] !== false).map(([label, path, key]) => ({ id: path, label: `Go to ${label}`, hint: key, go: go(path) })),
     ];
     out.push(...commands.filter((c) => !needle || c.label.toLowerCase().includes(needle)));
     return out;
-  }, [hits, q, navigate, onClose, user.role]);
+  }, [hits, q, navigate, onClose, user.role, meta]);
 
   useEffect(() => setActive(0), [items.length]);
   useEffect(() => {

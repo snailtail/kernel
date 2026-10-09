@@ -109,6 +109,15 @@ export function IncidentsPage() {
 function NewIncident({ onClose, onDone }: { onClose: () => void; onDone: (ref: string) => void }) {
   const { meta } = useSession();
   const [form, setForm] = useState({ title: '', description: '', impact: 3, urgency: 3, category_id: '', assignee_id: '', assignment_group: '', reporter: '', cis: '' });
+  const [more, setMore] = useState(false);
+  const { data: templates } = useApi<{ id: number; name: string; fields: Record<string, any>; active: boolean }[]>('/api/templates?kind=incident');
+  const applyTemplate = (id: number) => {
+    const t = templates?.find((x) => x.id === id);
+    if (!t) return;
+    const f = t.fields;
+    setForm((cur) => ({ ...cur, ...(f.title ? { title: f.title } : {}), ...(f.description ? { description: f.description } : {}), ...(f.impact ? { impact: f.impact } : {}), ...(f.urgency ? { urgency: f.urgency } : {}), ...(f.category_id ? { category_id: String(f.category_id) } : {}), ...(f.assignment_group ? { assignment_group: f.assignment_group } : {}), ...(f.cis ? { cis: f.cis.join(', ') } : {}) }));
+    if (f.assignment_group || f.category_id) setMore(true);
+  };
   const [error, setError] = useState<string | null>(null);
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -127,15 +136,26 @@ function NewIncident({ onClose, onDone }: { onClose: () => void; onDone: (ref: s
   return (
     <Modal title="Log an incident" onClose={onClose}>
       <form className="form" onSubmit={submit}>
+        {!!templates?.filter((t) => t.active).length && (
+          <label className="full">Start from a template<select defaultValue="" onChange={(e) => applyTemplate(Number(e.target.value))}><option value="">–</option>{templates.filter((t) => t.active).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
+        )}
         <label className="full">What is wrong?<input required autoFocus placeholder="As the user experiences it, e.g. Checkout times out" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></label>
         <label className="full">Description<textarea rows={3} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
         <label>Impact<select value={form.impact} onChange={(e) => setForm({ ...form, impact: Number(e.target.value) })}>{[1, 2, 3].map((n) => <option key={n} value={n}>{n} – {LEVEL[n]}</option>)}</select></label>
         <label>Urgency<select value={form.urgency} onChange={(e) => setForm({ ...form, urgency: Number(e.target.value) })}>{[1, 2, 3].map((n) => <option key={n} value={n}>{n} – {LEVEL[n]}</option>)}</select></label>
-        <label>Category<select value={form.category_id} onChange={(e) => setForm({ ...form, category_id: e.target.value })}><option value="">–</option>{meta.categories.filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
-        <label>Assignee<select value={form.assignee_id} onChange={(e) => setForm({ ...form, assignee_id: e.target.value })}><option value="">–</option>{meta.assignees.map((a) => <option key={a.id} value={a.id}>{a.display_name}</option>)}</select></label>
-        <label>Assignment group<input value={form.assignment_group} onChange={(e) => setForm({ ...form, assignment_group: e.target.value })} /></label>
-        <label>Reported by<input value={form.reporter} onChange={(e) => setForm({ ...form, reporter: e.target.value })} /></label>
-        <label className="full">Affected CIs <span className="muted small">(refs, e.g. CI000012 SVC000003; you can add more later)</span><input value={form.cis} onChange={(e) => setForm({ ...form, cis: e.target.value })} /></label>
+        {meta.modules?.cmdb !== false && <label className="full">Affected CIs or services <span className="muted small">(refs, e.g. CI000012 SVC000003; shows impact and known workarounds)</span><input value={form.cis} onChange={(e) => setForm({ ...form, cis: e.target.value })} /></label>}
+        <div className="full more-toggle">
+          <button type="button" className="btn-link" aria-expanded={more} onClick={() => setMore(!more)}>{more ? '− Fewer details' : '+ More details'}</button>
+          {!more && <span className="muted small"> assignee, group, category, reporter – all optional</span>}
+        </div>
+        {more && (
+          <>
+            <label>Assignee<select value={form.assignee_id} onChange={(e) => setForm({ ...form, assignee_id: e.target.value })}><option value="">–</option>{meta.assignees.map((a) => <option key={a.id} value={a.id}>{a.display_name}</option>)}</select></label>
+            <label>Assignment group<input value={form.assignment_group} onChange={(e) => setForm({ ...form, assignment_group: e.target.value })} /></label>
+            <label>Category<select value={form.category_id} onChange={(e) => setForm({ ...form, category_id: e.target.value })}><option value="">–</option>{meta.categories.filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
+            <label>Reported by<input value={form.reporter} onChange={(e) => setForm({ ...form, reporter: e.target.value })} /></label>
+          </>
+        )}
         {error && <div className="error full">{error}</div>}
         <div className="actions full"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary">Log incident</button></div>
       </form>
@@ -306,7 +326,7 @@ export function IncidentPage() {
               <dt>Resolved</dt><dd>{i.resolved_at ? formatDate(i.resolved_at) : '–'}</dd>
             </dl>
           </section>
-          <AffectedCisPanel record={i} basePath={path} editable={editable} onChange={setData} />
+          {meta.modules?.cmdb !== false && <AffectedCisPanel record={i} basePath={path} editable={editable} onChange={setData} />}
           <section className="card">
             <h2>Problem</h2>
             {i.problem_ref ? (

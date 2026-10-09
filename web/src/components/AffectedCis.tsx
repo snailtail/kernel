@@ -57,7 +57,7 @@ export function AffectedCisPanel<T extends WithAffected>({ record: p, basePath, 
       )}
       {p.impact_incomplete && <p className="muted small">The CMDB picture may be incomplete (large or deep graph).</p>}
       {p.impact_hint && (
-        <div className="hint-box">
+        <div className="hint-box hint-row">
           {p.impact_hint.reason}
           {editable && (
             <button className="btn small" onClick={() => run(() => api.patch<T>(basePath, { impact: p.impact_hint!.suggested_impact }))}>Update impact</button>

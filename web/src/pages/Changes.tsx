@@ -331,7 +331,7 @@ export function ChangePage() {
         </div>
       )}
       {c.status === 'closed' && c.outcome === 'successful' && c.problem_ref && !['resolved', 'closed'].includes(c.problem_status ?? '') && (
-        <div className="hint-box">The change fixed problem <Link to={`/problems/${c.problem_ref}`}>{c.problem_ref}</Link>. <button className="btn small" onClick={resolveProblem}>Resolve the problem</button></div>
+        <div className="hint-box hint-row">The change fixed problem <Link to={`/problems/${c.problem_ref}`}>{c.problem_ref}</Link>. <button className="btn small" onClick={resolveProblem}>Resolve the problem</button></div>
       )}
 
       <div className="problem-grid">

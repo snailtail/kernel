@@ -149,6 +149,8 @@ export interface ProblemDetail extends Problem {
 }
 
 export interface Meta {
+  modules: { incident: boolean; change: boolean; event: boolean; cmdb: boolean; sla: boolean };
+  setup_completed: boolean;
   statuses: Status[];
   transitions: Record<Status, Status[]>;
   closure_codes: string[];

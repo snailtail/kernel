@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireUser } from '../auth.js';
 import * as ch from '../changes.js';
+import { forbidden } from '../errors.js';
 
 type RefParams = { Params: { ref: string } };
 type Id = { Params: { id: string } };
@@ -23,7 +24,7 @@ export async function changeRoutes(app: FastifyInstance) {
   app.post<RefParams>('/api/changes/:ref/transition', async (req) => ch.transitionChange(requireUser(req), req.params.ref, ch.transitionChangeSchema.parse(req.body)));
   app.post<RefParams>('/api/changes/:ref/votes', async (req) => {
     // Authorising a change is a person's decision: never through an API token or MCP.
-    if (req.headers.authorization) throw Object.assign(new Error('Changes are approved by a person in the web UI'), { statusCode: 403 });
+    if (req.headers.authorization) throw forbidden('Changes are approved by a person in the web UI');
     return ch.voteOnChange(requireUser(req), req.params.ref, ch.voteSchema.parse(req.body));
   });
   app.post<RefParams>('/api/changes/:ref/comments', { config: { idempotent: 'change.update' } }, async (req) =>

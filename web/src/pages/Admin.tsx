@@ -29,12 +29,14 @@ export function AdminPage() {
         <h1>Administration</h1>
         {user.role === 'admin' && <Link className="btn" to="/admin/audit">Audit trail</Link>}
       </header>
+      {user.role === 'admin' && <ModulesCard />}
       {user.role === 'admin' && <SecurityCard />}
       {user.role === 'admin' && <WebhooksCard />}
       <SystemsCard />
       <BackupsCard />
       {user.role === 'admin' && <UsersCard />}
       <CategoriesCard />
+      <TemplatesCard />
     </>
   );
 }
@@ -525,6 +527,102 @@ function SecurityCard() {
             ))}
           </div>
         </div>
+      )}
+    </section>
+  );
+}
+
+/** Practices a team can switch off (#36); switching off never deletes anything. */
+function ModulesCard() {
+  const { reloadMeta } = useSession();
+  const { data, setData } = useApi<{ key: string; label: string; description: string; enabled: boolean }[]>('/api/admin/modules');
+  const { data: setup, reload } = useApi<{ completed: boolean; demo_records: number }>('/api/setup');
+  const [error, setError] = useState<string | null>(null);
+  if (!data) return null;
+  const toggle = async (key: string, enabled: boolean, label: string) => {
+    const reason = await askReason(`${enabled ? 'Switch on' : 'Switch off'} ${label}`, enabled ? 'It reappears with all its data.' : 'It disappears from menus, the API and MCP. Nothing is deleted; switch it on again to get everything back.');
+    if (!reason) return;
+    setError(null);
+    try {
+      setData(await api.put(`/api/admin/modules`, { [key]: enabled, reason }));
+      await reloadMeta();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+  return (
+    <section className="card">
+      <div className="section-head">
+        <h2>Modules</h2>
+        <Link className="btn-link" to="/setup">{setup?.completed ? 'Run setup again' : 'Set up Kernel'}</Link>
+      </div>
+      <p className="muted small">Problem management is always on. Switch off what your team does not use to keep Kernel simple.</p>
+      <div className="module-grid">
+        {data.map((m) => (
+          <label key={m.key} className={`module-card ${m.enabled ? 'on' : ''}`}>
+            <input type="checkbox" checked={m.enabled} onChange={(e) => toggle(m.key, e.target.checked, m.label)} />
+            <strong>{m.label}</strong>
+            <span className="muted small">{m.description}</span>
+          </label>
+        ))}
+      </div>
+      {!!setup?.demo_records && (
+        <div className="hint-box hint-row">
+          {setup.demo_records} demo records are loaded.
+          <button className="btn small" onClick={async () => { await api.post('/api/setup/demo/remove', {}); reload(); }}>Remove demo data</button>
+        </div>
+      )}
+      {error && <div className="error">{error}</div>}
+    </section>
+  );
+}
+
+interface Template { id: number; kind: 'incident' | 'problem'; name: string; fields: Record<string, any>; active: boolean }
+
+/** Templates that prefill new incidents and problems for common issues. */
+function TemplatesCard() {
+  const { meta } = useSession();
+  const { data, reload } = useApi<Template[]>('/api/templates');
+  const [editing, setEditing] = useState<Partial<Template> | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const kinds = (['problem', ...(meta.modules?.incident !== false ? ['incident'] : [])] as const);
+  const f = editing?.fields ?? {};
+  const setF = (patch: Record<string, unknown>) => setEditing({ ...editing, fields: { ...f, ...patch } });
+  return (
+    <section className="card">
+      <div className="section-head"><h2>Templates</h2><button className="btn-link" onClick={() => setEditing({ kind: 'problem', name: '', fields: {}, active: true })}>+ Template</button></div>
+      <p className="muted small">Prefill new {kinds.join(' and ')} records for issues that come back.</p>
+      {data?.length === 0 && <p className="placeholder">No templates yet.</p>}
+      <ul className="plain-list">
+        {data?.map((t) => <li key={t.id}><button className="btn-link" onClick={() => setEditing(t)}>{t.name}</button> <span className="tag">{t.kind}</span>{!t.active && <span className="muted small"> inactive</span>}</li>)}
+      </ul>
+      {editing && (
+        <Modal title={editing.id ? `Edit ${editing.name}` : 'New template'} onClose={() => setEditing(null)}>
+          <form className="form" onSubmit={async (e) => {
+            e.preventDefault();
+            const body = { kind: editing.kind, name: editing.name, fields: Object.fromEntries(Object.entries(f).filter(([, v]) => v !== '' && v !== undefined)), active: editing.active ?? true };
+            try {
+              if (editing.id) await api.put(`/api/templates/${editing.id}`, body);
+              else await api.post('/api/templates', body);
+              setEditing(null);
+              reload();
+            } catch (err) {
+              setError((err as Error).message);
+            }
+          }}>
+            <label>For<select value={editing.kind} onChange={(e) => setEditing({ ...editing, kind: e.target.value as 'problem' })}>{kinds.map((k) => <option key={k} value={k}>{k}</option>)}</select></label>
+            <label>Name<input required value={editing.name ?? ''} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></label>
+            <label className="full">Title<input value={f.title ?? ''} onChange={(e) => setF({ title: e.target.value })} /></label>
+            <label className="full">Description<textarea rows={3} value={f.description ?? ''} onChange={(e) => setF({ description: e.target.value })} /></label>
+            <label>Impact<select value={f.impact ?? ''} onChange={(e) => setF({ impact: e.target.value ? Number(e.target.value) : undefined })}><option value="">–</option>{[1, 2, 3].map((n) => <option key={n}>{n}</option>)}</select></label>
+            <label>Urgency<select value={f.urgency ?? ''} onChange={(e) => setF({ urgency: e.target.value ? Number(e.target.value) : undefined })}><option value="">–</option>{[1, 2, 3].map((n) => <option key={n}>{n}</option>)}</select></label>
+            <label>Category<select value={f.category_id ?? ''} onChange={(e) => setF({ category_id: e.target.value ? Number(e.target.value) : undefined })}><option value="">–</option>{meta.categories.filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
+            {editing.kind === 'incident' && <label>Assignment group<input value={f.assignment_group ?? ''} onChange={(e) => setF({ assignment_group: e.target.value })} /></label>}
+            <label className="check full"><input type="checkbox" checked={editing.active ?? true} onChange={(e) => setEditing({ ...editing, active: e.target.checked })} /> Active</label>
+            {error && <div className="error full">{error}</div>}
+            <div className="actions full"><button type="button" className="btn" onClick={() => setEditing(null)}>Cancel</button><button className="btn primary">Save</button></div>
+          </form>
+        </Modal>
       )}
     </section>
   );

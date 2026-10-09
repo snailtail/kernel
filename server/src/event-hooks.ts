@@ -7,9 +7,11 @@ import { z } from 'zod';
 import type { User } from './auth.js';
 import { audit } from './audit.js';
 import { query } from './db.js';
-import { badRequest, forbidden, notFound, unauthorized } from './errors.js';
+import { badRequest, forbidden, HttpError, notFound, unauthorized } from './errors.js';
 import { eventSchema, processEvents, type NormalisedEvent } from './events.js';
 import { authorize } from './policy.js';
+import { logger } from './log.js';
+import { moduleEnabled } from './modules.js';
 import { decryptSecret, encryptSecret } from './secrets.js';
 
 export const SOURCE_KINDS = ['generic', 'alertmanager', 'uptime_kuma', 'azure_monitor', 'op5'] as const;
@@ -287,6 +289,10 @@ export async function receiveHook(req: FastifyRequest, sourceId: number, raw: st
   };
   if (!ok) return reject(unauthorized('Unknown source or invalid token'));
   if (!source.enabled) return reject(forbidden('This event source is disabled'));
+  if (!moduleEnabled('event')) {
+    logger.warn({ source: source.name }, 'event received while the events module is turned off');
+    return reject(new HttpError(503, 'The events module is turned off in Kernel'));
+  }
   if (source.signing_secret) {
     let messageId: string;
     try {

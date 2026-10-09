@@ -10,6 +10,7 @@ import { badRequest, HttpError } from './errors.js';
 import * as actions from './actions.js';
 import * as analyses from './analyses.js';
 import * as cmdb from './cmdb.js';
+import { moduleEnabled } from './modules.js';
 import * as graph from './cmdb-graph.js';
 import * as problemCis from './problem-cis.js';
 import * as incidents from './incidents.js';
@@ -1016,7 +1017,7 @@ For each candidate: look for an existing problem or known error that explains th
     `Prepare the problem review meeting from get_review_agenda.
 Summarise each section briefly, highlight what needs a decision, and suggest the next step and owner per item. During or after the meeting, record the agreed outcomes as notes (add_comment) and actions (add_action) – only what I confirm.`, 'problem_review_board');
 
-  server.registerPrompt(
+  if (moduleEnabled('cmdb')) server.registerPrompt(
     'impact_analysis',
     { title: 'Impact analysis', description: 'Find what is affected if a CI or service fails and what it depends on, for priority and risk.', argsSchema: { ref: z.string().describe('CI, service or problem reference, e.g. CI000012, SVC000003 or PRB000012') } },
     ({ ref }) => ({
@@ -1032,7 +1033,7 @@ ${RULES}` } }],
     }),
   );
 
-  server.registerPrompt(
+  if (moduleEnabled('incident')) server.registerPrompt(
     'triage_incident',
     { title: 'Triage an incident', description: 'Restore service fast: affected CIs, known errors with workarounds, priority, assignment and hand-over to problem management.', argsSchema: { ref: z.string().describe('Incident reference, e.g. INC000012') } },
     ({ ref }) => ({

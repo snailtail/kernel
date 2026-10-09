@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import * as actions from './actions.js';
 import * as cmdb from './cmdb.js';
+import { MODULE_TAGS, moduleEnabled } from './modules.js';
 import * as graph from './cmdb-graph.js';
 import * as problemCis from './problem-cis.js';
 import * as inc from './incidents.js';
@@ -10,6 +11,7 @@ import * as events from './events.js';
 import * as ch from './changes.js';
 import * as slaMod from './sla.js';
 import * as notif from './notifications.js';
+import * as setupMod from './setup.js';
 import * as hooks from './event-hooks.js';
 import { auditQuerySchema } from './audit.js';
 import { searchSchema } from './generic.js';
@@ -118,6 +120,14 @@ export const OPERATIONS: Op[] = [
   { method: 'post', path: '/api/cis/:ref/comments', tag: 'CMDB', summary: 'Add a note', body: z.object({ body: z.string() }) },
   { method: 'post', path: '/api/cis/:ref/links', tag: 'CMDB', summary: 'Link a problem, incident, event, change or document', body: cmdb.ciLinkSchema },
   { method: 'delete', path: '/api/cis/:ref/links/:id', tag: 'CMDB', summary: 'Remove a link' },
+  { method: 'get', path: '/api/admin/modules', tag: 'Administration', summary: 'Modules (practices) and whether they are on' },
+  { method: 'put', path: '/api/admin/modules', tag: 'Administration', summary: 'Switch modules on or off (administrators); nothing is deleted', body: setupMod.modulesSchema },
+  { method: 'get', path: '/api/setup', tag: 'Administration', summary: 'First-run setup state' },
+  { method: 'post', path: '/api/setup', tag: 'Administration', summary: 'Apply the setup wizard (modules, support hours, first event source, demo data); safe to repeat', body: setupMod.setupSchema },
+  { method: 'post', path: '/api/setup/demo/remove', tag: 'Administration', summary: 'Remove all demo data in one action' },
+  { method: 'get', path: '/api/templates', tag: 'Reference data', summary: 'Templates for new incidents and problems' },
+  { method: 'post', path: '/api/templates', tag: 'Reference data', summary: 'Create a template (problem managers)', body: setupMod.templateSchema },
+  { method: 'put', path: '/api/templates/:id', tag: 'Reference data', summary: 'Update a template', body: setupMod.templateSchema },
   { method: 'get', path: '/api/notifications', tag: 'Notifications', summary: 'My notifications (newest first) and the unread count' },
   { method: 'post', path: '/api/notifications/read', tag: 'Notifications', summary: 'Mark notifications as read (ids, or all)' },
   { method: 'get', path: '/api/notifications/settings', tag: 'Notifications', summary: 'My notification settings: email, digest, events, chat webhook' },
@@ -238,6 +248,8 @@ const toSchema = (s: z.ZodType) => z.toJSONSchema(s, { io: 'input', unrepresenta
 export function openApiDocument(serverUrl?: string) {
   const paths: Record<string, Record<string, unknown>> = {};
   for (const op of OPERATIONS) {
+    // Switched-off modules are not part of the API (#36).
+    if (MODULE_TAGS[op.tag] && !moduleEnabled(MODULE_TAGS[op.tag])) continue;
     const path = op.path.replace(/:(\w+)/g, '{$1}');
     const params = [...op.path.matchAll(/:(\w+)/g)].map(([, name]) => ({ name, in: 'path', required: true, schema: { type: name === 'ref' ? 'string' : 'integer' } }));
     if (op.query) {

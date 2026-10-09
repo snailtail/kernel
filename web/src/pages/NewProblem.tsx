@@ -5,6 +5,7 @@ import { LEVEL_LABEL, LINK_LABEL, PRIORITY_LABEL } from '../format';
 import { canEdit, isManager, useSession } from '../session';
 import { Hint } from '../components/Guide';
 import { SimilarProblems } from '../components/Similar';
+import { useApi } from '../hooks';
 
 export function NewProblemPage() {
   const { user, meta } = useSession();
@@ -22,6 +23,8 @@ export function NewProblemPage() {
     workaround: '',
   });
   const [links, setLinks] = useState('');
+  const [more, setMore] = useState(false);
+  const { data: templates } = useApi<{ id: number; name: string; fields: Record<string, any>; active: boolean }[]>('/api/templates?kind=problem');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const set = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) => setForm((f) => ({ ...f, [key]: value }));
@@ -61,6 +64,18 @@ export function NewProblemPage() {
       </header>
       <div className="new-problem">
       <form className="card form" onSubmit={submit}>
+        {!!templates?.filter((t) => t.active).length && (
+          <label className="full">
+            Start from a template
+            <select defaultValue="" onChange={(e) => {
+              const t = templates.find((x) => x.id === Number(e.target.value));
+              if (t) setForm((f) => ({ ...f, ...Object.fromEntries(Object.entries(t.fields).filter(([k]) => k in f).map(([k, v]) => [k, k === 'category_id' ? (v ? String(v) : '') : v])) }));
+            }}>
+              <option value="">–</option>
+              {templates.filter((t) => t.active).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          </label>
+        )}
         <label className="full">
           Title
           <input autoFocus required maxLength={300} value={form.title} onChange={(e) => set('title', e.target.value)}
@@ -77,6 +92,33 @@ export function NewProblemPage() {
             Before logging, search <Link to="/problems?status=all">existing problems</Link> and the <Link to="/kedb">known error database</Link>.
           </Hint>
         </div>
+        <label>
+          Impact
+          <select value={form.impact} onChange={(e) => set('impact', Number(e.target.value))}>
+            {[1, 2, 3].map((l) => <option key={l} value={l}>{l} – {LEVEL_LABEL[l]}</option>)}
+          </select>
+        </label>
+        <label>
+          Urgency
+          <select value={form.urgency} onChange={(e) => set('urgency', Number(e.target.value))}>
+            {[1, 2, 3].map((l) => <option key={l} value={l}>{l} – {LEVEL_LABEL[l]}</option>)}
+          </select>
+        </label>
+        <div className="full">
+          <Hint>
+            <strong>Impact</strong> is how much harm the problem causes (users, services, money). <strong>Urgency</strong> is how quickly it must be
+            dealt with. Together they give the priority.
+          </Hint>
+        </div>
+        <div className="computed">
+          Priority: <strong>P{form.impact + form.urgency - 1} {PRIORITY_LABEL[form.impact + form.urgency - 1]}</strong>
+        </div>
+        <div className="full more-toggle">
+          <button type="button" className="btn-link" aria-expanded={more} onClick={() => setMore(!more)}>{more ? '− Fewer details' : '+ More details'}</button>
+          {!more && <span className="muted small"> detection, related incidents, category, service, assignee, workaround – all optional</span>}
+        </div>
+        {more && (
+          <>
         <fieldset className="full segmented">
           <legend>Detection</legend>
           <label className={form.detection === 'reactive' ? 'on' : ''}>
@@ -102,30 +144,9 @@ export function NewProblemPage() {
           </select>
         </label>
         <label>
-          Affected service / CI
+          Affected service{meta.modules?.cmdb !== false && <small className="muted"> (link CIs from the CMDB after logging)</small>}
           <input value={form.affected_service} onChange={(e) => set('affected_service', e.target.value)} />
         </label>
-        <label>
-          Impact
-          <select value={form.impact} onChange={(e) => set('impact', Number(e.target.value))}>
-            {[1, 2, 3].map((l) => <option key={l} value={l}>{l} – {LEVEL_LABEL[l]}</option>)}
-          </select>
-        </label>
-        <label>
-          Urgency
-          <select value={form.urgency} onChange={(e) => set('urgency', Number(e.target.value))}>
-            {[1, 2, 3].map((l) => <option key={l} value={l}>{l} – {LEVEL_LABEL[l]}</option>)}
-          </select>
-        </label>
-        <div className="full">
-          <Hint>
-            <strong>Impact</strong> is how much harm the problem causes (users, services, money). <strong>Urgency</strong> is how quickly it must be
-            dealt with. Together they give the priority.
-          </Hint>
-        </div>
-        <div className="computed">
-          Priority: <strong>P{form.impact + form.urgency - 1} {PRIORITY_LABEL[form.impact + form.urgency - 1]}</strong>
-        </div>
         <label>
           Assignee
           <select value={form.assignee_id} onChange={(e) => set('assignee_id', e.target.value)}>
@@ -143,6 +164,8 @@ export function NewProblemPage() {
           Workaround <small className="muted">(optional, if one is already known)</small>
           <textarea rows={3} value={form.workaround} onChange={(e) => set('workaround', e.target.value)} />
         </label>
+          </>
+        )}
         {error && <div className="error full">{error}</div>}
         <div className="actions full">
           <button type="button" className="btn" onClick={() => navigate(-1)}>Cancel</button>

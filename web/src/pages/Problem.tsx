@@ -133,9 +133,9 @@ export function ProblemPage() {
         </div>
         <aside className="problem-side">
           <DetailsPanel problem={p} editable={editable} onSave={save} />
-          <AffectedCisPanel record={p} basePath={`/api/problems/${p.ref}`} editable={canEdit(user)} onChange={setData} />
-          <ProblemChanges problem={p} editable={canEdit(user) && !['resolved', 'closed'].includes(p.status)} />
-          <ProblemIncidents problem={p} editable={canEdit(user)} onChange={setData} />
+          {meta.modules?.cmdb !== false && <AffectedCisPanel record={p} basePath={`/api/problems/${p.ref}`} editable={canEdit(user)} onChange={setData} />}
+          {meta.modules?.change !== false && <ProblemChanges problem={p} editable={canEdit(user) && !['resolved', 'closed'].includes(p.status)} />}
+          {meta.modules?.incident !== false && <ProblemIncidents problem={p} editable={canEdit(user)} onChange={setData} />}
           <LinksPanel problem={p} editable={canEdit(user)} onChange={setData} />
           <SimilarProblems text={`${p.title} ${p.description}`} exclude={p.ref} duplicateRef={isManager(user) && p.status !== 'closed' ? p.ref : undefined} />
         </aside>
@@ -754,7 +754,7 @@ function ProblemIncidents({ problem: p, editable, onChange }: { problem: Problem
         ))}
       </ul>
       {editable && open.length > 0 && ['resolved', 'closed'].includes(p.status) && (
-        <div className="hint-box">
+        <div className="hint-box hint-row">
           The problem is resolved: {open.length} linked incident{open.length > 1 ? 's are' : ' is'} still open.
           <button className="btn small" onClick={resolveAll}>Resolve them</button>
         </div>

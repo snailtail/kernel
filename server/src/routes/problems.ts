@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { modules } from '../modules.js';
 import { requireUser } from '../auth.js';
 import { config } from '../config.js';
 import { notFound } from '../errors.js';
@@ -25,7 +26,10 @@ export async function problemRoutes(app: FastifyInstance) {
       query('SELECT id, name, active FROM categories ORDER BY name'),
       query("SELECT id, display_name, role FROM users WHERE active AND role NOT IN ('viewer', 'integration') ORDER BY display_name"),
     ]);
+    const { rows: setupRows } = await query("SELECT value FROM settings WHERE key = 'setup'");
     return {
+      modules: modules(),
+      setup_completed: !!setupRows[0]?.value?.completed,
       statuses: STATUSES,
       transitions: TRANSITIONS,
       closure_codes: CLOSURE_CODES,

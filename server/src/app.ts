@@ -21,7 +21,9 @@ import { incidentRoutes } from './routes/incidents.js';
 import { eventRoutes } from './routes/events.js';
 import { changeRoutes } from './routes/changes.js';
 import { slaRoutes } from './routes/sla.js';
+import { refreshModules } from './modules.js';
 import { notificationRoutes } from './routes/notifications.js';
+import { setupRoutes } from './routes/setup.js';
 import { problemRoutes } from './routes/problems.js';
 
 declare module 'fastify' {
@@ -32,6 +34,7 @@ declare module 'fastify' {
 
 /** Builds the HTTP application: API, MCP endpoint and (if built) the web UI. */
 export async function buildApp(options: { logLevel?: string; serveWeb?: boolean } = {}) {
+  await refreshModules();
   const app = Fastify({
     loggerInstance: options.logLevel ? createLogger({ level: options.logLevel }) : logger,
     // A hop count is supported at runtime (proxy-addr) but missing from Fastify's types.
@@ -102,6 +105,7 @@ export async function buildApp(options: { logLevel?: string; serveWeb?: boolean 
   await app.register(changeRoutes);
   await app.register(slaRoutes);
   await app.register(notificationRoutes);
+  await app.register(setupRoutes);
   await app.register(mcpRoutes);
 
   app.get('/api/openapi.json', async (req) => openApiDocument(config.publicUrl ?? `${req.protocol}://${req.host}`));

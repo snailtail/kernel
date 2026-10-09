@@ -21,7 +21,7 @@ interface MyWork {
 
 /** One calm place for everything that needs me, most urgent first. */
 export function MyWorkPage() {
-  const { user, setPreferences } = useSession();
+  const { user, meta, setPreferences } = useSession();
   const { data, reload } = useApi<MyWork>('/api/my-work');
   if (!data) return null;
   const decide = async (id: number, approve: boolean) => {
@@ -38,6 +38,13 @@ export function MyWorkPage() {
         </div>
         <Link className="btn" to="/dashboard">Dashboard</Link>
       </header>
+
+      {user.role === 'admin' && meta.setup_completed === false && (
+        <div className="banner intro">
+          <div><strong>Welcome to Kernel.</strong> Choose what Kernel should help with, your support hours and a first monitoring source – a minute, and every step can be skipped.</div>
+          <div className="banner-actions"><Link className="btn primary small" to="/setup">Set up Kernel</Link></div>
+        </div>
+      )}
 
       {isGuided(user.preferences) && !user.preferences.intro_seen && (
         <div className="banner intro">

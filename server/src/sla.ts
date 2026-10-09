@@ -10,6 +10,7 @@ import { query, tx } from './db.js';
 import { conflict, notFound } from './errors.js';
 import { logIncident } from './incident-log.js';
 import { managers, notify } from './notifications.js';
+import { moduleEnabled } from './modules.js';
 import { authorize } from './policy.js';
 import type { Db } from './problems.js';
 
@@ -137,6 +138,7 @@ async function chooseSla(db: Db, incidentId: number): Promise<number | null> {
 
 /** Recomputes the SLA (when asked), due times and breach times of an incident; logs moved targets. */
 export async function recomputeSla(db: Db, incidentId: number, options: { reselect?: boolean; reason?: string } = {}) {
+  if (!moduleEnabled('sla')) return;
   const { rows } = await db.query('SELECT * FROM incidents WHERE id = $1', [incidentId]);
   const i = rows[0];
   const slaId = options.reselect || i.sla_id === null ? await chooseSla(db, incidentId) : i.sla_id;
@@ -186,7 +188,7 @@ export interface ClockState { target_minutes: number | null; due_at: string | nu
 
 /** The SLA clock as shown: computed on read from the stored due times and pauses. */
 export async function slaClock(db: Db, i: any, now = Date.now()) {
-  if (!i.sla_id) return null;
+  if (!i.sla_id || !moduleEnabled('sla')) return null;
   const { rows: s } = await db.query('SELECT s.*, c.name AS calendar FROM slas s JOIN business_calendars c ON c.id = s.calendar_id WHERE s.id = $1', [i.sla_id]);
   if (!s[0]) return null;
   const cal = await loadCalendar(db, s[0].calendar_id, now);
@@ -255,7 +257,7 @@ export async function backfillSla() {
 
 export function startSlaWorker(log: (msg: string) => void) {
   backfillSla().catch((err) => log(`SLA backfill failed: ${err.message}`));
-  setInterval(() => checkSlaEvents().catch((err) => log(`SLA check failed: ${err.message}`)), 60_000).unref();
+  setInterval(() => moduleEnabled('sla') && moduleEnabled('incident') && checkSlaEvents().catch((err) => log(`SLA check failed: ${err.message}`)), 60_000).unref();
 }
 
 // ---- Catalogue and reports ---------------------------------------------------------------------

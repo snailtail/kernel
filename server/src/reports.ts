@@ -1,5 +1,6 @@
 // Problem management KPIs and trends for a period, used by the Reports page, CSV export and MCP.
 import { slaCompliance } from './sla.js';
+import { moduleEnabled } from './modules.js';
 import { z } from 'zod';
 import { query } from './db.js';
 
@@ -211,10 +212,11 @@ export async function report({ from, to, bucket }: ReportParams) {
         resolved_p90_h: round(r.resolved_p90_h),
       })),
     closures: closures.rows,
-    hotspots: { services: services.rows, categories: categories.rows, cis: cis.rows, ci_types: ciTypes.rows },
-    changes: changeStats.rows[0],
-    sla: await slaCompliance(from, to),
-    incidents: { ...incidentStats.rows[0], mtta_median_min: round(incidentStats.rows[0].mtta_median_min), mttr_median_h: round(incidentStats.rows[0].mttr_median_h), by_ci: incidentCis.rows },
+    hotspots: { services: services.rows, categories: categories.rows, cis: moduleEnabled('cmdb') ? cis.rows : [], ci_types: moduleEnabled('cmdb') ? ciTypes.rows : [] },
+    // Sections of switched-off modules are left out (#36).
+    changes: moduleEnabled('change') ? changeStats.rows[0] : null,
+    sla: moduleEnabled('sla') && moduleEnabled('incident') ? await slaCompliance(from, to) : null,
+    incidents: !moduleEnabled('incident') ? null : { ...incidentStats.rows[0], mtta_median_min: round(incidentStats.rows[0].mtta_median_min), mttr_median_h: round(incidentStats.rows[0].mttr_median_h), by_ci: incidentCis.rows },
     known_errors: knownErrors.rows[0],
     actions: {
       created: a.created,

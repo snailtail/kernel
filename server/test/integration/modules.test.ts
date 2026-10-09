@@ -1,0 +1,92 @@
+import assert from 'node:assert/strict';
+import { after, before, describe, test } from 'node:test';
+import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { Client, skip, startKernel, type Harness } from './harness.js';
+
+describe('modules and first-run setup (#36)', { skip }, () => {
+  let k: Harness;
+  let admin: Client, pm: Client, analyst: Client;
+
+  before(async () => {
+    process.env.KERNEL_SECRET_KEY = 'modules-test-key-0123456789abcdefghijklm';
+    k = await startKernel();
+    [admin, pm, analyst] = await Promise.all([k.login('admin'), k.login('pm'), k.login('analyst')]);
+  });
+  after(async () => {
+    delete process.env.KERNEL_SECRET_KEY;
+    await k?.close();
+  });
+
+  test('a fresh installation offers the setup wizard; it is idempotent and demo data is removable', async () => {
+    assert.equal((await analyst.get('/api/meta')).body.setup_completed, false);
+    assert.equal((await pm.post('/api/setup', {})).status, 403, 'administrators only');
+    const first = (await admin.post('/api/setup', { support_hours: 'office', first_source: { kind: 'uptime_kuma', name: 'Kuma' }, demo_data: true })).body;
+    assert.equal(first.completed, true);
+    assert.match(first.result.first_source.token, /^kernel_evt_/);
+    assert.equal(first.result.demo.loaded, true);
+    assert.equal(first.demo_records, 6);
+    const again = (await admin.post('/api/setup', { support_hours: 'office', first_source: { kind: 'uptime_kuma', name: 'Kuma' }, demo_data: true })).body;
+    assert.equal(again.result.first_source.existing, true, 'no duplicate source');
+    assert.equal(again.result.demo.loaded, false, 'no duplicate demo data');
+    assert.equal((await admin.get('/api/event-sources')).body.length, 1);
+    assert.equal((await admin.get('/api/slas')).body.filter((s: any) => s.is_default)[0].calendar, 'Office hours (Sweden)');
+    const removed = (await admin.post('/api/setup/demo/remove', {})).body.removed;
+    assert.deepEqual(removed, { change: 1, incident: 1, problem: 1, ci: 3 });
+    await analyst.post('/api/problems', { title: 'A real problem' });
+    assert.equal((await admin.post('/api/setup', { demo_data: true })).status, 409, 'never mixed with real data');
+    const audit = (await admin.get('/api/audit?entity_type=setting')).body;
+    assert.ok(audit.some((e: any) => e.entity_ref === 'setup' && e.action === 'complete'));
+  });
+
+  test('a switched-off module is gone everywhere and comes back unchanged', async () => {
+    const inc = (await analyst.post('/api/incidents', { title: 'Before switching off' })).body;
+    assert.equal((await pm.put('/api/admin/modules', { incident: false })).status, 403);
+    const mods = (await admin.put('/api/admin/modules', { incident: false, reason: 'We use ServiceNow for incidents' })).body;
+    assert.equal(mods.find((m: any) => m.key === 'incident').enabled, false);
+    const gone = await analyst.get('/api/incidents');
+    assert.equal(gone.status, 404);
+    assert.match(gone.body.error, /Incidents module is turned off/);
+    assert.equal((await analyst.get(`/api/incidents/${inc.ref}`)).status, 404);
+    assert.equal((await analyst.get(`/api/records/${inc.ref}`)).status, 404);
+    assert.ok(!(await analyst.get('/api/search?q=switching')).body.some((h: any) => h.type === 'incident'));
+    const openapi = (await analyst.get('/api/openapi.json')).body;
+    assert.equal(openapi.paths['/api/incidents'], undefined);
+    assert.ok(openapi.paths['/api/problems']);
+    assert.equal((await analyst.get('/api/reports')).body.incidents, null);
+    assert.equal((await analyst.get('/api/meta')).body.modules.incident, false);
+    const mcp = new McpClient({ name: 'mods', version: '1' });
+    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
+    const tools = (await mcp.listTools()).tools.map((t) => t.name);
+    assert.ok(!tools.includes('create_incident') && !tools.includes('list_incidents'));
+    assert.ok(tools.includes('create_problem'));
+    assert.ok(!(await mcp.listPrompts()).prompts.some((p) => p.name === 'triage_incident'));
+    await mcp.close();
+    // Rules do not open incidents while incidents are off; the alert is still recorded.
+    await pm.post('/api/event-rules', { name: 'All', conditions: {} });
+    const ev = (await analyst.post('/api/events', { source: 'mod', events: [{ host: 'h1', check: 'ping', severity: 'critical' }] })).body;
+    assert.equal(ev.results[0].outcome, 'opened');
+    await admin.put('/api/admin/modules', { incident: true, reason: 'Back on' });
+    assert.equal((await analyst.get(`/api/incidents/${inc.ref}`)).body.title, 'Before switching off', 'nothing was deleted');
+  });
+
+  test('event hooks answer 503 while events are off; the CMDB can be switched off too', async () => {
+    const src = (await admin.get('/api/event-sources')).body[0];
+    const token = (await admin.post(`/api/event-sources/${src.id}/rotate`, {})).body.token;
+    await admin.put('/api/admin/modules', { event: false, cmdb: false, reason: 'Testing' });
+    const hook = await new Client(k.base).request('POST', `/api/event-hooks/${src.id}`, { heartbeat: null, monitor: null, msg: 'test' }, { Authorization: `Bearer ${token}` });
+    assert.equal(hook.status, 503);
+    assert.match(hook.body.error, /events module is turned off/);
+    assert.equal((await analyst.get('/api/cis')).status, 404);
+    assert.equal((await analyst.get('/api/alerts')).status, 404);
+    await admin.put('/api/admin/modules', { event: true, cmdb: true, reason: 'Done' });
+    assert.equal((await analyst.get('/api/cis')).status, 200);
+  });
+
+  test('templates prefill new incidents and problems', async () => {
+    assert.equal((await analyst.post('/api/templates', { kind: 'incident', name: 'x', fields: {} })).status, 403);
+    const t = await pm.post('/api/templates', { kind: 'incident', name: 'Printer jam', fields: { title: 'Printer jammed', impact: 3, urgency: 3, assignment_group: 'Desk' } });
+    assert.equal(t.status, 201);
+    assert.equal((await analyst.get('/api/templates?kind=incident')).body[0].fields.assignment_group, 'Desk');
+  });
+});

@@ -114,6 +114,12 @@ incidents feed the problem candidates per CI, and reports show MTTA, MTTR, reope
 Viewers stay strictly read-only (auditors, stakeholders): end users report incidents through the service desk or,
 later, the self-service portal (#45), not with a viewer account.
 
+**Keep it simple**: a first-run setup wizard (administrators) chooses the modules, the support hours, a first
+monitoring source and optional example data – every step can be skipped and run again. Incidents, changes, events,
+the CMDB and service levels are modules that can be switched off under Administration: they disappear from menus,
+the API (404), MCP, search and reports, and nothing is deleted. Forms ask for the essentials first, with the rest
+behind "More details"; templates prefill new incidents and problems. See `docs/ux-guidelines.md`.
+
 **Notifications**: everything that concerns you – assignments, approvals waiting for you, decisions on what you
 requested, SLA warnings and breaches, major incidents, updates on what you watch – appears under Notifications (the
 bell). Each person chooses what also reaches them by email (instant or a daily digest at 07:00) or a personal Slack
