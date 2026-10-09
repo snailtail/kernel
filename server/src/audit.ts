@@ -70,7 +70,8 @@ export const digestOf = (v: string) => {
   const key = digestKey();
   return key
     ? { digest: `hmac-sha256:${createHmac('sha256', key).update(v).digest('hex')}`, length: v.length }
-    : { digest: `sha256:${createHash('sha256').update(v).digest('hex')}`, length: v.length };
+    // Without a key a plain hash of a short value could be reversed, so only the fact and size of the change remain.
+    : { changed: true, length: v.length };
 };
 export function minimise(value: unknown, key = ''): unknown {
   if (typeof value === 'string') return PERSONAL.test(key) || !TOKEN.test(value) ? digestOf(value) : value;
@@ -98,7 +99,8 @@ export async function audit(db: Db | null, entry: AuditEntry) {
     let entityRef = entry.entity_ref ?? '';
     if ((entry.entity_type === 'user' || entry.entity_type === 'session') && entityRef && !entityRef.startsWith('#')) {
       const { rows: u } = await client.query('SELECT id FROM users WHERE username = $1', [entityRef]);
-      entityRef = u[0] ? `#${u[0].id}` : digestOf(entityRef).digest;
+      const d = digestOf(entityRef);
+      entityRef = u[0] ? `#${u[0].id}` : 'digest' in d ? d.digest : 'unknown account';
     }
     // Serialise appends so the hash chain has a single order.
     await client.query('SELECT pg_advisory_xact_lock(4713)');
