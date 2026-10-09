@@ -1,5 +1,5 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
-import { Link, useParams } from 'react-router';
+import { Link, useNavigate, useParams } from 'react-router';
 import { api, asConflict, type Action, type Activity, type Conflict, type LinkKind, type ProblemDetail, type Status } from '../api';
 import { MajorBadge, PriorityBadge, StatusBadge } from '../components/Badges';
 import { ActionList, ActionModal } from '../components/Actions';
@@ -134,6 +134,7 @@ export function ProblemPage() {
         <aside className="problem-side">
           <DetailsPanel problem={p} editable={editable} onSave={save} />
           <AffectedCisPanel record={p} basePath={`/api/problems/${p.ref}`} editable={canEdit(user)} onChange={setData} />
+          <ProblemChanges problem={p} editable={canEdit(user) && !['resolved', 'closed'].includes(p.status)} />
           <ProblemIncidents problem={p} editable={canEdit(user)} onChange={setData} />
           <LinksPanel problem={p} editable={canEdit(user)} onChange={setData} />
           <SimilarProblems text={`${p.title} ${p.description}`} exclude={p.ref} duplicateRef={isManager(user) && p.status !== 'closed' ? p.ref : undefined} />
@@ -758,6 +759,33 @@ function ProblemIncidents({ problem: p, editable, onChange }: { problem: Problem
           <button className="btn small" onClick={resolveAll}>Resolve them</button>
         </div>
       )}
+      {error && <div className="error">{error}</div>}
+    </section>
+  );
+}
+
+/** Changes raised for the problem's fix; "Raise change" prefills one from the known error. */
+function ProblemChanges({ problem: p, editable }: { problem: ProblemDetail; editable: boolean }) {
+  const navigate = useNavigate();
+  const [error, setError] = useState<string | null>(null);
+  if (!p.changes.length && !(editable && ['known_error', 'analysis'].includes(p.status))) return null;
+  const raise = async () => {
+    try {
+      const c = await api.post<{ ref: string }>(`/api/problems/${p.ref}/change`, {});
+      navigate(`/changes/${c.ref}`);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+  return (
+    <section className="card">
+      <div className="section-head"><h2>Changes</h2>{editable && <button className="btn-link" onClick={raise}>+ Raise change for fix</button>}</div>
+      {p.changes.length === 0 && <p className="placeholder">The permanent fix is usually implemented through a change.</p>}
+      <ul className="plain-list">
+        {p.changes.map((c) => (
+          <li key={c.ref}><Link to={`/changes/${c.ref}`} className="mono">{c.ref}</Link> {c.title} <span className="muted small">{c.status}{c.outcome ? `, ${c.outcome.replace('_', ' ')}` : ''}</span></li>
+        ))}
+      </ul>
       {error && <div className="error">{error}</div>}
     </section>
   );

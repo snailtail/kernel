@@ -9,6 +9,7 @@ import { query, tx } from './db.js';
 import { badRequest, conflict, notFound } from './errors.js';
 import { authorize, can } from './policy.js';
 import { affectedFrom } from './problem-cis.js';
+import { possibleCausesForIncident } from './changes.js';
 import { createProblem, createProblemSchema, getProblem, loadForUpdate, logActivity, registerProblemExtra, type Db } from './problems.js';
 import { recordUrl, registerRecordType, type RecordType } from './records.js';
 
@@ -172,7 +173,8 @@ export async function getIncident(user: User, ref: string) {
     ),
   ]);
   const affected = await affectedFrom(cis.rows, i.impact);
-  const detail = { ...i, ...affected, activity: activity.rows, links: links.rows, known_errors: knownErrors.rows, alerts: alerts.rows };
+  const possibleChanges = await possibleCausesForIncident({ created_at: i.created_at, affected_cis: cis.rows });
+  const detail = { ...i, ...affected, activity: activity.rows, links: links.rows, known_errors: knownErrors.rows, alerts: alerts.rows, possible_change_causes: possibleChanges };
   return { type: 'incident', ...detail, url: incidentUrl(i.ref), next_steps: incidentGuidance(detail) };
 }
 
@@ -182,6 +184,7 @@ function incidentGuidance(i: any) {
     { id: 'prioritise', label: 'Check impact and urgency', hint: 'Priority follows from them; affected services suggest the impact.', done: !i.impact_hint },
     { id: 'cis', label: 'Record the affected CIs or services', hint: 'Shows what else is affected and any known errors with workarounds.', done: i.affected_cis.length > 0 },
     { id: 'assign', label: 'Assign it', hint: 'An assignee or assignment group responds and owns restoring service.', done: !!i.assignee_id || !!i.assignment_group },
+    ...(i.possible_change_causes.length ? [{ id: 'change', label: 'Check the recent change', hint: `${i.possible_change_causes[0].ref} on ${i.possible_change_causes[0].ci_name} started shortly before: a backout may restore service.`, done: null as unknown as boolean }] : []),
     ...(i.known_errors.length ? [{ id: 'known_error', label: 'Try the known error workaround', hint: `${i.known_errors[0].ref}: ${String(i.known_errors[0].title)}`, done: !!i.problem_id }] : []),
     ...(i.is_major ? [{ id: 'communicate', label: 'Keep stakeholders informed', hint: 'Post communication updates while the major incident is open.', done: i.activity.some((a: any) => a.kind === 'communication') }] : []),
     { id: 'resolve', label: 'Restore service and resolve', hint: 'Record how service was restored and a resolution code.', done: !open },

@@ -114,6 +114,14 @@ incidents feed the problem candidates per CI, and reports show MTTA, MTTR, reope
 Viewers stay strictly read-only (auditors, stakeholders): end users report incidents through the service desk or,
 later, the self-service portal (#45), not with a viewer account.
 
+**Changes**: change enablement with standard (pre-approved templates), normal and emergency changes. Risk is assessed
+from the most critical CI or service the change affects through the CMDB; the change authority (problem managers and
+administrators) approves in the web UI – one approval for low and medium risk, two for high, never the requester's
+own. Plans are locked once a change is submitted. The schedule shows collisions on the same CI and change freezes,
+which block normal changes unless the change authority overrides with a reason. A problem raises a change for its
+fix in one click; incidents on a CI shortly after a change on it or on what it depends on are flagged as possibly
+change-related. Deployment pipelines register standard changes with `POST /api/changes/register` (integration token).
+
 **Events from monitoring**: create an event source under Events → Sources (administrators). Each source gets its
 own URL (`/api/event-hooks/<id>`) and token, shown once. Events are deduplicated into alerts per source, CI and check;
 a clear closes the alert, flapping reopens the same alert, and replayed or out-of-order events never move an alert

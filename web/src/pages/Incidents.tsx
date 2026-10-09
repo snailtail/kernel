@@ -21,6 +21,7 @@ interface Incident extends IncidentRow {
   reporter: string; hold_reason: string; resolution_code: string | null; resolution: string; reopen_count: number;
   responded_at: string | null; closed_at: string | null; problem_title: string | null; problem_status: string | null;
   affected_cis: AffectedCi[]; affected_services: AffectedService[]; impact_hint: ImpactHint | null; impact_incomplete: boolean;
+  possible_change_causes: { ref: string; title: string; status: string; change_type: string; outcome: string | null; started_at: string; ci: string; ci_name: string }[];
   known_errors: { ref: string; title: string; workaround: string; workaround_effectiveness: string | null; ci_ref: string; ci_name: string }[];
   links: { id: number; kind: string; reference: string; system: string; url: string }[];
   alerts: { id: number; source: string; check_key: string; severity: string; status: string; count: number; flap_count: number; last_seen: string; ci_hint: string; ci_ref: string | null; ci_name: string | null; source_url: string }[];
@@ -193,6 +194,18 @@ export function IncidentPage() {
         )}
         {actionError && <div className="error">{actionError}</div>}
       </header>
+
+      {i.possible_change_causes.length > 0 && !['resolved', 'closed'].includes(i.status) && (
+        <section className="card change-cause">
+          <h2>Possibly change-related</h2>
+          <p className="muted small">Changes that started shortly before this incident, on its CIs or on what they depend on. Backing one out may restore service.</p>
+          <ul className="plain-list">
+            {i.possible_change_causes.map((c) => (
+              <li key={c.ref}><Link to={`/changes/${c.ref}`} className="mono">{c.ref}</Link> {c.title} <span className="muted small">on {c.ci_name}, started {relativeTime(c.started_at)} · {c.status}{c.outcome ? `, ${c.outcome.replace('_', ' ')}` : ''}</span></li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {i.known_errors.length > 0 && !['resolved', 'closed'].includes(i.status) && (
         <section className="card known-errors-card">

@@ -12,6 +12,8 @@ const PAGES: [string, string, string][] = [
   ['Dashboard', '/dashboard', 'g d'],
   ['Events', '/events', 'g e'],
   ['Incidents', '/incidents', 'g t'],
+  ['Changes', '/changes', 'g h'],
+  ['Change schedule', '/changes?tab=schedule', ''],
   ['Problems', '/problems', 'g p'],
   ['Candidates', '/candidates', 'g c'],
   ['Known errors', '/kedb', 'g k'],
@@ -42,7 +44,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     const go = (path: string) => () => { navigate(path); onClose(); };
     const out: Item[] = [];
     const ref = q.trim().toUpperCase();
-    if (/^[A-Z]{2,5}\d{1,9}$/.test(ref)) out.push({ id: 'ref', label: `Open ${ref}`, hint: 'Enter', go: go(/^(CI|SVC)\d/.test(ref) ? `/cis/${ref}` : /^INC\d{6}$/.test(ref) ? `/incidents/${ref}` : `/problems/${ref}`) });
+    if (/^[A-Z]{2,5}\d{1,9}$/.test(ref)) out.push({ id: 'ref', label: `Open ${ref}`, hint: 'Enter', go: go(/^(CI|SVC)\d/.test(ref) ? `/cis/${ref}` : /^INC\d{6}$/.test(ref) ? `/incidents/${ref}` : /^CHG\d{6}$/.test(ref) ? `/changes/${ref}` : `/problems/${ref}`) });
     for (const h of hits) out.push({ id: `${h.type}-${h.ref}`, label: `${h.ref} ${h.title}`, hint: h.status.replace('_', ' '), go: go(new URL(h.url, location.origin).pathname) });
     const needle = q.trim().toLowerCase();
     const commands: Item[] = [
@@ -83,7 +85,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
 const SHORTCUTS: [string, string][] = [
   ['Ctrl+K or /', 'Search and go to…'],
   ['n', 'Log a problem'],
-  ['g m', 'My work'], ['g d', 'Dashboard'], ['g e', 'Events'], ['g t', 'Incidents'], ['g p', 'Problems'], ['g c', 'Candidates'], ['g k', 'Known errors'],
+  ['g m', 'My work'], ['g d', 'Dashboard'], ['g e', 'Events'], ['g t', 'Incidents'], ['g h', 'Changes'], ['g p', 'Problems'], ['g c', 'Candidates'], ['g k', 'Known errors'],
   ['g a', 'Actions'], ['g i', 'CMDB'], ['g v', 'Review'], ['g r', 'Reports'], ['g s', 'Settings'],
   ['?', 'This help'],
 ];
@@ -98,7 +100,7 @@ export function ShortcutHelp({ onClose }: { onClose: () => void }) {
   );
 }
 
-const GOTO: Record<string, string> = { m: '/', d: '/dashboard', p: '/problems', t: '/incidents', e: '/events', c: '/candidates', k: '/kedb', a: '/actions', i: '/cis', v: '/review', r: '/reports', s: '/settings' };
+const GOTO: Record<string, string> = { m: '/', d: '/dashboard', p: '/problems', t: '/incidents', h: '/changes', e: '/events', c: '/candidates', k: '/kedb', a: '/actions', i: '/cis', v: '/review', r: '/reports', s: '/settings' };
 
 /** Global keyboard shortcuts; ignored while typing in a field. */
 export function useShortcuts(open: (what: 'palette' | 'help') => void) {

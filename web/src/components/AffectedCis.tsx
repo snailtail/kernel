@@ -50,7 +50,7 @@ export function AffectedCisPanel<T extends WithAffected>({ record: p, basePath, 
           {derived.map((s) => (
             <div key={s.ref}>
               <Link to={`/cis/${s.ref}`}>{s.name}</Link> <span className={`crit crit-${s.criticality}`}>{CRIT[s.criticality]}</span>
-              <span className="muted small"> via {s.via.join(', ')}</span>
+              {s.via?.length > 0 && <span className="muted small"> via {s.via.join(', ')}</span>}
             </div>
           ))}
         </div>

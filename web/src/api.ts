@@ -138,6 +138,7 @@ export interface ProblemDetail extends Problem {
   impact_hint: import('./components/AffectedCis').ImpactHint | null;
   impact_incomplete: boolean;
   incidents: { ref: string; title: string; status: string; priority: number; created_at: string }[];
+  changes: { ref: string; title: string; status: string; change_type: string; outcome: string | null; planned_start: string | null }[];
   links: Link[];
   activity: Activity[];
   actions: Action[];

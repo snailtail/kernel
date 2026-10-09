@@ -906,3 +906,23 @@ dd.attention { color: var(--warn); }
 fieldset.rules { flex-direction: row; flex-wrap: wrap; }
 .secrets dd { text-align: left; word-break: break-all; font-weight: 500; }
 .alert-list li { display: flex; flex-direction: column; gap: 2px; }
+
+/* Changes (#29) */
+.chg-draft, .chg-cancelled { color: var(--s-closed); background: var(--s-closed-bg); }
+.chg-assess, .chg-authorize { color: var(--s-known); background: var(--s-known-bg); }
+.chg-scheduled, .chg-implementing { color: var(--s-analysis); background: var(--s-analysis-bg); }
+.chg-review, .chg-closed { color: var(--s-resolved); background: var(--s-resolved-bg); }
+.chg-rejected { color: var(--danger); background: var(--danger-soft); }
+.type-emergency { color: var(--danger); border-color: var(--danger); }
+.type-standard { color: var(--success); }
+.risk-high { color: var(--danger); background: var(--danger-soft); }
+.risk-medium { color: var(--s-known); background: var(--s-known-bg); }
+.risk-low { color: var(--success); background: var(--success-soft); }
+.outcome-successful { color: var(--success); background: var(--success-soft); }
+.outcome-failed, .outcome-rolled_back { color: var(--danger); background: var(--danger-soft); }
+.approvals-card { border-left: 3px solid var(--s-known); }
+.change-cause { border-left: 3px solid var(--warn); }
+.plans h3 { margin: 12px 0 4px; font-size: 13px; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.04em; }
+.plans h3:first-of-type { margin-top: 0; }
+.schedule { display: flex; flex-direction: column; gap: 14px; }
+.work-list li.collides { background: var(--danger-soft); border-radius: 6px; padding-left: 8px; padding-right: 8px; }

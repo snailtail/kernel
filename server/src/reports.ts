@@ -27,7 +27,7 @@ export async function report({ from, to, bucket }: ReportParams) {
   const range = [from, to];
   const inRange = (col: string) => `${col} >= $1::date AND ${col} < $2::date + 1`;
 
-  const [flow, backlog, leadTimes, closures, reopened, detection, services, categories, knownErrors, actionStats, totals, cis, ciTypes, incidentStats, incidentCis] = await Promise.all([
+  const [flow, backlog, leadTimes, closures, reopened, detection, services, categories, knownErrors, actionStats, totals, cis, ciTypes, incidentStats, incidentCis, changeStats] = await Promise.all([
     query(
       `WITH buckets AS (
          SELECT generate_series(date_trunc('${bucket}', $1::date), date_trunc('${bucket}', $2::date), '1 ${bucket}') AS start
@@ -163,6 +163,20 @@ export async function report({ from, to, bucket }: ReportParams) {
        WHERE ${inRange('i.created_at')} GROUP BY c.ref, c.name ORDER BY 3 DESC LIMIT 10`,
       range,
     ),
+    // Changes (#29): success rate, emergency ratio, and changes followed by incidents on their CIs within a day.
+    query(
+      `SELECT count(*) FILTER (WHERE ${inRange('c.created_at')})::int AS requested,
+         count(*) FILTER (WHERE c.outcome IS NOT NULL AND ${inRange('c.actual_end')})::int AS implemented,
+         count(*) FILTER (WHERE c.outcome = 'successful' AND ${inRange('c.actual_end')})::int AS successful,
+         count(*) FILTER (WHERE c.outcome IN ('failed', 'rolled_back') AND ${inRange('c.actual_end')})::int AS failed,
+         count(*) FILTER (WHERE c.change_type = 'emergency' AND ${inRange('c.created_at')})::int AS emergency,
+         count(*) FILTER (WHERE c.change_type = 'standard' AND ${inRange('c.created_at')})::int AS standard,
+         count(*) FILTER (WHERE c.actual_start IS NOT NULL AND ${inRange('c.actual_start')} AND EXISTS (
+           SELECT 1 FROM change_cis x JOIN incident_cis y ON y.ci_id = x.ci_id JOIN incidents i ON i.id = y.incident_id
+           WHERE x.change_id = c.id AND i.created_at BETWEEN c.actual_start AND c.actual_start + interval '24 hours'))::int AS followed_by_incidents
+       FROM changes c`,
+      range,
+    ),
   ]);
 
   const sum = (key: string) => flow.rows.reduce((n, r) => n + r[key], 0);
@@ -197,6 +211,7 @@ export async function report({ from, to, bucket }: ReportParams) {
       })),
     closures: closures.rows,
     hotspots: { services: services.rows, categories: categories.rows, cis: cis.rows, ci_types: ciTypes.rows },
+    changes: changeStats.rows[0],
     incidents: { ...incidentStats.rows[0], mtta_median_min: round(incidentStats.rows[0].mtta_median_min), mttr_median_h: round(incidentStats.rows[0].mttr_median_h), by_ci: incidentCis.rows },
     known_errors: knownErrors.rows[0],
     actions: {

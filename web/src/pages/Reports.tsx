@@ -23,6 +23,7 @@ interface Report {
     cis: { ref: string; name: string; type_label: string; criticality: number; records: number; unlinked: number; open_problems: number; known_errors: number }[];
     ci_types: { name: string; records: number; problems: number }[];
   };
+  changes: { requested: number; implemented: number; successful: number; failed: number; emergency: number; standard: number; followed_by_incidents: number };
   incidents: { opened: number; resolved: number; major: number; open_now: number; reopened: number; with_problem: number; mtta_median_min: number | null; mttr_median_h: number | null; by_ci: { ref: string; name: string; incidents: number; without_problem: number }[] };
   known_errors: { count: number; avg_age_days: number; with_workaround: number; with_decision: number; risk_accepted: number; review_due: number };
   actions: { created: number; completed: number; on_time_rate: number | null; open_now: number; overdue_now: number };
@@ -216,6 +217,19 @@ export function ReportsPage() {
                   <dt>Linked to a problem</dt><dd>{r.incidents.opened ? Math.round((r.incidents.with_problem / r.incidents.opened) * 100) : 0}%</dd>
                 </dl>
               </section>
+              {r.changes && (
+                <section className="card">
+                  <h2>Changes</h2>
+                  <dl className="kv">
+                    <dt>Requested in period</dt><dd>{r.changes.requested}</dd>
+                    <dt>Implemented</dt><dd>{r.changes.implemented}</dd>
+                    <dt>Success rate</dt><dd>{r.changes.implemented ? `${Math.round((r.changes.successful / r.changes.implemented) * 100)}%` : '–'}</dd>
+                    <dt>Emergency changes</dt><dd className={r.changes.requested && r.changes.emergency / r.changes.requested > 0.2 ? 'attention' : ''}>{r.changes.requested ? Math.round((r.changes.emergency / r.changes.requested) * 100) : 0}%</dd>
+                    <dt>Standard changes</dt><dd>{r.changes.requested ? Math.round((r.changes.standard / r.changes.requested) * 100) : 0}%</dd>
+                    <dt>Followed by incidents (24 h)</dt><dd className={r.changes.followed_by_incidents ? 'attention' : ''}>{r.changes.followed_by_incidents}</dd>
+                  </dl>
+                </section>
+              )}
               <section className="card">
                 <h2>Incidents per CI</h2>
                 <HBars rows={r.incidents.by_ci.map((c) => ({ label: c.name, value: c.incidents, detail: `${c.incidents} incidents, ${c.without_problem} without a problem` }))} empty="No incidents on CIs in the period." />

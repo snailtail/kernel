@@ -19,6 +19,8 @@ import { ProblemsPage } from './pages/Problems';
 import { SessionContext, canEdit, isManager } from './session';
 
 // Pages people open less often load on demand, so the start page stays small.
+const ChangesPage = lazy(() => import('./pages/Changes').then((m) => ({ default: m.ChangesPage })));
+const ChangePage = lazy(() => import('./pages/Changes').then((m) => ({ default: m.ChangePage })));
 const EventsPage = lazy(() => import('./pages/Events').then((m) => ({ default: m.EventsPage })));
 const CiGroupsPage = lazy(() => import('./pages/Cmdb').then((m) => ({ default: m.CiGroupsPage })));
 const CiPage = lazy(() => import('./pages/Cmdb').then((m) => ({ default: m.CiPage })));
@@ -114,6 +116,7 @@ export function App() {
             <NavLink to="/dashboard">{icons.dashboard}Dashboard</NavLink>
             <NavLink to="/events">{icons.events}Events</NavLink>
             <NavLink to="/incidents">{icons.incidents}Incidents</NavLink>
+            <NavLink to="/changes">{icons.changes}Changes</NavLink>
             <NavLink to="/problems" end>{icons.problems}Problems</NavLink>
             <NavLink to="/candidates">{icons.candidates}Candidates</NavLink>
             <NavLink to="/kedb">{icons.kedb}Known Errors</NavLink>
@@ -148,6 +151,8 @@ export function App() {
             <Route path="/candidates" element={<CandidatesPage />} />
             <Route path="/kedb" element={<KedbPage />} />
             <Route path="/events" element={<EventsPage />} />
+            <Route path="/changes" element={<ChangesPage />} />
+            <Route path="/changes/:ref" element={<ChangePage />} />
             <Route path="/incidents" element={<IncidentsPage />} />
             <Route path="/incidents/:ref" element={<IncidentPage />} />
             <Route path="/cis" element={<CmdbListPage />} />

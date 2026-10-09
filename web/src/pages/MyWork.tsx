@@ -11,6 +11,8 @@ import { useSession } from '../session';
 interface MyWork {
   problems: { ref: string; title: string; status: Status; priority: number; updated_at: string; url: string }[];
   incidents: { ref: string; title: string; status: string; priority: number; is_major: boolean; created_at: string }[];
+  change_votes: { ref: string; title: string; change_type: string; planned_start: string | null }[];
+  changes: { ref: string; title: string; status: string; change_type: string; planned_start: string | null }[];
   actions: Action[];
   watched_changes: { ref: string; title: string; kind: string; body: string; created_at: string; by: string | null }[];
   decisions: { ref: string; title: string; priority: number; known_error_at: string }[];
@@ -26,7 +28,7 @@ export function MyWorkPage() {
     await api.post<ProblemDetail>(`/api/approvals/${id}/${approve ? 'approve' : 'reject'}`, {});
     reload();
   };
-  const nothing = !data.problems.length && !data.incidents.length && !data.actions.length && !data.decisions.length && !data.approvals.length;
+  const nothing = !data.problems.length && !data.incidents.length && !data.change_votes.length && !data.changes.length && !data.actions.length && !data.decisions.length && !data.approvals.length;
   return (
     <>
       <header className="page-head">
@@ -83,6 +85,17 @@ export function MyWorkPage() {
         </section>
       )}
 
+      {data.change_votes.length > 0 && (
+        <section className="card">
+          <h2>Changes waiting for your approval <span className="count">{data.change_votes.length}</span></h2>
+          <ul className="work-list">
+            {data.change_votes.map((c) => (
+              <li key={c.ref}><div><Link to={`/changes/${c.ref}`} className="mono">{c.ref}</Link> {c.title}</div><span className="work-meta"><span className="tag">{c.change_type}</span>{c.planned_start && <span className="muted small">{relativeTime(c.planned_start)}</span>}</span></li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {data.incidents.length > 0 && (
         <section className="card">
           <h2>My incidents <span className="count">{data.incidents.length}</span></h2>
@@ -116,6 +129,17 @@ export function MyWorkPage() {
           <ActionList actions={data.actions} editable showProblem onChange={() => reload()} />
         </section>
       </div>
+
+      {data.changes.length > 0 && (
+        <section className="card">
+          <h2>My changes <span className="count">{data.changes.length}</span></h2>
+          <ul className="work-list">
+            {data.changes.map((c) => (
+              <li key={c.ref}><div><Link to={`/changes/${c.ref}`} className="mono">{c.ref}</Link> {c.title}</div><span className="work-meta"><span className="tag">{c.change_type}</span><span className="muted small">{c.status}</span></span></li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {data.watched_changes.length > 0 && (
         <section className="card">

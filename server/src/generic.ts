@@ -8,6 +8,7 @@ import { listApprovals } from './approvals.js';
 import { addCiLink, CI_LINK_KINDS } from './cmdb.js';
 import { linkCiToProblem } from './problem-cis.js';
 import { addIncidentLink, linkIncidentToProblem, setIncidentCi } from './incidents.js';
+import { addChangeLink, setChangeCi } from './changes.js';
 
 const incidentExists = async (ref: string) => (await query('SELECT 1 FROM incidents WHERE ref = $1', [ref.toUpperCase()])).rows.length > 0;
 import { addLink, LINK_KINDS, SELECT_ACTION } from './problems.js';
@@ -49,6 +50,15 @@ export async function linkRecords(user: User, from: string, to: string, options:
   } catch {
     if (!kind) throw badRequest('Give the kind (incident, event, change, problem) for an external reference');
   }
+  // Native changes (#29): CIs they change, the problem they fix, links to PRs, pipelines and documents.
+  const nativeChange = (ref: string) => { try { return typeForRef(ref).type === 'change' && !(options.system && options.system !== 'Kernel'); } catch { return false; } };
+  if (source.type === 'change') {
+    if (kind === 'ci' || kind === 'service') return (await setChangeCi(user, from, to, true)).affected_cis;
+    if (!['change', 'incident', 'pull_request', 'pipeline', 'document'].includes(kind!)) throw badRequest(`A change cannot link a ${kind}`);
+    return (await addChangeLink(user, from, { kind: kind as 'change', reference: to, system: options.system ?? '', url: options.url ?? '', note: options.note ?? '' })).links;
+  }
+  if (kind === 'change' && nativeChange(to) && (source.type === 'ci' || source.type === 'service')) return (await setChangeCi(user, to, from, true)).affected_cis;
+
   // Native incidents (#28): to a problem, to a CI, or to external references.
   const native = (ref: string) => { try { return typeForRef(ref).type === 'incident' && !(options.system && options.system !== 'Kernel'); } catch { return false; } };
   if (source.type === 'incident') {
@@ -76,7 +86,7 @@ export async function linkRecords(user: User, from: string, to: string, options:
 /** What the user should work on: their open problems and actions, and recent changes on what they watch. */
 export async function myWork(user: User) {
   const decide = can(user.role, 'problem.accept_risk');
-  const [problems, actions, watched, decisions, incidents] = await Promise.all([
+  const [problems, actions, watched, decisions, incidents, changeVotes, myChanges] = await Promise.all([
     query(
       `SELECT ref, title, status, priority, updated_at FROM problems WHERE assignee_id = $1 AND status NOT IN ('resolved', 'closed') ORDER BY priority, updated_at DESC LIMIT 50`,
       [user.id],
@@ -99,11 +109,27 @@ export async function myWork(user: User) {
           [user.id],
         )
       : Promise.resolve({ rows: [] as any[] }),
+    can(user.role, 'change.approve')
+      ? query(
+          `SELECT c.ref, c.title, c.change_type, c.planned_start FROM changes c WHERE c.status = 'authorize' AND c.created_by IS DISTINCT FROM $1
+           AND NOT EXISTS (SELECT 1 FROM change_votes v WHERE v.change_id = c.id AND v.user_id = $1) ORDER BY c.planned_start NULLS LAST LIMIT 30`,
+          [user.id],
+        )
+      : Promise.resolve({ rows: [] as any[] }),
+    can(user.role, 'change.read')
+      ? query(
+          `SELECT ref, title, status, change_type, planned_start FROM changes WHERE (assignee_id = $1 OR created_by = $1)
+           AND status NOT IN ('closed', 'rejected', 'cancelled') ORDER BY planned_start NULLS LAST LIMIT 30`,
+          [user.id],
+        )
+      : Promise.resolve({ rows: [] as any[] }),
   ]);
   const problemType = recordTypes().find((t) => t.type === 'problem')!;
   return {
     problems: problems.rows.map((p) => ({ type: 'problem', ...p, url: recordUrl(problemType, p.ref) })),
     incidents: incidents.rows,
+    change_votes: changeVotes.rows,
+    changes: myChanges.rows,
     actions: actions.rows,
     watched_changes: watched.rows,
     decisions: decisions.rows.map((p) => ({ type: 'problem', ...p, url: recordUrl(problemType, p.ref) })),

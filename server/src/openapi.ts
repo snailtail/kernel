@@ -7,6 +7,7 @@ import * as graph from './cmdb-graph.js';
 import * as problemCis from './problem-cis.js';
 import * as inc from './incidents.js';
 import * as events from './events.js';
+import * as ch from './changes.js';
 import * as hooks from './event-hooks.js';
 import { auditQuerySchema } from './audit.js';
 import { searchSchema } from './generic.js';
@@ -115,6 +116,25 @@ export const OPERATIONS: Op[] = [
   { method: 'post', path: '/api/cis/:ref/comments', tag: 'CMDB', summary: 'Add a note', body: z.object({ body: z.string() }) },
   { method: 'post', path: '/api/cis/:ref/links', tag: 'CMDB', summary: 'Link a problem, incident, event, change or document', body: cmdb.ciLinkSchema },
   { method: 'delete', path: '/api/cis/:ref/links/:id', tag: 'CMDB', summary: 'Remove a link' },
+  { method: 'get', path: '/api/changes', tag: 'Changes', summary: 'List changes (open by default)', query: ch.listChangesSchema },
+  { method: 'get', path: '/api/changes/schedule', tag: 'Changes', summary: 'Change schedule: planned changes, freezes and collisions', query: ch.scheduleSchema },
+  { method: 'post', path: '/api/changes', tag: 'Changes', summary: 'Request a change (standard changes from a template); supports Idempotency-Key', body: ch.createChangeSchema },
+  { method: 'post', path: '/api/changes/register', tag: 'Changes', summary: 'Register a standard change carried out by automation (deployment pipelines); token with ingest scope or an integration account', body: ch.registerSchema },
+  { method: 'get', path: '/api/changes/:ref', tag: 'Changes', summary: 'A change with risk, approvals, affected CIs and services, collisions, freezes and related incidents' },
+  { method: 'patch', path: '/api/changes/:ref', tag: 'Changes', summary: 'Update a change; send base to detect conflicting edits', body: ch.updateChangeSchema },
+  { method: 'post', path: '/api/changes/:ref/transition', tag: 'Changes', summary: 'Move a change through its lifecycle', body: ch.transitionChangeSchema },
+  { method: 'post', path: '/api/changes/:ref/votes', tag: 'Changes', summary: 'Approve or reject (change authority, web UI session only)', body: ch.voteSchema },
+  { method: 'post', path: '/api/changes/:ref/comments', tag: 'Changes', summary: 'Add a note', body: z.object({ body: z.string() }) },
+  { method: 'post', path: '/api/changes/:ref/links', tag: 'Changes', summary: 'Link a pull request, pipeline run, document, incident or external change', body: ch.changeLinkSchema },
+  { method: 'post', path: '/api/changes/:ref/cis', tag: 'Changes', summary: 'Link an affected CI or service', body: problemCis.linkCiSchema },
+  { method: 'delete', path: '/api/changes/:ref/cis/:ci', tag: 'Changes', summary: 'Unlink a CI or service' },
+  { method: 'post', path: '/api/problems/:ref/change', tag: 'Changes', summary: 'Raise a change for the fix of a problem (prefilled, linked)' },
+  { method: 'get', path: '/api/change-templates', tag: 'Changes', summary: 'Standard change templates' },
+  { method: 'post', path: '/api/change-templates', tag: 'Changes', summary: 'Create a standard change template (change authority)', body: ch.templateSchema },
+  { method: 'put', path: '/api/change-templates/:id', tag: 'Changes', summary: 'Update a template', body: ch.templateSchema },
+  { method: 'get', path: '/api/change-freezes', tag: 'Changes', summary: 'Change freezes' },
+  { method: 'post', path: '/api/change-freezes', tag: 'Changes', summary: 'Add a change freeze (change authority)', body: ch.freezeSchema },
+  { method: 'delete', path: '/api/change-freezes/:id', tag: 'Changes', summary: 'Remove a change freeze' },
   { method: 'post', path: '/api/events', tag: 'Events', summary: 'Report normalised events (token with ingest scope, or a session); deduplicated into alerts', body: events.reportEventsSchema },
   { method: 'post', path: '/api/event-hooks/:id', tag: 'Events', summary: "Inbound webhook for a configured event source (Alertmanager, Uptime Kuma, Azure Monitor, OP5, generic). Authenticate with the source token (Authorization: Bearer, X-Kernel-Token, or ?token=); a signed generic source also needs Standard Webhooks headers" },
   { method: 'get', path: '/api/alerts', tag: 'Events', summary: 'Alerts (open by default), most severe first', query: events.listAlertsSchema },
