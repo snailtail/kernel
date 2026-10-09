@@ -6,7 +6,7 @@ const PRIORITY: Record<number, string> = { 1: 'Critical', 2: 'High', 3: 'Medium'
 const TECHNIQUE: Record<string, string> = { five_whys: '5 Whys', ishikawa: 'Ishikawa', kepner_tregoe: 'Kepner-Tregoe', timeline: 'Timeline' };
 
 const day = (v: string | Date | null) => (v ? new Date(v).toISOString().slice(0, 10) : '–');
-const cell = (v: unknown) => String(v ?? '').replace(/\|/g, '\\|').replace(/\n/g, ' ');
+const cell = (v: unknown) => String(v ?? '').replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\n/g, ' ');
 
 export async function problemMarkdown(ref: string) {
   const p: any = await getProblem(ref);

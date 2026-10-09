@@ -95,7 +95,10 @@ describe('notifications (#48)', { skip }, () => {
     await analyst.post('/api/incidents', { title: 'Digest me', assignee_id: ids.pm });
     await deliver();
     assert.equal(mailTo('pm').length, instant, 'no instant mail with the digest on');
-    const tomorrow8 = Date.now() + 86400_000 + 3600_000;
+    // 08:00 tomorrow in Stockholm, whatever the time of day the test runs.
+    const { localDate, zonedToUtc } = await import('../../src/business-time.js');
+    const t = localDate('Europe/Stockholm', Date.now() + 86400_000);
+    const tomorrow8 = zonedToUtc('Europe/Stockholm', t.y, t.m, t.d, 8 * 60);
     assert.equal(await n.queueDigests(tomorrow8), 1);
     assert.equal(await n.queueDigests(tomorrow8), 0, 'once a day');
     await db.query("UPDATE notification_deliveries SET created_at = now() + interval '1 day', since = now() - interval '1 day' WHERE channel = 'digest'");

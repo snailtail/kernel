@@ -1,10 +1,12 @@
 // HTTP hardening (security headers, CSP, CSRF origin checks) and the security status checklist.
 import helmet from '@fastify/helmet';
+import rateLimit_ from '@fastify/rate-limit';
+import { createHash } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { backupStatus } from './backups.js';
 import { config } from './config.js';
 import { query } from './db.js';
-import { forbidden } from './errors.js';
+import { forbidden, HttpError } from './errors.js';
 import { logger } from './log.js';
 import { rateLimit } from './ratelimit.js';
 import { lastChainVerification } from './audit.js';
@@ -37,6 +39,21 @@ export async function registerSecurity(app: FastifyInstance<any, any, any, any>)
     referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
     crossOriginOpenerPolicy: { policy: 'same-origin' },
     crossOriginResourcePolicy: { policy: 'same-origin' },
+  });
+  // A ceiling per caller on the whole API (#66): a runaway script or a stolen token cannot exhaust the server. Keyed
+  // on the session or token (hashed), else the client address; event ingestion gets a higher ceiling for bursts.
+  const perMinute = Number(process.env.KERNEL_RATE_LIMIT_PER_MINUTE ?? 1200);
+  const INGEST = /^\/api\/(events|cmdb\/ci-batch|integrations\/records|cis\/upsert)(\?|$)/;
+  await app.register(rateLimit_, {
+    global: true,
+    timeWindow: 60_000,
+    max: (req) => (INGEST.test(req.url) ? perMinute * 5 : perMinute),
+    allowList: (req) => req.url === '/healthz' || !(req.url.startsWith('/api/') || req.url.startsWith('/mcp')),
+    keyGenerator: (req) => {
+      const auth = req.headers.authorization ?? /(?:^|;\s*)kernel_session=([^;]+)/.exec(req.headers.cookie ?? '')?.[1];
+      return auth ? `c:${createHash('sha256').update(auth).digest('hex').slice(0, 32)}` : `ip:${req.ip}`;
+    },
+    errorResponseBuilder: (_req, ctx) => new HttpError(429, 'Too many requests, try again later', { retry_after_seconds: Math.ceil(ctx.ttl / 1000) }),
   });
   app.addHook('onSend', async (req, reply) => {
     reply.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()');
