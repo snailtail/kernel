@@ -109,8 +109,13 @@ describe('notifications (#48)', { skip }, () => {
     const url = new URL(n.unsubscribeUrl(ids.pm, 'major_incident'), 'http://x');
     const get = await new Client(k.base).request('GET', `/api/notifications/unsubscribe${url.search}`);
     assert.equal(get.status, 200);
-    assert.match(String(get.body), /no longer receive email when: a major incident is declared/);
+    assert.match(String(get.body), /Stop email when: a major incident is declared\?/);
+    assert.match(String(get.body), /<form method="post"/);
+    assert.equal((await pm.get('/api/notifications/settings')).body.events.major_incident.email, true, 'a GET (link scanner) changes nothing');
+    const confirm = await fetch(`${k.base}/api/notifications/unsubscribe${url.search}`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'text/html' }, body: 'List-Unsubscribe=One-Click' });
+    assert.match(await confirm.text(), /no longer receive email when: a major incident is declared/);
     assert.equal((await pm.get('/api/notifications/settings')).body.events.major_incident.email, false);
+    assert.equal((await new Client(k.base).request('GET', `/api/notifications/unsubscribe?u=${ids.pm}&e=__proto__&t=x`)).status, 400);
     const forged = await new Client(k.base).request('GET', `/api/notifications/unsubscribe?u=${ids.admin}&e=all&t=${url.searchParams.get('t')}`);
     assert.equal(forged.status, 400);
     const all = new URL(n.unsubscribeUrl(ids.admin, 'all'), 'http://x');

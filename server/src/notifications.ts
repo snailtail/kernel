@@ -145,16 +145,23 @@ export function unsubscribeUrl(userId: number, event: string) {
   return `${base}/api/notifications/unsubscribe?u=${userId}&e=${event}&t=${unsubscribeSig(userId, event)}`;
 }
 
-/** One-click unsubscribe from email for an event (or all email), from a signed link; no login needed. */
-export async function unsubscribe(userId: number, event: string, token: string) {
+/** Checks a signed unsubscribe link without changing anything; returns what it would unsubscribe from. */
+export function checkUnsubscribe(userId: number, event: string, token: string) {
   if (!process.env.KERNEL_SECRET_KEY) throw badRequest('Unsubscribe links are not configured');
   const expected = Buffer.from(unsubscribeSig(userId, event));
   const given = Buffer.from(token);
   if (expected.length !== given.length || !timingSafeEqual(expected, given)) throw badRequest('Invalid unsubscribe link');
+  if (event !== 'all' && !Object.hasOwn(EVENTS, event)) throw badRequest('Unknown event');
+  return event === 'all' ? 'all email from Kernel' : `email when: ${EVENTS[event as NotificationEvent].label.toLowerCase()}`;
+}
+
+/** One-click unsubscribe (POST only: mail scanners prefetch GET links and must not unsubscribe anyone). */
+export async function unsubscribe(userId: number, event: string, token: string) {
+  checkUnsubscribe(userId, event, token);
   if (event === 'all') {
     await query('INSERT INTO notification_settings (user_id, email) VALUES ($1, false) ON CONFLICT (user_id) DO UPDATE SET email = false, updated_at = now()', [userId]);
   } else {
-    if (!(event in EVENTS)) throw badRequest('Unknown event');
+    if (!Object.hasOwn(EVENTS, event)) throw badRequest('Unknown event');
     const patch = JSON.stringify({ [event]: { email: false } });
     await query(
       `INSERT INTO notification_settings (user_id, events) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE

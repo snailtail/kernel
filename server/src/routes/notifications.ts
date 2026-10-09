@@ -21,13 +21,21 @@ export async function notificationRoutes(app: FastifyInstance) {
     const params = z.object({ u: z.coerce.number().int(), e: z.string().max(40), t: z.string().max(100) });
     const page = (text: string) =>
       `<!doctype html><meta charset="utf-8"><title>Kernel</title><body style="font-family:system-ui;max-width:32rem;margin:4rem auto;padding:0 1rem"><h1>Kernel</h1><p>${text.replace(/[<>&]/g, '')}</p></body>`;
+    // GET only shows a confirmation: link scanners (Safe Links, Proofpoint…) open every link in a mail.
     scope.get('/api/notifications/unsubscribe', async (req, reply) => {
       const p = params.parse(req.query);
-      reply.type('text/html').send(page(await n.unsubscribe(p.u, p.e, p.t)));
+      const what = n.checkUnsubscribe(p.u, p.e, p.t);
+      const action = `/api/notifications/unsubscribe?u=${p.u}&e=${encodeURIComponent(p.e)}&t=${encodeURIComponent(p.t)}`;
+      reply.type('text/html').send(
+        page(`Stop ${what}?`).replace('</body>', `<form method="post" action="${action}"><input type="hidden" name="List-Unsubscribe" value="One-Click"><button type="submit" style="font:inherit;padding:.5rem 1rem">Unsubscribe</button></form></body>`),
+      );
     });
-    scope.post('/api/notifications/unsubscribe', async (req) => {
+    // The one-click POST (RFC 8058) from the mail client, or the confirmation button above.
+    scope.post('/api/notifications/unsubscribe', async (req, reply) => {
       const p = params.parse(req.query);
-      return { ok: true, message: await n.unsubscribe(p.u, p.e, p.t) };
+      const message = await n.unsubscribe(p.u, p.e, p.t);
+      if (String(req.headers.accept ?? '').includes('text/html')) return reply.type('text/html').send(page(message));
+      return { ok: true, message };
     });
   });
 }
