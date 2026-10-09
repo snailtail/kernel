@@ -1,0 +1,76 @@
+name: Security
+
+# Supply chain and code checks (#66). What to do when one fails: docs/security-checks.md.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "23 4 * * 1" # weekly, to catch new advisories for unchanged code
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dependencies:
+    name: Dependencies (npm audit, OSV)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 24
+      # Production dependencies must have no known high or critical vulnerability.
+      - run: npm audit --omit=dev --audit-level=high
+      - name: OSV scanner
+        run: docker run --rm -v "$PWD":/src ghcr.io/google/osv-scanner:v2.6.0 scan source --lockfile /src/package-lock.json
+
+  secrets:
+    name: Secrets (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: docker run --rm -v "$PWD":/repo ghcr.io/gitleaks/gitleaks:v8.30.1 git /repo --config /repo/.gitleaks.toml --redact --no-banner
+
+  sast:
+    name: Code (Semgrep)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      # OWASP and Node rule sets plus Kernel's own rule against SQL built from input (.semgrep/kernel.yml).
+      - run: >-
+          docker run --rm -v "$PWD":/src -w /src semgrep/semgrep:1.140.0 semgrep scan --metrics=off --error
+          --config p/owasp-top-ten --config p/typescript --config p/nodejs --config .semgrep/kernel.yml
+          server/src web/src
+
+  image:
+    name: Container image (Trivy, SBOM)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - run: docker build -t kernel:ci .
+      # Fail on fixable high or critical vulnerabilities in the image that would be deployed.
+      - run: >-
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.67.2 image
+          --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln,secret kernel:ci
+      - name: SBOM (CycloneDX)
+        run: >-
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD":/out aquasec/trivy:0.67.2 image
+          --format cyclonedx --output /out/kernel-sbom.cdx.json kernel:ci
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sbom
+          path: kernel-sbom.cdx.json

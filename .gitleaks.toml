@@ -1,0 +1,8 @@
+# Secret scanning (#66). The default rules apply everywhere except the integration tests, whose keys are made up
+# for the test database and never used elsewhere. Do not widen this allowlist for real code; see docs/security-checks.md.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Made-up keys in integration tests"
+paths = ['''^server/test/''']
