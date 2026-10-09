@@ -10,6 +10,7 @@ import { registerCiExtra } from './cmdb.js';
 import { query, tx } from './db.js';
 import { badRequest, conflict, notFound } from './errors.js';
 import { insertIncident, logIncident } from './incidents.js';
+import { slaOnTransition } from './sla.js';
 import type { Db } from './problems.js';
 import { logger } from './log.js';
 import { authorize } from './policy.js';
@@ -274,6 +275,7 @@ async function applyRule(db: Db, rule: Rule, alert: any, ci: CiFacts | null) {
   );
   if (recent[0]) {
     await db.query("UPDATE incidents SET status = 'in_progress', resolved_at = NULL, reopen_count = reopen_count + 1 WHERE id = $1", [recent[0].id]);
+    await slaOnTransition(db, recent[0].id, 'in_progress');
     await logIncident(db, recent[0].id, null, 'status', `Reopened: ${label} fired again`, { from: 'resolved', to: 'in_progress', alert_id: alert.id });
     return { ...(await attach(recent[0], `Alert fired again: ${label}`)), action: 'reopened' as const };
   }
@@ -446,7 +448,10 @@ export async function autoResolveIncidents() {
                 responded_at = coalesce(responded_at, now()) WHERE id = $1 AND status IN ('new', 'in_progress')`,
         [i.id],
       );
-      if (rowCount) await logIncident(db, i.id, null, 'status', 'All alerts cleared', { from: i.status, to: 'resolved', resolution_code: 'fixed' });
+      if (rowCount) {
+        await slaOnTransition(db, i.id, 'resolved');
+        await logIncident(db, i.id, null, 'status', 'All alerts cleared', { from: i.status, to: 'resolved', resolution_code: 'fixed' });
+      }
     });
   }
   return rows.length;

@@ -21,6 +21,7 @@ import { SessionContext, canEdit, isManager } from './session';
 // Pages people open less often load on demand, so the start page stays small.
 const ChangesPage = lazy(() => import('./pages/Changes').then((m) => ({ default: m.ChangesPage })));
 const ChangePage = lazy(() => import('./pages/Changes').then((m) => ({ default: m.ChangePage })));
+const ServiceLevelsPage = lazy(() => import('./pages/ServiceLevels').then((m) => ({ default: m.ServiceLevelsPage })));
 const EventsPage = lazy(() => import('./pages/Events').then((m) => ({ default: m.EventsPage })));
 const CiGroupsPage = lazy(() => import('./pages/Cmdb').then((m) => ({ default: m.CiGroupsPage })));
 const CiPage = lazy(() => import('./pages/Cmdb').then((m) => ({ default: m.CiPage })));
@@ -151,6 +152,7 @@ export function App() {
             <Route path="/candidates" element={<CandidatesPage />} />
             <Route path="/kedb" element={<KedbPage />} />
             <Route path="/events" element={<EventsPage />} />
+            <Route path="/services" element={<ServiceLevelsPage />} />
             <Route path="/changes" element={<ChangesPage />} />
             <Route path="/changes/:ref" element={<ChangePage />} />
             <Route path="/incidents" element={<IncidentsPage />} />

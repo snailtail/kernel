@@ -32,6 +32,11 @@ const ciFields = {
   description: z.string().max(20000),
   tags: z.array(z.string().trim().min(1).max(50)).max(30),
   attributes: z.record(z.string(), z.union([z.string().max(500), z.number(), z.boolean(), z.null()])),
+  // Service catalogue (#43), for services.
+  sla_id: z.number().int().nullable(),
+  user_description: z.string().max(5000),
+  how_to_get_help: z.string().max(5000),
+  in_catalogue: z.boolean(),
 };
 
 export const createCiSchema = z
@@ -251,6 +256,12 @@ async function newRef(db: Db, cls: 'ci' | 'service') {
   return rows[0].ref as string;
 }
 
+async function validateSla(db: Db, slaId: number | null | undefined) {
+  if (slaId == null) return;
+  const { rows } = await db.query('SELECT 1 FROM slas WHERE id = $1', [slaId]);
+  if (!rows[0]) throw badRequest('Unknown SLA');
+}
+
 async function validateOwner(db: Db, ownerId: number | null | undefined) {
   if (ownerId == null) return;
   const { rows } = await db.query('SELECT 1 FROM users WHERE id = $1 AND active', [ownerId]);
@@ -262,12 +273,15 @@ export async function createCi(user: User, input: z.infer<typeof createCiSchema>
   const ref = await tx(async (db) => {
     const t = await typeInfo(db, input.ci_type);
     await validateOwner(db, input.owner_id);
+    await validateSla(db, input.sla_id);
     const ref = await newRef(db, t.class);
     const { rows } = await db.query(
-      `INSERT INTO configuration_items (ref, class, name, ci_type, status, environment, criticality, owner_id, team, description, tags, attributes, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id`,
+      `INSERT INTO configuration_items (ref, class, name, ci_type, status, environment, criticality, owner_id, team, description, tags, attributes, created_by,
+                                        sla_id, user_description, how_to_get_help, in_catalogue)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING id`,
       [ref, t.class, input.name, t.name, input.status ?? 'active', input.environment ?? 'prod', input.criticality ?? 3, input.owner_id ?? null,
-        input.team ?? '', input.description ?? '', input.tags ?? [], JSON.stringify(cleanAttributes(t.attributes, input.attributes)), user.id],
+        input.team ?? '', input.description ?? '', input.tags ?? [], JSON.stringify(cleanAttributes(t.attributes, input.attributes)), user.id,
+        input.sla_id ?? null, input.user_description ?? '', input.how_to_get_help ?? '', input.in_catalogue ?? false],
     );
     if (input.source) {
       await db.query('INSERT INTO ci_sources (ci_id, source_system, source_id, source_url, created_by) VALUES ($1, $2, $3, $4, $5)', [
@@ -291,6 +305,7 @@ export async function updateCi(user: User, ref: string, { base, ...input }: z.in
     const t = await typeInfo(db, input.ci_type ?? current.ci_type);
     if (input.ci_type && t.class !== current.class) throw badRequest('A CI cannot become a service or the other way round');
     await validateOwner(db, input.owner_id);
+    await validateSla(db, input.sla_id);
     const next: Record<string, unknown> = { ...input };
     if (input.attributes || input.ci_type) next.attributes = cleanAttributes(t.attributes, input.attributes ?? current.attributes);
     const changed = Object.entries(next).filter(([k, v]) => v !== undefined && JSON.stringify(current[k] ?? null) !== JSON.stringify(v));

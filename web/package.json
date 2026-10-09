@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsx --test test/*.test.tsx"
+    "test": "tsx --test test/*.test.tsx test/*.test.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.4",

@@ -20,3 +20,9 @@ export function MajorBadge() {
 export function SeverityBadge({ severity }: { severity: string }) {
   return <span className={`badge sev sev-${severity}`}>{severity}</span>;
 }
+
+const SLA_LABEL: Record<string, string> = { on_track: 'On track', at_risk: 'At risk', breached: 'Breached', met: 'Met', paused: 'Paused' };
+export function SlaBadge({ state, title }: { state?: string | null; title?: string }) {
+  if (!state || state === 'none') return null;
+  return <span className={`badge sla-${state}`} title={title}>{SLA_LABEL[state] ?? state}</span>;
+}

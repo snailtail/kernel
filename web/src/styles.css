@@ -926,3 +926,24 @@ fieldset.rules { flex-direction: row; flex-wrap: wrap; }
 .plans h3:first-of-type { margin-top: 0; }
 .schedule { display: flex; flex-direction: column; gap: 14px; }
 .work-list li.collides { background: var(--danger-soft); border-radius: 6px; padding-left: 8px; padding-right: 8px; }
+
+/* Service levels (#43) */
+.sla-on_track, .sla-met { color: var(--success); background: var(--success-soft); }
+.sla-at_risk { color: var(--s-known); background: var(--s-known-bg); }
+.sla-breached { color: var(--danger); background: var(--danger-soft); }
+.sla-paused { color: var(--s-closed); background: var(--s-closed-bg); }
+.card.sla-card { background: var(--surface); }
+.card.sla-card.sla-at_risk { border-left: 3px solid var(--s-known); }
+.card.sla-card.sla-breached { border-left: 3px solid var(--danger); }
+.sla-row { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.sla-head { display: flex; justify-content: space-between; align-items: center; }
+.sla-bar { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+.sla-bar span { display: block; height: 100%; background: var(--accent); }
+.sla-at_risk .sla-bar span, .sla-row:has(.sla-at_risk) .sla-bar span { background: var(--warn); }
+.sla-row:has(.sla-breached) .sla-bar span { background: var(--danger); }
+.service-card { display: flex; flex-direction: column; gap: 8px; }
+.service-card header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.service-card h2 { margin: 0; }
+.targets input { width: 100%; }
+tr.clickable { cursor: pointer; }
+tr.total td { border-bottom: 2px solid var(--border-strong); }

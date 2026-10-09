@@ -8,6 +8,7 @@ import { config } from './config.js';
 import { migrate, pool, query, waitForDb } from './db.js';
 import { encryptLegacySecrets, startWorker } from './webhooks.js';
 import { startEventWorker } from './events.js';
+import { startSlaWorker } from './sla.js';
 
 const app = await buildApp();
 const log = (msg: string) => app.log.info(msg);
@@ -21,6 +22,7 @@ setInterval(() => query('DELETE FROM sessions WHERE expires_at < now()').catch((
 asSystem(() => {
   startWorker(log);
   startEventWorker(log);
+  startSlaWorker(log);
   startChainVerification((msg) => app.log.error(msg));
   setInterval(() => pruneIdempotencyKeys().catch(() => {}), 3600_000).unref();
 });

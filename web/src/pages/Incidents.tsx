@@ -6,21 +6,23 @@ import { AffectedCisPanel, type AffectedCi, type AffectedService, type ImpactHin
 import { MajorBadge, PriorityBadge } from '../components/Badges';
 import { Markdown } from '../components/Markdown';
 import { Modal } from '../components/Modal';
-import { formatDate, relativeTime } from '../format';
+import { duration, formatDate, relativeTime } from '../format';
 import { useApi } from '../hooks';
 import { useSession } from '../session';
-import { SeverityBadge } from '../components/Badges';
+import { SeverityBadge, SlaBadge } from '../components/Badges';
 
 type IncidentStatus = 'new' | 'in_progress' | 'on_hold' | 'resolved' | 'closed';
 interface IncidentRow {
   id: number; ref: string; title: string; status: IncidentStatus; priority: number; is_major: boolean; assignee: string | null;
   assignment_group: string; source: string; created_at: string; resolved_at: string | null; problem_ref: string | null; cis: string[] | null;
+  sla_state?: string | null; resolution_due_at?: string | null;
 }
 interface Incident extends IncidentRow {
   description: string; impact: number; urgency: number; category_id: number | null; category: string | null; assignee_id: number | null;
   reporter: string; hold_reason: string; resolution_code: string | null; resolution: string; reopen_count: number;
   responded_at: string | null; closed_at: string | null; problem_title: string | null; problem_status: string | null;
   affected_cis: AffectedCi[]; affected_services: AffectedService[]; impact_hint: ImpactHint | null; impact_incomplete: boolean;
+  sla: { name: string; calendar: string; paused: boolean; response: SlaClock; resolution: SlaClock } | null;
   possible_change_causes: { ref: string; title: string; status: string; change_type: string; outcome: string | null; started_at: string; ci: string; ci_name: string }[];
   known_errors: { ref: string; title: string; workaround: string; workaround_effectiveness: string | null; ci_ref: string; ci_name: string }[];
   links: { id: number; kind: string; reference: string; system: string; url: string }[];
@@ -28,6 +30,8 @@ interface Incident extends IncidentRow {
   activity: { id: number; kind: string; body: string; data: any; channel: string; created_at: string; user_name: string | null }[];
   next_steps: { phase: string; purpose: string; next: string; steps: { id: string; label: string; hint: string; done: boolean }[] };
 }
+
+interface SlaClock { target_minutes: number | null; due_at: string | null; elapsed_minutes: number; remaining_minutes: number | null; state: string; met_at?: string | null }
 
 export const INCIDENT_STATUS: Record<IncidentStatus, string> = { new: 'New', in_progress: 'In progress', on_hold: 'On hold', resolved: 'Resolved', closed: 'Closed' };
 const RESOLUTION: Record<string, string> = {
@@ -77,7 +81,7 @@ export function IncidentsPage() {
         {data?.length === 0 ? <p className="empty">No incidents match.</p> : (
           <div className="table-wrap">
             <table className="table">
-              <thead><tr><th>Ref</th><th>Title</th><th>Status</th><th>Priority</th><th className="hide-sm">CIs</th><th className="hide-sm">Assignee</th><th className="hide-sm">Problem</th><th className="hide-sm">Opened</th></tr></thead>
+              <thead><tr><th>Ref</th><th>Title</th><th>Status</th><th>Priority</th><th>SLA</th><th className="hide-sm">CIs</th><th className="hide-sm">Assignee</th><th className="hide-sm">Problem</th><th className="hide-sm">Opened</th></tr></thead>
               <tbody>
                 {data?.map((i) => (
                   <tr key={i.id}>
@@ -85,6 +89,7 @@ export function IncidentsPage() {
                     <td className="title-cell"><Link to={`/incidents/${i.ref}`}>{i.title}</Link> {i.is_major && <MajorBadge />}</td>
                     <td><IncidentStatusBadge status={i.status} /></td>
                     <td><PriorityBadge priority={i.priority} /></td>
+                    <td className="nowrap"><SlaBadge state={i.sla_state} />{i.resolution_due_at && ['on_track', 'at_risk'].includes(i.sla_state ?? '') && <div className="muted small">due {relativeTime(i.resolution_due_at)}</div>}</td>
                     <td className="hide-sm small">{i.cis?.join(', ') ?? '–'}</td>
                     <td className="hide-sm muted">{i.assignee ?? (i.assignment_group || '–')}</td>
                     <td className="hide-sm mono small">{i.problem_ref ? <Link to={`/problems/${i.problem_ref}`}>{i.problem_ref}</Link> : '–'}</td>
@@ -265,6 +270,25 @@ export function IncidentPage() {
           </section>
         </div>
         <aside className="problem-side">
+          {i.sla && (
+            <section className={`card sla-card sla-${i.sla.resolution.state}`}>
+              <h2>Service level <span className="muted small">{i.sla.name} · {i.sla.calendar}</span></h2>
+              {(['response', 'resolution'] as const).map((t) => {
+                const c = i.sla![t];
+                if (!c.target_minutes) return null;
+                const pct = Math.min(100, Math.round((c.elapsed_minutes / c.target_minutes) * 100));
+                return (
+                  <div key={t} className="sla-row">
+                    <div className="sla-head"><strong>{t === 'response' ? 'Response' : 'Resolution'}</strong> <SlaBadge state={c.state} /></div>
+                    <div className="sla-bar" aria-hidden="true"><span style={{ width: `${pct}%` }} /></div>
+                    <div className="muted small">
+                      {c.met_at ? `${duration(c.elapsed_minutes)} of ${duration(c.target_minutes)}` : c.state === 'paused' ? `Paused · ${duration(c.remaining_minutes)} left` : c.remaining_minutes !== null && c.remaining_minutes >= 0 ? `${duration(c.remaining_minutes)} left · due ${c.due_at ? formatDate(c.due_at) : '–'}` : `${duration(-(c.remaining_minutes ?? 0))} over`}
+                    </div>
+                  </div>
+                );
+              })}
+            </section>
+          )}
           <section className="card">
             <h2>Details</h2>
             <dl className="kv details">

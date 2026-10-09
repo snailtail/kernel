@@ -8,6 +8,7 @@ import * as problemCis from './problem-cis.js';
 import * as inc from './incidents.js';
 import * as events from './events.js';
 import * as ch from './changes.js';
+import * as slaMod from './sla.js';
 import * as hooks from './event-hooks.js';
 import { auditQuerySchema } from './audit.js';
 import { searchSchema } from './generic.js';
@@ -116,6 +117,13 @@ export const OPERATIONS: Op[] = [
   { method: 'post', path: '/api/cis/:ref/comments', tag: 'CMDB', summary: 'Add a note', body: z.object({ body: z.string() }) },
   { method: 'post', path: '/api/cis/:ref/links', tag: 'CMDB', summary: 'Link a problem, incident, event, change or document', body: cmdb.ciLinkSchema },
   { method: 'delete', path: '/api/cis/:ref/links/:id', tag: 'CMDB', summary: 'Remove a link' },
+  { method: 'get', path: '/api/slas', tag: 'Service levels', summary: 'SLAs with targets per priority' },
+  { method: 'post', path: '/api/slas', tag: 'Service levels', summary: 'Create an SLA (problem managers)', body: slaMod.slaSchema },
+  { method: 'put', path: '/api/slas/:id', tag: 'Service levels', summary: 'Update an SLA', body: slaMod.slaSchema },
+  { method: 'get', path: '/api/calendars', tag: 'Service levels', summary: 'Business-hours calendars with holidays' },
+  { method: 'post', path: '/api/calendars', tag: 'Service levels', summary: 'Create a calendar', body: slaMod.calendarSchema },
+  { method: 'put', path: '/api/calendars/:id', tag: 'Service levels', summary: 'Update a calendar', body: slaMod.calendarSchema },
+  { method: 'get', path: '/api/service-catalogue', tag: 'Service levels', summary: 'Services with SLA, support hours and how to get help' },
   { method: 'get', path: '/api/changes', tag: 'Changes', summary: 'List changes (open by default)', query: ch.listChangesSchema },
   { method: 'get', path: '/api/changes/schedule', tag: 'Changes', summary: 'Change schedule: planned changes, freezes and collisions', query: ch.scheduleSchema },
   { method: 'post', path: '/api/changes', tag: 'Changes', summary: 'Request a change (standard changes from a template); supports Idempotency-Key', body: ch.createChangeSchema },

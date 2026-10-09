@@ -1,4 +1,5 @@
 // Problem management KPIs and trends for a period, used by the Reports page, CSV export and MCP.
+import { slaCompliance } from './sla.js';
 import { z } from 'zod';
 import { query } from './db.js';
 
@@ -212,6 +213,7 @@ export async function report({ from, to, bucket }: ReportParams) {
     closures: closures.rows,
     hotspots: { services: services.rows, categories: categories.rows, cis: cis.rows, ci_types: ciTypes.rows },
     changes: changeStats.rows[0],
+    sla: await slaCompliance(from, to),
     incidents: { ...incidentStats.rows[0], mtta_median_min: round(incidentStats.rows[0].mtta_median_min), mttr_median_h: round(incidentStats.rows[0].mttr_median_h), by_ci: incidentCis.rows },
     known_errors: knownErrors.rows[0],
     actions: {

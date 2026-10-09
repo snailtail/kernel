@@ -14,6 +14,8 @@ const PAGES: [string, string, string][] = [
   ['Incidents', '/incidents', 'g t'],
   ['Changes', '/changes', 'g h'],
   ['Change schedule', '/changes?tab=schedule', ''],
+  ['Service catalogue', '/services', ''],
+  ['Service levels (SLAs)', '/services?tab=slas', ''],
   ['Problems', '/problems', 'g p'],
   ['Candidates', '/candidates', 'g c'],
   ['Known errors', '/kedb', 'g k'],

@@ -53,6 +53,7 @@ export function CmdbListPage() {
           <p className="muted">What we operate, as pointers to where it really lives. Services are listed first.</p>
         </div>
         <div className="head-actions">
+          <Link className="btn" to="/services">Service catalogue</Link>
           <Link className="btn" to="/cis/groups">Groups</Link>
           {canManage(user) && <button className="btn primary" onClick={() => setCreating(true)}>Add CI or service</button>}
         </div>
@@ -316,7 +317,9 @@ function CiModal({ types, ci, onClose, onDone }: { types: CiType[]; ci?: Ci; onC
     team: ci?.team ?? '', owner_id: ci?.owner_id ? String(ci.owner_id) : '', tags: (ci?.tags ?? []).join(', '), description: ci?.description ?? '',
     attributes: Object.fromEntries(Object.entries(ci?.attributes ?? {}).map(([k, v]) => [k, String(v)])) as Record<string, string>,
     source_system: '', source_id: '', source_url: '',
+    sla_id: (ci as any)?.sla_id ? String((ci as any).sla_id) : '', user_description: (ci as any)?.user_description ?? '', how_to_get_help: (ci as any)?.how_to_get_help ?? '', in_catalogue: !!(ci as any)?.in_catalogue,
   });
+  const { data: slas } = useApi<{ id: number; name: string }[]>('/api/slas');
   const [error, setError] = useState<string | null>(null);
   const type = types.find((t) => t.name === form.ci_type);
   const submit = async (e: FormEvent) => {
@@ -325,6 +328,7 @@ function CiModal({ types, ci, onClose, onDone }: { types: CiType[]; ci?: Ci; onC
       name: form.name, ci_type: form.ci_type, environment: form.environment, criticality: Number(form.criticality), team: form.team,
       owner_id: form.owner_id ? Number(form.owner_id) : null, description: form.description,
       tags: form.tags.split(',').map((t) => t.trim()).filter(Boolean), attributes: form.attributes,
+      ...(type?.class === 'service' ? { sla_id: form.sla_id ? Number(form.sla_id) : null, user_description: form.user_description, how_to_get_help: form.how_to_get_help, in_catalogue: form.in_catalogue } : {}),
       ...(!ci && form.source_system && form.source_id ? { source: { system: form.source_system, id: form.source_id, url: form.source_url } } : {}),
     };
     try {
@@ -352,6 +356,15 @@ function CiModal({ types, ci, onClose, onDone }: { types: CiType[]; ci?: Ci; onC
           <label key={a.key}>{a.label}<input type={a.type === 'number' ? 'number' : 'text'} value={form.attributes[a.key] ?? ''} onChange={(e) => setForm({ ...form, attributes: { ...form.attributes, [a.key]: e.target.value } })} /></label>
         ))}
         <label className="full">Description<textarea rows={3} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
+        {type?.class === 'service' && (
+          <fieldset className="full source-fields">
+            <legend>Service catalogue</legend>
+            <label>SLA<select value={form.sla_id} onChange={(e) => setForm({ ...form, sla_id: e.target.value })}><option value="">Default</option>{slas?.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
+            <label>For users<textarea rows={2} placeholder="What the service is, in plain words" value={form.user_description} onChange={(e) => setForm({ ...form, user_description: e.target.value })} /></label>
+            <label>How to get help<textarea rows={2} value={form.how_to_get_help} onChange={(e) => setForm({ ...form, how_to_get_help: e.target.value })} /></label>
+            <label className="check"><input type="checkbox" checked={form.in_catalogue} onChange={(e) => setForm({ ...form, in_catalogue: e.target.checked })} /> Show in the service catalogue</label>
+          </fieldset>
+        )}
         {!ci && (
           <fieldset className="full source-fields">
             <legend>Source <span className="muted small">(optional: where it lives)</span></legend>

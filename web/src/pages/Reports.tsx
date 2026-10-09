@@ -23,11 +23,15 @@ interface Report {
     cis: { ref: string; name: string; type_label: string; criticality: number; records: number; unlinked: number; open_problems: number; known_errors: number }[];
     ci_types: { name: string; records: number; problems: number }[];
   };
+  sla: { overall: Compliance; by_priority: (Compliance & { priority: number })[]; by_group: (Compliance & { name: string })[]; by_service: (Compliance & { name: string })[] };
   changes: { requested: number; implemented: number; successful: number; failed: number; emergency: number; standard: number; followed_by_incidents: number };
   incidents: { opened: number; resolved: number; major: number; open_now: number; reopened: number; with_problem: number; mtta_median_min: number | null; mttr_median_h: number | null; by_ci: { ref: string; name: string; incidents: number; without_problem: number }[] };
   known_errors: { count: number; avg_age_days: number; with_workaround: number; with_decision: number; risk_accepted: number; review_due: number };
   actions: { created: number; completed: number; on_time_rate: number | null; open_now: number; overdue_now: number };
 }
+
+interface Compliance { resolved: number; resolution_met: number; resolution_with_target: number; response_met: number; response_with_target: number }
+const pctOf = (met: number, of: number) => (of ? `${Math.round((met / of) * 100)}%` : '–');
 
 const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
@@ -200,6 +204,23 @@ export function ReportsPage() {
                 <HBars rows={r.hotspots.ci_types.map((t) => ({ label: t.name, value: t.records, detail: `${t.records} records, ${t.problems} problems` }))} empty="No records on CIs in the period." />
               </section>
             </div>
+          )}
+
+          {r.sla && r.sla.overall.resolved > 0 && (
+            <section className="card flush">
+              <h2 className="pad">SLA compliance <span className="muted small">incidents resolved in the period</span></h2>
+              <div className="table-wrap">
+                <table className="table compact">
+                  <thead><tr><th>Group</th><th className="num">Resolved</th><th className="num">Response met</th><th className="num">Resolution met</th></tr></thead>
+                  <tbody>
+                    <tr className="total"><td><strong>All</strong></td><td className="num">{r.sla.overall.resolved}</td><td className="num">{pctOf(r.sla.overall.response_met, r.sla.overall.response_with_target)}</td><td className="num">{pctOf(r.sla.overall.resolution_met, r.sla.overall.resolution_with_target)}</td></tr>
+                    {r.sla.by_priority.map((p) => <tr key={`p${p.priority}`}><td>P{p.priority}</td><td className="num">{p.resolved}</td><td className="num">{pctOf(p.response_met, p.response_with_target)}</td><td className="num">{pctOf(p.resolution_met, p.resolution_with_target)}</td></tr>)}
+                    {r.sla.by_service.map((s) => <tr key={`s${s.name}`}><td>{s.name}</td><td className="num">{s.resolved}</td><td className="num">{pctOf(s.response_met, s.response_with_target)}</td><td className="num">{pctOf(s.resolution_met, s.resolution_with_target)}</td></tr>)}
+                    {r.sla.by_group.map((g) => <tr key={`g${g.name}`}><td className="muted">{g.name}</td><td className="num">{g.resolved}</td><td className="num">{pctOf(g.response_met, g.response_with_target)}</td><td className="num">{pctOf(g.resolution_met, g.resolution_with_target)}</td></tr>)}
+                  </tbody>
+                </table>
+              </div>
+            </section>
           )}
 
           {r.incidents && (r.incidents.opened > 0 || r.incidents.open_now > 0) && (

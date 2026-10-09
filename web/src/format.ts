@@ -99,8 +99,9 @@ export function relativeTime(value: string) {
   ];
   const fmt = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
   let prev = 1;
+  // The unit follows the size of the difference, past or future ("2 hours ago", "in 2 hours").
   for (const [limit, unit] of units) {
-    if (diff < limit) return fmt.format(-Math.round(diff / prev), unit);
+    if (Math.abs(diff) < limit) return fmt.format(-Math.round(diff / prev), unit);
     prev = limit;
   }
   return value;
@@ -137,3 +138,11 @@ export const EFFECTIVENESS_LABEL: Record<string, string> = {
 };
 
 export const RISK_LABEL: Record<number, string> = { 1: 'High risk', 2: 'Medium risk', 3: 'Low risk' };
+
+/** A duration in minutes as minutes, hours or days. */
+export const duration = (min?: number | null) => {
+  if (min === undefined || min === null) return '–';
+  if (min < 60) return `${min} min`;
+  if (min < 1440) return `${+(min / 60).toFixed(1)} h`;
+  return `${+(min / 1440).toFixed(1)} d`;
+};

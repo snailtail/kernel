@@ -2,7 +2,6 @@
 // major incidents to problem management. Shared by REST, MCP and the web UI like every other practice.
 import { z } from 'zod';
 import type { User } from './auth.js';
-import { audit } from './audit.js';
 import { loadCi, logCi, registerCiExtra } from './cmdb.js';
 import { currentContext } from './context.js';
 import { query, tx } from './db.js';
@@ -12,6 +11,11 @@ import { affectedFrom } from './problem-cis.js';
 import { possibleCausesForIncident } from './changes.js';
 import { createProblem, createProblemSchema, getProblem, loadForUpdate, logActivity, registerProblemExtra, type Db } from './problems.js';
 import { recordUrl, registerRecordType, type RecordType } from './records.js';
+import { logIncident } from './incident-log.js';
+import { recomputeSla, slaClock, slaOnTransition } from './sla.js';
+import { pool } from './db.js';
+
+export { logIncident };
 
 export const INCIDENT_STATUSES = ['new', 'in_progress', 'on_hold', 'resolved', 'closed'] as const;
 export const RESOLUTION_CODES = ['fixed', 'workaround', 'problem_fixed', 'no_fault_found', 'duplicate', 'cancelled'] as const;
@@ -56,6 +60,8 @@ export const listIncidentsSchema = z.object({
   assignee: z.union([z.literal('me'), z.literal('none'), z.coerce.number().int()]).optional(),
   major: z.coerce.boolean().optional(),
   ci: z.string().max(30).optional(),
+  /** Open incidents whose resolution target falls within this many minutes (or is already breached). */
+  breaching_within: z.coerce.number().int().min(0).max(100_000).optional(),
   limit: z.coerce.number().int().min(1).max(500).default(200),
 });
 export const incidentCommentSchema = z.object({ body: z.string().max(20000), kind: z.enum(['comment', 'communication']).default('comment') });
@@ -78,13 +84,6 @@ const SELECT_INCIDENT = `
 
 const sourceOf = (): 'mcp' | 'api' | 'user' => ({ mcp: 'mcp' as const, api: 'api' as const })[currentContext().channel as 'mcp' | 'api'] ?? 'user';
 
-export async function logIncident(db: Db, incidentId: number, userId: number | null, kind: string, body = '', data: object = {}) {
-  await db.query('INSERT INTO incident_activity (incident_id, user_id, kind, body, data, channel) VALUES ($1, $2, $3, $4, $5, $6)', [
-    incidentId, userId, kind, body, JSON.stringify(data), currentContext().channel,
-  ]);
-  const { rows } = await db.query('UPDATE incidents SET updated_at = now() WHERE id = $1 RETURNING ref', [incidentId]);
-  await audit(db, { entity_type: 'incident', entity_ref: rows[0].ref, action: kind, changes: kind === 'comment' || kind === 'communication' ? { body } : (data as Record<string, unknown>) });
-}
 
 async function loadIncident(db: Db, ref: string) {
   const { rows } = await db.query('SELECT * FROM incidents WHERE ref = $1 FOR UPDATE', [ref.toUpperCase()]);
@@ -120,6 +119,10 @@ export async function listIncidents(user: User, f: z.infer<typeof listIncidentsS
   else if (f.assignee === 'none') where.push('i.assignee_id IS NULL');
   else if (typeof f.assignee === 'number') add('i.assignee_id = ?', f.assignee);
   if (f.major) where.push('i.is_major');
+  if (f.breaching_within !== undefined) {
+    where.push("i.status NOT IN ('resolved', 'closed') AND i.sla_paused_since IS NULL");
+    add("(i.resolution_breached_at IS NOT NULL OR i.resolution_due_at < now() + ? * interval '1 minute')", f.breaching_within);
+  }
   if (f.ci) add('EXISTS (SELECT 1 FROM incident_cis x JOIN configuration_items c ON c.id = x.ci_id WHERE x.incident_id = i.id AND c.ref = ?)', f.ci.toUpperCase());
   if (f.q) {
     const terms = f.q.split(/\s+/).map((t) => t.replace(/[^\p{L}\p{N}_.-]/gu, '')).filter(Boolean);
@@ -128,7 +131,14 @@ export async function listIncidents(user: User, f: z.infer<typeof listIncidentsS
   params.push(f.limit);
   const { rows } = await query(
     `SELECT i.id, i.ref, i.title, i.status, i.priority, i.impact, i.urgency, i.is_major, i.assignment_group, a.display_name AS assignee,
-            i.source, i.created_at, i.updated_at, i.resolved_at, p.ref AS problem_ref,
+            i.source, i.created_at, i.updated_at, i.resolved_at, p.ref AS problem_ref, i.resolution_due_at,
+            CASE WHEN i.sla_id IS NULL OR i.resolution_due_at IS NULL THEN NULL
+                 WHEN i.resolution_breached_at IS NOT NULL THEN 'breached'
+                 WHEN i.status IN ('resolved', 'closed') THEN 'met'
+                 WHEN i.sla_paused_since IS NOT NULL THEN 'paused'
+                 WHEN now() > i.resolution_due_at THEN 'breached'
+                 WHEN now() >= i.created_at + (i.resolution_due_at - i.created_at) * 0.75 THEN 'at_risk'
+                 ELSE 'on_track' END AS sla_state,
             (SELECT array_agg(c.name ORDER BY c.criticality) FROM incident_cis x JOIN configuration_items c ON c.id = x.ci_id WHERE x.incident_id = i.id) AS cis
      FROM incidents i LEFT JOIN users a ON a.id = i.assignee_id LEFT JOIN problems p ON p.id = i.problem_id
      ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
@@ -174,13 +184,16 @@ export async function getIncident(user: User, ref: string) {
   ]);
   const affected = await affectedFrom(cis.rows, i.impact);
   const possibleChanges = await possibleCausesForIncident({ created_at: i.created_at, affected_cis: cis.rows });
-  const detail = { ...i, ...affected, activity: activity.rows, links: links.rows, known_errors: knownErrors.rows, alerts: alerts.rows, possible_change_causes: possibleChanges };
+  const sla = await slaClock(pool, i);
+  const detail = { ...i, ...affected, activity: activity.rows, links: links.rows, known_errors: knownErrors.rows, alerts: alerts.rows, possible_change_causes: possibleChanges, sla };
   return { type: 'incident', ...detail, url: incidentUrl(i.ref), next_steps: incidentGuidance(detail) };
 }
 
 function incidentGuidance(i: any) {
   const open = !['resolved', 'closed'].includes(i.status);
+  const atRisk = ['at_risk', 'breached'].includes(i.sla?.resolution?.state) ? i.sla.resolution : null;
   const steps = [
+    ...(atRisk && open ? [{ id: 'sla', label: atRisk.state === 'breached' ? 'The resolution target is breached' : 'The resolution target is at risk', hint: `${i.sla.name}: ${atRisk.remaining_minutes > 0 ? `${atRisk.remaining_minutes} business minutes left` : 'past due'}. Escalate or reassign if needed.`, done: null as unknown as boolean }] : []),
     { id: 'prioritise', label: 'Check impact and urgency', hint: 'Priority follows from them; affected services suggest the impact.', done: !i.impact_hint },
     { id: 'cis', label: 'Record the affected CIs or services', hint: 'Shows what else is affected and any known errors with workarounds.', done: i.affected_cis.length > 0 },
     { id: 'assign', label: 'Assign it', hint: 'An assignee or assignment group responds and owns restoring service.', done: !!i.assignee_id || !!i.assignment_group },
@@ -235,6 +248,7 @@ export async function insertIncident(
     await db.query('INSERT INTO incident_cis (incident_id, ci_id, added_by) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [rows[0].id, id, actorId]);
   }
   await logIncident(db, rows[0].id, actorId, 'created', `Incident ${rows[0].ref} logged${source === 'event' ? ' from monitoring' : ''}`, { title: fields.title, ci_ids: ciIds, source });
+  await recomputeSla(db, rows[0].id, { reselect: true });
   return rows[0] as { id: number; ref: string };
 }
 
@@ -253,6 +267,9 @@ export async function updateIncident(user: User, ref: string, { base, ...input }
     if (!changed.length) return;
     await db.query(`UPDATE incidents SET ${changed.map(([k], n) => `${k} = $${n + 2}`).join(', ')} WHERE id = $1`, [current.id, ...changed.map(([, v]) => v)]);
     if (input.assignee_id && !current.responded_at) await db.query('UPDATE incidents SET responded_at = now() WHERE id = $1', [current.id]);
+    if ((input.impact !== undefined && input.impact !== current.impact) || (input.urgency !== undefined && input.urgency !== current.urgency)) {
+      await recomputeSla(db, current.id, { reason: 'Priority changed' });
+    }
     await logIncident(db, current.id, user.id, 'update', `Updated ${changed.map(([k]) => k).join(', ')}`, Object.fromEntries(changed.map(([k, v]) => [k, { from: current[k] ?? null, to: v }])));
   });
   return getIncident(user, ref);
@@ -288,6 +305,7 @@ export async function transitionIncident(user: User, ref: string, input: z.infer
        WHERE id = $1`,
       [current.id, input.to, code, resolution, input.hold_reason ?? '', reopening],
     );
+    await slaOnTransition(db, current.id, input.to);
     await logIncident(db, current.id, user.id, 'status', input.comment ?? '', {
       from, to: input.to, ...(input.to === 'resolved' ? { resolution_code: code, resolution } : {}), ...(input.to === 'on_hold' ? { hold_reason: input.hold_reason } : {}),
     });
@@ -342,6 +360,7 @@ export async function setIncidentCi(user: User, ref: string, ciRef: string, link
     if (!rowCount) throw linked ? conflict(`${ci.ref} is already linked`) : notFound(`${ci.ref} is not linked`);
     await logIncident(db, current.id, user.id, 'link', `${linked ? 'Affects' : 'No longer affects'} ${ci.ref} ${ci.name}`, { kind: ci.class, reference: ci.ref, action: linked ? 'add' : 'remove' });
     await logCi(db, ci.id, user.id, 'link', `${linked ? 'Affected by' : 'Unlinked from'} incident ${current.ref}`, { kind: 'incident', reference: current.ref, action: linked ? 'add' : 'remove' });
+    await recomputeSla(db, current.id, { reselect: true, reason: 'Affected CIs changed' });
   });
   return getIncident(user, ref);
 }

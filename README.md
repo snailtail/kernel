@@ -114,6 +114,14 @@ incidents feed the problem candidates per CI, and reports show MTTA, MTTR, reope
 Viewers stay strictly read-only (auditors, stakeholders): end users report incidents through the service desk or,
 later, the self-service portal (#45), not with a viewer account.
 
+**Service levels**: SLAs set response and resolution targets per priority in business time, on a calendar evaluated
+in its own time zone (24/7, or office hours with Swedish public holidays, plus extra closed days). One default SLA
+works out of the box; a service can have its own, and an incident gets the SLA of its most critical service through
+the CMDB. The clock pauses while an incident is on hold and between resolved and a reopen; warnings at 75 % and
+breaches are recorded once, shown on the incident and in the list ("breaching soon": `?breaching_within=60`), and
+reports show compliance per priority, service and team. Services can be published in the service catalogue with a
+plain description and how to get help.
+
 **Changes**: change enablement with standard (pre-approved templates), normal and emergency changes. Risk is assessed
 from the most critical CI or service the change affects through the CMDB; the change authority (problem managers and
 administrators) approves in the web UI – one approval for low and medium risk, two for high, never the requester's
