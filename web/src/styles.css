@@ -1050,3 +1050,9 @@ tr.total td { border-bottom: 2px solid var(--border-strong); }
 .tv-csv { max-height: 60vh; overflow: auto; }
 .md-image { display: inline-block; margin: 4px 0; }
 .md-image img { max-width: min(100%, 640px); max-height: 420px; border: 1px solid var(--border); border-radius: 6px; display: block; cursor: zoom-in; }
+/* Knowledge (#47) */
+.kb-publish { display: flex; flex-direction: row; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.feedback-card { display: flex; flex-direction: row; gap: 8px; align-items: center; flex-wrap: wrap; }
+.article-body { font-size: 1rem; line-height: 1.6; }
+.warn-badge { background: var(--s-known-bg); color: var(--s-known); margin-left: 6px; }
+.kb-suggest ul { margin: 4px 0 0; }

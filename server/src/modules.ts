@@ -9,10 +9,11 @@ export const MODULES = {
   event: { label: 'Events from monitoring', description: 'Receive alerts from Alertmanager, Uptime Kuma, Azure Monitor, OP5…; rules open incidents.' },
   cmdb: { label: 'CMDB', description: 'Configuration items and services, relationships and impact analysis.' },
   sla: { label: 'Service levels', description: 'SLAs, business hours and the service catalogue; SLA clocks on incidents.' },
+  knowledge: { label: 'Knowledge', description: 'Articles from known errors and resolutions, suggested while logging incidents.' },
 } as const;
 export type Module = keyof typeof MODULES;
 
-let state: Record<Module, boolean> = { incident: true, change: true, event: true, cmdb: true, sla: true };
+let state: Record<Module, boolean> = { incident: true, change: true, event: true, cmdb: true, sla: true, knowledge: true };
 let loadedAt = 0;
 
 /** Reloads the module switches (on start, after a change, and every 30 s so replicas follow). */
@@ -35,6 +36,7 @@ export function moduleOfAction(action: string): Module | null {
   const prefix = action.split('.')[0];
   if (prefix === 'incident' || prefix === 'change' || prefix === 'event' || prefix === 'sla') return prefix;
   if (prefix === 'ci') return 'cmdb';
+  if (prefix === 'article') return 'knowledge';
   return null;
 }
 

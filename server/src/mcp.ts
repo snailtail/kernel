@@ -22,6 +22,7 @@ import * as notifications from './notifications.js';
 import * as flow from './flow.js';
 import * as people from './people.js';
 import * as attachments from './attachments.js';
+import * as knowledge from './knowledge.js';
 import * as generic from './generic.js';
 import { typeForRef } from './records.js';
 import { GUIDES, guideMarkdown } from './methods.js';
@@ -128,6 +129,7 @@ function buildServer(user: User, scopes?: string[]) {
     transition_ci: 'ci.manage', upsert_cis: 'ci.ingest',
     link_ci_to_problem: 'problem.link', unlink_ci_from_problem: 'problem.link',
     list_attachments: 'meta.read', read_attachment: 'meta.read', add_attachment: 'attachment.add',
+    search_knowledge: 'article.read', get_article: 'article.read', create_article: 'article.write', update_article: 'article.write', transition_article: 'article.write', use_article: 'incident.update',
     search_people: 'person.read', get_person: 'person.read', add_affected_person: 'incident.update',
     get_process_map: 'meta.read', get_health_tips: 'meta.read',
     list_slas: 'meta.read', get_service_catalogue: 'ci.read', get_my_notifications: 'meta.read',
@@ -495,6 +497,50 @@ function buildServer(user: User, scopes?: string[]) {
     async ({ ref, ...overrides }) => {
       const p: any = await incidents.createProblemFromIncident(user, ref, incidents.problemFromIncidentSchema.parse(overrides));
       return { ref: p.ref, url: p.url, status: p.status, affected_cis: p.affected_cis.map((c: any) => c.ref) };
+    },
+  );
+
+  // ---- Knowledge (#47) ----
+  tool(
+    'search_knowledge',
+    'Search knowledge articles: how-tos, troubleshooting, known errors with workarounds, FAQs. Use before suggesting a fix, and give the article ref to the person you help.',
+    { q: z.string().optional(), cis: z.array(z.string()).max(20).optional(), status: z.enum(['draft', 'published', 'retired', 'all']).optional(), limit: z.number().int().min(1).max(50).optional() },
+    true,
+    async ({ q, cis, status, limit }) =>
+      cis?.length && (!status || status === 'published')
+        ? knowledge.suggestArticles(user, q ?? '', cis, limit ?? 10)
+        : knowledge.listArticles(user, knowledge.listArticlesSchema.parse({ q, status: status ?? 'published', limit: limit ?? 10 })),
+  );
+  tool('get_article', 'A knowledge article with its text, the CIs it applies to and its history.', { ref: z.string() }, true, ({ ref }) => knowledge.getArticle(user, ref));
+  tool(
+    'create_article',
+    'Draft a knowledge article (Markdown). A person reviews and publishes it. Do not include secrets or personal data.',
+    { title: z.string(), body: z.string(), article_type: z.enum(knowledge.ARTICLE_TYPES).optional(), audience: z.enum(knowledge.AUDIENCES).optional(), cis: z.array(z.string()).max(50).optional() },
+    false,
+    (input) => knowledge.createArticle(user, knowledge.createArticleSchema.parse(input)),
+  );
+  tool(
+    'update_article',
+    'Edit a knowledge article. Articles that follow a known error change with the problem instead.',
+    { ref: z.string(), title: z.string().optional(), body: z.string().optional(), article_type: z.enum(knowledge.ARTICLE_TYPES).optional(), review_by: z.string().nullable().optional() },
+    false,
+    ({ ref, ...input }) => knowledge.updateArticle(user, ref, knowledge.updateArticleSchema.parse(input)),
+  );
+  tool(
+    'transition_article',
+    'Retire an article or take it back to draft. Publishing is done by a person in Kernel, so text an agent read cannot publish itself.',
+    { ref: z.string(), to: z.enum(['draft', 'retired']), note: z.string().optional() },
+    false,
+    ({ ref, to, note }) => knowledge.transitionArticle(user, ref, { to, note }),
+  );
+  tool(
+    'use_article',
+    'Record that a knowledge article was used to resolve an incident (measures which articles help).',
+    { incident: z.string(), article: z.string() },
+    false,
+    async ({ incident, article }) => {
+      await knowledge.useArticleForIncident(user, incident, article);
+      return { ok: true };
     },
   );
 
@@ -892,7 +938,7 @@ function buildServer(user: User, scopes?: string[]) {
 
   tool(
     'add_comment',
-    'Add a work note to any record (problem, incident, change, CI, service): findings, analysis steps, decisions.',
+    'Add a work note to any record (problem, incident, change, CI, service, article): findings, analysis steps, decisions.',
     { ref: z.string(), body: z.string(), idempotency_key: z.string().max(200).optional().describe('Retry-safe key') },
     false,
     async ({ ref, body, idempotency_key }) =>
@@ -901,6 +947,7 @@ function buildServer(user: User, scopes?: string[]) {
         if (type === 'problem') await problems.addComment(user, ref, body);
         else if (type === 'incident') await incidents.addIncidentComment(user, ref, { body, kind: 'comment' });
         else if (type === 'change') await changes.addChangeComment(user, ref, body);
+        else if (type === 'article') await knowledge.addArticleComment(user, ref, body);
         else await cmdb.addCiComment(user, ref, body);
         return { ok: true };
       }),

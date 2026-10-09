@@ -1,5 +1,6 @@
 // Cross-practice operations over the record type registry: one predictable surface for agents and scripts.
 import { z } from 'zod';
+import { linkArticleCi } from './knowledge.js';
 import type { User } from './auth.js';
 import { query } from './db.js';
 import { badRequest } from './errors.js';
@@ -49,6 +50,11 @@ export async function linkRecords(user: User, from: string, to: string, options:
     kind ??= target.type;
   } catch {
     if (!kind) throw badRequest('Give the kind (incident, event, change, problem) for an external reference');
+  }
+  // Knowledge articles (#47) apply to CIs and services.
+  if (source.type === 'article') {
+    if (kind !== 'ci' && kind !== 'service') throw badRequest('An article links to the CIs and services it applies to');
+    return (await linkArticleCi(user, from, to, true)).cis;
   }
   // Native changes (#29): CIs they change, the problem they fix, links to PRs, pipelines and documents.
   const nativeChange = (ref: string) => { try { return typeForRef(ref).type === 'change' && !(options.system && options.system !== 'Kernel'); } catch { return false; } };

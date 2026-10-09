@@ -10,6 +10,7 @@ import type { User } from './auth.js';
 import { audit } from './audit.js';
 import { logChange } from './changes.js';
 import { logCi } from './cmdb.js';
+import { logArticle } from './knowledge.js';
 import { pool, query, tx } from './db.js';
 import { badRequest, forbidden, HttpError, notFound } from './errors.js';
 import { logIncident } from './incident-log.js';
@@ -18,8 +19,8 @@ import { logActivity, type Db } from './problems.js';
 import { typeForRef } from './records.js';
 
 /** What it takes to attach to (or remove from) each record type. Reading follows the record's own access. */
-const WRITE: Record<string, Action> = { problem: 'problem.comment', incident: 'incident.update', change: 'change.update', ci: 'ci.annotate', service: 'ci.annotate' };
-const TABLE: Record<string, string> = { problem: 'problems', incident: 'incidents', change: 'changes', ci: 'configuration_items', service: 'configuration_items' };
+const WRITE: Record<string, Action> = { problem: 'problem.comment', incident: 'incident.update', change: 'change.update', ci: 'ci.annotate', service: 'ci.annotate', article: 'article.write' };
+const TABLE: Record<string, string> = { problem: 'problems', incident: 'incidents', change: 'changes', ci: 'configuration_items', service: 'configuration_items', article: 'articles' };
 
 /** Files that are kept but only ever downloaded (zip containers and gzip). */
 const DOWNLOAD_ONLY = /\.(docx|xlsx|pptx|odt|ods|odp|zip|gz|tgz|pcap|pcapng)$/i;
@@ -95,6 +96,7 @@ async function logOn(db: Db, type: string, id: number, userId: number, body: str
   if (type === 'problem') await logActivity(db, id, userId, 'update', body, data);
   else if (type === 'incident') await logIncident(db, id, userId, 'update', body, data);
   else if (type === 'change') await logChange(db, id, userId, 'update', body, data);
+  else if (type === 'article') await logArticle(db, id, userId, 'update', body, data);
   else await logCi(db, id, userId, 'update', body, data);
 }
 

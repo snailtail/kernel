@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { api, type Guidance } from '../api';
 import { GuidePanel } from '../components/Guide';
 import { richPaste } from '../components/RichPaste';
+import { ArticleSuggestions, IncidentKnowledgePanel, type ArticleRow } from './Knowledge';
 import { AttachmentsPanel } from '../components/Attachments';
 import { IncidentPeoplePanel, PersonPicker, type PersonLite, type PersonRef } from '../components/People';
 import { AffectedCisPanel, type AffectedCi, type AffectedService, type ImpactHint } from '../components/AffectedCis';
@@ -26,6 +27,7 @@ interface Incident extends IncidentRow {
   reporter: string; hold_reason: string; resolution_code: string | null; resolution: string; reopen_count: number;
   responded_at: string | null; closed_at: string | null; problem_title: string | null; problem_status: string | null;
   affected_cis: AffectedCi[]; affected_services: AffectedService[]; impact_hint: ImpactHint | null; impact_incomplete: boolean;
+  suggested_articles?: ArticleRow[]; articles_used?: { ref: string; title: string }[];
   caller: PersonLite | null; affected_people: PersonLite[]; people_hint: { suggested_impact: number; reason: string } | null; asks_affected_users: boolean;
   sla: { name: string; calendar: string; paused: boolean; response: SlaClock; resolution: SlaClock } | null;
   possible_change_causes: { ref: string; title: string; status: string; change_type: string; outcome: string | null; started_at: string; ci: string; ci_name: string }[];
@@ -155,6 +157,7 @@ function NewIncident({ onClose, onDone }: { onClose: () => void; onDone: (ref: s
         </div>
         <label><Term id="impact" /><select value={form.impact} onChange={(e) => setForm({ ...form, impact: Number(e.target.value) })}>{[1, 2, 3].map((n) => <option key={n} value={n}>{n} – {LEVEL[n]}</option>)}</select></label>
         <label><Term id="urgency" /><select value={form.urgency} onChange={(e) => setForm({ ...form, urgency: Number(e.target.value) })}>{[1, 2, 3].map((n) => <option key={n} value={n}>{n} – {LEVEL[n]}</option>)}</select></label>
+        {meta.modules?.knowledge !== false && <ArticleSuggestions text={form.title} cis={form.cis} />}
         {meta.modules?.cmdb !== false && <label className="full">Affected CIs or services <span className="muted small">(refs, e.g. CI000012 SVC000003; shows impact and known workarounds)</span><input value={form.cis} onChange={(e) => setForm({ ...form, cis: e.target.value })} /></label>}
         <div className="full more-toggle">
           <button type="button" className="btn-link" aria-expanded={more} onClick={() => setMore(!more)}>{more ? '− Fewer details' : '+ More details'}</button>
@@ -345,6 +348,7 @@ export function IncidentPage() {
             </dl>
           </section>
           <IncidentPeoplePanel record={i} basePath={path} editable={editable} onChange={setData} />
+          {meta.modules?.knowledge !== false && <IncidentKnowledgePanel incident={i} editable={editable} onChange={() => api.get<Incident>(path).then(setData)} />}
           <AttachmentsPanel recordRef={i.ref} editable={editable} canDelete={(a) => a.uploaded_by === user.id || manager} />
           {meta.modules?.cmdb !== false && <AffectedCisPanel record={i} basePath={path} editable={editable} onChange={setData} />}
           <section className="card">

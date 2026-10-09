@@ -135,6 +135,7 @@ export interface Analysis {
 }
 
 export interface ProblemDetail extends Problem {
+  knowledge_article?: { ref: string; status: string } | null;
   affected_cis: import('./components/AffectedCis').AffectedCi[];
   affected_services: import('./components/AffectedCis').AffectedService[];
   impact_hint: import('./components/AffectedCis').ImpactHint | null;
@@ -151,7 +152,7 @@ export interface ProblemDetail extends Problem {
 }
 
 export interface Meta {
-  modules: { incident: boolean; change: boolean; event: boolean; cmdb: boolean; sla: boolean };
+  modules: { incident: boolean; change: boolean; event: boolean; cmdb: boolean; sla: boolean; knowledge: boolean };
   setup_completed: boolean;
   statuses: Status[];
   transitions: Record<Status, Status[]>;
