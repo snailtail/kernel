@@ -1012,3 +1012,8 @@ tr.total td { border-bottom: 2px solid var(--border-strong); }
 .term { color: inherit; text-decoration: underline dotted var(--text-3); text-underline-offset: 3px; }
 .health-tips li { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 @media (max-width: 820px) { .flow-detail { grid-template-columns: 1fr; } .flow li { width: 100%; } .flow-arrow { display: none; } .flow-node { width: 100%; } }
+
+.run-succeeded { color: var(--success); background: var(--success-soft); }
+.run-failed { color: var(--danger); background: var(--danger-soft); }
+.run-refused { color: var(--s-known); background: var(--s-known-bg); }
+.run-running { color: var(--s-analysis); background: var(--s-analysis-bg); }

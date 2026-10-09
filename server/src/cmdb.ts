@@ -80,6 +80,8 @@ export const upsertSchema = z.object({
         source_system: z.string().trim().min(1).max(100),
         source_id: z.string().trim().min(1).max(300),
         source_url: httpUrl.default(''),
+        /** Explicit mapping to an existing CI (e.g. from a mapping table), used before automatic matching. */
+        ci: z.string().trim().max(30).optional(),
         name: z.string().trim().min(1).max(200),
         ci_type: z.string().trim().min(1).max(50),
         environment: z.enum(ENVIRONMENTS).optional(),
@@ -375,6 +377,9 @@ export async function upsertCis(user: User, input: z.infer<typeof upsertSchema>)
   // Integrations are bound to the source systems an administrator allowed, so one cannot squat another's name.
   const { rows: me } = await query('SELECT ci_source_systems FROM users WHERE id = $1', [user.id]);
   const allowed = new Set<string>(me[0]?.ci_source_systems ?? []);
+  // Source systems owned by a pull connector are written by that connector only.
+  const { rows: owned } = await query('SELECT source_system FROM connectors');
+  const connectorOwned = new Set<string>(owned.map((r) => r.source_system));
   const errors: { source_id: string; error: string }[] = [];
   const { rows: typeRows } = await query('SELECT name, class, attributes FROM ci_types');
   const types = new Map(typeRows.map((t) => [t.name as string, t as { name: string; class: 'ci' | 'service'; attributes: { key: string; type: string }[] }]));
@@ -384,6 +389,9 @@ export async function upsertCis(user: User, input: z.infer<typeof upsertSchema>)
   const items = new Map<string, Item>();
   for (const item of input.items) {
     try {
+      if (user.role === 'integration' && connectorOwned.has(item.source_system)) {
+        throw forbidden(`"${item.source_system}" is synced by a Kernel connector; push to another source system name`);
+      }
       if (user.role === 'integration' && !allowed.has(item.source_system)) {
         throw forbidden(`This account may not report CIs for source system "${item.source_system}". An administrator can allow it under Users.`);
       }
@@ -395,7 +403,19 @@ export async function upsertCis(user: User, input: z.infer<typeof upsertSchema>)
     }
   }
   const list = [...items.values()];
-  let created = 0, updated = 0, unchanged = 0;
+  let created = 0, updated = 0, unchanged = 0, matched = 0;
+  const { rows: rec } = await query("SELECT value FROM settings WHERE key = 'cmdb_reconciliation'");
+  const precedence: Record<string, string[]> = rec[0]?.value?.attribute_precedence ?? {};
+  /** Per-attribute source precedence: a source may not overwrite a value owned by a source listed before it. */
+  const mayWrite = (attr: string, owner: string | undefined, source: string) => {
+    const order = precedence[attr];
+    if (!owner || owner === source || !order) return true;
+    const o = order.indexOf(owner), s = order.indexOf(source);
+    return o === -1 || (s !== -1 && s < o);
+  };
+  const writable = (attrs: Record<string, unknown>, owners: Record<string, string>, source: string) =>
+    Object.fromEntries(Object.entries(attrs).filter(([a]) => mayWrite(a, owners[a], source)));
+  const own = (attrs: Record<string, unknown>, source: string) => Object.fromEntries(Object.keys(attrs).map((a) => [a, source]));
   try {
     await tx(async (db) => {
       const { rows: existing } = await db.query(
@@ -408,7 +428,7 @@ export async function upsertCis(user: User, input: z.infer<typeof upsertSchema>)
       );
       const found = new Map(existing.map((c) => [`${c.source_system}\u0000${c.source_id}`, c]));
       const seenRows: { id: number; url: string }[] = [];
-      const updates: { id: number; name: string; environment: string; status: string; team: string; tags: string[]; attributes: string }[] = [];
+      const updates: { id: number; name: string; environment: string; status: string; team: string; tags: string[]; attributes: string; attribute_sources: string }[] = [];
       const activity: { ci: number; body: string; data: string }[] = [];
       const fresh: Item[] = [];
       for (const item of list) {
@@ -424,12 +444,12 @@ export async function upsertCis(user: User, input: z.infer<typeof upsertSchema>)
           status: item.status ?? (c.status === 'missing' ? 'active' : c.status),
           team: item.team ?? c.team,
           tags: item.tags ?? c.tags,
-          attributes: { ...c.attributes, ...item.attrs },
+          attributes: { ...c.attributes, ...writable(item.attrs, c.attribute_sources ?? {}, item.source_system) },
         };
         const changed = Object.entries(next).filter(([k, v]) => JSON.stringify(c[k] ?? null) !== JSON.stringify(v));
         if (!changed.length) { unchanged++; continue; }
         updated++;
-        updates.push({ id: c.id, ...(next as any), attributes: JSON.stringify(next.attributes) });
+        updates.push({ id: c.id, ...(next as any), attributes: JSON.stringify(next.attributes), attribute_sources: JSON.stringify({ ...(c.attribute_sources ?? {}), ...own(writable(item.attrs, c.attribute_sources ?? {}, item.source_system), item.source_system) }) });
         const data = {
           ...Object.fromEntries(changed.map(([k, v]) => [k, { from: c[k] ?? null, to: v }])),
           ...(override ? { override: true, reason: input.override_reason } : {}),
@@ -440,7 +460,7 @@ export async function upsertCis(user: User, input: z.infer<typeof upsertSchema>)
       }
       if (seenRows.length) {
         await db.query(
-          `UPDATE ci_sources s SET last_seen_at = now(), source_url = coalesce(nullif(x.url, ''), s.source_url)
+          `UPDATE ci_sources s SET last_seen_at = now(), missed_syncs = 0, source_url = coalesce(nullif(x.url, ''), s.source_url)
            FROM unnest($1::int[], $2::text[]) AS x(id, url) WHERE s.id = x.id`,
           [seenRows.map((r) => r.id), seenRows.map((r) => r.url)],
         );
@@ -448,16 +468,27 @@ export async function upsertCis(user: User, input: z.infer<typeof upsertSchema>)
       if (updates.length) {
         await db.query(
           `UPDATE configuration_items c SET name = x.name, environment = x.environment, status = x.status, team = x.team,
-                  tags = ARRAY(SELECT jsonb_array_elements_text(x.tags)), attributes = x.attributes, updated_at = now()
-           FROM unnest($1::int[], $2::text[], $3::text[], $4::text[], $5::text[], $6::jsonb[], $7::jsonb[]) AS x(id, name, environment, status, team, tags, attributes)
+                  tags = ARRAY(SELECT jsonb_array_elements_text(x.tags)), attributes = x.attributes, attribute_sources = x.owners, updated_at = now()
+           FROM unnest($1::int[], $2::text[], $3::text[], $4::text[], $5::text[], $6::jsonb[], $7::jsonb[], $8::jsonb[]) AS x(id, name, environment, status, team, tags, attributes, owners)
            WHERE c.id = x.id`,
           [updates.map((u) => u.id), updates.map((u) => u.name), updates.map((u) => u.environment), updates.map((u) => u.status),
-            updates.map((u) => u.team), updates.map((u) => JSON.stringify(u.tags)), updates.map((u) => u.attributes)],
+            updates.map((u) => u.team), updates.map((u) => JSON.stringify(u.tags)), updates.map((u) => u.attributes), updates.map((u) => u.attribute_sources)],
         );
+      }
+      // Reconciliation: a new source id that clearly identifies an existing CI joins it instead of duplicating it.
+      const remaining: Item[] = [];
+      for (const item of fresh) {
+        const match = await findMatch(db, item);
+        if (!match) { remaining.push(item); continue; }
+        const attrs = writable(item.attrs, match.attribute_sources ?? {}, item.source_system);
+        await db.query('INSERT INTO ci_sources (ci_id, source_system, source_id, source_url, created_by) VALUES ($1, $2, $3, $4, $5)', [match.id, item.source_system, item.source_id, item.source_url, user.id]);
+        await db.query('UPDATE configuration_items SET attributes = attributes || $2, attribute_sources = attribute_sources || $3, updated_at = now() WHERE id = $1', [match.id, JSON.stringify(attrs), JSON.stringify(own(attrs, item.source_system))]);
+        activity.push({ ci: match.id, body: `Matched ${item.source_system} ${item.source_id} by ${match.rule}`, data: JSON.stringify({ source_system: item.source_system, source_id: item.source_id, rule: match.rule }) });
+        matched++;
       }
       const added: { ref: string; name: string }[] = [];
       for (const cls of ['ci', 'service'] as const) {
-        const batch = fresh.filter((i) => i.cls === cls);
+        const batch = remaining.filter((i) => i.cls === cls);
         if (!batch.length) continue;
         // Allocate refs first so every new row is matched to its source by ref, not by row order.
         const { rows: refRows } = await db.query(
@@ -466,13 +497,13 @@ export async function upsertCis(user: User, input: z.infer<typeof upsertSchema>)
         );
         const refs = refRows.map((r) => r.ref as string);
         const { rows: made } = await db.query(
-          `INSERT INTO configuration_items (ref, class, name, ci_type, status, environment, team, tags, attributes, created_by)
-           SELECT x.ref, $1, x.name, x.ci_type, x.status, x.environment, x.team, ARRAY(SELECT jsonb_array_elements_text(x.tags)), x.attributes, $2
-           FROM unnest($3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::jsonb[], $10::jsonb[])
-                AS x(ref, name, ci_type, status, environment, team, tags, attributes)
+          `INSERT INTO configuration_items (ref, class, name, ci_type, status, environment, team, tags, attributes, attribute_sources, created_by)
+           SELECT x.ref, $1, x.name, x.ci_type, x.status, x.environment, x.team, ARRAY(SELECT jsonb_array_elements_text(x.tags)), x.attributes, x.owners, $2
+           FROM unnest($3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::jsonb[], $10::jsonb[], $11::jsonb[])
+                AS x(ref, name, ci_type, status, environment, team, tags, attributes, owners)
            RETURNING id, ref, name`,
           [cls, user.id, refs, batch.map((i) => i.name), batch.map((i) => i.ci_type), batch.map((i) => i.status ?? 'active'), batch.map((i) => i.environment ?? 'prod'),
-            batch.map((i) => i.team ?? ''), batch.map((i) => JSON.stringify(i.tags ?? [])), batch.map((i) => JSON.stringify(i.attrs))],
+            batch.map((i) => i.team ?? ''), batch.map((i) => JSON.stringify(i.tags ?? [])), batch.map((i) => JSON.stringify(i.attrs)), batch.map((i) => JSON.stringify(own(i.attrs, i.source_system)))],
         );
         const idByRef = new Map(made.map((m) => [m.ref as string, m.id as number]));
         const ids = refs.map((r) => idByRef.get(r)!);
@@ -498,7 +529,7 @@ export async function upsertCis(user: User, input: z.infer<typeof upsertSchema>)
         entity_type: 'ci_upsert',
         entity_ref: [...new Set(list.map((i) => i.source_system))].join(', ').slice(0, 200),
         action: 'upsert',
-        changes: { created, updated, unchanged, errors: errors.length, created_refs: added.slice(0, 1000), updated_refs: updates.slice(0, 1000).map((u) => u.id) },
+        changes: { created, updated, unchanged, matched, errors: errors.length, created_refs: added.slice(0, 1000), updated_refs: updates.slice(0, 1000).map((u) => u.id) },
         reason: input.override_reason,
       });
     });
@@ -506,7 +537,27 @@ export async function upsertCis(user: User, input: z.infer<typeof upsertSchema>)
     if (err.code === '23505') throw conflict('Another sync reported the same records at the same time; retry');
     throw err;
   }
-  return { created, updated, unchanged, errors };
+  return { created, updated, unchanged, matched, errors };
+}
+
+/**
+ * Finds the one existing CI a new source record describes, in order: explicit mapping, cloud resource id or BIOS
+ * UUID, FQDN, then name plus IP. Only CIs without a record from the same source system, and only unique matches.
+ */
+async function findMatch(db: Db, item: { ci?: string; source_system: string; name: string; attributes?: Record<string, unknown> }) {
+  const a = item.attributes ?? {};
+  const free = 'NOT EXISTS (SELECT 1 FROM ci_sources s WHERE s.ci_id = c.id AND s.source_system = $1)';
+  const rules: [string, string, unknown[]][] = [];
+  if (item.ci) rules.push(['explicit mapping', 'c.ref = $2', [item.ci.toUpperCase()]]);
+  for (const key of ['resource_id', 'bios_uuid']) if (a[key]) rules.push([key, `lower(c.attributes->>'${key}') = lower($2)`, [String(a[key])]]);
+  if (a.fqdn) rules.push(['FQDN', "lower(c.attributes->>'fqdn') = lower($2)", [String(a.fqdn)]]);
+  if (a.ip) rules.push(['name and IP', "lower(c.name) = lower($2) AND c.attributes->>'ip' = $3", [item.name, String(a.ip)]]);
+  for (const [rule, where, params] of rules) {
+    const { rows } = await db.query(`SELECT c.id, c.attribute_sources FROM configuration_items c WHERE c.status <> 'retired' AND ${free} AND ${where} LIMIT 2`, [item.source_system, ...params]);
+    if (rows.length === 1) return { ...rows[0], rule };
+    if (rows.length > 1) return null; // ambiguous: create a new CI rather than guess
+  }
+  return null;
 }
 
 // ---- Registry ----------------------------------------------------------------------------------

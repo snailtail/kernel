@@ -5,6 +5,7 @@ import { useApi } from '../hooks';
 import { isManager, useSession } from '../session';
 import { Modal } from '../components/Modal';
 import { askReason } from '../components/Ask';
+import { ConnectorsCard } from '../components/Connectors';
 import { Link } from 'react-router';
 
 interface AdminUser {
@@ -21,7 +22,7 @@ interface AdminUser {
 }
 
 export function AdminPage() {
-  const { user } = useSession();
+  const { user, meta } = useSession();
   if (!isManager(user)) return <p className="empty">Administration requires the Problem Manager or Administrator role.</p>;
   return (
     <>
@@ -32,6 +33,7 @@ export function AdminPage() {
       {user.role === 'admin' && <ModulesCard />}
       {user.role === 'admin' && <SecurityCard />}
       {user.role === 'admin' && <WebhooksCard />}
+      {user.role === 'admin' && meta.modules?.cmdb !== false && <ConnectorsCard />}
       <SystemsCard />
       <BackupsCard />
       {user.role === 'admin' && <UsersCard />}

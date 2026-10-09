@@ -10,6 +10,7 @@ import { encryptLegacySecrets, startWorker } from './webhooks.js';
 import { startEventWorker } from './events.js';
 import { startSlaWorker } from './sla.js';
 import { startNotificationWorker } from './notifications.js';
+import { startConnectorWorker } from './connectors.js';
 
 const app = await buildApp();
 const log = (msg: string) => app.log.info(msg);
@@ -25,6 +26,7 @@ asSystem(() => {
   startEventWorker(log);
   startSlaWorker(log);
   startNotificationWorker(log);
+  startConnectorWorker(log);
   startChainVerification((msg) => app.log.error(msg));
   setInterval(() => pruneIdempotencyKeys().catch(() => {}), 3600_000).unref();
 });

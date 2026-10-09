@@ -25,8 +25,12 @@ for (const [net, prefix, type] of [
 
 /** KERNEL_OUTBOUND_ALLOW: comma-separated CIDRs or addresses that may be reached even though private/loopback. */
 function allowList() {
+  return parseList((process.env.KERNEL_OUTBOUND_ALLOW ?? '').split(','));
+}
+
+function parseList(entries: string[]) {
   const list = new BlockList();
-  for (const entry of (process.env.KERNEL_OUTBOUND_ALLOW ?? '').split(',').map((s) => s.trim()).filter(Boolean)) {
+  for (const entry of entries.map((s) => s.trim()).filter(Boolean)) {
     const [addr, bits] = entry.split('/');
     const type = isIP(addr) === 6 ? 'ipv6' : 'ipv4';
     if (!isIP(addr)) continue;
@@ -36,27 +40,42 @@ function allowList() {
   return list;
 }
 
-/** Why an address may not be contacted, or null if it may. */
-export function blockedReason(address: string): string | null {
+/**
+ * Validates a per-caller allowlist (e.g. a connector's "allow private network"): only private ranges may be listed;
+ * loopback, link-local, metadata and reserved addresses can never be opened this way.
+ */
+export function validatePrivateAllow(entries: string[]) {
+  for (const entry of entries) {
+    const [addr, bits] = entry.trim().split('/');
+    if (!isIP(addr)) return `${entry} is not an address or CIDR`;
+    const type = isIP(addr) === 6 ? 'ipv6' : 'ipv4';
+    if (!PRIVATE.check(addr, type) || ALWAYS_BLOCKED.check(addr, type)) return `${entry} is not in a private range`;
+    if (bits && (Number(bits) < (type === 'ipv4' ? 8 : 7) || Number(bits) > (type === 'ipv4' ? 32 : 128))) return `${entry} has an invalid prefix`;
+  }
+  return null;
+}
+
+/** Why an address may not be contacted, or null if it may. `privateAllow` may open private ranges only. */
+export function blockedReason(address: string, privateAllow?: BlockList): string | null {
   let ip = address;
   const mapped = ip.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i); // IPv4-mapped IPv6
   if (mapped) ip = mapped[1];
   const type = isIP(ip) === 6 ? 'ipv6' : 'ipv4';
   if (allowList().check(ip, type)) return null;
   if (ALWAYS_BLOCKED.check(ip, type)) return `${ip} is a loopback, link-local, metadata or reserved address`;
-  if (PRIVATE.check(ip, type)) return `${ip} is a private address (allow it with KERNEL_OUTBOUND_ALLOW)`;
+  if (PRIVATE.check(ip, type)) return privateAllow?.check(ip, type) ? null : `${ip} is a private address (allow it for this connector, or with KERNEL_OUTBOUND_ALLOW)`;
   return null;
 }
 
 type LookupCallback = (err: NodeJS.ErrnoException | null, address: string | LookupAddress[], family?: number) => void;
 
 /** DNS lookup that rejects blocked addresses; the socket then connects to exactly the address checked here. */
-export function checkedLookup(hostname: string, options: object, callback: LookupCallback) {
+export function checkedLookup(hostname: string, options: object, callback: LookupCallback, privateAllow?: BlockList) {
   dnsLookup(hostname, { ...options, all: true }, (err, addresses) => {
     if (err) return callback(err, []);
     const list = addresses as LookupAddress[];
     for (const a of list) {
-      const reason = blockedReason(a.address);
+      const reason = blockedReason(a.address, privateAllow);
       if (reason) return callback(Object.assign(new OutboundBlockedError(`Blocked outbound request to ${hostname}: ${reason}`), { code: 'EBLOCKED' }), []);
     }
     if ((options as { all?: boolean }).all) callback(null, list);
@@ -65,6 +84,20 @@ export function checkedLookup(hostname: string, options: object, callback: Looku
 }
 
 const agent = new Agent({ connect: { lookup: checkedLookup as any, timeout: 5000 }, bodyTimeout: 10_000, headersTimeout: 10_000 });
+const allowAgents = new Map<string, { agent: Agent; list: BlockList }>();
+/** An agent whose lookup also accepts the given private ranges (one per distinct allowlist). */
+function agentFor(privateAllow?: string[]) {
+  if (!privateAllow?.length) return { agent, list: undefined };
+  const key = [...privateAllow].sort().join(',');
+  let entry = allowAgents.get(key);
+  if (!entry) {
+    const list = parseList(privateAllow);
+    const lookup = (h: string, o: object, cb: LookupCallback) => checkedLookup(h, o, cb, list);
+    entry = { agent: new Agent({ connect: { lookup: lookup as any, timeout: 5000 }, bodyTimeout: 30_000, headersTimeout: 30_000 }), list };
+    allowAgents.set(key, entry);
+  }
+  return entry;
+}
 
 export interface OutboundResponse {
   status: number;
@@ -73,7 +106,7 @@ export interface OutboundResponse {
 }
 
 /** Checks a URL before it is stored (e.g. a webhook URL), so obvious mistakes are rejected early. */
-export function checkUrl(url: string): string | null {
+export function checkUrl(url: string, privateAllow?: BlockList): string | null {
   let u: URL;
   try {
     u = new URL(url);
@@ -83,19 +116,24 @@ export function checkUrl(url: string): string | null {
   if (u.protocol !== 'https:' && u.protocol !== 'http:') return 'Only http(s) URLs are allowed';
   if (u.username || u.password) return 'Credentials in the URL are not allowed';
   const host = u.hostname.replace(/^\[|\]$/g, '');
-  if (isIP(host)) return blockedReason(host);
+  if (isIP(host)) return blockedReason(host, privateAllow);
   if (/^(localhost|.*\.localhost|.*\.internal|metadata\.google\.internal)$/i.test(host)) return `${host} is an internal host name`;
   return null;
 }
 
 export async function outboundFetch(
   url: string,
-  init: { method?: string; headers?: Record<string, string>; body?: string; timeoutMs?: number; maxBytes?: number } = {},
+  init: { method?: string; headers?: Record<string, string>; body?: string; timeoutMs?: number; maxBytes?: number; privateAllow?: string[] } = {},
 ): Promise<OutboundResponse> {
   const maxBytes = init.maxBytes ?? 1_000_000;
+  if (init.privateAllow?.length) {
+    const problem = validatePrivateAllow(init.privateAllow);
+    if (problem) throw new OutboundBlockedError(problem);
+  }
+  const { agent: dispatcher, list: privateList } = agentFor(init.privateAllow);
   let current = url;
   for (let hop = 0; hop <= 3; hop++) {
-    const problem = checkUrl(current);
+    const problem = checkUrl(current, privateList);
     if (problem) throw new OutboundBlockedError(problem);
     let res;
     try {
@@ -104,7 +142,7 @@ export async function outboundFetch(
         headers: init.headers,
         body: init.body,
         redirect: 'manual',
-        dispatcher: agent,
+        dispatcher,
         signal: AbortSignal.timeout(init.timeoutMs ?? 10_000),
       });
     } catch (err) {

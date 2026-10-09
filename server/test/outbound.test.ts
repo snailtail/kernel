@@ -57,3 +57,13 @@ test('blocks hosts that resolve to blocked addresses, and redirects into them', 
     delete process.env.KERNEL_OUTBOUND_ALLOW;
   }
 });
+
+test('a connector may only open private ranges, never loopback, link-local or metadata', async () => {
+  const { validatePrivateAllow } = await import('../src/outbound.js');
+  assert.equal(validatePrivateAllow(['192.168.1.20', '10.0.0.0/8', 'fd12::/16']), null);
+  assert.match(validatePrivateAllow(['127.0.0.1'])!, /not in a private range/);
+  assert.match(validatePrivateAllow(['169.254.169.254'])!, /not in a private range/);
+  assert.match(validatePrivateAllow(['8.8.8.8'])!, /not in a private range/);
+  assert.match(validatePrivateAllow(['10.0.0.0/2'])!, /invalid prefix/);
+  assert.match(validatePrivateAllow(['op5.local'])!, /not an address/);
+});

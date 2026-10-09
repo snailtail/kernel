@@ -12,6 +12,7 @@ import * as analyses from './analyses.js';
 import * as cmdb from './cmdb.js';
 import { moduleEnabled } from './modules.js';
 import * as graph from './cmdb-graph.js';
+import * as connectors from './connectors.js';
 import * as problemCis from './problem-cis.js';
 import * as incidents from './incidents.js';
 import * as events from './events.js';
@@ -132,7 +133,7 @@ function buildServer(user: User, scopes?: string[]) {
     register_standard_change: 'change.register', approve_change: 'change.approve', link_ci_to_change: 'change.update',
     report_event: 'event.ingest', list_alerts: 'event.read', acknowledge_alert: 'event.ack', list_event_rules: 'event.read',
     get_ci_impact: 'ci.read', get_service_dependencies: 'ci.read', add_ci_relationship: 'ci.manage', remove_ci_relationship: 'ci.manage',
-    sync_ci_relationships: 'ci.ingest', list_ci_groups: 'ci.read', get_ci_group: 'ci.read', save_ci_group: 'ci.manage',
+    sync_ci_relationships: 'ci.ingest', sync_ci_batch: 'ci.ingest', list_ci_groups: 'ci.read', get_ci_group: 'ci.read', save_ci_group: 'ci.manage',
     whoami: 'meta.read', list_reference_data: 'meta.read', search: 'meta.read', get_record: 'meta.read', next_steps: 'meta.read',
     my_work: 'problem.read', link_records: 'problem.link',
     search_problems: 'problem.read', get_problem: 'problem.read', get_history: 'problem.read', find_similar_problems: 'problem.read',
@@ -653,6 +654,13 @@ function buildServer(user: User, scopes?: string[]) {
     { source_system: z.string(), relationships: graph.syncSchema.shape.relationships, full: z.boolean().optional() },
     false,
     async (args) => graph.syncRelationships(user, graph.syncSchema.parse(args)),
+  );
+  tool(
+    'sync_ci_batch',
+    'Report CIs and relationships from one source in one call – e.g. an inventory an agent gathered from a tool Kernel has no connector for. Matched to existing CIs by source id, explicit ci ref, resource id, FQDN or name+IP. full_sync: this is the complete snapshot, so CIs no longer reported count as missed (a sharply shrunk snapshot is refused).',
+    { source_system: z.string(), cis: connectors.ciBatchSchema.shape.cis, relationships: connectors.ciBatchSchema.shape.relationships.optional(), full_sync: z.boolean().optional() },
+    false,
+    async (args) => connectors.ciBatch(user, connectors.ciBatchSchema.parse(args)),
   );
   tool('list_ci_groups', 'CI groups: services, flows, billing, monitoring or maintenance sets.', {}, true, () => graph.listGroups(user));
   tool('get_ci_group', 'A CI group with its members (manual and matched by rules).', { id: z.number().int() }, true, ({ id }) => graph.getGroup(user, id));

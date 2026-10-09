@@ -5,6 +5,7 @@ import * as actions from './actions.js';
 import * as cmdb from './cmdb.js';
 import { MODULE_TAGS, moduleEnabled } from './modules.js';
 import * as graph from './cmdb-graph.js';
+import * as conn from './connectors.js';
 import * as problemCis from './problem-cis.js';
 import * as inc from './incidents.js';
 import * as events from './events.js';
@@ -194,6 +195,14 @@ export const OPERATIONS: Op[] = [
   { method: 'post', path: '/api/problems/:ref/resolve-incidents', tag: 'Incidents', summary: "Resolve a problem's open incidents with resolution code problem_fixed", body: inc.resolveLinkedSchema },
   { method: 'post', path: '/api/problems/:ref/cis', tag: 'CMDB', summary: 'Link an affected CI or service to a problem', body: problemCis.linkCiSchema },
   { method: 'delete', path: '/api/problems/:ref/cis/:ci', tag: 'CMDB', summary: 'Unlink a CI or service from a problem' },
+  { method: 'post', path: '/api/cmdb/ci-batch', tag: 'CMDB', summary: 'Push contract: CIs and relationships from one source; full_sync marks what the source no longer reports (a sharply shrunk snapshot is refused)', body: conn.ciBatchSchema },
+  { method: 'get', path: '/api/connectors', tag: 'CMDB', summary: 'Pull connectors and their last run (administrators)' },
+  { method: 'post', path: '/api/connectors', tag: 'CMDB', summary: 'Create a connector; credentials are encrypted and never returned', body: conn.connectorSchema },
+  { method: 'put', path: '/api/connectors/:id', tag: 'CMDB', summary: 'Update a connector (omit secret to keep the credentials)', body: conn.connectorSchema },
+  { method: 'delete', path: '/api/connectors/:id', tag: 'CMDB', summary: 'Delete a connector' },
+  { method: 'post', path: '/api/connectors/:id/test', tag: 'CMDB', summary: 'Test the connection' },
+  { method: 'post', path: '/api/connectors/:id/run', tag: 'CMDB', summary: 'Run now (never overlaps a running sync)' },
+  { method: 'get', path: '/api/connectors/:id/runs', tag: 'CMDB', summary: 'The run log: counts, errors, duration' },
   { method: 'get', path: '/api/ci-relationship-types', tag: 'CMDB', summary: 'Relationship types with direction, inverse label and how outages propagate' },
   { method: 'post', path: '/api/cis/:ref/relationships', tag: 'CMDB', summary: 'Add a manual relationship (problem managers)', body: graph.relationshipSchema },
   { method: 'delete', path: '/api/cis/:ref/relationships/:id', tag: 'CMDB', summary: 'Remove a manual relationship (discovered ones are owned by their source)' },
