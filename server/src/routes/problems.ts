@@ -5,6 +5,7 @@ import { config } from '../config.js';
 import { query } from '../db.js';
 import * as actions from '../actions.js';
 import * as analyses from '../analyses.js';
+import * as generic from '../generic.js';
 import * as problems from '../problems.js';
 import * as reports from '../reports.js';
 import { problemMarkdown } from '../export.js';
@@ -155,6 +156,16 @@ export async function problemRoutes(app: FastifyInstance) {
     reply.header('Content-Disposition', `attachment; filename="problem-review-${agenda.generated_at.slice(0, 10)}.md"`);
     return review.agendaMarkdown(agenda);
   });
+
+  // ---- Cross-practice (see docs/api-conventions.md) ----
+  app.get('/api/search', async (req) => generic.search(requireUser(req, 'meta.read'), generic.searchSchema.parse(req.query)));
+  app.get<RefParams>('/api/records/:ref', async (req) => generic.getRecord(requireUser(req), req.params.ref));
+  app.get<RefParams>('/api/records/:ref/next-steps', async (req) => generic.nextSteps(requireUser(req), req.params.ref));
+  app.post<RefParams>('/api/records/:ref/links', async (req) => {
+    const body = z.object({ to: z.string().trim().min(1).max(200), kind: z.string().max(20).optional(), system: z.string().max(100).optional(), url: z.string().max(2000).optional(), note: z.string().max(2000).optional() }).parse(req.body);
+    return generic.linkRecords(requireUser(req), req.params.ref, body.to, body);
+  });
+  app.get('/api/my-work', async (req) => generic.myWork(requireUser(req, 'problem.read')));
 
   app.get('/api/kedb', async (req) => {
     requireUser(req, 'kedb.read');

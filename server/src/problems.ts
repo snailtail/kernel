@@ -5,6 +5,7 @@ import type pg from 'pg';
 import type { User } from './auth.js';
 import { afterCommit, query, tx } from './db.js';
 import { audit } from './audit.js';
+import { recordUrl, registerRecordType, type RecordType } from './records.js';
 import { authorize } from './policy.js';
 import { logDomainEvent } from './log.js';
 import { recordActivity } from './metrics.js';
@@ -248,7 +249,7 @@ export async function getProblem(ref: string) {
   ]);
   const { resolveLinkUrls } = await import('./integrations.js');
   const detail = { ...problem, links: await resolveLinkUrls(links.rows), activity: activity.rows, actions: actions.rows, analyses: analyses.rows, watchers: watchers.rows };
-  return { ...detail, next_steps: guidanceFor(detail) };
+  return { type: 'problem', ...detail, url: problemUrl(detail.ref), next_steps: guidanceFor(detail) };
 }
 
 export async function createProblem(user: User, input: z.infer<typeof createProblemSchema>) {
@@ -561,4 +562,38 @@ export async function markDuplicate(user: User, ref: string, ofRef: string) {
     await db.query('UPDATE problems SET updated_at = now() WHERE id = $1', [original.id]);
   });
   return getProblem(ofRef);
+}
+
+// ---- Record type registration (see records.ts and docs/api-conventions.md) ---------------------------
+
+const PROBLEM_TYPE: RecordType = {
+  type: 'problem',
+  prefix: 'PRB',
+  readAction: 'problem.read',
+  uiPath: (ref) => `/problems/${ref}`,
+  get: (_user, ref) => getProblem(ref),
+  search: async (_user, q, limit) =>
+    (await listProblems(listSchema.parse({ q, status: 'all', sort: 'updated', limit }))).map((p) => ({
+      type: 'problem',
+      ref: p.ref,
+      title: p.title,
+      status: p.status,
+      url: problemUrl(p.ref),
+      summary: [p.affected_service, p.category].filter(Boolean).join(' · '),
+    })),
+  rest: {
+    list: '/api/problems',
+    create: '/api/problems',
+    get: '/api/problems/:ref',
+    update: '/api/problems/:ref',
+    transition: '/api/problems/:ref/transition',
+    links: '/api/problems/:ref/links',
+    comments: '/api/problems/:ref/comments',
+  },
+  mcp: { list: 'search_problems', get: 'get_problem', create: 'create_problem', update: 'update_problem', transition: 'transition_problem' },
+};
+registerRecordType(PROBLEM_TYPE);
+
+function problemUrl(ref: string) {
+  return recordUrl(PROBLEM_TYPE, ref);
 }

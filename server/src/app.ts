@@ -11,6 +11,7 @@ import { HttpError } from './errors.js';
 import { createLogger, logger } from './log.js';
 import { mcpRoutes } from './mcp.js';
 import { openApiDocument } from './openapi.js';
+import { registerIdempotency } from './idempotency.js';
 import { registerSecurity } from './security.js';
 import { adminRoutes } from './routes/admin.js';
 import { authRoutes } from './routes/auth.js';
@@ -83,6 +84,7 @@ export async function buildApp(options: { logLevel?: string; serveWeb?: boolean 
     return { status: 'ok' };
   });
 
+  registerIdempotency(app);
   await app.register(authRoutes);
   await app.register(problemRoutes);
   await app.register(adminRoutes);

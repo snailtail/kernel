@@ -9,6 +9,7 @@ import { query } from './db.js';
 import { badRequest, HttpError } from './errors.js';
 import * as actions from './actions.js';
 import * as analyses from './analyses.js';
+import * as generic from './generic.js';
 import * as integrations from './integrations.js';
 import * as problems from './problems.js';
 import * as reports from './reports.js';
@@ -96,7 +97,8 @@ function buildServer(user: User, scopes?: string[]) {
 
   // Every tool maps to a policy action; tools the user's role cannot use are not listed at all.
   const TOOL_ACTIONS: Record<string, Action> = {
-    whoami: 'meta.read', list_reference_data: 'meta.read',
+    whoami: 'meta.read', list_reference_data: 'meta.read', search: 'meta.read', get_record: 'meta.read', next_steps: 'meta.read',
+    my_work: 'problem.read', link_records: 'problem.link',
     search_problems: 'problem.read', get_problem: 'problem.read', get_history: 'problem.read', find_similar_problems: 'problem.read',
     export_problem: 'problem.read', list_actions: 'problem.read', get_dashboard: 'problem.read',
     search_known_errors: 'kedb.read', get_report: 'report.read', get_review_agenda: 'review.read',
@@ -209,6 +211,38 @@ function buildServer(user: User, scopes?: string[]) {
     { ref: z.string().describe('The duplicate'), of: z.string().describe('The original problem to keep') },
     false,
     async ({ ref, of }) => compactProblem(await problems.markDuplicate(user, ref, of), 5),
+  );
+
+  // ---- Cross-practice tools: the same verbs for every record type (docs/api-conventions.md) ----
+  tool(
+    'search',
+    'Search all record types you may read (problems today; incidents, changes, CIs… as they are added). Returns type, ref, title, status and a link.',
+    { q: z.string(), types: z.string().optional().describe('Comma-separated types, e.g. "problem"'), limit: z.number().int().min(1).max(100).optional() },
+    true,
+    async (args) => generic.search(user, generic.searchSchema.parse(args)),
+  );
+
+  tool('get_record', 'Get any record by its ref (e.g. PRB000012), with links, history and next_steps.', { ref: z.string() }, true, async ({ ref }) => {
+    const r: any = await generic.getRecord(user, ref);
+    return Array.isArray(r.activity) ? { ...r, activity: r.activity.slice(0, 20), activity_total: r.activity.length } : r;
+  });
+
+  tool(
+    'next_steps',
+    'The current process phase of a record, its purpose and the remaining steps (guided mode). Use it to decide what to do next.',
+    { ref: z.string() },
+    true,
+    async ({ ref }) => generic.nextSteps(user, ref),
+  );
+
+  tool('my_work', 'What you should work on: your open problems and actions, and recent changes on records you watch.', {}, true, () => generic.myWork(user));
+
+  tool(
+    'link_records',
+    'Link a record to another Kernel record (by ref) or to an external record (give kind: incident, event, change, problem).',
+    { from: z.string(), to: z.string(), kind: z.string().optional(), system: z.string().optional(), url: z.string().optional(), note: z.string().optional() },
+    false,
+    async ({ from, to, ...options }) => generic.linkRecords(user, from, to, options),
   );
 
   tool(

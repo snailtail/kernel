@@ -1,6 +1,7 @@
 import { buildApp } from './app.js';
 import { startChainVerification } from './audit.js';
 import { asSystem } from './context.js';
+import { pruneIdempotencyKeys } from './idempotency.js';
 import { checkConfiguration } from './security.js';
 import { bootstrapAdmin } from './auth.js';
 import { config } from './config.js';
@@ -19,6 +20,7 @@ setInterval(() => query('DELETE FROM sessions WHERE expires_at < now()').catch((
 asSystem(() => {
   startWorker(log);
   startChainVerification((msg) => app.log.error(msg));
+  setInterval(() => pruneIdempotencyKeys().catch(() => {}), 3600_000).unref();
 });
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {

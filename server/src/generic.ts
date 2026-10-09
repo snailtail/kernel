@@ -1,0 +1,74 @@
+// Cross-practice operations over the record type registry: one predictable surface for agents and scripts.
+import { z } from 'zod';
+import type { User } from './auth.js';
+import { query } from './db.js';
+import { badRequest } from './errors.js';
+import { authorize, can } from './policy.js';
+import { addLink, LINK_KINDS, SELECT_ACTION } from './problems.js';
+import { recordTypes, recordUrl, typeForRef, type SearchHit } from './records.js';
+
+export const searchSchema = z.object({
+  q: z.string().trim().min(1).max(200),
+  types: z.string().max(200).optional().describe('Comma-separated record types, e.g. "problem"'),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+});
+
+/** Searches every record type the user may read. */
+export async function search(user: User, input: z.infer<typeof searchSchema>): Promise<SearchHit[]> {
+  const wanted = input.types?.split(',').map((t) => t.trim());
+  const types = recordTypes().filter((t) => can(user.role, t.readAction) && (!wanted || wanted.includes(t.type)));
+  const results = await Promise.all(types.map((t) => t.search(user, input.q, input.limit)));
+  return results.flat().slice(0, input.limit);
+}
+
+/** Any record by its ref (the prefix selects the type). */
+export async function getRecord(user: User, ref: string) {
+  const t = typeForRef(ref);
+  authorize(user, t.readAction);
+  return t.get(user, ref.toUpperCase());
+}
+
+export async function nextSteps(user: User, ref: string) {
+  const record = await getRecord(user, ref);
+  return { ref: record.ref, type: record.type, url: record.url, next_steps: record.next_steps ?? null };
+}
+
+/** Links a record to another Kernel record or to an external record. */
+export async function linkRecords(user: User, from: string, to: string, options: { kind?: string; system?: string; url?: string; note?: string }) {
+  const source = typeForRef(from);
+  if (source.type !== 'problem') throw badRequest(`Links from ${source.type} records are not supported yet`);
+  let kind = options.kind;
+  try {
+    const target = typeForRef(to);
+    kind ??= target.type;
+  } catch {
+    if (!kind) throw badRequest('Give the kind (incident, event, change, problem) for an external reference');
+  }
+  if (!(LINK_KINDS as readonly string[]).includes(kind!)) throw badRequest(`Unknown link kind ${kind}`);
+  const result = await addLink(user, from, { kind: kind as (typeof LINK_KINDS)[number], reference: to, system: options.system ?? '', url: options.url ?? '', note: options.note ?? '' });
+  return result.links;
+}
+
+/** What the user should work on: their open problems and actions, and recent changes on what they watch. */
+export async function myWork(user: User) {
+  const [problems, actions, watched] = await Promise.all([
+    query(
+      `SELECT ref, title, status, priority, updated_at FROM problems WHERE assignee_id = $1 AND status NOT IN ('resolved', 'closed') ORDER BY priority, updated_at DESC LIMIT 50`,
+      [user.id],
+    ),
+    query(`${SELECT_ACTION} WHERE a.owner_id = $1 AND a.status = 'open' ORDER BY a.due_date NULLS LAST LIMIT 50`, [user.id]),
+    query(
+      `SELECT p.ref, p.title, a.kind, a.body, a.created_at, u.display_name AS by
+       FROM problem_activity a JOIN problems p ON p.id = a.problem_id LEFT JOIN users u ON u.id = a.user_id
+       JOIN problem_watchers w ON w.problem_id = a.problem_id AND w.user_id = $1
+       WHERE a.user_id IS DISTINCT FROM $1 AND a.created_at > now() - interval '7 days' ORDER BY a.created_at DESC LIMIT 30`,
+      [user.id],
+    ),
+  ]);
+  const problemType = recordTypes().find((t) => t.type === 'problem')!;
+  return {
+    problems: problems.rows.map((p) => ({ type: 'problem', ...p, url: recordUrl(problemType, p.ref) })),
+    actions: actions.rows,
+    watched_changes: watched.rows,
+  };
+}

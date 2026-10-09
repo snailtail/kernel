@@ -225,7 +225,14 @@ Tools: `whoami`, `list_reference_data`, `search_problems`, `get_problem`, `searc
 `create_problem`, `update_problem`, `transition_problem`, `add_comment`, `link_record`, `unlink_record`,
 `assess_known_error`, `start_analysis`, `update_analysis`, `list_actions`, `add_action`, `update_action`, `get_report`,
 `list_problem_candidates`, `create_problem_from_candidate`, `link_candidate_records`, `report_records`,
-`find_similar_problems`, `mark_duplicate`, `get_review_agenda`, `export_problem`, `watch_problem`.
+`find_similar_problems`, `mark_duplicate`, `get_review_agenda`, `export_problem`, `watch_problem`, `get_history`,
+and the cross-practice tools `search`, `get_record`, `next_steps`, `my_work`, `link_records`.
+
+## API conventions
+
+All record types follow the same REST and MCP conventions (refs, `url`, `next_steps`, `Idempotency-Key`, conflict
+detection, error format, generic `search`/`get_record`/`next_steps`/`my_work`/`link_records`), enforced by a parity
+test. See [docs/api-conventions.md](docs/api-conventions.md).
 
 ## REST API
 

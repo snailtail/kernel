@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import * as actions from './actions.js';
 import { auditQuerySchema } from './audit.js';
+import { searchSchema } from './generic.js';
 import * as analyses from './analyses.js';
 import * as integrations from './integrations.js';
 import * as problems from './problems.js';
@@ -81,6 +82,11 @@ export const OPERATIONS: Op[] = [
   { method: 'patch', path: '/api/problems/:ref/analyses/:id', tag: 'Analyses', summary: 'Update an analysis (data replaces the whole structure)', body: analyses.updateAnalysisSchema },
   { method: 'delete', path: '/api/problems/:ref/analyses/:id', tag: 'Analyses', summary: 'Remove an analysis' },
 
+  { method: 'get', path: '/api/search', tag: 'Records', summary: 'Search all record types you may read', query: searchSchema },
+  { method: 'get', path: '/api/records/:ref', tag: 'Records', summary: 'Any record by ref (the prefix selects the type)' },
+  { method: 'get', path: '/api/records/:ref/next-steps', tag: 'Records', summary: 'Process phase and remaining steps for a record' },
+  { method: 'post', path: '/api/records/:ref/links', tag: 'Records', summary: 'Link a record to another record or an external reference', body: z.object({ to: z.string(), kind: z.string().optional(), system: z.string().optional(), url: z.string().optional(), note: z.string().optional() }) },
+  { method: 'get', path: '/api/my-work', tag: 'Records', summary: 'Your open problems and actions, and changes on what you watch' },
   { method: 'get', path: '/api/kedb', tag: 'Known errors', summary: 'Search the known error database', query: z.object({ q: z.string().optional(), include_resolved: z.enum(['true', 'false']).optional() }) },
 
   { method: 'get', path: '/api/reports', tag: 'Reports', summary: 'KPIs and trends for a period', query: reports.reportSchema },
@@ -157,6 +163,8 @@ export function openApiDocument(serverUrl?: string) {
       description:
         'Problem management (ITIL 4). Authenticate with `Authorization: Bearer krn_…` (personal API token, see Settings) or the session cookie; ' +
         'cookie-authenticated changes must send `X-Kernel-Request: 1`. Business rules (workflow, roles) are enforced server-side and reported as 409/403 with an `error` message. ' +
+        'Creating requests (POST/PUT/PATCH) accept an `Idempotency-Key` header: a retry with the same key returns the original response. ' +
+        'Every record has a `ref` (e.g. PRB000012), a `type` and a `url` to the web UI; see docs/api-conventions.md. ' +
         'An MCP server with the same capabilities is available at /mcp.',
     },
     ...(serverUrl ? { servers: [{ url: serverUrl }] } : {}),
