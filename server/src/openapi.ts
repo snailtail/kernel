@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import * as actions from './actions.js';
 import * as cmdb from './cmdb.js';
+import * as graph from './cmdb-graph.js';
 import { auditQuerySchema } from './audit.js';
 import { searchSchema } from './generic.js';
 import * as analyses from './analyses.js';
@@ -110,6 +111,18 @@ export const OPERATIONS: Op[] = [
   { method: 'post', path: '/api/cis/:ref/comments', tag: 'CMDB', summary: 'Add a note', body: z.object({ body: z.string() }) },
   { method: 'post', path: '/api/cis/:ref/links', tag: 'CMDB', summary: 'Link a problem, incident, event, change or document', body: cmdb.ciLinkSchema },
   { method: 'delete', path: '/api/cis/:ref/links/:id', tag: 'CMDB', summary: 'Remove a link' },
+  { method: 'get', path: '/api/ci-relationship-types', tag: 'CMDB', summary: 'Relationship types with direction, inverse label and how outages propagate' },
+  { method: 'post', path: '/api/cis/:ref/relationships', tag: 'CMDB', summary: 'Add a manual relationship (problem managers)', body: graph.relationshipSchema },
+  { method: 'delete', path: '/api/cis/:ref/relationships/:id', tag: 'CMDB', summary: 'Remove a manual relationship (discovered ones are owned by their source)' },
+  { method: 'post', path: '/api/ci-relationships/sync', tag: 'CMDB', summary: 'Report relationships from a source system by its ids; full sync removes what it no longer reports', body: graph.syncSchema },
+  { method: 'get', path: '/api/cis/:ref/impact', tag: 'CMDB', summary: 'Impact (up: what is affected if this is down) or dependencies (down); bounded depth and size', query: graph.impactSchema },
+  { method: 'get', path: '/api/ci-groups', tag: 'CMDB', summary: 'CI groups (services, flows, billing, monitoring…)' },
+  { method: 'post', path: '/api/ci-groups', tag: 'CMDB', summary: 'Create a group with optional membership rules', body: graph.groupSchema },
+  { method: 'get', path: '/api/ci-groups/:id', tag: 'CMDB', summary: 'A group with its manual and rule-matched members' },
+  { method: 'put', path: '/api/ci-groups/:id', tag: 'CMDB', summary: 'Update a group', body: graph.groupSchema },
+  { method: 'delete', path: '/api/ci-groups/:id', tag: 'CMDB', summary: 'Delete a group' },
+  { method: 'put', path: '/api/ci-groups/:id/members/:ref', tag: 'CMDB', summary: 'Add a CI to a group by hand' },
+  { method: 'delete', path: '/api/ci-groups/:id/members/:ref', tag: 'CMDB', summary: 'Remove a manually added CI from a group' },
   { method: 'get', path: '/api/kedb', tag: 'Known errors', summary: 'Search the known error database', query: z.object({ q: z.string().optional(), include_resolved: z.enum(['true', 'false']).optional() }) },
 
   { method: 'get', path: '/api/reports', tag: 'Reports', summary: 'KPIs and trends for a period', query: reports.reportSchema },

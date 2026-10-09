@@ -93,6 +93,12 @@ typed attributes per CI type, source links, linked records and history. Source s
 `POST /api/cis/upsert` (or the `upsert_cis` MCP tool), matched by source system and id; an integration account can
 only update the source records it created.
 
+**Relationships and impact**: CIs and services are connected by typed relationships (runs on, depends on, uses
+database, connects to, contains, part of service). The CI page shows what is affected if it is down, up to the
+business services, and what it depends on; walks are bounded (10 levels, 500 nodes) and say when the picture is
+incomplete. Connectors report relationships with `POST /api/ci-relationships/sync` and own what they report; manual
+relationships survive every sync. CI groups collect CIs by hand or by rules (tag, type, team, attribute…).
+
 **Follow-up actions** track work that follows from a problem (vendor fixes, monitoring, runbook updates, review
 outcomes) with an owner and due date.
 

@@ -125,7 +125,7 @@ describe('MCP server', { skip }, () => {
 
     const { prompts } = await mcp.listPrompts();
     assert.deepEqual(prompts.map((x) => x.name).sort(), [
-      'assess_known_error', 'five_whys', 'ishikawa', 'kepner_tregoe', 'major_problem_review', 'problem_review_board',
+      'assess_known_error', 'five_whys', 'impact_analysis', 'ishikawa', 'kepner_tregoe', 'major_problem_review', 'problem_review_board',
       'review_candidates', 'timeline', 'triage_problem', 'verify_resolution',
     ]);
     const prompt = await mcp.getPrompt({ name: 'five_whys', arguments: { ref: p.ref.toLowerCase() } });

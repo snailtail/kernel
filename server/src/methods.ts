@@ -175,6 +175,26 @@ export const GUIDES: MethodGuide[] = [
   },
 ];
 
+GUIDES.push({
+  id: 'impact_analysis',
+  title: 'Impact analysis',
+  purpose: 'Find what is affected when a CI or service fails, and what it depends on, so priority and risk rest on facts.',
+  when: 'Triaging a problem or incident, assessing a known error, or planning a change on a CI.',
+  steps: [
+    'Identify the CI or service that is failing or will be changed (search the CMDB by name, IP or FQDN).',
+    'Walk upwards: what depends on it, up to the business services. Note the most critical service affected.',
+    'Walk downwards from the affected service: what else could cause the same symptom? Those are candidate causes.',
+    'Check the result is complete: a truncated or depth-limited walk, or a CI without relationships, means the picture may be missing parts.',
+    'Use the affected services and their criticality for impact and priority, and record the reasoning on the record.',
+  ],
+  stop: 'The affected services are known with their criticality, gaps in the CMDB data are noted, and the priority reflects them.',
+  pitfalls: [
+    'Trusting the CMDB as complete: discovered data has gaps and stale relationships (check last seen).',
+    'Treating every dependent as equally affected: redundancy (clusters, replicas) may absorb a failure.',
+    'Forgetting manual relationships that no connector knows about.',
+  ],
+});
+
 export const guideById = (id: string) => GUIDES.find((g) => g.id === id);
 
 export function guideMarkdown(g: MethodGuide) {

@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { api, type User } from '../api';
+import { GroupsPage, ImpactSection, RelationshipsSection, type Relationship } from '../components/CmdbGraph';
 import { Markdown } from '../components/Markdown';
 import { Modal } from '../components/Modal';
 import { formatDate, relativeTime } from '../format';
@@ -17,7 +18,7 @@ export interface Ci {
   tags: string[]; attributes: Record<string, unknown>; created_at: string; updated_at: string; last_seen_at: string | null;
   source_systems: string[] | null; url: string;
 }
-interface CiDetail extends Ci { sources: Source[]; links: CiLink[]; activity: CiActivity[]; [key: string]: unknown }
+interface CiDetail extends Ci { sources: Source[]; links: CiLink[]; activity: CiActivity[]; relationships: Relationship[]; groups: { id: number; name: string; purpose: string; membership: string }[] }
 
 const STATUSES = ['planned', 'active', 'maintenance', 'retired', 'missing'];
 const CRITICALITY: Record<number, string> = { 1: 'Business critical', 2: 'High', 3: 'Medium', 4: 'Low' };
@@ -49,7 +50,10 @@ export function CmdbListPage() {
           <h1>Configuration items</h1>
           <p className="muted">What we operate, as pointers to where it really lives. Services are listed first.</p>
         </div>
-        {canManage(user) && <button className="btn primary" onClick={() => setCreating(true)}>Add CI or service</button>}
+        <div className="head-actions">
+          <Link className="btn" to="/cis/groups">Groups</Link>
+          {canManage(user) && <button className="btn primary" onClick={() => setCreating(true)}>Add CI or service</button>}
+        </div>
       </header>
       <div className="filters">
         <input className="search" placeholder="Search name, tag, IP, FQDN…" value={q} onChange={(e) => setQ(e.target.value)} />
@@ -154,7 +158,8 @@ export function CiPage() {
               <dt>Team</dt><dd>{ci.team || '–'}</dd>
             </dl>
           </section>
-          <CiExtraSections ci={ci} onChange={setData} />
+          <ImpactSection key={ci.ref} ciRef={ci.ref} isService={ci.class === 'service'} />
+          <RelationshipsSection ciRef={ci.ref} relationships={ci.relationships} editable={manage} onChange={setData} />
           <section className="card">
             <h2>Notes &amp; history</h2>
             {annotate && (
@@ -193,18 +198,19 @@ export function CiPage() {
             )}
           </section>
           <CiLinks ci={ci} editable={annotate} onChange={setData} />
+          {ci.groups.length > 0 && (
+            <section className="card">
+              <h2>Groups</h2>
+              <ul className="plain-list">
+                {ci.groups.map((g) => <li key={g.id}><Link to={`/cis/groups?open=${g.id}`}>{g.name}</Link> <span className="muted small">{g.purpose}{g.membership === 'rule' ? ' · by rule' : ''}</span></li>)}
+              </ul>
+            </section>
+          )}
         </aside>
       </div>
       {editing && types && <CiModal types={types} ci={ci} onClose={() => setEditing(false)} onDone={(n) => { setData(n as CiDetail); setEditing(false); }} />}
     </>
   );
-}
-
-/** Sections other modules add to the CI page (relationships, problems…). */
-const extraSections: ((props: { ci: CiDetail; onChange: (c: CiDetail) => void }) => React.ReactNode)[] = [];
-export const registerCiSection = (fn: (props: { ci: any; onChange: (c: any) => void }) => React.ReactNode) => extraSections.push(fn);
-function CiExtraSections(props: { ci: CiDetail; onChange: (c: CiDetail) => void }) {
-  return <>{extraSections.map((Section, i) => <Section key={i} {...props} />)}</>;
 }
 
 function CiLinks({ ci, editable, onChange }: { ci: CiDetail; editable: boolean; onChange: (c: CiDetail) => void }) {
@@ -307,4 +313,9 @@ function CiModal({ types, ci, onClose, onDone }: { types: CiType[]; ci?: Ci; onC
       </form>
     </Modal>
   );
+}
+
+export function CiGroupsPage() {
+  const { user } = useSession();
+  return <GroupsPage canManage={canManage(user)} />;
 }

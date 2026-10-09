@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { CommandPalette, ShortcutHelp, useShortcuts } from './components/CommandPalette';
 import { MyWorkPage } from './pages/MyWork';
-import { CiPage, CmdbListPage } from './pages/Cmdb';
+import { CiGroupsPage, CiPage, CmdbListPage } from './pages/Cmdb';
 import { Navigate, NavLink, Route, Routes } from 'react-router';
 import { api, type Meta, type Preferences, type User } from './api';
 import { icons } from './components/Icons';
@@ -139,6 +139,7 @@ export function App() {
             <Route path="/candidates" element={<CandidatesPage />} />
             <Route path="/kedb" element={<KedbPage />} />
             <Route path="/cis" element={<CmdbListPage />} />
+            <Route path="/cis/groups" element={<CiGroupsPage />} />
             <Route path="/cis/:ref" element={<CiPage />} />
             <Route path="/actions" element={<ActionsPage />} />
             <Route path="/reports" element={<ReportsPage />} />

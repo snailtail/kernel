@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireUser } from '../auth.js';
 import * as cmdb from '../cmdb.js';
+import * as graph from '../cmdb-graph.js';
 
 type RefParams = { Params: { ref: string } };
 
@@ -28,5 +29,32 @@ export async function cmdbRoutes(app: FastifyInstance) {
   app.post<RefParams>('/api/cis/:ref/links', { config: { idempotent: 'ci.annotate' } }, async (req) =>
     cmdb.addCiLink(requireUser(req), req.params.ref, cmdb.ciLinkSchema.parse(req.body)),
   );
+  app.get('/api/ci-relationship-types', async (req) => {
+    requireUser(req, 'ci.read');
+    return graph.relationshipTypes();
+  });
+  app.post<RefParams>('/api/cis/:ref/relationships', async (req) => graph.addRelationship(requireUser(req), req.params.ref, graph.relationshipSchema.parse(req.body)));
+  app.delete<{ Params: { ref: string; id: string } }>('/api/cis/:ref/relationships/:id', async (req) =>
+    graph.removeRelationship(requireUser(req), req.params.ref, Number(req.params.id)),
+  );
+  app.post('/api/ci-relationships/sync', { bodyLimit: 4 * 1024 * 1024 }, async (req) => graph.syncRelationships(requireUser(req), graph.syncSchema.parse(req.body)));
+  app.get<RefParams>('/api/cis/:ref/impact', async (req) => graph.impact(requireUser(req), req.params.ref, graph.impactSchema.parse(req.query)));
+
+  type GroupParams = { Params: { id: string } };
+  app.get('/api/ci-groups', async (req) => graph.listGroups(requireUser(req)));
+  app.post('/api/ci-groups', async (req, reply) => {
+    const g = await graph.saveGroup(requireUser(req), null, graph.groupSchema.parse(req.body));
+    reply.code(201);
+    return g;
+  });
+  app.get<GroupParams>('/api/ci-groups/:id', async (req) => graph.getGroup(requireUser(req), Number(req.params.id)));
+  app.put<GroupParams>('/api/ci-groups/:id', async (req) => graph.saveGroup(requireUser(req), Number(req.params.id), graph.groupSchema.parse(req.body)));
+  app.delete<GroupParams>('/api/ci-groups/:id', async (req) => {
+    await graph.deleteGroup(requireUser(req), Number(req.params.id));
+    return { ok: true };
+  });
+  app.put<{ Params: { id: string; ref: string } }>('/api/ci-groups/:id/members/:ref', async (req) => graph.setMember(requireUser(req), Number(req.params.id), req.params.ref, true));
+  app.delete<{ Params: { id: string; ref: string } }>('/api/ci-groups/:id/members/:ref', async (req) => graph.setMember(requireUser(req), Number(req.params.id), req.params.ref, false));
+
   app.delete<{ Params: { ref: string; id: string } }>('/api/cis/:ref/links/:id', async (req) => cmdb.removeCiLink(requireUser(req), req.params.ref, Number(req.params.id)));
 }

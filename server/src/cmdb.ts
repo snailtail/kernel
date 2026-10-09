@@ -10,7 +10,7 @@ import { badRequest, conflict, forbidden, notFound } from './errors.js';
 import { authorize } from './policy.js';
 import { recordUrl, registerRecordType, type RecordType } from './records.js';
 
-type Db = Pick<pg.PoolClient, 'query'>;
+export type Db = Pick<pg.PoolClient, 'query'>;
 
 export const CI_STATUSES = ['planned', 'active', 'maintenance', 'retired', 'missing'] as const;
 export const ENVIRONMENTS = ['prod', 'test', 'dev', 'other'] as const;
@@ -90,7 +90,7 @@ export const upsertSchema = z.object({
   override_reason: z.string().trim().max(1000).optional(),
 });
 
-const SELECT_CI = `
+export const SELECT_CI = `
   SELECT c.id, c.ref, c.class, c.name, c.ci_type, t.label AS type_label, c.status, c.environment, c.criticality,
          c.owner_id, o.display_name AS owner, c.team, c.description, c.tags, c.attributes, c.created_at, c.updated_at,
          (SELECT max(s.last_seen_at) FROM ci_sources s WHERE s.ci_id = c.id) AS last_seen_at,
@@ -231,7 +231,7 @@ function ciNextSteps(ci: any, sources: any[]) {
 
 // ---- Changing ----------------------------------------------------------------------------------
 
-async function logCi(db: Db, ciId: number, userId: number | null, kind: string, body: string, data: object = {}) {
+export async function logCi(db: Db, ciId: number, userId: number | null, kind: string, body: string, data: object = {}) {
   await db.query('INSERT INTO ci_activity (ci_id, user_id, kind, body, data, channel) VALUES ($1, $2, $3, $4, $5, $6)', [
     ciId, userId, kind, body, JSON.stringify(data), currentContext().channel,
   ]);
@@ -240,7 +240,7 @@ async function logCi(db: Db, ciId: number, userId: number | null, kind: string, 
   await db.query('UPDATE configuration_items SET updated_at = now() WHERE id = $1', [ciId]);
 }
 
-async function loadCi(db: Db, ref: string) {
+export async function loadCi(db: Db, ref: string) {
   const { rows } = await db.query('SELECT * FROM configuration_items WHERE ref = $1 FOR UPDATE', [ref.toUpperCase()]);
   if (!rows[0]) throw notFound(`${ref} not found`);
   return rows[0];
@@ -359,63 +359,137 @@ export async function upsertCis(user: User, input: z.infer<typeof upsertSchema>)
   // Integrations are bound to the source systems an administrator allowed, so one cannot squat another's name.
   const { rows: me } = await query('SELECT ci_source_systems FROM users WHERE id = $1', [user.id]);
   const allowed = new Set<string>(me[0]?.ci_source_systems ?? []);
-  let created = 0, updated = 0, unchanged = 0;
   const errors: { source_id: string; error: string }[] = [];
-  await tx(async (db) => {
-    for (const item of input.items) {
-      await db.query('SAVEPOINT item');
-      try {
-        if (user.role === 'integration' && !allowed.has(item.source_system)) {
-          throw forbidden(`This account may not report CIs for source system "${item.source_system}". An administrator can allow it under Users.`);
-        }
-        const t = await typeInfo(db, item.ci_type);
-        const attrs = cleanAttributes(t.attributes, item.attributes);
-        const { rows: existing } = await db.query(
-          'SELECT s.id AS source_row, s.created_by, c.* FROM ci_sources s JOIN configuration_items c ON c.id = s.ci_id WHERE s.source_system = $1 AND s.source_id = $2 FOR UPDATE OF c',
-          [item.source_system, item.source_id],
-        );
-        if (existing[0]) {
-          const c = existing[0];
-          const override = c.created_by !== user.id;
-          if (override && user.role === 'integration') throw forbidden('This source record belongs to another integration');
-          if (override && !input.override_reason) throw forbidden('This source record was reported by another account; give override_reason to update it');
-          const next: Record<string, unknown> = { name: item.name, environment: item.environment ?? c.environment, attributes: { ...c.attributes, ...attrs } };
-          if (item.status) next.status = item.status;
-          if (item.team !== undefined) next.team = item.team;
-          if (item.tags) next.tags = item.tags;
-          const changed = Object.entries(next).filter(([k, v]) => JSON.stringify(c[k] ?? null) !== JSON.stringify(v));
-          await db.query('UPDATE ci_sources SET last_seen_at = now(), source_url = coalesce(nullif($2, \'\'), source_url) WHERE id = $1', [c.source_row, item.source_url]);
-          if (changed.length) {
-            await db.query(
-              `UPDATE configuration_items SET ${changed.map(([k], i) => `${k} = $${i + 2}`).join(', ')}${c.status === 'missing' && !item.status ? ", status = 'active'" : ''} WHERE id = $1`,
-              [c.id, ...changed.map(([k, v]) => (k === 'attributes' ? JSON.stringify(v) : v))],
-            );
-            await logCi(db, c.id, user.id, 'source', override ? `Overrode ${item.source_system} data: ${input.override_reason}` : `Updated from ${item.source_system}`, {
-              ...Object.fromEntries(changed.map(([k, v]) => [k, { from: c[k] ?? null, to: v }])),
-              ...(override ? { override: true, reason: input.override_reason } : {}),
-            });
-            updated++;
-          } else unchanged++;
-        } else {
-          const ref = await newRef(db, t.class);
-          const { rows } = await db.query(
-            `INSERT INTO configuration_items (ref, class, name, ci_type, status, environment, team, tags, attributes, created_by)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
-            [ref, t.class, item.name, t.name, item.status ?? 'active', item.environment ?? 'prod', item.team ?? '', item.tags ?? [], JSON.stringify(attrs), user.id],
-          );
-          await db.query('INSERT INTO ci_sources (ci_id, source_system, source_id, source_url, created_by) VALUES ($1, $2, $3, $4, $5)', [
-            rows[0].id, item.source_system, item.source_id, item.source_url, user.id,
-          ]);
-          await logCi(db, rows[0].id, user.id, 'created', `Discovered by ${item.source_system}`, { source_system: item.source_system, source_id: item.source_id });
-          created++;
-        }
-        await db.query('RELEASE SAVEPOINT item');
-      } catch (err) {
-        await db.query('ROLLBACK TO SAVEPOINT item');
-        errors.push({ source_id: item.source_id, error: (err as Error).message });
+  const { rows: typeRows } = await query('SELECT name, class, attributes FROM ci_types');
+  const types = new Map(typeRows.map((t) => [t.name as string, t as { name: string; class: 'ci' | 'service'; attributes: { key: string; type: string }[] }]));
+
+  // Validate everything up front, then write in a few set-based statements: connectors report thousands of CIs.
+  type Item = z.infer<typeof upsertSchema>['items'][number] & { cls: 'ci' | 'service'; attrs: Record<string, unknown> };
+  const items = new Map<string, Item>();
+  for (const item of input.items) {
+    try {
+      if (user.role === 'integration' && !allowed.has(item.source_system)) {
+        throw forbidden(`This account may not report CIs for source system "${item.source_system}". An administrator can allow it under Users.`);
       }
+      const t = types.get(item.ci_type);
+      if (!t) throw badRequest(`Unknown CI type "${item.ci_type}". See /api/ci-types.`);
+      items.set(`${item.source_system}\u0000${item.source_id}`, { ...item, cls: t.class, attrs: cleanAttributes(t.attributes, item.attributes) });
+    } catch (err) {
+      errors.push({ source_id: item.source_id, error: (err as Error).message });
     }
-  });
+  }
+  const list = [...items.values()];
+  let created = 0, updated = 0, unchanged = 0;
+  try {
+    await tx(async (db) => {
+      const { rows: existing } = await db.query(
+        `SELECT s.source_system, s.source_id, s.id AS source_row, s.created_by AS source_owner, c.*
+         FROM unnest($1::text[], $2::text[]) AS x(sys, sid)
+         JOIN ci_sources s ON s.source_system = x.sys AND s.source_id = x.sid
+         JOIN configuration_items c ON c.id = s.ci_id
+         FOR UPDATE OF c`,
+        [list.map((i) => i.source_system), list.map((i) => i.source_id)],
+      );
+      const found = new Map(existing.map((c) => [`${c.source_system}\u0000${c.source_id}`, c]));
+      const seenRows: { id: number; url: string }[] = [];
+      const updates: { id: number; name: string; environment: string; status: string; team: string; tags: string[]; attributes: string }[] = [];
+      const activity: { ci: number; body: string; data: string }[] = [];
+      const fresh: Item[] = [];
+      for (const item of list) {
+        const c = found.get(`${item.source_system}\u0000${item.source_id}`);
+        if (!c) { fresh.push(item); continue; }
+        const override = c.source_owner !== user.id;
+        if (override && user.role === 'integration') { errors.push({ source_id: item.source_id, error: 'This source record belongs to another integration' }); continue; }
+        if (override && !input.override_reason) { errors.push({ source_id: item.source_id, error: 'This source record was reported by another account; give override_reason to update it' }); continue; }
+        seenRows.push({ id: c.source_row, url: item.source_url });
+        const next: Record<string, unknown> = {
+          name: item.name,
+          environment: item.environment ?? c.environment,
+          status: item.status ?? (c.status === 'missing' ? 'active' : c.status),
+          team: item.team ?? c.team,
+          tags: item.tags ?? c.tags,
+          attributes: { ...c.attributes, ...item.attrs },
+        };
+        const changed = Object.entries(next).filter(([k, v]) => JSON.stringify(c[k] ?? null) !== JSON.stringify(v));
+        if (!changed.length) { unchanged++; continue; }
+        updated++;
+        updates.push({ id: c.id, ...(next as any), attributes: JSON.stringify(next.attributes) });
+        const data = {
+          ...Object.fromEntries(changed.map(([k, v]) => [k, { from: c[k] ?? null, to: v }])),
+          ...(override ? { override: true, reason: input.override_reason } : {}),
+        };
+        activity.push({ ci: c.id, body: override ? `Overrode ${item.source_system} data: ${input.override_reason}` : `Updated from ${item.source_system}`, data: JSON.stringify(data) });
+        // Overrides are rare and deliberate: each gets its own audit entry on the CI.
+        if (override) await audit(db, { entity_type: c.class === 'service' ? 'service' : 'ci', entity_ref: c.ref, action: 'source_override', changes: data, reason: input.override_reason });
+      }
+      if (seenRows.length) {
+        await db.query(
+          `UPDATE ci_sources s SET last_seen_at = now(), source_url = coalesce(nullif(x.url, ''), s.source_url)
+           FROM unnest($1::int[], $2::text[]) AS x(id, url) WHERE s.id = x.id`,
+          [seenRows.map((r) => r.id), seenRows.map((r) => r.url)],
+        );
+      }
+      if (updates.length) {
+        await db.query(
+          `UPDATE configuration_items c SET name = x.name, environment = x.environment, status = x.status, team = x.team,
+                  tags = ARRAY(SELECT jsonb_array_elements_text(x.tags)), attributes = x.attributes, updated_at = now()
+           FROM unnest($1::int[], $2::text[], $3::text[], $4::text[], $5::text[], $6::jsonb[], $7::jsonb[]) AS x(id, name, environment, status, team, tags, attributes)
+           WHERE c.id = x.id`,
+          [updates.map((u) => u.id), updates.map((u) => u.name), updates.map((u) => u.environment), updates.map((u) => u.status),
+            updates.map((u) => u.team), updates.map((u) => JSON.stringify(u.tags)), updates.map((u) => u.attributes)],
+        );
+      }
+      const added: { ref: string; name: string }[] = [];
+      for (const cls of ['ci', 'service'] as const) {
+        const batch = fresh.filter((i) => i.cls === cls);
+        if (!batch.length) continue;
+        // Allocate refs first so every new row is matched to its source by ref, not by row order.
+        const { rows: refRows } = await db.query(
+          `SELECT $1 || lpad(nextval($2::regclass)::text, 6, '0') AS ref FROM generate_series(1, $3)`,
+          [cls === 'service' ? 'SVC' : 'CI', cls === 'service' ? 'service_ref_seq' : 'ci_ref_seq', batch.length],
+        );
+        const refs = refRows.map((r) => r.ref as string);
+        const { rows: made } = await db.query(
+          `INSERT INTO configuration_items (ref, class, name, ci_type, status, environment, team, tags, attributes, created_by)
+           SELECT x.ref, $1, x.name, x.ci_type, x.status, x.environment, x.team, ARRAY(SELECT jsonb_array_elements_text(x.tags)), x.attributes, $2
+           FROM unnest($3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::jsonb[], $10::jsonb[])
+                AS x(ref, name, ci_type, status, environment, team, tags, attributes)
+           RETURNING id, ref, name`,
+          [cls, user.id, refs, batch.map((i) => i.name), batch.map((i) => i.ci_type), batch.map((i) => i.status ?? 'active'), batch.map((i) => i.environment ?? 'prod'),
+            batch.map((i) => i.team ?? ''), batch.map((i) => JSON.stringify(i.tags ?? [])), batch.map((i) => JSON.stringify(i.attrs))],
+        );
+        const idByRef = new Map(made.map((m) => [m.ref as string, m.id as number]));
+        const ids = refs.map((r) => idByRef.get(r)!);
+        await db.query(
+          `INSERT INTO ci_sources (ci_id, source_system, source_id, source_url, created_by)
+           SELECT *, $5 FROM unnest($1::int[], $2::text[], $3::text[], $4::text[])`,
+          [ids, batch.map((i) => i.source_system), batch.map((i) => i.source_id), batch.map((i) => i.source_url), user.id],
+        );
+        batch.forEach((item, n) => activity.push({ ci: ids[n], body: `Discovered by ${item.source_system}`, data: JSON.stringify({ source_system: item.source_system, source_id: item.source_id }) }));
+        added.push(...made.map((m) => ({ ref: m.ref, name: m.name })));
+        created += made.length;
+      }
+      if (activity.length) {
+        await db.query(
+          `INSERT INTO ci_activity (ci_id, user_id, kind, body, data, channel)
+           SELECT x.ci, $4, CASE WHEN x.body LIKE 'Discovered by %' THEN 'created' ELSE 'source' END, x.body, x.data, $5
+           FROM unnest($1::int[], $2::text[], $3::jsonb[]) AS x(ci, body, data)`,
+          [activity.map((a) => a.ci), activity.map((a) => a.body), activity.map((a) => a.data), user.id, currentContext().channel],
+        );
+      }
+      // One audit entry per upsert, naming what was created and changed.
+      await audit(db, {
+        entity_type: 'ci_upsert',
+        entity_ref: [...new Set(list.map((i) => i.source_system))].join(', ').slice(0, 200),
+        action: 'upsert',
+        changes: { created, updated, unchanged, errors: errors.length, created_refs: added.slice(0, 1000), updated_refs: updates.slice(0, 1000).map((u) => u.id) },
+        reason: input.override_reason,
+      });
+    });
+  } catch (err: any) {
+    if (err.code === '23505') throw conflict('Another sync reported the same records at the same time; retry');
+    throw err;
+  }
   return { created, updated, unchanged, errors };
 }
 
