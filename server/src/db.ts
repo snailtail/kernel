@@ -2,6 +2,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { createHash, createHmac, pbkdf2Sync, randomBytes } from 'node:crypto';
 import pg from 'pg';
 import { config } from './config.js';
+import { currentContext } from './context.js';
 
 // Return DATE columns as 'YYYY-MM-DD' strings instead of local-midnight Date objects.
 pg.types.setTypeParser(pg.types.builtins.DATE, (value) => value);
@@ -15,12 +16,40 @@ export function runtimeUrl() {
   return u.toString();
 }
 
-// Connections open lazily, so the role can be created by migrate() before the first query.
-export const pool = new pg.Pool({ connectionString: runtimeUrl() });
+// Connections open lazily, so the role can be created by migrate() before the first query. The raw pool stays in
+// this module: every statement goes through query() or tx(), which tell the database who is asking (#53).
+const rawPool = new pg.Pool({ connectionString: runtimeUrl() });
+
+/**
+ * Row-level security reads kernel.viewer. It is set on a connection whenever the borrower's viewer differs from what
+ * that connection last had, so a statement can never run with another request's viewer (and, at ~0.2 ms per round
+ * trip, only changes cost one). Code outside this module cannot borrow a connection (test: no raw pool access).
+ */
+const viewerOf = new WeakMap<pg.PoolClient, string>();
+async function borrow() {
+  const client = await rawPool.connect();
+  const viewer = currentContext().viewer;
+  if (viewerOf.get(client) !== viewer) {
+    await client.query("SELECT set_config('kernel.viewer', $1, false)", [viewer]);
+    viewerOf.set(client, viewer);
+  }
+  return client;
+}
 
 export async function query<T extends pg.QueryResultRow = any>(sql: string, params: unknown[] = []) {
-  return pool.query<T>(sql, params);
+  const client = await borrow();
+  try {
+    return await client.query<T>(sql, params);
+  } finally {
+    client.release();
+  }
 }
+
+/** For code that takes a "db" argument outside a transaction: the same helper, never a raw connection. */
+export const pool = {
+  query: (sql: string, params?: unknown[]) => query(sql, params),
+  end: () => rawPool.end(),
+} as unknown as pg.Pool & pg.PoolClient;
 
 const AFTER_COMMIT = Symbol('afterCommit');
 type Hooked = { [AFTER_COMMIT]?: (() => void)[] };
@@ -33,7 +62,7 @@ export function afterCommit(db: unknown, fn: () => void) {
 }
 
 export async function tx<T>(fn: (client: pg.PoolClient) => Promise<T>): Promise<T> {
-  const client = await pool.connect();
+  const client = await borrow();
   const hooks: (() => void)[] = [];
   (client as Hooked)[AFTER_COMMIT] = hooks;
   try {

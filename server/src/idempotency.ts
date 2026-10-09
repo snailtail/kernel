@@ -61,6 +61,12 @@ export function registerIdempotency(app: FastifyInstance<any, any, any, any>) {
     const scope = `${req.method} ${req.url.split('?')[0]}`;
     const result = await claim(req.user.id, key, scope, fingerprintOf(scope, req.body));
     if ('replay' in result) {
+      // A replay must not outlive access (#53): if the stored answer is about a record the caller can no longer see,
+      // answer as if it did not exist.
+      const ref = (result.replay.body as { ref?: unknown } | null)?.ref;
+      if (typeof ref === 'string' && (await query('SELECT kernel_ref_hidden($1) AS hidden', [ref])).rows[0].hidden) {
+        return reply.code(404).send({ error: 'Not found' });
+      }
       reply.header('Idempotent-Replayed', 'true');
       return reply.code(result.replay.status).send(result.replay.body);
     }

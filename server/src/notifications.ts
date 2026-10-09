@@ -48,10 +48,12 @@ export interface Notice {
 export async function notify(db: Db, n: Notice) {
   const users = [...new Set(n.users.filter((u): u is number => !!u && u !== n.actorId))];
   if (!users.length) return 0;
+  // Only people who may see the record hear about it (#53): a restricted record's title never reaches others.
   const { rows } = await db.query(
     `INSERT INTO notifications (user_id, event, ref, title, summary, url, dedupe_key)
      SELECT u, $2, $3, $4, $5, $6, $7 FROM unnest($1::int[]) AS u
      JOIN users ON users.id = u AND users.active
+     WHERE kernel_user_can_see(u, $3)
      ON CONFLICT (user_id, dedupe_key) DO NOTHING
      RETURNING id, user_id`,
     [users, n.event, n.ref, clip(n.title, 200), clip(n.summary, 200), n.path, n.dedupe],

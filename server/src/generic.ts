@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import { linkArticleCi } from './knowledge.js';
 import { myTeams } from './teams.js';
+import { assertVisibleRef } from './visibility.js';
 import type { User } from './auth.js';
 import { query } from './db.js';
 import { badRequest } from './errors.js';
@@ -45,6 +46,7 @@ export async function nextSteps(user: User, ref: string) {
 /** Links a record to another Kernel record or to an external record. */
 export async function linkRecords(user: User, from: string, to: string, options: { kind?: string; system?: string; url?: string; note?: string }) {
   const source = typeForRef(from);
+  if (!options.system || options.system === 'Kernel') await assertVisibleRef(to);
   let kind = options.kind;
   try {
     const target = typeForRef(to);

@@ -507,11 +507,18 @@ function SecurityCard() {
     await api.put('/api/admin/mcp-approvals', { required: !approvals.required, reason });
     reloadApprovals();
   };
-  const { data: aiData, reload: reloadAiData } = useApi<{ attachment_images: boolean; flagged_text: boolean }>('/api/admin/ai-data');
-  const toggleAiData = async (key: 'attachment_images' | 'flagged_text') => {
+  const { data: aiData, reload: reloadAiData } = useApi<{ attachment_images: boolean; flagged_text: boolean; restricted_records: boolean }>('/api/admin/ai-data');
+  const { data: vis, reload: reloadVis } = useApi<{ team_scoped: Record<string, boolean>; restricted_categories: number[]; break_glass: { record_type: string; record_id: number; user_name: string; reason: string; expires_at: string }[] }>('/api/admin/visibility');
+  const saveVis = async (next: { team_scoped: Record<string, boolean>; restricted_categories: number[] }, what: string) => {
+    const reason = await askReason('Visibility', what, { confirmLabel: 'Change setting' });
+    if (!reason) return;
+    await api.put('/api/admin/visibility', { team_scoped: { incident: false, problem: false, change: false, ...next.team_scoped }, restricted_categories: next.restricted_categories, reason });
+    reloadVis();
+  };
+  const toggleAiData = async (key: 'attachment_images' | 'flagged_text' | 'restricted_records') => {
     if (!aiData) return;
     const on = !aiData[key];
-    const what = key === 'attachment_images' ? 'Screenshots and other images' : 'Text attachments flagged as possibly containing secrets or personal identity numbers';
+    const what = key === 'attachment_images' ? 'Screenshots and other images' : key === 'restricted_records' ? 'Restricted records (to agents whose user may see them)' : 'Text attachments flagged as possibly containing secrets or personal identity numbers';
     const reason = await askReason('Attachments for AI agents', `${what} will ${on ? '' : 'no longer '}be sent to the AI provider when an agent reads them through MCP.`, { confirmLabel: 'Change setting', danger: on });
     if (!reason) return;
     await api.put('/api/admin/ai-data', { ...aiData, [key]: on, reason });
@@ -549,6 +556,25 @@ function SecurityCard() {
           <p className="muted small">What an AI agent may read through MCP is sent to the AI provider. Text attachments without flags are always readable.</p>
           <label className="check"><input type="checkbox" checked={aiData.attachment_images} onChange={() => toggleAiData('attachment_images')} /> Images (screenshots may show names, customer data or credentials)</label>
           <label className="check"><input type="checkbox" checked={aiData.flagged_text} onChange={() => toggleAiData('flagged_text')} /> Text flagged as possibly containing secrets or personal identity numbers</label>
+          <label className="check"><input type="checkbox" checked={!!aiData.restricted_records} onChange={() => toggleAiData('restricted_records')} /> Restricted records (only to agents whose user may see them)</label>
+        </div>
+      )}
+      {vis && (
+        <div className="mfa-policy">
+          <h3>Visibility</h3>
+          <p className="muted small">Restricted records are seen only by their assignee, creator and named teams. Team scoping shows analysts and viewers their teams' work, unteamed work and their own.</p>
+          {(['incident', 'problem', 'change'] as const).map((k) => (
+            <label key={k} className="check"><input type="checkbox" checked={!!vis.team_scoped[k]} onChange={() => saveVis({ ...vis, team_scoped: { ...vis.team_scoped, [k]: !vis.team_scoped[k] } }, `${k[0].toUpperCase()}${k.slice(1)}s will ${vis.team_scoped[k] ? 'be visible to everyone again' : 'be scoped to teams'}.`)} /> Scope {k}s to teams</label>
+          ))}
+          <div className="chip-row">
+            <span className="muted small">Start restricted:</span>
+            {meta.categories.filter((c) => c.active).map((c) => (
+              <label key={c.id} className="check small"><input type="checkbox" checked={vis.restricted_categories.includes(c.id)} onChange={(e) => saveVis({ ...vis, restricted_categories: e.target.checked ? [...vis.restricted_categories, c.id] : vis.restricted_categories.filter((x) => x !== c.id) }, `New records in "${c.name}" will ${e.target.checked ? 'start restricted' : 'no longer start restricted'}.`)} /> {c.name}</label>
+            ))}
+          </div>
+          {vis.break_glass.length > 0 && (
+            <ul className="plain-list">{vis.break_glass.map((b, n) => <li key={n} className="warn-box small">{b.user_name} opened a restricted {b.record_type} until {new Date(b.expires_at).toLocaleTimeString()}: {b.reason}</li>)}</ul>
+          )}
         </div>
       )}
       {policy && (

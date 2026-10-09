@@ -10,6 +10,7 @@ import { GuidePanel } from '../components/Guide';
 import { SimilarProblems } from '../components/Similar';
 import { Markdown } from '../components/Markdown';
 import { richPaste } from '../components/RichPaste';
+import { RecordNotFound, VisibilityPanel } from '../components/Visibility';
 import { AttachmentsPanel } from '../components/Attachments';
 import { Modal } from '../components/Modal';
 import {
@@ -29,7 +30,7 @@ export function ProblemPage() {
   const [transition, setTransition] = useState<Status | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  if (error) return <div className="error">{error}</div>;
+  if (error) return <RecordNotFound refId={ref ?? ''} error={error} onOpened={reload} />;
   if (!p) return null;
 
   const editable = canEdit(user) && p.status !== 'closed';
@@ -151,6 +152,7 @@ export function ProblemPage() {
         </div>
         <aside className="problem-side">
           <DetailsPanel problem={p} editable={editable} onSave={save} />
+          <VisibilityPanel record={p as any} onChange={reload} />
           <AttachmentsPanel recordRef={p.ref} editable={editable} canDelete={(a) => a.uploaded_by === user.id || user.role === 'admin' || user.role === 'problem_manager'} />
           {meta.modules?.cmdb !== false && <AffectedCisPanel record={p} basePath={`/api/problems/${p.ref}`} editable={canEdit(user)} onChange={setData} />}
           {meta.modules?.change !== false && <ProblemChanges problem={p} editable={canEdit(user) && !['resolved', 'closed'].includes(p.status)} />}

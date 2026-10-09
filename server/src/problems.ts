@@ -15,6 +15,7 @@ import { guidanceFor } from './guidance.js';
 import { notify } from './notifications.js';
 import { enqueue as enqueueWebhooks, eventFor } from './webhooks.js';
 import { checkAssigneeInTeam, validTeam } from './teams.js';
+import { restrictedByCategory } from './visibility.js';
 import { canEdit, checkTransition, CLOSURE_CODES, EC_DECISIONS, isManager, STATUSES, WORKAROUND_EFFECTIVENESS, type Status } from './workflow.js';
 
 export const LINK_KINDS = ['incident', 'event', 'change', 'problem'] as const;
@@ -96,7 +97,7 @@ export type Db = Pick<pg.PoolClient, 'query'>;
 const SELECT_PROBLEM = `
   SELECT p.id, p.ref, p.title, p.description, p.status, p.category_id, c.name AS category,
          p.affected_service, p.detection, p.impact, p.urgency, p.priority, p.is_major,
-         p.assignee_id, a.display_name AS assignee, p.team_id, (SELECT name FROM teams WHERE id = p.team_id) AS team, p.created_by, cb.display_name AS created_by_name,
+         p.assignee_id, a.display_name AS assignee, p.restricted, p.restricted_teams, p.team_id, (SELECT name FROM teams WHERE id = p.team_id) AS team, p.created_by, cb.display_name AS created_by_name,
          p.root_cause, p.workaround, p.resolution, p.closure_code, p.major_review,
          p.known_error_at, p.resolved_at, p.closed_at, p.created_at, p.updated_at,
          p.ec_risk_level, p.ec_risk, p.ec_fix_cost, p.ec_decision, p.ec_decision_note, p.ec_decided_by,
@@ -293,11 +294,13 @@ export async function createProblem(user: User, input: z.infer<typeof createProb
   const ref = await tx(async (db) => {
     await validateReferences(db, input);
     await checkAssigneeInTeam(db, input.team_id, input.assignee_id);
-    const cols = Object.keys(input);
+    // Categories such as security problems start restricted (#53).
+    const values: Record<string, unknown> = { ...input, ...((await restrictedByCategory(input.category_id)) ? { restricted: true } : {}) };
+    const cols = Object.keys(values);
     const { rows } = await db.query(
       `INSERT INTO problems (${[...cols, 'created_by'].join(', ')})
        VALUES (${[...cols, 'created_by'].map((_, i) => `$${i + 1}`).join(', ')}) RETURNING id, ref`,
-      [...Object.values(input), user.id],
+      [...Object.values(values), user.id],
     );
     await watch(db, rows[0].id, user.id);
     await watch(db, rows[0].id, input.assignee_id);

@@ -2,6 +2,7 @@
 // or freezes, and reviewing. Problems raise changes for their permanent fix; incidents on CIs shortly after a change on
 // what they depend on are flagged as possibly change-related.
 import { checkAssigneeInTeam, validTeam } from './teams.js';
+import { inheritRestriction } from './visibility.js';
 import { z } from 'zod';
 import type { User } from './auth.js';
 import { audit } from './audit.js';
@@ -539,7 +540,7 @@ export async function addChangeLink(user: User, ref: string, input: z.infer<type
 /** Problem → "Raise change for fix": prefilled from the known error, CIs carried over, linked both ways. */
 export async function raiseChangeForProblem(user: User, problemRef: string, overrides: Partial<z.infer<typeof createChangeSchema>> = {}) {
   const p: any = await getProblem(problemRef);
-  return createChange(user, createChangeSchema.parse({
+  const change = await createChange(user, createChangeSchema.parse({
     title: `Fix: ${p.title}`.slice(0, 300),
     description: [p.root_cause && `Root cause:\n${p.root_cause}`, p.resolution && `Proposed fix:\n${p.resolution}`, `Raised from problem ${p.ref}.`].filter(Boolean).join('\n\n'),
     change_type: 'normal',
@@ -547,6 +548,8 @@ export async function raiseChangeForProblem(user: User, problemRef: string, over
     problem: p.ref,
     ...overrides,
   }));
+  await inheritRestriction(p.ref, change.ref); // the change carries the problem's root cause
+  return getChange(user, change.ref);
 }
 
 /**

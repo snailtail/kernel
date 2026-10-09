@@ -15,6 +15,7 @@ import { logIncident } from './incident-log.js';
 import { recomputeSla, slaClock, slaOnTransition } from './sla.js';
 import { incidentPeople, namePeople, personRefSchema, resolvePerson } from './people.js';
 import { incidentArticles, suggestArticles } from './knowledge.js';
+import { inheritRestriction, restrictedByCategory } from './visibility.js';
 import { checkAssigneeInTeam, defaultTeamFor, nameTeams, notifyTeamQueue, pickAssignee, validTeam } from './teams.js';
 import { managers, notify } from './notifications.js';
 import { pool } from './db.js';
@@ -270,6 +271,7 @@ export async function insertIncident(
   extra: { event_rule_id?: number; event_group_key?: string } = {},
 ) {
   const values: Record<string, unknown> = { ...fields, ...extra, source, created_by: actorId };
+  if (await restrictedByCategory(fields.category_id)) values.restricted = true; // e.g. security incidents (#53)
   // Teams (#42): the named team, else the team that supports the CI or its service; round robin if the team uses it.
   await validTeam(db, fields.team_id);
   if (!values.team_id && !String(fields.assignment_group ?? '').trim()) values.team_id = (await defaultTeamFor(db, ciIds)) ?? undefined;
@@ -496,6 +498,7 @@ export async function createProblemFromIncident(user: User, ref: string, overrid
   };
   // Leave out unset fields so the database defaults apply.
   const created = await createProblem(user, createProblemSchema.parse(Object.fromEntries(Object.entries(prefill).filter(([, v]) => v !== undefined))));
+  await inheritRestriction(inc.ref, created.ref); // a restricted incident's problem carries its text, so it is restricted too
   await linkIncidentToProblem(user, ref, created.ref);
   return getProblem(created.ref);
 }

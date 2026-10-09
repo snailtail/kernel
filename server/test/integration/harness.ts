@@ -72,14 +72,31 @@ export interface Harness {
   close(): Promise<void>;
 }
 
+/**
+ * The database owner, for the few tests that act as an attacker with schema rights (disabling triggers…). Kernel
+ * itself runs as the least-privilege role, as in production, so row-level security applies to it (#53).
+ */
+export async function ownerQuery(sql: string, params: unknown[] = []) {
+  const pg = (await import('pg')).default;
+  const c = new pg.Client({ connectionString: TEST_DATABASE_URL });
+  await c.connect();
+  try {
+    return await c.query(sql, params);
+  } finally {
+    await c.end();
+  }
+}
+
 export async function startKernel(): Promise<Harness> {
   process.env.DATABASE_URL = TEST_DATABASE_URL;
   process.env.LOG_LEVEL ??= 'warn';
+  process.env.KERNEL_APP_DB_USER ??= 'kernel_app_test';
+  process.env.KERNEL_APP_DB_PASSWORD ??= 'app role password for tests only';
+  await ownerQuery('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
   const { pool, migrate } = await import('../../src/db.js');
   const { hashPassword } = await import('../../src/auth.js');
   const { buildApp } = await import('../../src/app.js');
 
-  await pool.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
   await migrate(() => {});
   const hash = await hashPassword(PASSWORD);
   for (const [username, role] of Object.entries(USERS)) {

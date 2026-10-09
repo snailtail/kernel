@@ -10,11 +10,13 @@ export interface RequestContext {
   ip: string;
   userAgent: string;
   requestId: string;
+  /** Who the database filters for (row-level security, #53): 'system', '' (nobody) or a user's viewer string. */
+  viewer: string;
 }
 
 export const contextStore = new AsyncLocalStorage<RequestContext>();
 
-const SYSTEM: RequestContext = { userId: null, userName: 'system', actorType: 'system', channel: 'system', tokenPrefix: '', ip: '', userAgent: '', requestId: '' };
+const SYSTEM: RequestContext = { userId: null, userName: 'system', actorType: 'system', channel: 'system', tokenPrefix: '', ip: '', userAgent: '', requestId: '', viewer: 'system' };
 
 export const currentContext = (): RequestContext => contextStore.getStore() ?? SYSTEM;
 

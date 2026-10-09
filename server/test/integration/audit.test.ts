@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
-import { Client, skip, startKernel, type Harness } from './harness.js';
+import { Client, ownerQuery, skip, startKernel, type Harness } from './harness.js';
 
 describe('audit trail', { skip }, () => {
   let k: Harness;
@@ -49,14 +49,14 @@ describe('audit trail', { skip }, () => {
 
   test('is append-only and tamper-evident', async () => {
     const { pool } = await import('../../src/db.js');
-    await assert.rejects(pool.query("UPDATE audit_log SET actor_name = 'someone else'"), /append-only/);
-    await assert.rejects(pool.query('DELETE FROM audit_log'), /append-only/);
+    await assert.rejects(pool.query("UPDATE audit_log SET actor_name = 'someone else'"), /append-only|permission denied/);
+    await assert.rejects(pool.query('DELETE FROM audit_log'), /append-only|permission denied/);
     assert.equal((await admin.get('/api/audit/verify')).body.ok, true);
 
     // Simulate tampering by an attacker with superuser rights: bypass the trigger and change a row.
-    await pool.query('ALTER TABLE audit_log DISABLE TRIGGER audit_log_no_update');
-    await pool.query("UPDATE audit_log SET reason = 'forged' WHERE id = (SELECT min(id) + 1 FROM audit_log)");
-    await pool.query('ALTER TABLE audit_log ENABLE TRIGGER audit_log_no_update');
+    await ownerQuery('ALTER TABLE audit_log DISABLE TRIGGER audit_log_no_update');
+    await ownerQuery("UPDATE audit_log SET reason = 'forged' WHERE id = (SELECT min(id) + 1 FROM audit_log)");
+    await ownerQuery('ALTER TABLE audit_log ENABLE TRIGGER audit_log_no_update');
     const verify = (await admin.get('/api/audit/verify')).body;
     assert.equal(verify.ok, false);
     assert.ok(verify.broken_at);
@@ -67,9 +67,9 @@ describe('audit trail', { skip }, () => {
     process.env.KERNEL_SECRET_KEY = 'audit-test-key-0123456789abcdefghijklmn';
     const { pool } = await import('../../src/db.js');
     // Start a fresh chain for this test (owner rights bypass the trigger, as an attacker with superuser would).
-    await pool.query('ALTER TABLE audit_log DISABLE TRIGGER audit_log_no_truncate');
-    await pool.query('TRUNCATE audit_log, audit_context');
-    await pool.query('ALTER TABLE audit_log ENABLE TRIGGER audit_log_no_truncate');
+    await ownerQuery('ALTER TABLE audit_log DISABLE TRIGGER audit_log_no_truncate');
+    await ownerQuery('TRUNCATE audit_log, audit_context');
+    await ownerQuery('ALTER TABLE audit_log ENABLE TRIGGER audit_log_no_truncate');
     await analyst.post('/api/problems', { title: 'Keyed' });
     const last = (await pool.query('SELECT hash, hash_version FROM audit_log ORDER BY id DESC LIMIT 1')).rows[0];
     assert.equal(last.hash_version, 2);
