@@ -28,7 +28,7 @@ export async function setupRoutes(app: FastifyInstance) {
   app.post('/api/setup/demo/remove', async (req) => {
     const user = requireUser(req, 'user.manage');
     await requireStepUp(req);
-    return setup.removeDemoData(user);
+    return setup.removeDemoData(user, z.object({ confirm: z.boolean().default(false) }).parse(req.body ?? {}).confirm);
   });
   app.get('/api/templates', async (req) => setup.listTemplates(requireUser(req), (req.query as any)?.kind));
   app.post('/api/templates', async (req, reply) => {

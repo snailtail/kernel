@@ -4,16 +4,17 @@
 import { z } from 'zod';
 import type { User } from './auth.js';
 import { audit } from './audit.js';
-import { createChange } from './changes.js';
+import { createChange, logChange } from './changes.js';
 import { addRelationship } from './cmdb-graph.js';
-import { createCi } from './cmdb.js';
+import { createCi, logCi } from './cmdb.js';
 import { query, tx } from './db.js';
 import { badRequest, conflict, notFound } from './errors.js';
 import { createSource } from './event-hooks.js';
 import { createIncident } from './incidents.js';
 import { moduleEnabled, MODULES, refreshModules, type Module } from './modules.js';
 import { authorize } from './policy.js';
-import { createProblem, transitionProblem } from './problems.js';
+import { createProblem, logActivity, transitionProblem } from './problems.js';
+import { logIncident } from './incident-log.js';
 
 export const modulesSchema = z.object(Object.fromEntries(Object.keys(MODULES).map((m) => [m, z.boolean().optional()])) as Record<Module, z.ZodOptional<z.ZodBoolean>>);
 
@@ -43,7 +44,7 @@ export async function setupState() {
   const { rows } = await query("SELECT value FROM settings WHERE key = 'setup'");
   const real = await hasRealData();
   const { rows: demo } = await query('SELECT count(*)::int AS n FROM demo_records');
-  return { completed: !!rows[0]?.value?.completed, has_real_data: real, demo_records: demo[0].n, modules: await getModules() };
+  return { completed: !!rows[0]?.value?.completed, has_real_data: real, demo_records: demo[0].n, demo_references: demo[0].n ? (await demoReferences()).map(({ id: _, ...r }) => r) : [], modules: await getModules() };
 }
 
 async function hasRealData() {
@@ -133,17 +134,50 @@ export async function loadDemoData(user: User) {
   return { loaded: true, refs };
 }
 
-/** Removes everything the demo created, in one action. */
-export async function removeDemoData(user: User) {
+const DEMO = (kind: string, alias: string) => `EXISTS (SELECT 1 FROM demo_records d WHERE d.kind = '${kind}' AND d.record_id = ${alias})`;
+
+/** Real records that point at demo records; removing the demo unlinks them, so they are shown first. */
+export async function demoReferences(db: Pick<import('pg').PoolClient, 'query'> = { query } as any) {
+  const { rows } = await db.query(
+    `SELECT 'incident' AS type, i.id, i.ref, p.ref AS demo_ref FROM incidents i JOIN problems p ON p.id = i.problem_id WHERE NOT ${DEMO('incident', 'i.id')} AND ${DEMO('problem', 'p.id')}
+     UNION ALL SELECT 'change', c.id, c.ref, p.ref FROM changes c JOIN problems p ON p.id = c.problem_id WHERE NOT ${DEMO('change', 'c.id')} AND ${DEMO('problem', 'p.id')}
+     UNION ALL SELECT 'problem', p.id, p.ref, ci.ref FROM problem_cis x JOIN problems p ON p.id = x.problem_id JOIN configuration_items ci ON ci.id = x.ci_id WHERE NOT ${DEMO('problem', 'p.id')} AND ${DEMO('ci', 'ci.id')}
+     UNION ALL SELECT 'incident', i.id, i.ref, ci.ref FROM incident_cis x JOIN incidents i ON i.id = x.incident_id JOIN configuration_items ci ON ci.id = x.ci_id WHERE NOT ${DEMO('incident', 'i.id')} AND ${DEMO('ci', 'ci.id')}
+     UNION ALL SELECT 'change', c.id, c.ref, ci.ref FROM change_cis x JOIN changes c ON c.id = x.change_id JOIN configuration_items ci ON ci.id = x.ci_id WHERE NOT ${DEMO('change', 'c.id')} AND ${DEMO('ci', 'ci.id')}
+     UNION ALL SELECT 'ci', real.id, real.ref, demo.ref FROM ci_relationships r
+       JOIN configuration_items real ON real.id IN (r.from_ci, r.to_ci) JOIN configuration_items demo ON demo.id IN (r.from_ci, r.to_ci) AND demo.id <> real.id
+       WHERE NOT ${DEMO('ci', 'real.id')} AND ${DEMO('ci', 'demo.id')}
+     ORDER BY 3`,
+  );
+  return rows as { type: 'incident' | 'change' | 'problem' | 'ci'; id: number; ref: string; demo_ref: string }[];
+}
+
+/**
+ * Removes everything the demo created, in one action. When real records point at demo records, nothing happens
+ * until the caller confirms; then each real record gets a history entry saying what was unlinked.
+ */
+export async function removeDemoData(user: User, confirm = false) {
   authorize(user, 'user.manage');
+  const refs = await demoReferences();
+  if (refs.length && !confirm) {
+    throw conflict(`${refs.length} real record${refs.length === 1 ? '' : 's'} link to demo data; confirm to unlink them`, { references: refs.map(({ id: _, ...r }) => r) });
+  }
   const removed = await tx(async (db) => {
+    for (const r of refs) {
+      const body = `Unlinked ${r.demo_ref}: demo data removed`;
+      const data = { kind: 'demo', reference: r.demo_ref, action: 'remove' };
+      if (r.type === 'problem') await logActivity(db, r.id, user.id, 'link', body, data);
+      else if (r.type === 'incident') await logIncident(db, r.id, user.id, 'link', body, data);
+      else if (r.type === 'change') await logChange(db, r.id, user.id, 'link', body, data);
+      else await logCi(db, r.id, user.id, 'relationship', body, data);
+    }
     const counts: Record<string, number> = {};
     for (const [kind, table] of [['change', 'changes'], ['incident', 'incidents'], ['problem', 'problems'], ['ci', 'configuration_items']] as const) {
       const { rowCount } = await db.query(`DELETE FROM ${table} WHERE id IN (SELECT record_id FROM demo_records WHERE kind = $1)`, [kind]);
       counts[kind] = rowCount ?? 0;
     }
     await db.query('DELETE FROM demo_records');
-    await audit(db, { entity_type: 'setting', entity_ref: 'demo_data', action: 'remove', changes: counts });
+    await audit(db, { entity_type: 'setting', entity_ref: 'demo_data', action: 'remove', changes: { ...counts, unlinked_real_records: refs.map((r) => r.ref) } });
     return counts;
   });
   return { removed };

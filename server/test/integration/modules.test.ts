@@ -31,8 +31,19 @@ describe('modules and first-run setup (#36)', { skip }, () => {
     assert.equal(again.result.demo.loaded, false, 'no duplicate demo data');
     assert.equal((await admin.get('/api/event-sources')).body.length, 1);
     assert.equal((await admin.get('/api/slas')).body.filter((s: any) => s.is_default)[0].calendar, 'Office hours (Sweden)');
-    const removed = (await admin.post('/api/setup/demo/remove', {})).body.removed;
+    // A real incident linked to the demo problem: removal waits for confirmation and leaves a history entry.
+    const demoProblem = again.result ? (await admin.get('/api/problems?q=demo&status=all')).body[0].ref : '';
+    const real = (await analyst.post('/api/incidents', { title: 'Real incident' })).body.ref;
+    await analyst.put(`/api/incidents/${real}/problem`, { problem: demoProblem });
+    const blocked = await admin.post('/api/setup/demo/remove', {});
+    assert.equal(blocked.status, 409);
+    assert.deepEqual(blocked.body.references.map((r: any) => [r.ref, r.demo_ref]), [[real, demoProblem]]);
+    assert.equal((await admin.get('/api/setup')).body.demo_references.length, 1, 'shown before removal');
+    const removed = (await admin.post('/api/setup/demo/remove', { confirm: true })).body.removed;
     assert.deepEqual(removed, { change: 1, incident: 1, problem: 1, ci: 3 });
+    const after = (await analyst.get(`/api/incidents/${real}`)).body;
+    assert.equal(after.problem_ref, null);
+    assert.ok(after.activity.some((a: any) => a.body === `Unlinked ${demoProblem}: demo data removed`));
     await analyst.post('/api/problems', { title: 'A real problem' });
     assert.equal((await admin.post('/api/setup', { demo_data: true })).status, 409, 'never mixed with real data');
     const audit = (await admin.get('/api/audit?entity_type=setting')).body;
