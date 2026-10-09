@@ -410,7 +410,8 @@ export async function setIncidentCi(user: User, ref: string, ciRef: string, link
 /** Links the incident to a problem; the problem lists it like any linked incident (kind incident, system Kernel). */
 export async function linkIncidentToProblem(user: User, ref: string, problemRef: string | null) {
   authorize(user, 'incident.update');
-  if (problemRef) authorize(user, 'problem.link');
+  // Linking and unlinking both change the problem record too.
+  authorize(user, 'problem.link');
   await tx(async (db) => {
     const inc = await loadIncident(db, ref);
     if (inc.problem_id) {
