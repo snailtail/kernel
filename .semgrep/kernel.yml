@@ -1,0 +1,37 @@
+# Kernel's own rules (#66). Run in CI next to the OWASP rule set; see docs/security-checks.md.
+rules:
+  - id: kernel-sql-built-from-input
+    message: >-
+      SQL text built from request or input values. Pass values as query parameters ($1, $2, …); only constant
+      fragments, column lists from a schema and placeholder numbers may be interpolated.
+    severity: ERROR
+    languages: [typescript]
+    patterns:
+      - pattern-either:
+          - pattern: $DB.query(`...${$X}...`, ...)
+          - pattern: $DB.query("..." + $X, ...)
+          - pattern: $DB.query($X + "...", ...)
+          - pattern: query(`...${$X}...`, ...)
+          - pattern: query("..." + $X, ...)
+          - pattern: query($X + "...", ...)
+      # The whole interpolated expression is a request or input value (a ternary choosing constants is fine).
+      - metavariable-regex:
+          metavariable: $X
+          regex: ^(req|request|input|body|f|filters)(\.\w+)+$|^String\(.*\)$
+
+  - id: kernel-sql-built-from-request-taint
+    message: Request data reaches the SQL text of a query. Pass it as a parameter instead.
+    severity: ERROR
+    languages: [typescript]
+    mode: taint
+    pattern-sources:
+      - pattern: req.body
+      - pattern: req.query
+      - pattern: req.params
+    pattern-sanitizers:
+      - pattern: Number(...)
+      - pattern: $SCHEMA.parse(...)
+    pattern-sinks:
+      - patterns:
+          - pattern-inside: $DB.query($SQL, ...)
+          - focus-metavariable: $SQL
