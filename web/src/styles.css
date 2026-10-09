@@ -1018,3 +1018,8 @@ tr.total td { border-bottom: 2px solid var(--border-strong); }
 .run-refused { color: var(--s-known); background: var(--s-known-bg); }
 .run-running { color: var(--s-analysis); background: var(--s-analysis-bg); }
 .danger-zone { border-top: 1px solid var(--border); padding-top: 10px; }
+.vip { font-size: 0.7rem; font-weight: 600; padding: 0 5px; border-radius: 4px; background: var(--s-known-bg); color: var(--s-known); margin-left: 4px; }
+.link-btn { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; text-decoration: underline; }
+.check-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 4px 12px; }
+.person-field { display: inline-flex; align-items: center; gap: 4px; }
+.field-label { font-size: 0.85rem; font-weight: 550; color: var(--text-2); margin-bottom: 4px; }

@@ -20,6 +20,7 @@ import * as changes from './changes.js';
 import * as sla from './sla.js';
 import * as notifications from './notifications.js';
 import * as flow from './flow.js';
+import * as people from './people.js';
 import * as generic from './generic.js';
 import { typeForRef } from './records.js';
 import { GUIDES, guideMarkdown } from './methods.js';
@@ -123,6 +124,7 @@ function buildServer(user: User, scopes?: string[]) {
     search_cis: 'ci.read', get_ci: 'ci.read', list_ci_types: 'ci.read', create_ci: 'ci.manage', update_ci: 'ci.manage',
     transition_ci: 'ci.manage', upsert_cis: 'ci.ingest',
     link_ci_to_problem: 'problem.link', unlink_ci_from_problem: 'problem.link',
+    search_people: 'person.read', get_person: 'person.read', add_affected_person: 'incident.update',
     get_process_map: 'meta.read', get_health_tips: 'meta.read',
     list_slas: 'meta.read', get_service_catalogue: 'ci.read', get_my_notifications: 'meta.read',
     list_incidents: 'incident.read', get_incident: 'incident.read', create_incident: 'incident.create', update_incident: 'incident.update',
@@ -416,6 +418,9 @@ function buildServer(user: User, scopes?: string[]) {
     affected_cis: i.affected_cis.map((c: any) => ({ ref: c.ref, type: c.type, ci_type: c.ci_type, criticality: c.criticality, status: c.status })),
     affected_services: i.affected_services.map((s: any) => ({ ref: s.ref, criticality: s.criticality, via: s.via })),
     impact_hint: i.impact_hint,
+    people_hint: i.people_hint,
+    caller: i.caller ? { id: i.caller.id, is_vip: i.caller.is_vip, organisation: i.caller.organisation } : null,
+    affected_people: (i.affected_people ?? []).map((p: any) => ({ id: p.id, is_vip: p.is_vip, organisation: p.organisation })),
     known_errors: i.known_errors.map((k: any) => ({ ref: k.ref, ci: k.ci_ref, workaround_effectiveness: k.workaround_effectiveness })),
     sla: i.sla,
     possible_change_causes: (i.possible_change_causes ?? []).map((c: any) => ({ ref: c.ref, ci: c.ci, started_at: c.started_at, outcome: c.outcome })),
@@ -489,6 +494,22 @@ function buildServer(user: User, scopes?: string[]) {
     },
   );
 
+  // ---- People (#39) ----
+  const peopleNotice = 'Contact details are personal data: use them only for the incident at hand, and never copy them into notes.';
+  tool('search_people', `Find contacts (callers, affected users, service owners) by name, email or department. ${peopleNotice}`, { q: z.string(), limit: z.number().int().min(1).max(50).optional() }, true, async ({ q, limit }) =>
+    (await people.listPeople(user, people.listPeopleSchema.parse({ q, limit: limit ?? 20 }))).map((p: any) => ({ id: p.id, name: p.name, email: p.email, department: p.department, organisation: p.organisation, is_vip: p.is_vip })),
+  );
+  tool('get_person', `A contact with their incidents, the services their organisation consumes and what they own. ${peopleNotice}`, { id: z.number().int() }, true, ({ id }) => people.getPerson(user, id));
+  tool(
+    'add_affected_person',
+    'Record that a person is affected by an incident (by id, or by email/name – created as a contact if new). Many affected people or a VIP raise the suggested impact.',
+    { ref: z.string(), id: z.number().int().optional(), email: z.string().optional(), name: z.string().optional() },
+    false,
+    async ({ ref, ...person }) => {
+      await people.setAffected(user, ref, people.personRefSchema.parse(person), true);
+      return incidentForAgent(await incidents.getIncident(user, ref));
+    },
+  );
   tool(
     'get_process_map',
     'The big picture: how event, incident, problem, known error, change and resolution hand over to each other, with live counts and links. Use it to explain the process or to find where work is piling up.',

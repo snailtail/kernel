@@ -31,6 +31,8 @@ const CmdbListPage = lazy(() => import('./pages/Cmdb').then((m) => ({ default: m
 const AdminPage = lazy(() => import('./pages/Admin').then((m) => ({ default: m.AdminPage })));
 const ApiDocsPage = lazy(() => import('./pages/ApiDocs').then((m) => ({ default: m.ApiDocsPage })));
 const GuidePage = lazy(() => import('./pages/Guide').then((m) => ({ default: m.GuidePage })));
+const PeoplePage = lazy(() => import('./pages/People').then((m) => ({ default: m.PeoplePage })));
+const PersonPage = lazy(() => import('./pages/People').then((m) => ({ default: m.PersonPage })));
 const AuditPage = lazy(() => import('./pages/Audit').then((m) => ({ default: m.AuditPage })));
 const ProblemPrintPage = lazy(() => import('./pages/ProblemPrint').then((m) => ({ default: m.ProblemPrintPage })));
 const ReportsPage = lazy(() => import('./pages/Reports').then((m) => ({ default: m.ReportsPage })));
@@ -127,6 +129,7 @@ export function App() {
             <NavLink to="/kedb">{icons.kedb}Known Errors</NavLink>
             <NavLink to="/actions">{icons.actions}Actions</NavLink>
             {on('cmdb') && <NavLink to="/cis">{icons.cmdb}CMDB</NavLink>}
+            {on('incident') && <NavLink to="/people">{icons.people}People</NavLink>}
             <NavLink to="/review">{icons.review}Review</NavLink>
             <NavLink to="/reports">{icons.reports}Reports</NavLink>
             {canEdit(user) && <NavLink to="/problems/new" className="nav-cta">{icons.plus}Log problem</NavLink>}
@@ -167,6 +170,8 @@ export function App() {
             <Route path="/cis" element={<CmdbListPage />} />
             <Route path="/cis/groups" element={<CiGroupsPage />} />
             <Route path="/cis/:ref" element={<CiPage />} />
+            <Route path="/people" element={<PeoplePage />} />
+            <Route path="/people/:id" element={<PersonPage />} />
             <Route path="/actions" element={<ActionsPage />} />
             <Route path="/reports" element={<ReportsPage />} />
             <Route path="/review" element={<ReviewPage />} />

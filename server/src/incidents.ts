@@ -13,6 +13,7 @@ import { createProblem, createProblemSchema, getProblem, loadForUpdate, logActiv
 import { recordUrl, registerRecordType, type RecordType } from './records.js';
 import { logIncident } from './incident-log.js';
 import { recomputeSla, slaClock, slaOnTransition } from './sla.js';
+import { incidentPeople, namePeople, personRefSchema, resolvePerson } from './people.js';
 import { managers, notify } from './notifications.js';
 import { pool } from './db.js';
 
@@ -43,10 +44,10 @@ export const incidentFields = {
   is_major: z.boolean(),
 };
 export const createIncidentSchema = z
-  .object({ ...incidentFields, cis: z.array(z.string().trim().min(1).max(30)).max(50).optional() })
+  .object({ ...incidentFields, cis: z.array(z.string().trim().min(1).max(30)).max(50).optional(), caller: personRefSchema.optional() })
   .partial()
   .required({ title: true });
-export const updateIncidentSchema = z.object(incidentFields).partial().extend({ base: z.object(incidentFields).partial().optional() });
+export const updateIncidentSchema = z.object(incidentFields).partial().extend({ base: z.object(incidentFields).partial().optional(), caller: personRefSchema.nullable().optional() });
 export const transitionIncidentSchema = z.object({
   to: z.enum(INCIDENT_STATUSES),
   resolution_code: z.enum(RESOLUTION_CODES).optional(),
@@ -186,7 +187,11 @@ export async function getIncident(user: User, ref: string) {
   const affected = await affectedFrom(cis.rows, i.impact);
   const possibleChanges = await possibleCausesForIncident({ created_at: i.created_at, affected_cis: cis.rows });
   const sla = await slaClock(pool, i);
-  const detail = { ...i, ...affected, activity: activity.rows, links: links.rows, known_errors: knownErrors.rows, alerts: alerts.rows, possible_change_causes: possibleChanges, sla };
+  const people = await incidentPeople(i);
+  // Affected users are only asked for when a service involved has end users (#39: keep it optional).
+  const refs = [...cis.rows.map((c) => c.ref), ...affected.affected_services.map((s) => s.ref)];
+  const { rows: endUsers } = await query('SELECT 1 FROM configuration_items WHERE ref = ANY($1) AND has_end_users LIMIT 1', [refs]);
+  const detail = { ...i, ...affected, activity: await namePeople(activity.rows), links: links.rows, known_errors: knownErrors.rows, alerts: alerts.rows, possible_change_causes: possibleChanges, sla, ...people, asks_affected_users: !!endUsers[0] || people.affected_people.length > 0 };
   return { type: 'incident', ...detail, url: incidentUrl(i.ref), next_steps: incidentGuidance(detail) };
 }
 
@@ -223,12 +228,18 @@ function incidentGuidance(i: any) {
 export async function createIncident(user: User, input: z.infer<typeof createIncidentSchema>, source?: 'event') {
   authorize(user, 'incident.create');
   if (input.is_major) authorize(user, 'incident.flag_major');
-  const { cis, ...fields } = input;
+  const { cis, caller, ...fields } = input;
   const ref = await tx(async (db) => {
     await validateRefs(db, fields);
     const ciIds: number[] = [];
     for (const ciRef of cis ?? []) ciIds.push((await loadCi(db, ciRef)).id);
-    return (await insertIncident(db, user.id, fields, ciIds, source ?? sourceOf())).ref;
+    const created = await insertIncident(db, user.id, fields, ciIds, source ?? sourceOf());
+    if (caller) {
+      const callerId = await resolvePerson(db, user, caller);
+      await db.query('UPDATE incidents SET caller_id = $2 WHERE id = $1', [created.id, callerId]);
+      await logIncident(db, created.id, user.id, 'update', `Caller: person #${callerId}`, { caller: { to: callerId } });
+    }
+    return created.ref;
   });
   return getIncident(user, ref);
 }
@@ -266,10 +277,18 @@ export async function insertIncident(
   return rows[0] as { id: number; ref: string };
 }
 
-export async function updateIncident(user: User, ref: string, { base, ...input }: z.infer<typeof updateIncidentSchema>) {
+export async function updateIncident(user: User, ref: string, { base, caller, ...input }: z.infer<typeof updateIncidentSchema>) {
   authorize(user, 'incident.update');
   await tx(async (db) => {
     const current = await loadIncident(db, ref);
+    if (caller !== undefined) {
+      const callerId = caller ? await resolvePerson(db, user, caller) : null;
+      if (callerId !== current.caller_id) {
+        await db.query('UPDATE incidents SET caller_id = $2 WHERE id = $1', [current.id, callerId]);
+        // People are referred to by id in histories, so erasing a person never rewrites them.
+        await logIncident(db, current.id, user.id, 'update', callerId ? `Caller: person #${callerId}` : 'Caller removed', { caller: { from: current.caller_id, to: callerId } });
+      }
+    }
     if (base) {
       const stale = Object.keys(base).filter((k) => k in input && (current[k] ?? null) !== ((base as any)[k] ?? null));
       if (stale.length) throw conflict(`${stale.join(', ')} changed while you were editing`, { conflicts: stale.map((f) => ({ field: f, current: current[f] ?? null })) });

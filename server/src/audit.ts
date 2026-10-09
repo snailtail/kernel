@@ -59,7 +59,7 @@ export function hashOf(prev: string, row: Record<string, unknown>, version = 1) 
  * short code-like values (statuses, refs, ids, dates, numbers) stay readable. The full texts are in the record
  * histories, which can be anonymised; the digest still proves what was there.
  */
-const PERSONAL = /^(email|display_name|username|reporter|ip|address|phone|caller|name_of_person)$/i;
+const PERSONAL = /^(email|display_name|username|reporter|ip|address|phone|caller|name_of_person|person_name|title|department|location|external_id)$/i;
 const TOKEN = /^[A-Za-z0-9_.:\/#+-]{0,64}$/;
 /**
  * Keyed, so a digest of a short personal value (a name, an email, a personal identity number) cannot be reversed by

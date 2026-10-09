@@ -5,6 +5,7 @@ import { GroupsPage, ImpactSection, RelationshipsSection, type Relationship } fr
 import { Markdown } from '../components/Markdown';
 import { SeverityBadge } from '../components/Badges';
 import { Modal } from '../components/Modal';
+import { PersonField } from '../components/People';
 import { Term } from '../components/Glossary';
 import { formatDate, relativeTime } from '../format';
 import { useApi } from '../hooks';
@@ -18,6 +19,7 @@ export interface Ci {
   id: number; ref: string; type: 'ci' | 'service'; class: 'ci' | 'service'; name: string; ci_type: string; type_label: string; status: string;
   environment: string; criticality: number; owner_id: number | null; owner: string | null; team: string; description: string;
   tags: string[]; attributes: Record<string, unknown>; created_at: string; updated_at: string; last_seen_at: string | null;
+  has_end_users?: boolean; business_owner_id?: number | null; business_owner?: string | null; technical_contact_id?: number | null; technical_contact?: string | null;
   source_systems: string[] | null; url: string;
 }
 interface CiProblem { ref: string; title: string; status: string; priority: number; workaround?: string; workaround_effectiveness?: string | null; ec_decision?: string | null }
@@ -160,6 +162,8 @@ export function CiPage() {
               {(type?.attributes ?? []).map((a) => (<Fragment key={a.key}><dt>{a.label}</dt><dd className="mono">{String(ci.attributes[a.key] ?? '–')}</dd></Fragment>))}
               <dt>Owner</dt><dd>{ci.owner ?? '–'}</dd>
               <dt>Team</dt><dd>{ci.team || '–'}</dd>
+              {ci.business_owner_id && <><dt>Business owner</dt><dd><Link to={`/people/${ci.business_owner_id}`}>{ci.business_owner}</Link></dd></>}
+              {ci.technical_contact_id && <><dt>Technical contact</dt><dd><Link to={`/people/${ci.technical_contact_id}`}>{ci.technical_contact}</Link></dd></>}
             </dl>
           </section>
           {ci.known_errors.length > 0 && (
@@ -319,6 +323,9 @@ function CiModal({ types, ci, onClose, onDone }: { types: CiType[]; ci?: Ci; onC
     attributes: Object.fromEntries(Object.entries(ci?.attributes ?? {}).map(([k, v]) => [k, String(v)])) as Record<string, string>,
     source_system: '', source_id: '', source_url: '',
     sla_id: (ci as any)?.sla_id ? String((ci as any).sla_id) : '', user_description: (ci as any)?.user_description ?? '', how_to_get_help: (ci as any)?.how_to_get_help ?? '', in_catalogue: !!(ci as any)?.in_catalogue,
+    has_end_users: !!ci?.has_end_users,
+    business_owner: ci?.business_owner_id ? { id: ci.business_owner_id, name: ci.business_owner ?? '' } : null as { id: number; name: string } | null,
+    technical_contact: ci?.technical_contact_id ? { id: ci.technical_contact_id, name: ci.technical_contact ?? '' } : null as { id: number; name: string } | null,
   });
   const { data: slas } = useApi<{ id: number; name: string }[]>('/api/slas');
   const [error, setError] = useState<string | null>(null);
@@ -329,7 +336,7 @@ function CiModal({ types, ci, onClose, onDone }: { types: CiType[]; ci?: Ci; onC
       name: form.name, ci_type: form.ci_type, environment: form.environment, criticality: Number(form.criticality), team: form.team,
       owner_id: form.owner_id ? Number(form.owner_id) : null, description: form.description,
       tags: form.tags.split(',').map((t) => t.trim()).filter(Boolean), attributes: form.attributes,
-      ...(type?.class === 'service' ? { sla_id: form.sla_id ? Number(form.sla_id) : null, user_description: form.user_description, how_to_get_help: form.how_to_get_help, in_catalogue: form.in_catalogue } : {}),
+      ...(type?.class === 'service' ? { sla_id: form.sla_id ? Number(form.sla_id) : null, user_description: form.user_description, how_to_get_help: form.how_to_get_help, in_catalogue: form.in_catalogue, has_end_users: form.has_end_users, business_owner_id: form.business_owner?.id ?? null, technical_contact_id: form.technical_contact?.id ?? null } : {}),
       ...(!ci && form.source_system && form.source_id ? { source: { system: form.source_system, id: form.source_id, url: form.source_url } } : {}),
     };
     try {
@@ -364,6 +371,9 @@ function CiModal({ types, ci, onClose, onDone }: { types: CiType[]; ci?: Ci; onC
             <label>For users<textarea rows={2} placeholder="What the service is, in plain words" value={form.user_description} onChange={(e) => setForm({ ...form, user_description: e.target.value })} /></label>
             <label>How to get help<textarea rows={2} value={form.how_to_get_help} onChange={(e) => setForm({ ...form, how_to_get_help: e.target.value })} /></label>
             <label className="check"><input type="checkbox" checked={form.in_catalogue} onChange={(e) => setForm({ ...form, in_catalogue: e.target.checked })} /> Show in the service catalogue</label>
+            <label className="check"><input type="checkbox" checked={form.has_end_users} onChange={(e) => setForm({ ...form, has_end_users: e.target.checked })} /> Has end users <span className="muted small">(incidents ask who is affected)</span></label>
+            <label>Business owner<PersonField value={form.business_owner} placeholder="Business owner: name or email…" onChange={(v) => setForm({ ...form, business_owner: v })} /></label>
+            <label>Technical contact<PersonField value={form.technical_contact} placeholder="Technical contact: name or email…" onChange={(v) => setForm({ ...form, technical_contact: v })} /></label>
           </fieldset>
         )}
         {!ci && (

@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { api, type Guidance } from '../api';
 import { GuidePanel } from '../components/Guide';
+import { IncidentPeoplePanel, PersonPicker, type PersonLite, type PersonRef } from '../components/People';
 import { AffectedCisPanel, type AffectedCi, type AffectedService, type ImpactHint } from '../components/AffectedCis';
 import { MajorBadge, PriorityBadge } from '../components/Badges';
 import { Markdown } from '../components/Markdown';
@@ -23,6 +24,7 @@ interface Incident extends IncidentRow {
   reporter: string; hold_reason: string; resolution_code: string | null; resolution: string; reopen_count: number;
   responded_at: string | null; closed_at: string | null; problem_title: string | null; problem_status: string | null;
   affected_cis: AffectedCi[]; affected_services: AffectedService[]; impact_hint: ImpactHint | null; impact_incomplete: boolean;
+  caller: PersonLite | null; affected_people: PersonLite[]; people_hint: { suggested_impact: number; reason: string } | null; asks_affected_users: boolean;
   sla: { name: string; calendar: string; paused: boolean; response: SlaClock; resolution: SlaClock } | null;
   possible_change_causes: { ref: string; title: string; status: string; change_type: string; outcome: string | null; started_at: string; ci: string; ci_name: string }[];
   known_errors: { ref: string; title: string; workaround: string; workaround_effectiveness: string | null; ci_ref: string; ci_name: string }[];
@@ -111,6 +113,7 @@ function NewIncident({ onClose, onDone }: { onClose: () => void; onDone: (ref: s
   const { meta } = useSession();
   const [form, setForm] = useState({ title: '', description: '', impact: 3, urgency: 3, category_id: '', assignee_id: '', assignment_group: '', reporter: '', cis: '' });
   const [more, setMore] = useState(false);
+  const [caller, setCaller] = useState<PersonRef | null>(null);
   const { data: templates } = useApi<{ id: number; name: string; fields: Record<string, any>; active: boolean }[]>('/api/templates?kind=incident');
   const applyTemplate = (id: number) => {
     const t = templates?.find((x) => x.id === id);
@@ -128,6 +131,7 @@ function NewIncident({ onClose, onDone }: { onClose: () => void; onDone: (ref: s
         category_id: form.category_id ? Number(form.category_id) : null, assignee_id: form.assignee_id ? Number(form.assignee_id) : null,
         assignment_group: form.assignment_group, reporter: form.reporter,
         cis: form.cis.split(/[\s,]+/).map((c) => c.trim()).filter(Boolean),
+        ...(caller ? { caller: 'id' in caller ? { id: caller.id } : caller } : {}),
       });
       onDone(created.ref);
     } catch (err) {
@@ -142,6 +146,11 @@ function NewIncident({ onClose, onDone }: { onClose: () => void; onDone: (ref: s
         )}
         <label className="full">What is wrong?<input required autoFocus placeholder="As the user experiences it, e.g. Checkout times out" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></label>
         <label className="full">Description<textarea rows={3} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
+        <div className="full">
+          <div className="field-label">Caller <span className="muted small">(optional: who reported it – a name or email creates a contact)</span></div>
+          {caller ? <span className="person-field">{'id' in caller ? caller.label : `${caller.name}${caller.email && caller.email !== caller.name ? ` <${caller.email}>` : ''} (new contact)`} <button type="button" className="btn-icon small" aria-label="Clear caller" onClick={() => setCaller(null)}>×</button></span>
+            : <PersonPicker placeholder="Name or email…" onPick={setCaller} />}
+        </div>
         <label><Term id="impact" /><select value={form.impact} onChange={(e) => setForm({ ...form, impact: Number(e.target.value) })}>{[1, 2, 3].map((n) => <option key={n} value={n}>{n} – {LEVEL[n]}</option>)}</select></label>
         <label><Term id="urgency" /><select value={form.urgency} onChange={(e) => setForm({ ...form, urgency: Number(e.target.value) })}>{[1, 2, 3].map((n) => <option key={n} value={n}>{n} – {LEVEL[n]}</option>)}</select></label>
         {meta.modules?.cmdb !== false && <label className="full">Affected CIs or services <span className="muted small">(refs, e.g. CI000012 SVC000003; shows impact and known workarounds)</span><input value={form.cis} onChange={(e) => setForm({ ...form, cis: e.target.value })} /></label>}
@@ -328,11 +337,12 @@ export function IncidentPage() {
               <dt>Group</dt><dd>{i.assignment_group || '–'}</dd>
               <dt>Category</dt>
               <dd>{editable ? <select value={i.category_id ?? ''} onChange={(e) => save({ category_id: e.target.value ? Number(e.target.value) : null })}><option value="">–</option>{meta.categories.filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select> : i.category ?? '–'}</dd>
-              <dt>Reported by</dt><dd>{i.reporter || '–'}</dd>
+              {i.reporter && <><dt>Reported by</dt><dd>{i.reporter}</dd></>}
               <dt>Responded</dt><dd>{i.responded_at ? formatDate(i.responded_at) : '–'}</dd>
               <dt>Resolved</dt><dd>{i.resolved_at ? formatDate(i.resolved_at) : '–'}</dd>
             </dl>
           </section>
+          <IncidentPeoplePanel record={i} basePath={path} editable={editable} onChange={setData} />
           {meta.modules?.cmdb !== false && <AffectedCisPanel record={i} basePath={path} editable={editable} onChange={setData} />}
           <section className="card">
             <h2>Problem</h2>

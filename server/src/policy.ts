@@ -7,13 +7,13 @@ import { actionEnabled, moduleEnabled, moduleOfAction, MODULES } from './modules
 
 export const ACTIONS = [
   // Reading
-  'meta.read', 'problem.read', 'kedb.read', 'report.read', 'review.read', 'candidate.read', 'system.read', 'ci.read', 'incident.read', 'event.read', 'change.read',
+  'meta.read', 'problem.read', 'kedb.read', 'report.read', 'review.read', 'candidate.read', 'system.read', 'ci.read', 'incident.read', 'event.read', 'change.read', 'person.read',
   // Problem work
   'problem.create', 'problem.update', 'problem.transition', 'problem.comment', 'problem.link', 'problem.watch',
-  'problem.assess', 'action.write', 'analysis.write', 'candidate.act', 'ci.annotate', 'incident.create', 'incident.update', 'event.ack', 'event.ingest', 'change.create', 'change.update', 'change.register',
+  'problem.assess', 'action.write', 'analysis.write', 'candidate.act', 'ci.annotate', 'incident.create', 'incident.update', 'event.ack', 'event.ingest', 'change.create', 'change.update', 'change.register', 'person.write',
   // Problem management decisions
   'problem.close', 'problem.reopen_closed', 'problem.flag_major', 'problem.accept_risk', 'problem.mark_duplicate',
-  'candidate.rule', 'category.manage', 'system.manage', 'backup.read', 'ci.manage', 'incident.flag_major', 'event.manage', 'change.approve', 'change.manage', 'sla.manage',
+  'candidate.rule', 'category.manage', 'system.manage', 'backup.read', 'ci.manage', 'incident.flag_major', 'event.manage', 'change.approve', 'change.manage', 'sla.manage', 'organisation.manage',
   // Administration
   'user.manage', 'webhook.manage', 'audit.read', 'security.read', 'mfa.policy',
   // Integrations
@@ -21,9 +21,9 @@ export const ACTIONS = [
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 
-const READ: Action[] = ['meta.read', 'problem.read', 'kedb.read', 'report.read', 'review.read', 'candidate.read', 'system.read', 'ci.read', 'incident.read', 'event.read', 'change.read'];
-const WORK: Action[] = ['problem.create', 'problem.update', 'problem.transition', 'problem.comment', 'problem.link', 'problem.watch', 'problem.assess', 'action.write', 'analysis.write', 'candidate.act', 'record.ingest', 'ci.annotate', 'incident.create', 'incident.update', 'event.ack', 'event.ingest', 'change.create', 'change.update', 'change.register'];
-const MANAGE: Action[] = ['problem.close', 'problem.reopen_closed', 'problem.flag_major', 'problem.accept_risk', 'problem.mark_duplicate', 'candidate.rule', 'category.manage', 'system.manage', 'backup.read', 'ci.manage', 'ci.ingest', 'incident.flag_major', 'event.manage', 'change.approve', 'change.manage', 'sla.manage'];
+const READ: Action[] = ['meta.read', 'problem.read', 'kedb.read', 'report.read', 'review.read', 'candidate.read', 'system.read', 'ci.read', 'incident.read', 'event.read', 'change.read', 'person.read'];
+const WORK: Action[] = ['problem.create', 'problem.update', 'problem.transition', 'problem.comment', 'problem.link', 'problem.watch', 'problem.assess', 'action.write', 'analysis.write', 'candidate.act', 'record.ingest', 'ci.annotate', 'incident.create', 'incident.update', 'event.ack', 'event.ingest', 'change.create', 'change.update', 'change.register', 'person.write'];
+const MANAGE: Action[] = ['problem.close', 'problem.reopen_closed', 'problem.flag_major', 'problem.accept_risk', 'problem.mark_duplicate', 'candidate.rule', 'category.manage', 'system.manage', 'backup.read', 'ci.manage', 'ci.ingest', 'incident.flag_major', 'event.manage', 'change.approve', 'change.manage', 'sla.manage', 'organisation.manage'];
 const ADMIN: Action[] = ['user.manage', 'webhook.manage', 'audit.read', 'security.read', 'mfa.policy'];
 
 export const PERMISSIONS: Record<Role, ReadonlySet<Action>> = {

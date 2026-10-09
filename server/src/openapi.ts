@@ -13,6 +13,7 @@ import * as ch from './changes.js';
 import * as slaMod from './sla.js';
 import * as notif from './notifications.js';
 import * as setupMod from './setup.js';
+import * as ppl from './people.js';
 import * as hooks from './event-hooks.js';
 import { auditQuerySchema } from './audit.js';
 import { searchSchema } from './generic.js';
@@ -130,6 +131,16 @@ export const OPERATIONS: Op[] = [
   { method: 'get', path: '/api/templates', tag: 'Reference data', summary: 'Templates for new incidents and problems' },
   { method: 'post', path: '/api/templates', tag: 'Reference data', summary: 'Create a template (problem managers)', body: setupMod.templateSchema },
   { method: 'put', path: '/api/templates/:id', tag: 'Reference data', summary: 'Update a template', body: setupMod.templateSchema },
+  { method: 'get', path: '/api/people', tag: 'People', summary: 'Search contacts (name, email, department)', query: ppl.listPeopleSchema },
+  { method: 'post', path: '/api/people', tag: 'People', summary: 'Add a contact (no login needed)', body: ppl.createPersonSchema },
+  { method: 'get', path: '/api/people/:id', tag: 'People', summary: 'A contact with their incidents, services consumed and what they own' },
+  { method: 'patch', path: '/api/people/:id', tag: 'People', summary: 'Update a contact (VIP flag: problem managers)', body: ppl.updatePersonSchema },
+  { method: 'post', path: '/api/people/:id/erase', tag: 'People', summary: 'Erase (anonymise) a contact with a reason; incidents keep the reference' },
+  { method: 'get', path: '/api/organisations', tag: 'People', summary: 'Organisations (departments, customers) and the services they consume' },
+  { method: 'post', path: '/api/organisations', tag: 'People', summary: 'Create an organisation (problem managers)', body: ppl.organisationSchema },
+  { method: 'put', path: '/api/organisations/:id', tag: 'People', summary: 'Update an organisation', body: ppl.organisationSchema },
+  { method: 'post', path: '/api/incidents/:ref/people', tag: 'Incidents', summary: 'Add an affected person (by id, or by email/name, created if new)', body: ppl.personRefSchema },
+  { method: 'delete', path: '/api/incidents/:ref/people/:id', tag: 'Incidents', summary: 'Remove an affected person' },
   { method: 'get', path: '/api/flow', tag: 'Guidance', summary: 'The process map (event → incident → problem → known error → change → resolution) with live counts' },
   { method: 'get', path: '/api/health-tips', tag: 'Guidance', summary: 'Gentle health tips: things worth a look this week' },
   { method: 'get', path: '/api/notifications', tag: 'Notifications', summary: 'My notifications (newest first) and the unread count' },

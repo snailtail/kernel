@@ -37,6 +37,10 @@ const ciFields = {
   user_description: z.string().max(5000),
   how_to_get_help: z.string().max(5000),
   in_catalogue: z.boolean(),
+  // People (#39): who owns the service, and whether it has end users who can be affected.
+  has_end_users: z.boolean(),
+  business_owner_id: z.number().int().nullable(),
+  technical_contact_id: z.number().int().nullable(),
 };
 
 export const createCiSchema = z
@@ -100,6 +104,9 @@ export const upsertSchema = z.object({
 export const SELECT_CI = `
   SELECT c.id, c.ref, c.class, c.name, c.ci_type, t.label AS type_label, c.status, c.environment, c.criticality,
          c.owner_id, o.display_name AS owner, c.team, c.description, c.tags, c.attributes, c.created_at, c.updated_at,
+         c.sla_id, c.user_description, c.how_to_get_help, c.in_catalogue, c.has_end_users,
+         c.business_owner_id, (SELECT name FROM people WHERE id = c.business_owner_id) AS business_owner,
+         c.technical_contact_id, (SELECT name FROM people WHERE id = c.technical_contact_id) AS technical_contact,
          (SELECT max(s.last_seen_at) FROM ci_sources s WHERE s.ci_id = c.id) AS last_seen_at,
          (SELECT array_agg(DISTINCT s.source_system) FROM ci_sources s WHERE s.ci_id = c.id) AS source_systems
   FROM configuration_items c JOIN ci_types t ON t.name = c.ci_type LEFT JOIN users o ON o.id = c.owner_id`;
@@ -264,6 +271,13 @@ async function validateSla(db: Db, slaId: number | null | undefined) {
   if (!rows[0]) throw badRequest('Unknown SLA');
 }
 
+async function validatePeople(db: Db, input: { business_owner_id?: number | null; technical_contact_id?: number | null }) {
+  const ids = [input.business_owner_id, input.technical_contact_id].filter((v): v is number => v != null);
+  if (!ids.length) return;
+  const { rows } = await db.query('SELECT count(DISTINCT id)::int AS n FROM people WHERE id = ANY($1) AND erased_at IS NULL', [ids]);
+  if (rows[0].n !== new Set(ids).size) throw badRequest('Business owner and technical contact must be existing contacts');
+}
+
 async function validateOwner(db: Db, ownerId: number | null | undefined) {
   if (ownerId == null) return;
   const { rows } = await db.query('SELECT 1 FROM users WHERE id = $1 AND active', [ownerId]);
@@ -276,14 +290,16 @@ export async function createCi(user: User, input: z.infer<typeof createCiSchema>
     const t = await typeInfo(db, input.ci_type);
     await validateOwner(db, input.owner_id);
     await validateSla(db, input.sla_id);
+    await validatePeople(db, input);
     const ref = await newRef(db, t.class);
     const { rows } = await db.query(
       `INSERT INTO configuration_items (ref, class, name, ci_type, status, environment, criticality, owner_id, team, description, tags, attributes, created_by,
-                                        sla_id, user_description, how_to_get_help, in_catalogue)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING id`,
+                                        sla_id, user_description, how_to_get_help, in_catalogue, has_end_users, business_owner_id, technical_contact_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20) RETURNING id`,
       [ref, t.class, input.name, t.name, input.status ?? 'active', input.environment ?? 'prod', input.criticality ?? 3, input.owner_id ?? null,
         input.team ?? '', input.description ?? '', input.tags ?? [], JSON.stringify(cleanAttributes(t.attributes, input.attributes)), user.id,
-        input.sla_id ?? null, input.user_description ?? '', input.how_to_get_help ?? '', input.in_catalogue ?? false],
+        input.sla_id ?? null, input.user_description ?? '', input.how_to_get_help ?? '', input.in_catalogue ?? false,
+        input.has_end_users ?? false, input.business_owner_id ?? null, input.technical_contact_id ?? null],
     );
     if (input.source) {
       await db.query('INSERT INTO ci_sources (ci_id, source_system, source_id, source_url, created_by) VALUES ($1, $2, $3, $4, $5)', [
@@ -308,6 +324,7 @@ export async function updateCi(user: User, ref: string, { base, ...input }: z.in
     if (input.ci_type && t.class !== current.class) throw badRequest('A CI cannot become a service or the other way round');
     await validateOwner(db, input.owner_id);
     await validateSla(db, input.sla_id);
+    await validatePeople(db, input);
     const next: Record<string, unknown> = { ...input };
     if (input.attributes || input.ci_type) next.attributes = cleanAttributes(t.attributes, input.attributes ?? current.attributes);
     const changed = Object.entries(next).filter(([k, v]) => v !== undefined && JSON.stringify(current[k] ?? null) !== JSON.stringify(v));
