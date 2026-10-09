@@ -1069,3 +1069,7 @@ tr.total td { border-bottom: 2px solid var(--border-strong); }
 .row-risk td:first-child { box-shadow: inset 3px 0 0 var(--danger); }
 .members-list { display: flex; flex-direction: column; gap: 6px; max-height: 50vh; overflow: auto; }
 .member-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+/* Visibility (#53) */
+.visibility-card.is-restricted { border-color: var(--warn); }
+.breakglass-banner { margin: 0 0 12px; }
+.hidden-note { margin: -6px 0 10px; }

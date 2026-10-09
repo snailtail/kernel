@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { viewerFor } from './visibility.js';
 import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
 import fastifyStatic from '@fastify/static';
@@ -29,6 +30,7 @@ import { peopleRoutes } from './routes/people.js';
 import { attachmentRoutes } from './routes/attachments.js';
 import { knowledgeRoutes } from './routes/knowledge.js';
 import { teamRoutes } from './routes/teams.js';
+import { visibilityRoutes } from './routes/visibility.js';
 import { problemRoutes } from './routes/problems.js';
 
 declare module 'fastify' {
@@ -79,19 +81,23 @@ export async function buildApp(options: { logLevel?: string; serveWeb?: boolean 
   app.addHook('onRequest', (req, _reply, done) => {
     const u = req.user;
     const bearer = !!req.headers.authorization && !!u;
-    contextStore.run(
+    const channel = req.url.startsWith('/mcp') ? 'mcp' : bearer ? 'api' : 'web';
+    // Anonymous requests see no restricted or team-scoped rows; signed-in users see what the database rule allows.
+    const viewer = u ? viewerFor(u, channel) : Promise.resolve('');
+    viewer.then((v) => contextStore.run(
       {
+        viewer: v,
         userId: u?.id ?? null,
         userName: u?.username ?? '',
         actorType: !u ? 'anonymous' : bearer ? (u.role === 'integration' ? 'integration' : req.url.startsWith('/mcp') ? 'mcp' : 'api_token') : 'user',
-        channel: req.url.startsWith('/mcp') ? 'mcp' : bearer ? 'api' : 'web',
+        channel,
         tokenPrefix: req.tokenPrefix ?? '',
         ip: req.ip,
         userAgent: String(req.headers['user-agent'] ?? '').slice(0, 300),
         requestId: String(req.id),
       },
       done,
-    );
+    ), done);
   });
 
   app.get('/healthz', async () => {
@@ -116,6 +122,7 @@ export async function buildApp(options: { logLevel?: string; serveWeb?: boolean 
   await app.register(attachmentRoutes);
   await app.register(knowledgeRoutes);
   await app.register(teamRoutes);
+  await app.register(visibilityRoutes);
   await app.register(mcpRoutes);
 
   app.get('/api/openapi.json', async (req) => openApiDocument(config.publicUrl ?? `${req.protocol}://${req.host}`));

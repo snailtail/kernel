@@ -220,11 +220,11 @@ export async function storageUse() {
 
 // ---- What may go to an AI provider (MCP) -------------------------------------------------------
 
-export interface AiDataPolicy { attachment_images: boolean; flagged_text: boolean }
+export interface AiDataPolicy { attachment_images: boolean; flagged_text: boolean; restricted_records?: boolean }
 
 export async function aiDataPolicy(): Promise<AiDataPolicy> {
   const { rows } = await query("SELECT value FROM settings WHERE key = 'ai_data'");
-  return { attachment_images: false, flagged_text: false, ...(rows[0]?.value ?? {}) };
+  return { attachment_images: false, flagged_text: false, restricted_records: false, ...(rows[0]?.value ?? {}) };
 }
 
 export async function setAiDataPolicy(actor: User, policy: AiDataPolicy, reason: string) {

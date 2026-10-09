@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { api, type Guidance } from '../api';
 import { GuidePanel } from '../components/Guide';
 import { richPaste } from '../components/RichPaste';
+import { RecordNotFound, VisibilityPanel } from '../components/Visibility';
 import { TeamAndAssignee, useTeams } from './Teams';
 import { ArticleSuggestions, IncidentKnowledgePanel, type ArticleRow } from './Knowledge';
 import { AttachmentsPanel } from '../components/Attachments';
@@ -191,13 +192,13 @@ export function IncidentPage() {
   const { ref } = useParams();
   const { user, meta } = useSession();
   const navigate = useNavigate();
-  const { data: i, setData, error } = useApi<Incident>(`/api/incidents/${ref}`);
+  const { data: i, setData, error, reload } = useApi<Incident>(`/api/incidents/${ref}`);
   const [note, setNote] = useState('');
   const [noteKind, setNoteKind] = useState<'comment' | 'communication'>('comment');
   const [resolving, setResolving] = useState(false);
   const [problemRef, setProblemRef] = useState('');
   const [actionError, setActionError] = useState<string | null>(null);
-  if (error) return <div className="error">{error}</div>;
+  if (error) return <RecordNotFound refId={ref ?? ''} error={error} onOpened={reload} />;
   if (!i) return null;
   const editable = user.role !== 'viewer' && i.status !== 'closed';
   const manager = user.role === 'admin' || user.role === 'problem_manager';
@@ -359,6 +360,7 @@ export function IncidentPage() {
           </section>
           <IncidentPeoplePanel record={i} basePath={path} editable={editable} onChange={setData} />
           {meta.modules?.knowledge !== false && <IncidentKnowledgePanel incident={i} editable={editable} onChange={() => api.get<Incident>(path).then(setData)} />}
+          <VisibilityPanel record={i as any} onChange={reload} />
           <AttachmentsPanel recordRef={i.ref} editable={editable} canDelete={(a) => a.uploaded_by === user.id || manager} />
           {meta.modules?.cmdb !== false && <AffectedCisPanel record={i} basePath={path} editable={editable} onChange={setData} />}
           <section className="card">

@@ -57,14 +57,17 @@ export async function enqueue(db: Db, event: EventType, problemId: number, actor
   );
   if (!hooks.length) return;
   const { rows } = await db.query(
-    `SELECT p.ref, p.title, p.status, p.priority, p.is_major, a.username AS assignee,
+    `SELECT p.ref, p.title, p.status, p.priority, p.is_major, p.restricted, a.username AS assignee,
             u.username AS actor_username, u.display_name AS actor_name
      FROM problems p LEFT JOIN users a ON a.id = p.assignee_id LEFT JOIN users u ON u.id = $2 WHERE p.id = $1`,
     [problemId, actorId],
   );
   const p = rows[0];
   if (!p) return;
-  const payload = {
+  // A restricted problem leaves Kernel only as its ref (#53): receivers learn that something changed, not what.
+  const payload = p.restricted
+    ? { event, occurred_at: new Date().toISOString(), problem: { ref: p.ref, restricted: true, url: problemUrl(p.ref) }, actor: null, summary: 'A restricted problem changed.', data: {} }
+    : {
     event,
     occurred_at: new Date().toISOString(),
     problem: { ref: p.ref, title: p.title, status: p.status, priority: p.priority, is_major: p.is_major, assignee: p.assignee, url: problemUrl(p.ref) },

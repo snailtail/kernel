@@ -1,4 +1,5 @@
 import { Link } from 'react-router';
+import { HiddenRecordsNote } from '../components/Visibility';
 import { useState } from 'react';
 import { GroupedBars, HBars, LineChart } from '../components/Charts';
 import { CLOSURE_LABEL, formatDay, PRIORITY_LABEL } from '../format';
@@ -84,6 +85,7 @@ export function ReportsPage() {
           <button className="btn" onClick={() => window.print()}>Print</button>
         </div>
       </header>
+      <HiddenRecordsNote />
 
       <div className="filters no-print">
         <select value={range.name} onChange={(e) => choose(e.target.value)} aria-label="Period">

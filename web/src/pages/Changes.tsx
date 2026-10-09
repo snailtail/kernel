@@ -5,6 +5,7 @@ import { AffectedCisPanel, type AffectedCi, type AffectedService } from '../comp
 import { GuidePanel } from '../components/Guide';
 import { Markdown } from '../components/Markdown';
 import { richPaste } from '../components/RichPaste';
+import { RecordNotFound, VisibilityPanel } from '../components/Visibility';
 import { AttachmentsPanel } from '../components/Attachments';
 import { Modal } from '../components/Modal';
 import { Term } from '../components/Glossary';
@@ -267,12 +268,12 @@ function NewChange({ onClose, onDone }: { onClose: () => void; onDone: (ref: str
 export function ChangePage() {
   const { ref } = useParams();
   const { user } = useSession();
-  const { data: c, setData, error } = useApi<Change>(`/api/changes/${ref}`);
+  const { data: c, setData, error, reload } = useApi<Change>(`/api/changes/${ref}`);
   const [actionError, setActionError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [finishing, setFinishing] = useState<null | 'review' | 'closed'>(null);
   const [note, setNote] = useState('');
-  if (error) return <div className="error">{error}</div>;
+  if (error) return <RecordNotFound refId={ref ?? ''} error={error} onOpened={reload} />;
   if (!c) return null;
   const path = `/api/changes/${c.ref}`;
   const editable = user.role !== 'viewer' && !['closed', 'rejected', 'cancelled'].includes(c.status);
@@ -380,6 +381,7 @@ export function ChangePage() {
           </section>
         </div>
         <aside className="problem-side">
+          <VisibilityPanel record={c as any} onChange={reload} />
           <AttachmentsPanel recordRef={c.ref} editable={editable} canDelete={(a) => a.uploaded_by === user.id || user.role === 'admin' || user.role === 'problem_manager'} />
           <section className="card">
             <h2>Window</h2>

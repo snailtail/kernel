@@ -127,7 +127,7 @@ export interface SecurityCheck {
 
 /** A checklist of the security-relevant configuration, for the admin Security page. */
 export async function securityStatus(): Promise<{ checks: SecurityCheck[] }> {
-  const [admins, mustChange, neverExpiring, backups, mfaAdmins, dbRole, legacyAudit, attachmentUse] = await Promise.all([
+  const [admins, mustChange, neverExpiring, backups, mfaAdmins, dbRole, legacyAudit, attachmentUse, breakGlass] = await Promise.all([
     query("SELECT count(*)::int AS n FROM users WHERE role = 'admin' AND active"),
     query('SELECT count(*)::int AS n FROM users WHERE must_change_password AND active'),
     query('SELECT count(*)::int AS n FROM api_tokens WHERE expires_at IS NULL'),
@@ -137,6 +137,7 @@ export async function securityStatus(): Promise<{ checks: SecurityCheck[] }> {
              (SELECT rolsuper FROM pg_roles WHERE rolname = current_user) AS superuser`),
     query("SELECT count(*)::int AS n FROM audit_log WHERE actor_name <> '' OR ip <> ''"),
     storageUse(),
+    query('SELECT count(*)::int AS n FROM visibility_breakglass WHERE expires_at > now()'),
   ]);
   const usedPct = Math.round((attachmentUse.bytes / attachmentUse.quota_bytes) * 100);
   const role = dbRole.rows[0];
@@ -166,6 +167,12 @@ export async function securityStatus(): Promise<{ checks: SecurityCheck[] }> {
         label: 'Attachment storage',
         ok: usedPct < 80,
         detail: `${attachmentUse.files} attachments use ${(attachmentUse.bytes / 1024 ** 3).toFixed(2)} GB of ${(attachmentUse.quota_bytes / 1024 ** 3).toFixed(0)} GB (${usedPct}%). They are stored in the database and included in every backup.`,
+      },
+      {
+        id: 'break_glass',
+        label: 'Break-glass access to restricted records',
+        ok: breakGlass.rows[0].n === 0,
+        detail: breakGlass.rows[0].n ? `${breakGlass.rows[0].n} administrator session(s) can currently open restricted records (one hour each; see the audit trail).` : 'No one is using break-glass access.',
       },
       { id: 'secret_key', label: 'Secrets encryption key', ok: secretsConfigured(), detail: secretsConfigured() ? 'KERNEL_SECRET_KEY is set; stored secrets are encrypted.' : 'Set KERNEL_SECRET_KEY (≥ 32 random characters).' },
       { id: 'initial_password', label: 'Initial passwords changed', ok: mustChange.rows[0].n === 0, detail: mustChange.rows[0].n ? `${mustChange.rows[0].n} account(s) still use a generated password.` : 'No account uses a generated password.' },

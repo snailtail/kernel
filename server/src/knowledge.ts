@@ -217,9 +217,10 @@ export async function publishKnownError(user: User, problemRef: string) {
 /** "This resolution is reusable": a draft troubleshooting article from a resolved incident. */
 export async function draftFromIncident(user: User, incidentRef: string) {
   authorize(user, 'article.write');
-  const { rows } = await query('SELECT id, ref, title, description, resolution FROM incidents WHERE ref = $1', [incidentRef.toUpperCase()]);
+  const { rows } = await query('SELECT id, ref, title, description, resolution, restricted FROM incidents WHERE ref = $1', [incidentRef.toUpperCase()]);
   const i = rows[0];
   if (!i) throw notFound(`Incident ${incidentRef} not found`);
+  if (i.restricted) throw badRequest('A restricted incident cannot become a knowledge article: articles are read by everyone');
   if (!i.resolution?.trim()) throw badRequest('The incident has no resolution to reuse yet');
   const { rows: cis } = await query('SELECT c.ref FROM incident_cis x JOIN configuration_items c ON c.id = x.ci_id WHERE x.incident_id = $1', [i.id]);
   const body = [i.description && `## Symptoms\n\n${i.description}`, `## Resolution\n\n${i.resolution}`].filter(Boolean).join('\n\n');

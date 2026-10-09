@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { HiddenRecordsNote } from '../components/Visibility';
 import { Link } from 'react-router';
 import { api, type Action, type Status } from '../api';
 import { ActionList } from '../components/Actions';
@@ -43,6 +44,7 @@ export function ReviewPage() {
           <button className="btn" onClick={() => window.print()}>Print</button>
         </div>
       </header>
+      <HiddenRecordsNote />
       <div className="filters no-print">
         <label className="check">
           Stale after

@@ -153,6 +153,7 @@ export interface ProblemDetail extends Problem {
 
 export interface Meta {
   modules: { incident: boolean; change: boolean; event: boolean; cmdb: boolean; sla: boolean; knowledge: boolean };
+  hidden_records?: boolean;
   setup_completed: boolean;
   statuses: Status[];
   transitions: Record<Status, Status[]>;

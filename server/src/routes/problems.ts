@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { hiddenRecordsExist } from '../visibility.js';
 import { z } from 'zod';
 import { modules } from '../modules.js';
 import * as flow from '../flow.js';
@@ -43,6 +44,8 @@ export async function problemRoutes(app: FastifyInstance) {
       mcp_url: config.mcpUrl,
       categories: categories.rows,
       assignees: users.rows,
+      // Managers' numbers leave out restricted records they cannot see; the UI says so (a yes/no, never a count).
+      hidden_records: ['admin', 'problem_manager'].includes(req.user!.role) ? await hiddenRecordsExist() : false,
     };
   });
 

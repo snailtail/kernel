@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { aiDataPolicy, setAiDataPolicy } from '../attachments.js';
+import { refreshVisibility } from '../visibility.js';
 import { hashPassword, requireUser } from '../auth.js';
 import { backupStatus } from '../backups.js';
 import { disable as disableMfa, requiredRoles, requireStepUp, setRequiredRoles } from '../mfa.js';
@@ -171,8 +172,10 @@ export async function adminRoutes(app: FastifyInstance) {
   app.put('/api/admin/ai-data', async (req) => {
     const admin = requireUser(req, 'mfa.policy');
     await requireStepUp(req);
-    const body = z.object({ attachment_images: z.boolean(), flagged_text: z.boolean(), reason: z.string().max(1000).optional() }).parse(req.body);
-    return setAiDataPolicy(admin, { attachment_images: body.attachment_images, flagged_text: body.flagged_text }, requireReason(body.reason));
+    const body = z.object({ attachment_images: z.boolean(), flagged_text: z.boolean(), restricted_records: z.boolean().default(false), reason: z.string().max(1000).optional() }).parse(req.body);
+    const saved = await setAiDataPolicy(admin, { attachment_images: body.attachment_images, flagged_text: body.flagged_text, restricted_records: body.restricted_records }, requireReason(body.reason));
+    await refreshVisibility();
+    return saved;
   });
 
   app.get('/api/admin/mfa-policy', async (req) => {
