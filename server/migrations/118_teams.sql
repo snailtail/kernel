@@ -45,6 +45,19 @@ ALTER TABLE incidents ADD COLUMN team_hops int NOT NULL DEFAULT 0;
 UPDATE incidents i SET team_id = t.id FROM teams t WHERE lower(t.name) = lower(trim(i.assignment_group));
 CREATE INDEX incidents_team_idx ON incidents (team_id) WHERE team_id IS NOT NULL;
 
+-- Event rules route by team id, so renaming a team never breaks routing.
+ALTER TABLE event_rules ADD COLUMN team_id int REFERENCES teams(id) ON DELETE SET NULL;
+UPDATE event_rules r SET team_id = t.id FROM teams t WHERE lower(t.name) = lower(trim(r.assignment_group));
+CREATE FUNCTION kernel_event_rule_team() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.team_id IS NULL AND trim(NEW.assignment_group) <> '' THEN
+    NEW.team_id := (SELECT id FROM teams WHERE lower(name) = lower(trim(NEW.assignment_group)));
+  END IF;
+  IF NEW.team_id IS NOT NULL THEN NEW.assignment_group := (SELECT name FROM teams WHERE id = NEW.team_id); END IF;
+  RETURN NEW;
+END $$;
+CREATE TRIGGER event_rules_team BEFORE INSERT OR UPDATE OF team_id, assignment_group ON event_rules FOR EACH ROW EXECUTE FUNCTION kernel_event_rule_team();
+
 ALTER TABLE problems ADD COLUMN team_id int REFERENCES teams(id) ON DELETE SET NULL;
 ALTER TABLE changes ADD COLUMN team_id int REFERENCES teams(id) ON DELETE SET NULL;
 CREATE INDEX problems_team_idx ON problems (team_id) WHERE team_id IS NOT NULL;
@@ -72,6 +85,7 @@ CREATE TRIGGER incidents_team BEFORE INSERT OR UPDATE OF team_id, assignment_gro
 CREATE FUNCTION kernel_team_renamed() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   UPDATE incidents SET assignment_group = NEW.name WHERE team_id = NEW.id AND assignment_group IS DISTINCT FROM NEW.name;
+  UPDATE event_rules SET assignment_group = NEW.name WHERE team_id = NEW.id AND assignment_group IS DISTINCT FROM NEW.name;
   RETURN NEW;
 END $$;
 CREATE TRIGGER teams_renamed AFTER UPDATE OF name ON teams FOR EACH ROW EXECUTE FUNCTION kernel_team_renamed();

@@ -71,6 +71,21 @@ describe('teams and assignment (#42)', { skip }, () => {
     assert.equal(rr.assignee_id, ids.pm, 'the member with the least open work');
   });
 
+  test('event rules route by team id, so a rename keeps working; members who cannot work get no work', async () => {
+    const rule = (await admin.post('/api/event-rules', { name: 'Core alerts', conditions: { min_severity: 'critical' }, assignment_group: 'network', impact: 2, urgency: 2 })).body;
+    assert.equal(rule.team_id, net.id, 'a group name becomes the team');
+    await admin.put(`/api/teams/${net.id}`, { name: 'Networks', cis: [svc] });
+    const renamed = (await admin.get('/api/event-rules')).body.find((r: any) => r.id === rule.id);
+    assert.deepEqual([renamed.team_id, renamed.assignment_group], [net.id, 'Networks']);
+    await admin.put(`/api/teams/${net.id}`, { name: 'Network', cis: [svc] });
+    // A member who is later made a viewer is skipped by round robin and cannot be assigned.
+    await db.query('INSERT INTO team_members (team_id, user_id) VALUES ($1, $2)', [dba.id, ids.viewer]);
+    const i = (await analyst.post('/api/incidents', { title: 'Replica lag', team_id: dba.id })).body;
+    assert.notEqual(i.assignee_id, ids.viewer);
+    assert.equal((await analyst.patch(`/api/incidents/${i.ref}`, { assignee_id: ids.viewer })).status, 400);
+    await db.query('DELETE FROM team_members WHERE team_id = $1 AND user_id = $2', [dba.id, ids.viewer]);
+  });
+
   test('a team with open work cannot be removed; my work shows my teams\' queues', async () => {
     assert.equal((await admin.del(`/api/teams/${net.id}`)).status, 409);
     const work = (await analyst.get('/api/my-work')).body;
