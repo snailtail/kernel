@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      security-events: write # upload results to code scanning
+      actions: read # the action reads its own workflow run
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -24,4 +24,27 @@ jobs:
         with:
           languages: javascript-typescript
           queries: security-extended
+      # The repository is private without code scanning, so results are kept as an artifact and fail the job here.
       - uses: github/codeql-action/analyze@9f759ee644a3e7c15c1390abf49868036c00067b # v3
+        with:
+          upload: never
+          output: codeql-results
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: codeql-sarif
+          path: codeql-results
+      - name: Fail on findings
+        run: |
+          python3 - <<'PY'
+          import glob, json, sys
+          found = []
+          for path in glob.glob('codeql-results/*.sarif'):
+              for run in json.load(open(path))['runs']:
+                  rules = {r['id']: r for r in run['tool']['driver'].get('rules', [])}
+                  for r in run.get('results', []):
+                      loc = r['locations'][0]['physicalLocation']
+                      found.append(f"{r['ruleId']}: {loc['artifactLocation']['uri']}:{loc.get('region', {}).get('startLine')} {r['message']['text'][:160]}")
+          print('\n'.join(found) or 'No findings')
+          sys.exit(1 if found else 0)
+          PY
