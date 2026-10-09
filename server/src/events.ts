@@ -78,6 +78,8 @@ export const ruleSchema = z.object({
   impact: z.number().int().min(1).max(3).default(2),
   urgency: z.number().int().min(1).max(3).default(2),
   assignment_group: z.string().trim().max(100).default(''),
+  /** The team new incidents go to (#42); a group name is matched to its team. */
+  team_id: z.number().int().nullable().optional(),
   group_by: z.enum(['service', 'ci', 'rule']).default('service'),
   group_window_minutes: z.number().int().min(1).max(1440).default(60),
   max_incidents_per_hour: z.number().int().min(1).max(100).default(5),
@@ -300,7 +302,7 @@ async function applyRule(db: Db, rule: Rule, alert: any, ci: CiFacts | null) {
       description: [alert.message, `Source: ${alert.source}`, alert.source_url ? `Alert: ${alert.source_url}` : '', `Opened by event rule "${rule.name}".`].filter(Boolean).join('\n\n'),
       impact: rule.impact,
       urgency: rule.urgency,
-      assignment_group: rule.assignment_group,
+      ...(rule.team_id ? { team_id: rule.team_id } : { assignment_group: rule.assignment_group }),
     },
     ci ? [ci.id] : [],
     'event',

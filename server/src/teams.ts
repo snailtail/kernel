@@ -9,6 +9,9 @@ import { notify } from './notifications.js';
 import { authorize, can } from './policy.js';
 import type { Db } from './problems.js';
 
+/** Members who can be given work: active, and in a role that can update records (not viewers or integrations). */
+const CAN_WORK = "u.active AND u.role NOT IN ('viewer', 'integration')";
+
 export const teamSchema = z.object({
   name: z.string().trim().min(2).max(100),
   description: z.string().max(2000).default(''),
@@ -156,7 +159,7 @@ export async function pickAssignee(db: Db, teamId: number) {
   const { rows: team } = await db.query('SELECT auto_assign FROM teams WHERE id = $1', [teamId]);
   if (team[0]?.auto_assign !== 'round_robin') return null;
   const { rows } = await db.query(
-    `SELECT u.id FROM team_members m JOIN users u ON u.id = m.user_id AND u.active
+    `SELECT u.id FROM team_members m JOIN users u ON u.id = m.user_id AND ${CAN_WORK}
      WHERE m.team_id = $1
      ORDER BY (SELECT count(*) FROM incidents i WHERE i.assignee_id = u.id AND i.status NOT IN ('resolved', 'closed')),
               (SELECT max(i.created_at) FROM incidents i WHERE i.assignee_id = u.id) NULLS FIRST, u.id
@@ -169,8 +172,12 @@ export async function pickAssignee(db: Db, teamId: number) {
 /** An assignee must belong to the record's team (when the team has members). */
 export async function checkAssigneeInTeam(db: Db, teamId: number | null | undefined, assigneeId: number | null | undefined) {
   if (!teamId || !assigneeId) return;
-  const { rows } = await db.query('SELECT count(*)::int AS members, bool_or(user_id = $2) AS member FROM team_members WHERE team_id = $1', [teamId, assigneeId]);
-  if (rows[0].members > 0 && !rows[0].member) throw badRequest('The assignee is not a member of the assigned team. Choose a member, or reassign the team first.');
+  const { rows } = await db.query(
+    `SELECT count(*)::int AS members, bool_or(m.user_id = $2 AND ${CAN_WORK}) AS member
+     FROM team_members m JOIN users u ON u.id = m.user_id WHERE m.team_id = $1`,
+    [teamId, assigneeId],
+  );
+  if (rows[0].members > 0 && !rows[0].member) throw badRequest('The assignee is not a member of the assigned team who can work on records. Choose a member, or reassign the team first.');
 }
 
 export async function validTeam(db: Db, teamId: number | null | undefined) {
@@ -180,7 +187,7 @@ export async function validTeam(db: Db, teamId: number | null | undefined) {
 }
 
 export async function teamMembers(db: Db, teamId: number, role?: 'lead') {
-  const { rows } = await db.query(`SELECT m.user_id FROM team_members m JOIN users u ON u.id = m.user_id AND u.active WHERE m.team_id = $1${role ? " AND m.role = 'lead'" : ''}`, [teamId]);
+  const { rows } = await db.query(`SELECT m.user_id FROM team_members m JOIN users u ON u.id = m.user_id AND ${CAN_WORK} WHERE m.team_id = $1${role ? " AND m.role = 'lead'" : ''}`, [teamId]);
   return rows.map((r) => r.user_id as number);
 }
 
