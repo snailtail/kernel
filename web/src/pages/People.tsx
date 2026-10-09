@@ -65,12 +65,12 @@ export function PeoplePage() {
             {people?.length === 0 ? <p className="empty">{query ? 'No contacts match.' : 'No contacts yet. Add one here, or type a name or email in an incident’s caller field.'}</p> : (
               <div className="table-wrap">
                 <table className="table">
-                  <thead><tr><th>Name</th><th>Email</th><th className="hide-sm">Organisation</th><th className="hide-sm">Department</th><th className="hide-sm">Title</th></tr></thead>
+                  <thead><tr><th>Name</th>{people?.[0]?.email !== undefined && <th>Email</th>}<th className="hide-sm">Organisation</th><th className="hide-sm">Department</th><th className="hide-sm">Title</th></tr></thead>
                   <tbody>
                     {people?.map((p) => (
                       <tr key={p.id} className={p.active ? '' : 'muted'}>
                         <td className="title-cell"><Link to={`/people/${p.id}`}>{p.name}</Link> {p.is_vip && <span className="vip">VIP</span>}</td>
-                        <td>{p.email ?? '–'}</td>
+                        {p.email !== undefined && <td>{p.email ?? '–'}</td>}
                         <td className="hide-sm">{p.organisation ?? '–'}</td>
                         <td className="hide-sm muted">{p.department || '–'}</td>
                         <td className="hide-sm muted">{p.title || '–'}</td>
@@ -165,13 +165,13 @@ export function PersonPage() {
           <section className="card">
             <h2>Contact</h2>
             <dl className="kv details">
-              <dt>Email</dt><dd>{p.email ? <a href={`mailto:${p.email}`}>{p.email}</a> : '–'}</dd>
-              <dt>Phone</dt><dd>{p.phone || '–'}</dd>
+              {p.email !== undefined && <><dt>Email</dt><dd>{p.email ? <a href={`mailto:${p.email}`}>{p.email}</a> : '–'}</dd></>}
+              {p.phone !== undefined && <><dt>Phone</dt><dd>{p.phone || '–'}</dd></>}
               <dt>Title</dt><dd>{p.title || '–'}</dd>
               <dt>Department</dt><dd>{p.department || '–'}</dd>
               <dt>Location</dt><dd>{p.location || '–'}</dd>
               <dt>Organisation</dt><dd>{p.organisation ?? '–'}</dd>
-              <dt>Manager</dt><dd>{p.manager_id ? <Link to={`/people/${p.manager_id}`}>{p.manager}</Link> : '–'}</dd>
+              {p.manager_id !== undefined && <><dt>Manager</dt><dd>{p.manager_id ? <Link to={`/people/${p.manager_id}`}>{p.manager}</Link> : '–'}</dd></>}
               <dt>Source</dt><dd>{p.source}{p.external_id ? <span className="muted small"> · {p.external_id}</span> : ''}</dd>
               {!p.active && <><dt>Status</dt><dd>Inactive</dd></>}
             </dl>

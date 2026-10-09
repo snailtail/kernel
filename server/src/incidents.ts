@@ -187,7 +187,7 @@ export async function getIncident(user: User, ref: string) {
   const affected = await affectedFrom(cis.rows, i.impact);
   const possibleChanges = await possibleCausesForIncident({ created_at: i.created_at, affected_cis: cis.rows });
   const sla = await slaClock(pool, i);
-  const people = await incidentPeople(i);
+  const people = await incidentPeople(i, user);
   // Affected users are only asked for when a service involved has end users (#39: keep it optional).
   const refs = [...cis.rows.map((c) => c.ref), ...affected.affected_services.map((s) => s.ref)];
   const { rows: endUsers } = await query('SELECT 1 FROM configuration_items WHERE ref = ANY($1) AND has_end_users LIMIT 1', [refs]);

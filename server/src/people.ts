@@ -7,7 +7,7 @@ import { audit } from './audit.js';
 import { query, tx } from './db.js';
 import { badRequest, conflict, notFound } from './errors.js';
 import { logIncident } from './incident-log.js';
-import { authorize } from './policy.js';
+import { authorize, can } from './policy.js';
 import { registerProblemExtra, type Db } from './problems.js';
 
 const optionalText = (max: number) => z.string().trim().max(max);
@@ -38,6 +38,16 @@ const SELECT_PERSON = `
          p.manager_id, m.name AS manager, p.is_vip, p.active, p.external_id, p.source, p.user_id, p.erased_at, p.created_at, p.updated_at
   FROM people p LEFT JOIN organisations o ON o.id = p.organisation_id LEFT JOIN people m ON m.id = p.manager_id`;
 
+/**
+ * Data minimisation (#39): everyone who reads incidents may see who a person is (name, organisation, department,
+ * VIP); only roles that work incidents see how to reach them (email, phone, manager).
+ */
+export function withoutContact<T extends Record<string, any>>(p: T): T {
+  const { email, phone, manager_id, manager, ...rest } = p;
+  return rest as T;
+}
+export const contactFor = (user: User) => <T extends Record<string, any>>(p: T): T => (can(user.role, 'person.contact') ? p : withoutContact(p));
+
 /** Audit keys for people: "person_name" and the other personal fields are digested by the audit trail. */
 const auditable = (o: Record<string, unknown>) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k === 'name' ? 'person_name' : k, v]));
 
@@ -54,7 +64,7 @@ export async function listPeople(user: User, f: z.infer<typeof listPeopleSchema>
   if (f.q) add("(p.name ILIKE '%' || ? || '%' OR p.email ILIKE '%' || ? || '%' OR p.department ILIKE '%' || ? || '%')", f.q.replace(/[\\%_]/g, (m) => '\\' + m));
   params.push(f.limit);
   const { rows } = await query(`${SELECT_PERSON} WHERE ${where.join(' AND ')} ORDER BY p.is_vip DESC, lower(p.name) LIMIT $${params.length}`, params);
-  return rows;
+  return rows.map(contactFor(user));
 }
 
 export async function getPerson(user: User, id: number) {
@@ -80,7 +90,7 @@ export async function getPerson(user: User, id: number) {
       [id],
     ),
   ]);
-  return { ...p, incidents: incidents.rows, services: services.rows, owns: owned.rows };
+  return { ...contactFor(user)(p), incidents: incidents.rows, services: services.rows, owns: owned.rows };
 }
 
 async function validate(db: Db, input: { organisation_id?: number | null; manager_id?: number | null }, self?: number) {
@@ -195,7 +205,7 @@ export async function saveOrganisation(user: User, id: number | null, input: z.i
 // ---- Incidents: caller and affected people ------------------------------------------------------
 
 /** Finds a contact by email, or creates one (quick add from the caller field). */
-export async function resolvePerson(db: Db, user: User, ref: { id?: number; email?: string; name?: string }) {
+export async function resolvePerson(db: Db, user: User, ref: { id?: number; email?: string; name?: string }, create = true) {
   if (ref.id) {
     const { rows } = await db.query('SELECT id FROM people WHERE id = $1 AND erased_at IS NULL', [ref.id]);
     if (!rows[0]) throw badRequest('Unknown person');
@@ -205,6 +215,7 @@ export async function resolvePerson(db: Db, user: User, ref: { id?: number; emai
     const { rows } = await db.query('SELECT id FROM people WHERE lower(email) = lower($1) AND erased_at IS NULL', [ref.email]);
     if (rows[0]) return rows[0].id as number;
   }
+  if (!create) throw badRequest('No such contact. Agents can only link existing contacts; ask a person to add new ones.');
   if (!ref.name && !ref.email) throw badRequest('Give a person id, an email or a name');
   authorize(user, 'person.write');
   const { rows } = await db.query('INSERT INTO people (name, email) VALUES ($1, $2) RETURNING id', [ref.name || ref.email, ref.email || null]);
@@ -214,12 +225,12 @@ export async function resolvePerson(db: Db, user: User, ref: { id?: number; emai
 
 export const personRefSchema = z.object({ id: z.number().int().optional(), email: z.string().trim().email().max(200).optional(), name: z.string().trim().max(200).optional() });
 
-export async function setAffected(user: User, incidentRef: string, person: z.infer<typeof personRefSchema>, affected: boolean) {
+export async function setAffected(user: User, incidentRef: string, person: z.infer<typeof personRefSchema>, affected: boolean, create = true) {
   authorize(user, 'incident.update');
   await tx(async (db) => {
     const { rows } = await db.query('SELECT id, ref FROM incidents WHERE ref = $1 FOR UPDATE', [incidentRef.toUpperCase()]);
     if (!rows[0]) throw notFound(`Incident ${incidentRef} not found`);
-    const personId = await resolvePerson(db, user, person);
+    const personId = await resolvePerson(db, user, person, create);
     const { rowCount } = affected
       ? await db.query('INSERT INTO incident_people (incident_id, person_id, added_by) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [rows[0].id, personId, user.id])
       : await db.query('DELETE FROM incident_people WHERE incident_id = $1 AND person_id = $2', [rows[0].id, personId]);
@@ -241,7 +252,7 @@ export async function namePeople<T extends { body: string }>(rows: T[]): Promise
 }
 
 /** People on an incident, and whether they should raise the suggested impact (VIP, many affected). */
-export async function incidentPeople(incident: { id: number; caller_id: number | null; impact: number }) {
+export async function incidentPeople(incident: { id: number; caller_id: number | null; impact: number }, user: User) {
   const { rows } = await query(
     `SELECT p.id, p.name, p.email, p.is_vip, p.erased_at IS NOT NULL AS erased, o.name AS organisation FROM incident_people x
      JOIN people p ON p.id = x.person_id LEFT JOIN organisations o ON o.id = p.organisation_id WHERE x.incident_id = $1 ORDER BY p.is_vip DESC, p.name`,
@@ -259,7 +270,8 @@ export async function incidentPeople(incident: { id: number; caller_id: number |
     : vip && incident.impact > 2
       ? { suggested_impact: 2, reason: 'A VIP is involved: consider impact Medium or higher.' }
       : null;
-  return { caller: caller[0] ?? null, affected_people: rows, people_hint: hint };
+  const shown = contactFor(user);
+  return { caller: caller[0] ? shown(caller[0]) : null, affected_people: rows.map(shown), people_hint: hint };
 }
 
 // Problems: the organisations affected, rolled up from the people on their incidents.

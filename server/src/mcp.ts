@@ -495,18 +495,19 @@ function buildServer(user: User, scopes?: string[]) {
   );
 
   // ---- People (#39) ----
-  const peopleNotice = 'Contact details are personal data: use them only for the incident at hand, and never copy them into notes.';
+  // Data minimisation: the AI provider gets who a person is, never how to reach them (#39).
+  const peopleNotice = 'Returns who people are (name, department, organisation, VIP) but no contact details.';
   tool('search_people', `Find contacts (callers, affected users, service owners) by name, email or department. ${peopleNotice}`, { q: z.string(), limit: z.number().int().min(1).max(50).optional() }, true, async ({ q, limit }) =>
-    (await people.listPeople(user, people.listPeopleSchema.parse({ q, limit: limit ?? 20 }))).map((p: any) => ({ id: p.id, name: p.name, email: p.email, department: p.department, organisation: p.organisation, is_vip: p.is_vip })),
+    (await people.listPeople(user, people.listPeopleSchema.parse({ q, limit: limit ?? 20 }))).map((p: any) => ({ id: p.id, name: p.name, department: p.department, organisation: p.organisation, is_vip: p.is_vip })),
   );
-  tool('get_person', `A contact with their incidents, the services their organisation consumes and what they own. ${peopleNotice}`, { id: z.number().int() }, true, ({ id }) => people.getPerson(user, id));
+  tool('get_person', `A contact with their incidents, the services their organisation consumes and what they own. ${peopleNotice}`, { id: z.number().int() }, true, async ({ id }) => people.withoutContact(await people.getPerson(user, id)));
   tool(
     'add_affected_person',
-    'Record that a person is affected by an incident (by id, or by email/name – created as a contact if new). Many affected people or a VIP raise the suggested impact.',
-    { ref: z.string(), id: z.number().int().optional(), email: z.string().optional(), name: z.string().optional() },
+    'Record that an existing contact is affected by an incident (find them with search_people). Agents cannot create contacts. Many affected people or a VIP raise the suggested impact.',
+    { ref: z.string(), id: z.number().int() },
     false,
     async ({ ref, ...person }) => {
-      await people.setAffected(user, ref, people.personRefSchema.parse(person), true);
+      await people.setAffected(user, ref, { id: person.id }, true, false);
       return incidentForAgent(await incidents.getIncident(user, ref));
     },
   );

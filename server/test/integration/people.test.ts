@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
+import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { Client, skip, startKernel, type Harness } from './harness.js';
 
 describe('people, organisations and affected users (#39)', { skip }, () => {
@@ -28,6 +30,8 @@ describe('people, organisations and affected users (#39)', { skip }, () => {
     assert.equal((await analyst.post('/api/people', { name: 'Other', email: 'ANNA@example.com' })).status, 409);
     const found = (await viewer.get('/api/people?q=berg')).body;
     assert.equal(found[0].organisation, 'Finance');
+    assert.equal(found[0].email, undefined, 'viewers see who a person is, not how to reach them');
+    assert.equal((await analyst.get('/api/people?q=berg')).body[0].email, 'anna@example.com');
     assert.equal((await analyst.patch(`/api/people/${found[0].id}`, { is_vip: true })).status, 403, 'VIP is a manager decision');
     assert.equal((await pm.patch(`/api/people/${found[0].id}`, { is_vip: true })).status, 200);
     assert.equal((await pm.patch(`/api/cis/${svc}`, { business_owner_id: 999999 })).status, 400);
@@ -50,9 +54,26 @@ describe('people, organisations and affected users (#39)', { skip }, () => {
     assert.equal(plain.asks_affected_users, false, 'infrastructure-only services are not cluttered');
     const anna = (await analyst.get('/api/people?q=anna@example.com')).body[0];
     const page = (await viewer.get(`/api/people/${anna.id}`)).body;
+    assert.equal(page.phone, undefined);
+    assert.equal((await viewer.get(`/api/incidents/${inc.ref}`)).body.caller.email, undefined);
     assert.equal(page.incidents[0].role, 'caller');
     assert.deepEqual(page.services.map((s: any) => s.ref), [svc]);
     assert.equal(page.owns[0].role, 'business owner');
+  });
+
+  test('agents see who people are, not how to reach them, and cannot create contacts', async () => {
+    const mcp = new McpClient({ name: 'people', version: '1' });
+    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
+    const raw = async (name: string, args: object) => (await mcp.callTool({ name, arguments: args })) as any;
+    const found = JSON.parse((await raw('search_people', { q: 'anna' })).content[0].text);
+    assert.equal(found[0].name, 'Anna Berg');
+    assert.ok(!JSON.stringify(found).includes('@'), 'no email to the AI provider');
+    assert.ok(!(await raw('get_person', { id: found[0].id })).content[0].text.includes('anna@example.com'));
+    const inc = (await analyst.post('/api/incidents', { title: 'Agent case' })).body;
+    assert.equal((await raw('add_affected_person', { ref: inc.ref, id: found[0].id })).isError, undefined);
+    assert.equal((await raw('add_affected_person', { ref: inc.ref, id: 999999 })).isError, true);
+    assert.equal((await raw('add_affected_person', { ref: inc.ref, name: 'Injected Person' })).isError, true, 'agents link existing contacts only');
+    await mcp.close();
   });
 
   test('erasing a person keeps incidents and the audit trail, with no name left in either', async () => {
