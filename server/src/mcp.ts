@@ -14,6 +14,7 @@ import * as integrations from './integrations.js';
 import * as problems from './problems.js';
 import * as reports from './reports.js';
 import { traceTool } from './metrics.js';
+import { idempotent } from './idempotency.js';
 import { can, type Action } from './policy.js';
 import { auditQuerySchema, queryAudit } from './audit.js';
 import { problemMarkdown } from './export.js';
@@ -357,9 +358,11 @@ function buildServer(user: User, scopes?: string[]) {
   tool(
     'create_problem',
     'Log a new problem record. Search first to avoid duplicates. Link the triggering incidents or events afterwards with link_record.',
-    { ...optionalEditable, title: editable.title },
+    { ...optionalEditable, title: editable.title, idempotency_key: z.string().max(200).optional().describe('Retry-safe: the same key returns the original result instead of creating a duplicate') },
     false,
-    async (args) => compactProblem(await problems.createProblem(user, problems.createProblemSchema.parse(await toInput(args))), 5),
+    async ({ idempotency_key, ...args }) =>
+      idempotent(user.id, idempotency_key, 'create_problem', args, async () =>
+        compactProblem(await problems.createProblem(user, problems.createProblemSchema.parse(await toInput(args))), 5)),
   );
 
   tool(
@@ -407,12 +410,13 @@ function buildServer(user: User, scopes?: string[]) {
   tool(
     'add_comment',
     'Add a work note to the problem activity log (findings, analysis steps, decisions).',
-    { ref: z.string(), body: z.string() },
+    { ref: z.string(), body: z.string(), idempotency_key: z.string().max(200).optional().describe('Retry-safe key') },
     false,
-    async ({ ref, body }) => {
-      await problems.addComment(user, ref, body);
-      return { ok: true };
-    },
+    async ({ ref, body, idempotency_key }) =>
+      idempotent(user.id, idempotency_key, `add_comment ${ref}`, { body }, async () => {
+        await problems.addComment(user, ref, body);
+        return { ok: true };
+      }),
   );
 
   tool(
@@ -558,9 +562,10 @@ Show me the draft first. When I approve it, save it with update_problem (major_r
   tool(
     'add_action',
     'Add a follow-up action to a problem, with an owner and due date.',
-    { ref: z.string(), ...actionShape },
+    { ref: z.string(), ...actionShape, idempotency_key: z.string().max(200).optional().describe('Retry-safe key') },
     false,
-    async ({ ref, ...args }) => (await actions.createAction(user, ref, actions.createActionSchema.parse(await actionInput(args)))).actions,
+    async ({ ref, idempotency_key, ...args }) =>
+      idempotent(user.id, idempotency_key, `add_action ${ref}`, args, async () => (await actions.createAction(user, ref, actions.createActionSchema.parse(await actionInput(args)))).actions),
   );
 
   tool(

@@ -35,8 +35,10 @@ Cross-practice: `GET /api/search?q=`, `GET /api/records/:ref`, `GET /api/records
 - Errors are `{ "error": "message" }` plus optional details (e.g. `conflicts` on 409). Status codes: 400 invalid
   input, 401 not signed in, 403 not allowed (or a missing step-up / token scope), 404 not found, 409 conflicts with
   the current state or a workflow rule, 422 misused idempotency key, 429 rate limited.
-- Creating requests accept an **`Idempotency-Key`** header; a retry with the same key returns the original response
-  (`Idempotent-Replayed: true`), a failed request may be retried.
+- Routes that create ordinary records opt in to an **`Idempotency-Key`** header (route config `idempotent: <action>`);
+  a retry with the same key and body returns the original response (`Idempotent-Replayed: true`), a different body
+  gives 422, a failed request may be retried. The caller is authorised again before any replay. Routes that return
+  secrets (tokens, webhook/TOTP secrets, recovery codes) never opt in. MCP create tools take `idempotency_key`.
 - Concurrent edits: send `base` (the values the edit started from); changes by others to the same fields give 409
   with the current values instead of being overwritten.
 - Request bodies are JSON validated by zod schemas; unknown fields are ignored, server-controlled fields (ids,

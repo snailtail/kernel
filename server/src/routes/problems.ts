@@ -44,7 +44,7 @@ export async function problemRoutes(app: FastifyInstance) {
     return problems.listProblems(problems.listSchema.parse(req.query));
   });
 
-  app.post('/api/problems', async (req, reply) => {
+  app.post('/api/problems', { config: { idempotent: 'problem.create' } }, async (req, reply) => {
     const created = await problems.createProblem(requireUser(req), problems.createProblemSchema.parse(req.body));
     reply.code(201);
     return created;
@@ -89,12 +89,12 @@ export async function problemRoutes(app: FastifyInstance) {
   app.put<RefParams>('/api/problems/:ref/watch', async (req) => problems.setWatching(requireUser(req), req.params.ref, true));
   app.delete<RefParams>('/api/problems/:ref/watch', async (req) => problems.setWatching(requireUser(req), req.params.ref, false));
 
-  app.post<RefParams>('/api/problems/:ref/comments', async (req) => {
+  app.post<RefParams>('/api/problems/:ref/comments', { config: { idempotent: 'problem.comment' } }, async (req) => {
     const body = z.object({ body: z.string().max(20000) }).parse(req.body);
     return problems.addComment(requireUser(req), req.params.ref, body.body);
   });
 
-  app.post<RefParams>('/api/problems/:ref/links', async (req) =>
+  app.post<RefParams>('/api/problems/:ref/links', { config: { idempotent: 'problem.link' } }, async (req) =>
     problems.addLink(requireUser(req), req.params.ref, problems.linkSchema.parse(req.body)),
   );
 
@@ -107,7 +107,7 @@ export async function problemRoutes(app: FastifyInstance) {
     return actions.listActions(actions.listActionsSchema.parse(req.query));
   });
 
-  app.post<RefParams>('/api/problems/:ref/actions', async (req, reply) => {
+  app.post<RefParams>('/api/problems/:ref/actions', { config: { idempotent: 'action.write' } }, async (req, reply) => {
     const result = await actions.createAction(requireUser(req), req.params.ref, actions.createActionSchema.parse(req.body));
     reply.code(201);
     return result;
@@ -117,7 +117,7 @@ export async function problemRoutes(app: FastifyInstance) {
     actions.updateAction(requireUser(req), req.params.ref, Number(req.params.id), actions.updateActionSchema.parse(req.body)),
   );
 
-  app.post<RefParams>('/api/problems/:ref/analyses', async (req, reply) => {
+  app.post<RefParams>('/api/problems/:ref/analyses', { config: { idempotent: 'analysis.write' } }, async (req, reply) => {
     const result = await analyses.createAnalysis(requireUser(req), req.params.ref, analyses.createAnalysisSchema.parse(req.body));
     reply.code(201);
     return result;
@@ -161,7 +161,7 @@ export async function problemRoutes(app: FastifyInstance) {
   app.get('/api/search', async (req) => generic.search(requireUser(req, 'meta.read'), generic.searchSchema.parse(req.query)));
   app.get<RefParams>('/api/records/:ref', async (req) => generic.getRecord(requireUser(req), req.params.ref));
   app.get<RefParams>('/api/records/:ref/next-steps', async (req) => generic.nextSteps(requireUser(req), req.params.ref));
-  app.post<RefParams>('/api/records/:ref/links', async (req) => {
+  app.post<RefParams>('/api/records/:ref/links', { config: { idempotent: 'problem.link' } }, async (req) => {
     const body = z.object({ to: z.string().trim().min(1).max(200), kind: z.string().max(20).optional(), system: z.string().max(100).optional(), url: z.string().max(2000).optional(), note: z.string().max(2000).optional() }).parse(req.body);
     return generic.linkRecords(requireUser(req), req.params.ref, body.to, body);
   });

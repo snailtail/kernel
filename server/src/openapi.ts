@@ -163,7 +163,7 @@ export function openApiDocument(serverUrl?: string) {
       description:
         'Problem management (ITIL 4). Authenticate with `Authorization: Bearer krn_…` (personal API token, see Settings) or the session cookie; ' +
         'cookie-authenticated changes must send `X-Kernel-Request: 1`. Business rules (workflow, roles) are enforced server-side and reported as 409/403 with an `error` message. ' +
-        'Creating requests (POST/PUT/PATCH) accept an `Idempotency-Key` header: a retry with the same key returns the original response. ' +
+        'Record-creating requests accept an `Idempotency-Key` header: a retry with the same key and body returns the original response. ' +
         'Every record has a `ref` (e.g. PRB000012), a `type` and a `url` to the web UI; see docs/api-conventions.md. ' +
         'An MCP server with the same capabilities is available at /mcp.',
     },
