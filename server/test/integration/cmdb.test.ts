@@ -52,8 +52,8 @@ describe('CMDB core (#16)', { skip }, () => {
   });
 
   test('integrations upsert CIs from their own source only', async () => {
-    await admin.post('/api/users', { username: 'vcenter-sync', display_name: 'vCenter sync', role: 'integration', password: 'four quiet harbour lamps' });
-    await admin.post('/api/users', { username: 'azure-sync', display_name: 'Azure sync', role: 'integration', password: 'four quiet harbour lamps' });
+    await admin.post('/api/users', { username: 'vcenter-sync', display_name: 'vCenter sync', role: 'integration', password: 'four quiet harbour lamps', ci_source_systems: ['vCenter'] });
+    await admin.post('/api/users', { username: 'azure-sync', display_name: 'Azure sync', role: 'integration', password: 'four quiet harbour lamps', ci_source_systems: ['Azure'] });
     const token = async (u: string) => {
       const c = new Client(k.base);
       await c.post('/api/auth/login', { username: u, password: 'four quiet harbour lamps' });
@@ -75,7 +75,18 @@ describe('CMDB core (#16)', { skip }, () => {
     const az = await token('azure-sync');
     const hijack = (await az.post('/api/cis/upsert', { items: [{ ...items[0], name: 'renamed by another source' }] })).body;
     assert.equal(hijack.errors.length, 1);
-    assert.match(hijack.errors[0].error, /another integration/);
+    assert.match(hijack.errors[0].error, /may not report CIs for source system "vCenter"/);
+    const squat = (await az.post('/api/cis/upsert', { items: [{ source_system: 'VMware', source_id: 'x', name: 'x', ci_type: 'other' }] })).body;
+    assert.equal(squat.created, 0, 'an integration cannot claim a source system it was not allowed');
+    // A manager may correct another source's data, but only with a reason that is audited.
+    const plain = (await pm.post('/api/cis/upsert', { items: [{ ...items[0], name: 'db01-corrected' }] })).body;
+    assert.match(plain.errors[0].error, /override_reason/);
+    const fixed = (await pm.post('/api/cis/upsert', { items: [{ ...items[0], name: 'db01-corrected' }], override_reason: 'Wrong name in vCenter' })).body;
+    assert.equal(fixed.updated, 1);
+    const ref = (await pm.get('/api/cis?q=db01-corrected')).body[0].ref;
+    const log = (await admin.get(`/api/audit?entity_type=ci&entity_ref=${ref}`)).body;
+    assert.ok(log.some((e: any) => e.changes.override === true && e.changes.reason === 'Wrong name in vCenter'));
+    await pm.post('/api/cis/upsert', { items: [items[0]], override_reason: 'Restore' });
     assert.equal((await vc.get('/api/cis')).status, 403, 'integrations cannot read the CMDB');
   });
 

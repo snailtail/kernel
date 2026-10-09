@@ -86,6 +86,8 @@ export const upsertSchema = z.object({
     )
     .min(1)
     .max(1000),
+  /** Required when a person updates records another account reported; recorded in the audit trail. */
+  override_reason: z.string().trim().max(1000).optional(),
 });
 
 const SELECT_CI = `
@@ -354,12 +356,18 @@ export async function removeCiLink(user: User, ref: string, linkId: number) {
  */
 export async function upsertCis(user: User, input: z.infer<typeof upsertSchema>) {
   authorize(user, 'ci.ingest');
+  // Integrations are bound to the source systems an administrator allowed, so one cannot squat another's name.
+  const { rows: me } = await query('SELECT ci_source_systems FROM users WHERE id = $1', [user.id]);
+  const allowed = new Set<string>(me[0]?.ci_source_systems ?? []);
   let created = 0, updated = 0, unchanged = 0;
   const errors: { source_id: string; error: string }[] = [];
   await tx(async (db) => {
     for (const item of input.items) {
       await db.query('SAVEPOINT item');
       try {
+        if (user.role === 'integration' && !allowed.has(item.source_system)) {
+          throw forbidden(`This account may not report CIs for source system "${item.source_system}". An administrator can allow it under Users.`);
+        }
         const t = await typeInfo(db, item.ci_type);
         const attrs = cleanAttributes(t.attributes, item.attributes);
         const { rows: existing } = await db.query(
@@ -368,7 +376,9 @@ export async function upsertCis(user: User, input: z.infer<typeof upsertSchema>)
         );
         if (existing[0]) {
           const c = existing[0];
-          if (user.role === 'integration' && c.created_by !== user.id) throw forbidden('This source record belongs to another integration');
+          const override = c.created_by !== user.id;
+          if (override && user.role === 'integration') throw forbidden('This source record belongs to another integration');
+          if (override && !input.override_reason) throw forbidden('This source record was reported by another account; give override_reason to update it');
           const next: Record<string, unknown> = { name: item.name, environment: item.environment ?? c.environment, attributes: { ...c.attributes, ...attrs } };
           if (item.status) next.status = item.status;
           if (item.team !== undefined) next.team = item.team;
@@ -380,7 +390,10 @@ export async function upsertCis(user: User, input: z.infer<typeof upsertSchema>)
               `UPDATE configuration_items SET ${changed.map(([k], i) => `${k} = $${i + 2}`).join(', ')}${c.status === 'missing' && !item.status ? ", status = 'active'" : ''} WHERE id = $1`,
               [c.id, ...changed.map(([k, v]) => (k === 'attributes' ? JSON.stringify(v) : v))],
             );
-            await logCi(db, c.id, user.id, 'source', `Updated from ${item.source_system}`, Object.fromEntries(changed.map(([k, v]) => [k, { from: c[k] ?? null, to: v }])));
+            await logCi(db, c.id, user.id, 'source', override ? `Overrode ${item.source_system} data: ${input.override_reason}` : `Updated from ${item.source_system}`, {
+              ...Object.fromEntries(changed.map(([k, v]) => [k, { from: c[k] ?? null, to: v }])),
+              ...(override ? { override: true, reason: input.override_reason } : {}),
+            });
             updated++;
           } else unchanged++;
         } else {

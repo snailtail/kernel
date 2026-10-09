@@ -15,6 +15,7 @@ interface AdminUser {
   email: string;
   role: Role;
   active: boolean;
+  ci_source_systems: string[];
   created_at: string;
 }
 
@@ -82,6 +83,7 @@ function UserModal({ user, self, roles, onClose, onDone }: { user: AdminUser | n
     email: user?.email ?? '',
     role: user?.role ?? ('analyst' as Role),
     active: user?.active ?? true,
+    sources: (user?.ci_source_systems ?? []).join(', '),
     password: '',
   });
   const [error, setError] = useState<string | null>(null);
@@ -89,15 +91,19 @@ function UserModal({ user, self, roles, onClose, onDone }: { user: AdminUser | n
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
+    const ci_source_systems = form.role === 'integration' ? form.sources.split(',').map((s) => s.trim()).filter(Boolean) : user?.ci_source_systems ?? [];
     try {
       if (user) {
-        const { username: _, password, ...fields } = form;
-        const sensitive = !self && (password || fields.role !== user.role || fields.active !== user.active);
-        const reason = sensitive ? await askReason(`Change ${user.username}`, "Changing someone's role, status or password needs a reason.", { confirmLabel: 'Save change' }) : undefined;
+        const { username: _, password, sources: __, ...rest } = form;
+        const fields = { ...rest, ci_source_systems };
+        const sourcesChanged = JSON.stringify(ci_source_systems) !== JSON.stringify(user.ci_source_systems);
+        const sensitive = !self && (password || sourcesChanged || fields.role !== user.role || fields.active !== user.active);
+        const reason = sensitive ? await askReason(`Change ${user.username}`, "Changing someone's role, status, password or CI sources needs a reason.", { confirmLabel: 'Save change' }) : undefined;
         if (sensitive && !reason) return;
         await api.patch(`/api/users/${user.id}`, { ...(password ? { ...fields, password } : fields), reason });
       } else {
-        await api.post('/api/users', form);
+        const { sources: _, ...rest } = form;
+        await api.post('/api/users', { ...rest, ci_source_systems });
       }
       onDone();
     } catch (err) {
@@ -116,6 +122,12 @@ function UserModal({ user, self, roles, onClose, onDone }: { user: AdminUser | n
             {roles.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
           </select>
         </label>
+        {form.role === 'integration' && (
+          <label className="full">CI source systems
+            <input placeholder="vCenter, Azure" value={form.sources} onChange={(e) => setForm({ ...form, sources: e.target.value })} />
+            <span className="muted small">The source systems this account may report CIs for, exactly as it names them. Empty means none.</span>
+          </label>
+        )}
         <label className="full">{user ? 'New password (leave empty to keep)' : 'Password'}
           <input type="password" autoComplete="new-password" required={!user} minLength={12} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
         </label>

@@ -350,7 +350,7 @@ function buildServer(user: User, scopes?: string[]) {
   tool(
     'upsert_cis',
     'Report CIs from a source system (inventory, monitoring, cloud). Matched by source_system + source_id; new ones are created. Idempotent.',
-    { items: cmdb.upsertSchema.shape.items },
+    { items: cmdb.upsertSchema.shape.items, override_reason: z.string().optional().describe('Only when updating records another account reported; recorded in the audit trail') },
     false,
     async (args) => cmdb.upsertCis(user, cmdb.upsertSchema.parse(args)),
   );
