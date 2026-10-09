@@ -18,6 +18,7 @@ import { authRoutes } from './routes/auth.js';
 import { integrationRoutes } from './routes/integrations.js';
 import { cmdbRoutes } from './routes/cmdb.js';
 import { incidentRoutes } from './routes/incidents.js';
+import { eventRoutes } from './routes/events.js';
 import { problemRoutes } from './routes/problems.js';
 
 declare module 'fastify' {
@@ -60,7 +61,8 @@ export async function buildApp(options: { logLevel?: string; serveWeb?: boolean 
   });
 
   app.addHook('onRequest', async (req) => {
-    if (req.url.startsWith('/api/') || req.url.startsWith('/mcp')) await authenticate(req);
+    // Event hooks authenticate with their own source token (event-hooks.ts), never as a user.
+    if ((req.url.startsWith('/api/') && !req.url.startsWith('/api/event-hooks/')) || req.url.startsWith('/mcp')) await authenticate(req);
   });
   // Who is acting and how, for the audit trail; the rest of the request runs inside this context.
   app.addHook('onRequest', (req, _reply, done) => {
@@ -93,6 +95,7 @@ export async function buildApp(options: { logLevel?: string; serveWeb?: boolean 
   await app.register(integrationRoutes);
   await app.register(cmdbRoutes);
   await app.register(incidentRoutes);
+  await app.register(eventRoutes);
   await app.register(mcpRoutes);
 
   app.get('/api/openapi.json', async (req) => openApiDocument(config.publicUrl ?? `${req.protocol}://${req.host}`));

@@ -6,7 +6,7 @@ import { formatDate, LEVEL_LABEL, relativeTime } from '../format';
 import { useApi } from '../hooks';
 import { canEdit, isManager, useSession } from '../session';
 
-interface CandidateRecord { id: number | null; incident_ref: string | null; system: string; kind: 'incident' | 'event'; reference: string; summary: string; category: string; occurred_at: string }
+interface CandidateRecord { id: number | null; incident_ref: string | null; alert_id: number | null; system: string; kind: 'incident' | 'event'; reference: string; summary: string; category: string; occurred_at: string }
 interface Candidate { service: string; ci_ref: string | null; ci_class: string | null; count: number; incidents: number; events: number; first_at: string; last_at: string; records: CandidateRecord[] }
 interface Candidates { rule: { min_records: number; window_days: number }; candidates: Candidate[] }
 
@@ -14,6 +14,7 @@ interface Candidates { rule: { min_records: number; window_days: number }; candi
 const ids = (c: Candidate) => ({
   record_ids: c.records.filter((r) => r.id !== null).map((r) => r.id as number),
   incident_refs: c.records.filter((r) => r.incident_ref).map((r) => r.incident_ref as string),
+  alert_ids: c.records.filter((r) => r.alert_id).map((r) => r.alert_id as number),
 });
 
 export function CandidatesPage() {
@@ -68,7 +69,7 @@ export function CandidatesPage() {
             </header>
             <ul className="record-list">
               {c.records.slice(0, 8).map((r) => (
-                <li key={r.id ?? r.incident_ref}>
+                <li key={r.id ?? r.incident_ref ?? `a${r.alert_id}`}>
                   <span className={`kind kind-${r.kind}`}>{r.kind}</span>
                   {r.incident_ref ? <Link to={`/incidents/${r.incident_ref}`} className="mono">{r.reference}</Link> : <span className="mono">{r.reference}</span>}
                   <span className="record-summary">{r.summary}</span>

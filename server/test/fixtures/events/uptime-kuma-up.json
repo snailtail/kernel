@@ -1,0 +1,5 @@
+{
+  "heartbeat": { "monitorID": 3, "status": 1, "time": "{{NOW_KUMA}}", "msg": "200 - OK", "important": true, "duration": 120 },
+  "monitor": { "id": 3, "name": "Webshop", "url": "https://shop.example.com/health", "hostname": null, "type": "http", "interval": 60 },
+  "msg": "[Webshop] [✅ Up] 200 - OK"
+}

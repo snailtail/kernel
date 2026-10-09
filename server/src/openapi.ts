@@ -6,6 +6,8 @@ import * as cmdb from './cmdb.js';
 import * as graph from './cmdb-graph.js';
 import * as problemCis from './problem-cis.js';
 import * as inc from './incidents.js';
+import * as events from './events.js';
+import * as hooks from './event-hooks.js';
 import { auditQuerySchema } from './audit.js';
 import { searchSchema } from './generic.js';
 import * as analyses from './analyses.js';
@@ -113,6 +115,23 @@ export const OPERATIONS: Op[] = [
   { method: 'post', path: '/api/cis/:ref/comments', tag: 'CMDB', summary: 'Add a note', body: z.object({ body: z.string() }) },
   { method: 'post', path: '/api/cis/:ref/links', tag: 'CMDB', summary: 'Link a problem, incident, event, change or document', body: cmdb.ciLinkSchema },
   { method: 'delete', path: '/api/cis/:ref/links/:id', tag: 'CMDB', summary: 'Remove a link' },
+  { method: 'post', path: '/api/events', tag: 'Events', summary: 'Report normalised events (token with ingest scope, or a session); deduplicated into alerts', body: events.reportEventsSchema },
+  { method: 'post', path: '/api/event-hooks/:id', tag: 'Events', summary: "Inbound webhook for a configured event source (Alertmanager, Uptime Kuma, Azure Monitor, OP5, generic). Authenticate with the source token (Authorization: Bearer, X-Kernel-Token, or ?token=); a signed generic source also needs Standard Webhooks headers" },
+  { method: 'get', path: '/api/alerts', tag: 'Events', summary: 'Alerts (open by default), most severe first', query: events.listAlertsSchema },
+  { method: 'get', path: '/api/alerts/:id', tag: 'Events', summary: 'An alert with its recent events' },
+  { method: 'post', path: '/api/alerts/:id/ack', tag: 'Events', summary: 'Acknowledge an alert' },
+  { method: 'get', path: '/api/event-rules', tag: 'Events', summary: 'Rules that open or group incidents from alerts' },
+  { method: 'post', path: '/api/event-rules', tag: 'Events', summary: 'Create a rule (problem managers)', body: events.ruleSchema },
+  { method: 'put', path: '/api/event-rules/:id', tag: 'Events', summary: 'Update a rule', body: events.ruleSchema },
+  { method: 'delete', path: '/api/event-rules/:id', tag: 'Events', summary: 'Delete a rule' },
+  { method: 'get', path: '/api/maintenance-windows', tag: 'Events', summary: 'Current and upcoming maintenance windows (alerts on those CIs are suppressed)' },
+  { method: 'post', path: '/api/maintenance-windows', tag: 'Events', summary: 'Schedule a maintenance window on a CI', body: events.maintenanceSchema },
+  { method: 'delete', path: '/api/maintenance-windows/:id', tag: 'Events', summary: 'Remove a maintenance window' },
+  { method: 'get', path: '/api/event-sources', tag: 'Events', summary: 'Inbound event sources (administrators)' },
+  { method: 'post', path: '/api/event-sources', tag: 'Events', summary: 'Create a source; returns its URL, token and optional signing secret once', body: hooks.sourceSchema },
+  { method: 'post', path: '/api/event-sources/:id/rotate', tag: 'Events', summary: "Rotate a source's token" },
+  { method: 'patch', path: '/api/event-sources/:id', tag: 'Events', summary: 'Enable/disable a source or change its CMDB source system' },
+  { method: 'delete', path: '/api/event-sources/:id', tag: 'Events', summary: 'Delete a source' },
   { method: 'get', path: '/api/incidents', tag: 'Incidents', summary: 'List incidents (open by default)', query: inc.listIncidentsSchema },
   { method: 'post', path: '/api/incidents', tag: 'Incidents', summary: 'Log an incident (optionally with affected CIs); supports Idempotency-Key', body: inc.createIncidentSchema },
   { method: 'get', path: '/api/incidents/:ref', tag: 'Incidents', summary: 'An incident with affected CIs and services, known errors with workarounds, activity and next steps' },

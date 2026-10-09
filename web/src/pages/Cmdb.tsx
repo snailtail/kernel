@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { api, type User } from '../api';
 import { GroupsPage, ImpactSection, RelationshipsSection, type Relationship } from '../components/CmdbGraph';
 import { Markdown } from '../components/Markdown';
+import { SeverityBadge } from '../components/Badges';
 import { Modal } from '../components/Modal';
 import { formatDate, relativeTime } from '../format';
 import { useApi } from '../hooks';
@@ -19,7 +20,7 @@ export interface Ci {
   source_systems: string[] | null; url: string;
 }
 interface CiProblem { ref: string; title: string; status: string; priority: number; workaround?: string; workaround_effectiveness?: string | null; ec_decision?: string | null }
-interface CiDetail extends Ci { problems: CiProblem[]; known_errors: CiProblem[]; recent_records: { system: string; kind: string; reference: string; summary: string; occurred_at: string; linked: boolean }[]; sources: Source[]; links: CiLink[]; activity: CiActivity[]; relationships: Relationship[]; groups: { id: number; name: string; purpose: string; membership: string }[] }
+interface CiDetail extends Ci { alerts: { id: number; source: string; check_key: string; severity: string; status: string; count: number; flap_count: number; last_seen: string; suppressed: string; incident_ref: string | null }[]; maintenance_windows: { id: number; starts_at: string; ends_at: string; reason: string }[]; incidents: { ref: string; title: string; status: string; priority: number }[]; problems: CiProblem[]; known_errors: CiProblem[]; recent_records: { system: string; kind: string; reference: string; summary: string; occurred_at: string; linked: boolean }[]; sources: Source[]; links: CiLink[]; activity: CiActivity[]; relationships: Relationship[]; groups: { id: number; name: string; purpose: string; membership: string }[] }
 
 const STATUSES = ['planned', 'active', 'maintenance', 'retired', 'missing'];
 const CRITICALITY: Record<number, string> = { 1: 'Business critical', 2: 'High', 3: 'Medium', 4: 'Low' };
@@ -190,6 +191,23 @@ export function CiPage() {
                   ))}
                 </ul>
               )}
+            </section>
+          )}
+          {(ci.alerts.length > 0 || ci.incidents.length > 0) && (
+            <section className="card">
+              <h2>Alerts &amp; incidents</h2>
+              {ci.maintenance_windows.map((w) => <p key={w.id} className="hint-box">Maintenance {formatDate(w.starts_at)} – {formatDate(w.ends_at)}{w.reason && `: ${w.reason}`}. Alerts are suppressed.</p>)}
+              <ul className="work-list">
+                {ci.incidents.map((i) => (
+                  <li key={i.ref}><div><Link to={`/incidents/${i.ref}`} className="mono">{i.ref}</Link> {i.title}</div><span className="work-meta"><span className="tag">P{i.priority}</span><span className="muted small">{i.status.replace('_', ' ')}</span></span></li>
+                ))}
+                {ci.alerts.map((a) => (
+                  <li key={`a${a.id}`}>
+                    <div><SeverityBadge severity={a.status === 'closed' ? 'clear' : a.severity} /> <span className="mono small">{a.check_key}</span> <span className="muted small">{a.source} ×{a.count}{a.suppressed ? ' · suppressed' : ''}</span></div>
+                    <span className="work-meta">{a.incident_ref && <Link to={`/incidents/${a.incident_ref}`} className="mono small">{a.incident_ref}</Link>}<span className="muted small">{relativeTime(a.last_seen)}</span></span>
+                  </li>
+                ))}
+              </ul>
             </section>
           )}
           <ImpactSection key={ci.ref} ciRef={ci.ref} isService={ci.class === 'service'} />

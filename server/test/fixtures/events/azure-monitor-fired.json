@@ -1,0 +1,21 @@
+{
+  "schemaId": "azureMonitorCommonAlertSchema",
+  "data": {
+    "essentials": {
+      "alertId": "/subscriptions/0000/providers/Microsoft.AlertsManagement/alerts/b9569717-bc32-442f-add5-83a997729330",
+      "alertRule": "High CPU on sql-prod",
+      "severity": "Sev1",
+      "signalType": "Metric",
+      "monitorCondition": "Fired",
+      "monitoringService": "Platform",
+      "alertTargetIDs": ["/subscriptions/0000/resourceGroups/prod/providers/Microsoft.Sql/servers/sql-prod"],
+      "configurationItems": ["sql-prod"],
+      "originAlertId": "0000_prod_microsoft.sql_servers_sql-prod",
+      "firedDateTime": "{{NOW}}",
+      "description": "CPU above 90% for 15 minutes",
+      "essentialsVersion": "1.0",
+      "alertContextVersion": "1.0"
+    },
+    "alertContext": { "conditionType": "SingleResourceMultipleMetricCriteria" }
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "heartbeat": { "monitorID": 3, "status": 0, "time": "{{NOW_KUMA}}", "msg": "Request failed with status code 503", "important": true, "duration": 60 },
+  "monitor": { "id": 3, "name": "Webshop", "url": "https://shop.example.com/health", "hostname": null, "type": "http", "interval": 60 },
+  "msg": "[Webshop] [🔴 Down] Request failed with status code 503"
+}

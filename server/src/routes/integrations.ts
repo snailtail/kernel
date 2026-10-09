@@ -34,12 +34,12 @@ export async function integrationRoutes(app: FastifyInstance) {
   });
   app.post('/api/candidates/link', async (req) => {
     const body = { ...integrations.candidateActionSchema.parse(req.body), ref: z.string().parse((req.body as any)?.ref) };
-    return integrations.linkCandidate(requireUser(req), body.ref, body.record_ids, body.incident_refs);
+    return integrations.linkCandidate(requireUser(req), body.ref, body.record_ids, body.incident_refs, body.alert_ids);
   });
   app.post('/api/candidates/dismiss', async (req) =>
     {
       const body = integrations.candidateActionSchema.parse(req.body);
-      return integrations.dismissRecords(requireUser(req), body.record_ids, body.incident_refs);
+      return integrations.dismissRecords(requireUser(req), body.record_ids, body.incident_refs, body.alert_ids);
     },
   );
 }

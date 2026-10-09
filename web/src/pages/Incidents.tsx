@@ -9,6 +9,7 @@ import { Modal } from '../components/Modal';
 import { formatDate, relativeTime } from '../format';
 import { useApi } from '../hooks';
 import { useSession } from '../session';
+import { SeverityBadge } from '../components/Badges';
 
 type IncidentStatus = 'new' | 'in_progress' | 'on_hold' | 'resolved' | 'closed';
 interface IncidentRow {
@@ -22,6 +23,7 @@ interface Incident extends IncidentRow {
   affected_cis: AffectedCi[]; affected_services: AffectedService[]; impact_hint: ImpactHint | null; impact_incomplete: boolean;
   known_errors: { ref: string; title: string; workaround: string; workaround_effectiveness: string | null; ci_ref: string; ci_name: string }[];
   links: { id: number; kind: string; reference: string; system: string; url: string }[];
+  alerts: { id: number; source: string; check_key: string; severity: string; status: string; count: number; flap_count: number; last_seen: string; ci_hint: string; ci_ref: string | null; ci_name: string | null; source_url: string }[];
   activity: { id: number; kind: string; body: string; data: any; channel: string; created_at: string; user_name: string | null }[];
   next_steps: { phase: string; purpose: string; next: string; steps: { id: string; label: string; hint: string; done: boolean }[] };
 }
@@ -282,6 +284,19 @@ export function IncidentPage() {
               </div>
             )}
           </section>
+          {i.alerts.length > 0 && (
+            <section className="card">
+              <h2>Alerts <span className="count">{i.alerts.filter((a) => a.status === 'open').length} open of {i.alerts.length}</span></h2>
+              <ul className="plain-list alert-list">
+                {i.alerts.map((a) => (
+                  <li key={a.id}>
+                    <SeverityBadge severity={a.status === 'closed' ? 'clear' : a.severity} /> <span className="mono small">{a.check_key}</span>
+                    <div className="muted small">{a.ci_ref ? <Link to={`/cis/${a.ci_ref}`}>{a.ci_name}</Link> : a.ci_hint} · {a.source} · ×{a.count}{a.flap_count ? ` · flapped ${a.flap_count}×` : ''} · {relativeTime(a.last_seen)}</div>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
           {i.links.length > 0 && (
             <section className="card">
               <h2>Linked records</h2>

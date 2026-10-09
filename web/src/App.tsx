@@ -1,31 +1,36 @@
-import { useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { CommandPalette, ShortcutHelp, useShortcuts } from './components/CommandPalette';
 import { MyWorkPage } from './pages/MyWork';
 import { IncidentPage, IncidentsPage } from './pages/Incidents';
-import { CiGroupsPage, CiPage, CmdbListPage } from './pages/Cmdb';
 import { Navigate, NavLink, Route, Routes } from 'react-router';
 import { api, type Meta, type Preferences, type User } from './api';
 import { icons } from './components/Icons';
 import { ROLE_LABEL } from './format';
 import { ActionsPage } from './pages/Actions';
-import { AdminPage } from './pages/Admin';
-import { ApiDocsPage } from './pages/ApiDocs';
 import { CandidatesPage } from './pages/Candidates';
 import { DashboardPage } from './pages/Dashboard';
-import { GuidePage } from './pages/Guide';
 import { KedbPage } from './pages/Kedb';
 import { ChangeInitialPassword, EnrollTwoFactor, LoginPage } from './pages/Login';
 import { ReauthPrompt } from './components/Reauth';
 import { AskHost } from './components/Ask';
-import { AuditPage } from './pages/Audit';
 import { NewProblemPage } from './pages/NewProblem';
 import { ProblemPage } from './pages/Problem';
 import { ProblemsPage } from './pages/Problems';
-import { ProblemPrintPage } from './pages/ProblemPrint';
-import { ReportsPage } from './pages/Reports';
-import { ReviewPage } from './pages/Review';
-import { SettingsPage } from './pages/Settings';
 import { SessionContext, canEdit, isManager } from './session';
+
+// Pages people open less often load on demand, so the start page stays small.
+const EventsPage = lazy(() => import('./pages/Events').then((m) => ({ default: m.EventsPage })));
+const CiGroupsPage = lazy(() => import('./pages/Cmdb').then((m) => ({ default: m.CiGroupsPage })));
+const CiPage = lazy(() => import('./pages/Cmdb').then((m) => ({ default: m.CiPage })));
+const CmdbListPage = lazy(() => import('./pages/Cmdb').then((m) => ({ default: m.CmdbListPage })));
+const AdminPage = lazy(() => import('./pages/Admin').then((m) => ({ default: m.AdminPage })));
+const ApiDocsPage = lazy(() => import('./pages/ApiDocs').then((m) => ({ default: m.ApiDocsPage })));
+const GuidePage = lazy(() => import('./pages/Guide').then((m) => ({ default: m.GuidePage })));
+const AuditPage = lazy(() => import('./pages/Audit').then((m) => ({ default: m.AuditPage })));
+const ProblemPrintPage = lazy(() => import('./pages/ProblemPrint').then((m) => ({ default: m.ProblemPrintPage })));
+const ReportsPage = lazy(() => import('./pages/Reports').then((m) => ({ default: m.ReportsPage })));
+const ReviewPage = lazy(() => import('./pages/Review').then((m) => ({ default: m.ReviewPage })));
+const SettingsPage = lazy(() => import('./pages/Settings').then((m) => ({ default: m.SettingsPage })));
 
 export function App() {
   const [user, setUser] = useState<User | null | undefined>(undefined);
@@ -107,6 +112,7 @@ export function App() {
           <nav>
             <NavLink to="/" end>{icons.actions}My work</NavLink>
             <NavLink to="/dashboard">{icons.dashboard}Dashboard</NavLink>
+            <NavLink to="/events">{icons.events}Events</NavLink>
             <NavLink to="/incidents">{icons.incidents}Incidents</NavLink>
             <NavLink to="/problems" end>{icons.problems}Problems</NavLink>
             <NavLink to="/candidates">{icons.candidates}Candidates</NavLink>
@@ -131,6 +137,7 @@ export function App() {
           </div>
         </aside>
         <main className="main">
+          <Suspense fallback={<p className="muted">Loading…</p>}>
           <Routes>
             <Route path="/" element={<MyWorkPage />} />
             <Route path="/dashboard" element={<DashboardPage />} />
@@ -140,6 +147,7 @@ export function App() {
             <Route path="/problems/:ref/print" element={<ProblemPrintPage />} />
             <Route path="/candidates" element={<CandidatesPage />} />
             <Route path="/kedb" element={<KedbPage />} />
+            <Route path="/events" element={<EventsPage />} />
             <Route path="/incidents" element={<IncidentsPage />} />
             <Route path="/incidents/:ref" element={<IncidentPage />} />
             <Route path="/cis" element={<CmdbListPage />} />
@@ -155,6 +163,7 @@ export function App() {
             <Route path="/api-docs" element={<ApiDocsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
+          </Suspense>
         </main>
       </div>
     </SessionContext.Provider>

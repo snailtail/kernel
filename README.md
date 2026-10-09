@@ -114,6 +114,25 @@ incidents feed the problem candidates per CI, and reports show MTTA, MTTR, reope
 Viewers stay strictly read-only (auditors, stakeholders): end users report incidents through the service desk or,
 later, the self-service portal (#45), not with a viewer account.
 
+**Events from monitoring**: create an event source under Events → Sources (administrators). Each source gets its
+own URL (`/api/event-hooks/<id>`) and token, shown once. Events are deduplicated into alerts per source, CI and check;
+a clear closes the alert, flapping reopens the same alert, and replayed or out-of-order events never move an alert
+backwards. Event rules (allowlisted conditions: severity, source, check, CI type, environment, criticality, repeat
+count) open incidents, grouped per service, CI or rule and capped per hour, so an alert storm becomes one incident.
+Incidents can auto-resolve once all their alerts stayed clear for a hold-down period. Maintenance windows on a CI,
+a service (with what it depends on) or a CI group suppress alerts. Raw events are kept 14 days, daily counts longer;
+payloads are never stored. Alerts that never became incidents feed the problem candidates.
+
+| Tool | Source kind | Setup |
+|---|---|---|
+| Prometheus Alertmanager | `alertmanager` | `webhook_configs: - url: https://kernel…/api/event-hooks/<id>` with `http_config: authorization: { credentials: <token> }` |
+| Uptime Kuma | `uptime_kuma` | Notification type Webhook, body "Preset – application/json", Additional Headers `{"Authorization": "Bearer <token>"}` |
+| Azure Monitor | `azure_monitor` | Action group → Webhook with the common alert schema enabled, URL `…/api/event-hooks/<id>?token=<token>`; set the source's CMDB source system to the one your Azure CIs use (resource ids) |
+| OP5 / Naemon | `op5` | A notification command that posts `{"host_name","service_description","state","output","notification_type","timestamp"}` with `X-Kernel-Token` |
+| Anything else | `generic` | `{"events": [{"check","severity","host" or "ci","message","occurred_at"}]}`; optionally signed (Standard Webhooks) |
+
+Scripts and agents can also report events with a token (`POST /api/events`) or the MCP tool `report_event`.
+
 **Follow-up actions** track work that follows from a problem (vendor fixes, monitoring, runbook updates, review
 outcomes) with an owner and due date.
 

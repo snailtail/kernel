@@ -4,18 +4,21 @@ import { ecsFormat } from '@elastic/ecs-pino-format';
 import pino, { type DestinationStream, type Logger } from 'pino';
 import { minimiseData } from './minimise.js';
 
+/** Query-string secrets (event hook tokens) never reach the logs. */
+export const redactUrl = (url?: string) => url?.replace(/([?&](?:token|access_token|key)=)[^&]*/gi, '$1[REDACTED]');
+
 const FORMAT = () => process.env.KERNEL_LOG_FORMAT ?? 'json';
 
 // Never log credentials: session cookies, bearer tokens (API/MCP) or Set-Cookie, wherever they appear.
 const REDACT = [
-  'req.headers.cookie', 'req.headers.authorization', 'res.headers["set-cookie"]', 'headers.cookie', 'headers.authorization',
+  'req.headers.cookie', 'req.headers.authorization', 'req.headers["x-kernel-token"]', 'res.headers["set-cookie"]', 'headers.cookie', 'headers.authorization',
   'http.request.headers.cookie', 'http.request.headers.authorization', 'http.response.headers["set-cookie"]',
   'password', '*.password', 'token', '*.token', 'secret', '*.secret',
 ];
 
 // Only safe request/response fields, in ECS shape. Headers are deliberately left out.
 const serializers = {
-  req: (req: any) => ({ method: req.method, url: req.url, remoteAddress: req.ip ?? req.socket?.remoteAddress }),
+  req: (req: any) => ({ method: req.method, url: redactUrl(req.url), remoteAddress: req.ip ?? req.socket?.remoteAddress }),
   res: (res: any) => ({ statusCode: res.statusCode }),
 };
 

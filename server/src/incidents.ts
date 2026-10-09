@@ -75,7 +75,7 @@ const SELECT_INCIDENT = `
   SELECT i.*, c.name AS category, a.display_name AS assignee, p.ref AS problem_ref, p.title AS problem_title, p.status AS problem_status
   FROM incidents i LEFT JOIN categories c ON c.id = i.category_id LEFT JOIN users a ON a.id = i.assignee_id LEFT JOIN problems p ON p.id = i.problem_id`;
 
-const sourceOf = () => ({ mcp: 'mcp', api: 'api' })[currentContext().channel as 'mcp' | 'api'] ?? 'user';
+const sourceOf = (): 'mcp' | 'api' | 'user' => ({ mcp: 'mcp' as const, api: 'api' as const })[currentContext().channel as 'mcp' | 'api'] ?? 'user';
 
 export async function logIncident(db: Db, incidentId: number, userId: number | null, kind: string, body = '', data: object = {}) {
   await db.query('INSERT INTO incident_activity (incident_id, user_id, kind, body, data, channel) VALUES ($1, $2, $3, $4, $5, $6)', [
@@ -142,7 +142,7 @@ export async function getIncident(user: User, ref: string) {
   const { rows } = await query(`${SELECT_INCIDENT} WHERE i.ref = $1`, [ref.toUpperCase()]);
   const i = rows[0];
   if (!i) throw notFound(`Incident ${ref} not found`);
-  const [cis, activity, links, knownErrors] = await Promise.all([
+  const [cis, activity, links, knownErrors, alerts] = await Promise.all([
     query(
       `SELECT c.id, c.ref, c.name, c.class, c.ci_type, t.label AS type_label, c.status, c.environment, c.criticality
        FROM incident_cis x JOIN configuration_items c ON c.id = x.ci_id JOIN ci_types t ON t.name = c.ci_type
@@ -163,9 +163,16 @@ export async function getIncident(user: User, ref: string) {
        WHERE x.incident_id = $1 AND p.status = 'known_error' ORDER BY p.id LIMIT 10`,
       [i.id],
     ),
+    // Monitoring alerts grouped into this incident (#30).
+    query(
+      `SELECT a.id, a.source, a.check_key, a.severity, a.status, a.count, a.flap_count, a.first_seen, a.last_seen, a.cleared_at, a.ci_hint,
+              a.message, a.source_url, c.ref AS ci_ref, c.name AS ci_name
+       FROM alerts a LEFT JOIN configuration_items c ON c.id = a.ci_id WHERE a.incident_id = $1 ORDER BY a.status, a.last_seen DESC LIMIT 200`,
+      [i.id],
+    ),
   ]);
   const affected = await affectedFrom(cis.rows, i.impact);
-  const detail = { ...i, ...affected, activity: activity.rows, links: links.rows, known_errors: knownErrors.rows };
+  const detail = { ...i, ...affected, activity: activity.rows, links: links.rows, known_errors: knownErrors.rows, alerts: alerts.rows };
   return { type: 'incident', ...detail, url: incidentUrl(i.ref), next_steps: incidentGuidance(detail) };
 }
 
@@ -196,20 +203,36 @@ export async function createIncident(user: User, input: z.infer<typeof createInc
   const { cis, ...fields } = input;
   const ref = await tx(async (db) => {
     await validateRefs(db, fields);
-    const cols = Object.keys(fields);
-    const { rows } = await db.query(
-      `INSERT INTO incidents (${[...cols, 'source', 'created_by'].join(', ')})
-       VALUES (${[...cols, 'source', 'created_by'].map((_, n) => `$${n + 1}`).join(', ')}) RETURNING id, ref`,
-      [...Object.values(fields), source ?? sourceOf(), user.id],
-    );
-    for (const ciRef of cis ?? []) {
-      const ci = await loadCi(db, ciRef);
-      await db.query('INSERT INTO incident_cis (incident_id, ci_id, added_by) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [rows[0].id, ci.id, user.id]);
-    }
-    await logIncident(db, rows[0].id, user.id, 'created', `Incident ${rows[0].ref} logged`, { title: fields.title, cis: cis ?? [] });
-    return rows[0].ref as string;
+    const ciIds: number[] = [];
+    for (const ciRef of cis ?? []) ciIds.push((await loadCi(db, ciRef)).id);
+    return (await insertIncident(db, user.id, fields, ciIds, source ?? sourceOf())).ref;
   });
   return getIncident(user, ref);
+}
+
+/**
+ * The insert itself, in the caller's transaction. Event rules (#30) call it as the system (actorId null) after
+ * their own checks; everyone else goes through createIncident, which authorises.
+ */
+export async function insertIncident(
+  db: Db,
+  actorId: number | null,
+  fields: Omit<z.infer<typeof createIncidentSchema>, 'cis'>,
+  ciIds: number[],
+  source: 'user' | 'api' | 'mcp' | 'event',
+  extra: { event_rule_id?: number; event_group_key?: string } = {},
+) {
+  const values: Record<string, unknown> = { ...fields, ...extra, source, created_by: actorId };
+  const cols = Object.keys(values).filter((k) => values[k] !== undefined);
+  const { rows } = await db.query(
+    `INSERT INTO incidents (${cols.join(', ')}) VALUES (${cols.map((_, n) => `$${n + 1}`).join(', ')}) RETURNING id, ref`,
+    cols.map((k) => values[k]),
+  );
+  for (const id of ciIds) {
+    await db.query('INSERT INTO incident_cis (incident_id, ci_id, added_by) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [rows[0].id, id, actorId]);
+  }
+  await logIncident(db, rows[0].id, actorId, 'created', `Incident ${rows[0].ref} logged${source === 'event' ? ' from monitoring' : ''}`, { title: fields.title, ci_ids: ciIds, source });
+  return rows[0] as { id: number; ref: string };
 }
 
 export async function updateIncident(user: User, ref: string, { base, ...input }: z.infer<typeof updateIncidentSchema>) {

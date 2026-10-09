@@ -7,6 +7,7 @@ import { bootstrapAdmin } from './auth.js';
 import { config } from './config.js';
 import { migrate, pool, query, waitForDb } from './db.js';
 import { encryptLegacySecrets, startWorker } from './webhooks.js';
+import { startEventWorker } from './events.js';
 
 const app = await buildApp();
 const log = (msg: string) => app.log.info(msg);
@@ -19,6 +20,7 @@ await encryptLegacySecrets(log);
 setInterval(() => query('DELETE FROM sessions WHERE expires_at < now()').catch(() => {}), 3600_000).unref();
 asSystem(() => {
   startWorker(log);
+  startEventWorker(log);
   startChainVerification((msg) => app.log.error(msg));
   setInterval(() => pruneIdempotencyKeys().catch(() => {}), 3600_000).unref();
 });

@@ -1,0 +1,1 @@
+{ "host_name": "mail01", "service_description": "SMTP queue", "state": "OK", "output": "OK - 3 messages in queue", "notification_type": "RECOVERY", "timestamp": {{NOW_UNIX}}, "host_address": "10.0.4.12" }

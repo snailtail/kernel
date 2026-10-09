@@ -22,7 +22,18 @@ if (enabled && process.env.OTEL_SDK_DISABLED !== 'true') {
     traceExporter: new OTLPTraceExporter(),
     metricReaders: [new PeriodicExportingMetricReader({ exporter: new OTLPMetricExporter(), exportIntervalMillis: 30_000 })],
     instrumentations: [
-      new HttpInstrumentation({ ignoreIncomingRequestHook: (req) => req.url === '/healthz' }),
+      new HttpInstrumentation({
+        ignoreIncomingRequestHook: (req) => req.url === '/healthz',
+        // Event hook tokens may be in the query string: never export them in spans.
+        requestHook: (span, req) => {
+          const url = 'url' in req ? req.url : undefined;
+          if (url && /[?&](token|access_token|key)=/i.test(url)) {
+            const clean = url.replace(/([?&](?:token|access_token|key)=)[^&]*/gi, '$1[REDACTED]');
+            span.setAttribute('http.target', clean);
+            span.setAttribute('url.query', clean.split('?')[1] ?? '');
+          }
+        },
+      }),
       new FastifyInstrumentation(),
       new PgInstrumentation({ enhancedDatabaseReporting: false }),
     ],

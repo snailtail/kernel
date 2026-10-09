@@ -883,3 +883,26 @@ td.attention { color: var(--warn); font-weight: 600; }
 .activity li.communication { border-left: 3px solid var(--accent); padding-left: 10px; }
 dd.attention { color: var(--warn); }
 .details dd select { width: 100%; }
+
+/* Events (#30) */
+.badge.sev { text-transform: capitalize; }
+.sev-critical { background: var(--danger-soft); color: var(--danger); }
+.sev-major { background: var(--s-known-bg); color: var(--warn); }
+.sev-minor { background: var(--s-known-bg); color: var(--s-known); }
+.sev-warning { background: var(--s-new-bg); color: var(--warn); }
+.sev-info { background: var(--s-analysis-bg); color: var(--s-analysis); }
+.sev-clear { background: var(--success-soft); color: var(--success); }
+.tabs { margin-bottom: 4px; width: fit-content; max-width: 100%; overflow-x: auto; }
+.tabs button { padding: 6px 16px; }
+.muted-row td { color: var(--text-3); }
+.clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; max-width: 520px; }
+.warn-tag { color: var(--warn); }
+.rule-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+.rule-card { text-align: left; font: inherit; color: inherit; cursor: pointer; display: flex; flex-direction: column; gap: 4px; }
+.rule-card:disabled { cursor: default; }
+.rule-card.disabled { opacity: 0.6; }
+.rule-card:hover:not(:disabled) { border-color: var(--accent); }
+.rules label { flex: 1; min-width: 200px; }
+fieldset.rules { flex-direction: row; flex-wrap: wrap; }
+.secrets dd { text-align: left; word-break: break-all; font-weight: 500; }
+.alert-list li { display: flex; flex-direction: column; gap: 2px; }

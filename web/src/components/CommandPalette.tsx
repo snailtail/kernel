@@ -10,6 +10,7 @@ interface Item { id: string; label: string; hint?: string; go: () => void }
 const PAGES: [string, string, string][] = [
   ['My work', '/', 'g m'],
   ['Dashboard', '/dashboard', 'g d'],
+  ['Events', '/events', 'g e'],
   ['Incidents', '/incidents', 'g t'],
   ['Problems', '/problems', 'g p'],
   ['Candidates', '/candidates', 'g c'],
@@ -82,7 +83,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
 const SHORTCUTS: [string, string][] = [
   ['Ctrl+K or /', 'Search and go to…'],
   ['n', 'Log a problem'],
-  ['g m', 'My work'], ['g d', 'Dashboard'], ['g t', 'Incidents'], ['g p', 'Problems'], ['g c', 'Candidates'], ['g k', 'Known errors'],
+  ['g m', 'My work'], ['g d', 'Dashboard'], ['g e', 'Events'], ['g t', 'Incidents'], ['g p', 'Problems'], ['g c', 'Candidates'], ['g k', 'Known errors'],
   ['g a', 'Actions'], ['g i', 'CMDB'], ['g v', 'Review'], ['g r', 'Reports'], ['g s', 'Settings'],
   ['?', 'This help'],
 ];
@@ -97,7 +98,7 @@ export function ShortcutHelp({ onClose }: { onClose: () => void }) {
   );
 }
 
-const GOTO: Record<string, string> = { m: '/', d: '/dashboard', p: '/problems', t: '/incidents', c: '/candidates', k: '/kedb', a: '/actions', i: '/cis', v: '/review', r: '/reports', s: '/settings' };
+const GOTO: Record<string, string> = { m: '/', d: '/dashboard', p: '/problems', t: '/incidents', e: '/events', c: '/candidates', k: '/kedb', a: '/actions', i: '/cis', v: '/review', r: '/reports', s: '/settings' };
 
 /** Global keyboard shortcuts; ignored while typing in a field. */
 export function useShortcuts(open: (what: 'palette' | 'help') => void) {

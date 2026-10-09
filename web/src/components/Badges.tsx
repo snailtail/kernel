@@ -16,3 +16,7 @@ export function PriorityBadge({ priority }: { priority: number }) {
 export function MajorBadge() {
   return <span className="badge major">Major</span>;
 }
+
+export function SeverityBadge({ severity }: { severity: string }) {
+  return <span className={`badge sev sev-${severity}`}>{severity}</span>;
+}
