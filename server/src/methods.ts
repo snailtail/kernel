@@ -216,6 +216,39 @@ GUIDES.push({
   ],
 });
 
+GUIDES.push(
+  {
+    id: 'change_assessment',
+    title: 'Assessing and authorising a change',
+    purpose: 'Make changes succeed: understand what they touch, how risky they are, how to undo them, and when to do them.',
+    when: 'Every normal or emergency change; standard changes were assessed once, in their template.',
+    steps: [
+      'Record the CIs and services the change touches; Kernel derives the risk from the most critical service behind them.',
+      'Write the implementation plan, how to test it, and the backout plan – how to undo it if it goes wrong.',
+      'Choose a window outside freezes and without collisions on the same CIs; check the schedule.',
+      'Submit for authorisation; the change authority approves (one approval, two for high risk), never the requester.',
+      'Implement, record the outcome, and review: what went well, what to improve – required after a failure or an emergency change.',
+    ],
+    stop: 'The change is implemented with a recorded outcome, and reviewed when it failed or was an emergency.',
+    pitfalls: ['No backout plan.', 'Changing the window after approval without re-authorising.', 'Emergency changes for work that could have been planned.'],
+  },
+  {
+    id: 'handling_alerts',
+    title: 'Handling alerts from monitoring',
+    purpose: 'Turn monitoring noise into action: the alerts that matter become incidents; the ones that keep coming back become problems.',
+    when: 'When alerts arrive in the event console, or when setting up event rules.',
+    steps: [
+      'Map alerts to CIs: by source id, host name, FQDN or IP – unmapped alerts lose impact and known workarounds.',
+      'Write few, clear rules: what opens an incident (severity, environment, criticality), grouped per service so a storm becomes one incident.',
+      'Schedule maintenance windows so planned work does not page anyone.',
+      'Acknowledge what you look at; let clears close alerts and auto-resolve incidents after a hold-down.',
+      'Review alerts that never became incidents but keep recurring: they are problem candidates.',
+    ],
+    stop: 'Important alerts open incidents once, noise is suppressed or tuned, and recurring alerts are reviewed as problem candidates.',
+    pitfalls: ['A rule per alert type instead of grouping by service.', 'Ignoring flapping checks – they are problems waiting to happen.'],
+  },
+);
+
 export const guideById = (id: string) => GUIDES.find((g) => g.id === id);
 
 export function guideMarkdown(g: MethodGuide) {

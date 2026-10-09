@@ -6,6 +6,7 @@ import { canEdit, isManager, useSession } from '../session';
 import { Hint } from '../components/Guide';
 import { SimilarProblems } from '../components/Similar';
 import { useApi } from '../hooks';
+import { Term } from '../components/Glossary';
 
 export function NewProblemPage() {
   const { user, meta } = useSession();
@@ -93,13 +94,13 @@ export function NewProblemPage() {
           </Hint>
         </div>
         <label>
-          Impact
+          <Term id="impact" />
           <select value={form.impact} onChange={(e) => set('impact', Number(e.target.value))}>
             {[1, 2, 3].map((l) => <option key={l} value={l}>{l} – {LEVEL_LABEL[l]}</option>)}
           </select>
         </label>
         <label>
-          Urgency
+          <Term id="urgency" />
           <select value={form.urgency} onChange={(e) => set('urgency', Number(e.target.value))}>
             {[1, 2, 3].map((l) => <option key={l} value={l}>{l} – {LEVEL_LABEL[l]}</option>)}
           </select>

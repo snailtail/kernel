@@ -9,6 +9,7 @@ import { Modal } from '../components/Modal';
 import { duration, formatDate, relativeTime } from '../format';
 import { useApi } from '../hooks';
 import { useSession } from '../session';
+import { Term } from '../components/Glossary';
 import { SeverityBadge, SlaBadge } from '../components/Badges';
 
 type IncidentStatus = 'new' | 'in_progress' | 'on_hold' | 'resolved' | 'closed';
@@ -141,8 +142,8 @@ function NewIncident({ onClose, onDone }: { onClose: () => void; onDone: (ref: s
         )}
         <label className="full">What is wrong?<input required autoFocus placeholder="As the user experiences it, e.g. Checkout times out" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></label>
         <label className="full">Description<textarea rows={3} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
-        <label>Impact<select value={form.impact} onChange={(e) => setForm({ ...form, impact: Number(e.target.value) })}>{[1, 2, 3].map((n) => <option key={n} value={n}>{n} – {LEVEL[n]}</option>)}</select></label>
-        <label>Urgency<select value={form.urgency} onChange={(e) => setForm({ ...form, urgency: Number(e.target.value) })}>{[1, 2, 3].map((n) => <option key={n} value={n}>{n} – {LEVEL[n]}</option>)}</select></label>
+        <label><Term id="impact" /><select value={form.impact} onChange={(e) => setForm({ ...form, impact: Number(e.target.value) })}>{[1, 2, 3].map((n) => <option key={n} value={n}>{n} – {LEVEL[n]}</option>)}</select></label>
+        <label><Term id="urgency" /><select value={form.urgency} onChange={(e) => setForm({ ...form, urgency: Number(e.target.value) })}>{[1, 2, 3].map((n) => <option key={n} value={n}>{n} – {LEVEL[n]}</option>)}</select></label>
         {meta.modules?.cmdb !== false && <label className="full">Affected CIs or services <span className="muted small">(refs, e.g. CI000012 SVC000003; shows impact and known workarounds)</span><input value={form.cis} onChange={(e) => setForm({ ...form, cis: e.target.value })} /></label>}
         <div className="full more-toggle">
           <button type="button" className="btn-link" aria-expanded={more} onClick={() => setMore(!more)}>{more ? '− Fewer details' : '+ More details'}</button>
@@ -247,7 +248,13 @@ export function IncidentPage() {
 
       <div className="problem-grid">
         <div className="problem-main">
-          <GuidePanel guidance={i.next_steps as Guidance} />
+          <GuidePanel guidance={i.next_steps as Guidance} onHandover={async (h) => {
+            if (h.action === 'link_problem' && h.target) await run(() => api.put(`${path}/problem`, { problem: h.target }));
+            if (h.action === 'create_problem') {
+              const p = await api.post<{ ref: string }>(`${path}/problem`, {}).catch((err) => { setActionError(err.message); return null; });
+              if (p) navigate(`/problems/${p.ref}`);
+            }
+          }} />
           <section className="card">
             <h2>Description</h2>
             {i.description ? <Markdown text={i.description} /> : <p className="placeholder">No description.</p>}

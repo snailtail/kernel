@@ -5,6 +5,7 @@ import { GroupsPage, ImpactSection, RelationshipsSection, type Relationship } fr
 import { Markdown } from '../components/Markdown';
 import { SeverityBadge } from '../components/Badges';
 import { Modal } from '../components/Modal';
+import { Term } from '../components/Glossary';
 import { formatDate, relativeTime } from '../format';
 import { useApi } from '../hooks';
 import { useSession } from '../session';
@@ -348,7 +349,7 @@ function CiModal({ types, ci, onClose, onDone }: { types: CiType[]; ci?: Ci; onC
           </select>
         </label>
         <label>Environment<select value={form.environment} onChange={(e) => setForm({ ...form, environment: e.target.value })}>{['prod', 'test', 'dev', 'other'].map((x) => <option key={x}>{x}</option>)}</select></label>
-        <label>Criticality<select value={form.criticality} onChange={(e) => setForm({ ...form, criticality: Number(e.target.value) })}>{[1, 2, 3, 4].map((c) => <option key={c} value={c}>{c} – {CRITICALITY[c]}</option>)}</select></label>
+        <label><Term id="criticality" /><select value={form.criticality} onChange={(e) => setForm({ ...form, criticality: Number(e.target.value) })}>{[1, 2, 3, 4].map((c) => <option key={c} value={c}>{c} – {CRITICALITY[c]}</option>)}</select></label>
         <label>Owner<select value={form.owner_id} onChange={(e) => setForm({ ...form, owner_id: e.target.value })}><option value="">–</option>{meta.assignees.map((a) => <option key={a.id} value={a.id}>{a.display_name}</option>)}</select></label>
         <label>Team<input value={form.team} onChange={(e) => setForm({ ...form, team: e.target.value })} /></label>
         <label>Tags<input value={form.tags} placeholder="app=payroll, pci" onChange={(e) => setForm({ ...form, tags: e.target.value })} /></label>

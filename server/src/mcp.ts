@@ -18,6 +18,7 @@ import * as events from './events.js';
 import * as changes from './changes.js';
 import * as sla from './sla.js';
 import * as notifications from './notifications.js';
+import * as flow from './flow.js';
 import * as generic from './generic.js';
 import { typeForRef } from './records.js';
 import { GUIDES, guideMarkdown } from './methods.js';
@@ -121,6 +122,7 @@ function buildServer(user: User, scopes?: string[]) {
     search_cis: 'ci.read', get_ci: 'ci.read', list_ci_types: 'ci.read', create_ci: 'ci.manage', update_ci: 'ci.manage',
     transition_ci: 'ci.manage', upsert_cis: 'ci.ingest',
     link_ci_to_problem: 'problem.link', unlink_ci_from_problem: 'problem.link',
+    get_process_map: 'meta.read', get_health_tips: 'meta.read',
     list_slas: 'meta.read', get_service_catalogue: 'ci.read', get_my_notifications: 'meta.read',
     list_incidents: 'incident.read', get_incident: 'incident.read', create_incident: 'incident.create', update_incident: 'incident.update',
     transition_incident: 'incident.update', resolve_incident: 'incident.update', link_incident_to_problem: 'incident.update',
@@ -486,6 +488,14 @@ function buildServer(user: User, scopes?: string[]) {
     },
   );
 
+  tool(
+    'get_process_map',
+    'The big picture: how event, incident, problem, known error, change and resolution hand over to each other, with live counts and links. Use it to explain the process or to find where work is piling up.',
+    {},
+    true,
+    () => flow.processMap(user),
+  );
+  tool('get_health_tips', 'Things worth a look this week: known errors without a decision, unowned problems, overdue actions, incidents without CI or category, CIs not seen.', {}, true, () => flow.healthTips(user));
   tool('get_my_notifications', 'My notifications: assignments, approvals waiting for me, SLA warnings, major incidents, updates on what I watch.', { unread_only: z.boolean().optional() }, true, ({ unread_only }) =>
     notifications.listNotifications(user, !!unread_only, 50),
   );

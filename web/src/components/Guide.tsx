@@ -7,7 +7,7 @@ import { icons } from './Icons';
 export const isGuided = (prefs: { guided?: boolean }) => prefs.guided !== false;
 
 /** Guided mode panel on the problem page: the phase, its purpose, and the remaining steps. */
-export function GuidePanel({ guidance }: { guidance: Guidance }) {
+export function GuidePanel({ guidance, onHandover }: { guidance: Guidance; onHandover?: (h: NonNullable<Guidance['handover']>) => void }) {
   const { user, setPreferences } = useSession();
   const [open, setOpen] = useState(true);
   if (!isGuided(user.preferences)) return null;
@@ -39,8 +39,18 @@ export function GuidePanel({ guidance }: { guidance: Guidance }) {
             </ul>
           )}
           <p className="guide-next"><strong>Next:</strong> {guidance.next}</p>
+          {guidance.handover && (
+            <div className="handover">
+              <span className="handover-arrow" aria-hidden="true">→</span>
+              <div>
+                <strong>{guidance.handover.label}</strong>
+                <div className="muted small">{guidance.handover.hint}</div>
+              </div>
+              {guidance.handover.action && onHandover && <button className="btn primary small" onClick={() => onHandover(guidance.handover!)}>{guidance.handover.label.replace(/^.*?[?:] /, '')}</button>}
+            </div>
+          )}
           <p className="muted small">
-            <Link to="/guide">How problem management works</Link> ·{' '}
+            <Link to="/guide">How it all fits together</Link> ·{' '}
             <button className="btn-link small" onClick={() => setPreferences({ guided: false })}>Turn off guided mode</button>{' '}
             (you can turn it on again in Settings)
           </p>

@@ -5,6 +5,7 @@ import { AffectedCisPanel, type AffectedCi, type AffectedService } from '../comp
 import { GuidePanel } from '../components/Guide';
 import { Markdown } from '../components/Markdown';
 import { Modal } from '../components/Modal';
+import { Term } from '../components/Glossary';
 import { formatDate, relativeTime } from '../format';
 import { useApi } from '../hooks';
 import { useSession } from '../session';
@@ -246,7 +247,7 @@ function NewChange({ onClose, onDone }: { onClose: () => void; onDone: (ref: str
     <Modal title="Request a change" onClose={onClose}>
       <form className="form" onSubmit={submit}>
         <label className="full">What will change?<input required autoFocus value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></label>
-        <label>Type<select value={form.change_type} onChange={(e) => setForm({ ...form, change_type: e.target.value })}><option value="normal">Normal</option><option value="standard">Standard (pre-approved)</option><option value="emergency">Emergency</option></select></label>
+        <label>Type <span className="muted small">(<Term id="standard_change">standard</Term> · <Term id="emergency_change">emergency</Term>)</span><select value={form.change_type} onChange={(e) => setForm({ ...form, change_type: e.target.value })}><option value="normal">Normal</option><option value="standard">Standard (pre-approved)</option><option value="emergency">Emergency</option></select></label>
         {form.change_type === 'standard' && (
           <label>Template<select required value={form.template_id} onChange={(e) => setForm({ ...form, template_id: e.target.value })}><option value="">–</option>{templates?.filter((t) => t.active).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
         )}
@@ -336,7 +337,7 @@ export function ChangePage() {
 
       <div className="problem-grid">
         <div className="problem-main">
-          <GuidePanel guidance={c.next_steps} />
+          <GuidePanel guidance={c.next_steps} onHandover={(h) => { if (h.action === 'resolve_problem') resolveProblem(); }} />
           {c.status === 'authorize' && (
             <section className="card approvals-card">
               <h2>Authorisation <span className="count">{c.approvals.approved} of {c.approvals.required}</span></h2>

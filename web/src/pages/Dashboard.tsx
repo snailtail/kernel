@@ -1,3 +1,4 @@
+import { HealthTips } from '../components/ProcessMap';
 import { Link } from 'react-router';
 import type { Action, Activity, Problem, Status } from '../api';
 import { ActionList } from '../components/Actions';
@@ -39,6 +40,7 @@ export function DashboardPage() {
           <p className="muted">Welcome back, {user.display_name}.</p>
         </div>
       </header>
+      <HealthTips />
 
       {isGuided(user.preferences) && !user.preferences.intro_seen && (
         <div className="banner intro">

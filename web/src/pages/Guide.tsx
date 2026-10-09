@@ -1,5 +1,8 @@
+import { useEffect } from 'react';
 import { Link } from 'react-router';
 import { useSession } from '../session';
+import { GlossaryList } from '../components/Glossary';
+import { ProcessMap } from '../components/ProcessMap';
 
 const PHASES = [
   {
@@ -30,15 +33,30 @@ const PHASES = [
 ];
 
 export function GuidePage() {
-  const { user, setPreferences } = useSession();
+  // Glossary links (/guide#term-…) scroll to the term.
+  useEffect(() => {
+    if (location.hash) document.getElementById(location.hash.slice(1))?.scrollIntoView({ block: 'center' });
+  }, []);
+  const { user, meta, setPreferences } = useSession();
   return (
     <article className="guide-page">
       <header className="page-head">
         <div>
-          <h1>Problem management in 5 minutes</h1>
-          <p className="muted">Based on the ITIL 4 problem management practice.</p>
+          <h1>How it all fits together</h1>
+          <p className="muted">From an alert to a permanent fix, based on ITIL 4. Click a step to see what it is for and where your work is.</p>
         </div>
       </header>
+      <ProcessMap />
+      <section className="card prose-card">
+        <h2>Walk through a scenario</h2>
+        <ol className="scenarios">
+          {meta.modules?.event !== false && meta.modules?.incident !== false && <li><strong>A server goes down.</strong> An alert arrives under <Link to="/events">Events</Link>; a rule opens an incident on the affected service. The incident page shows what else is affected and any known workaround.</li>}
+          <li><strong>The same thing keeps happening.</strong> Recurring incidents show up as <Link to="/candidates">problem candidates</Link>. Log a problem, analyse the root cause with 5 Whys, and document a workaround – it now appears on new incidents for the same CI.</li>
+          {meta.modules?.change !== false && <li><strong>Planning the fix.</strong> On the known error, decide to fix it; the guide offers to raise a change, prefilled from the root cause. It is assessed, authorised and scheduled outside freezes.</li>}
+          <li><strong>Making sure it worked.</strong> When the change succeeds, resolve the problem and watch for new incidents before closing. Major problems get a review: what went well, what to improve.</li>
+        </ol>
+      </section>
+      <h2 className="section-title">Problem management in 5 minutes</h2>
       <section className="card prose-card">
         <p>
           <strong>Incident management</strong> restores service as quickly as possible. <strong>Problem management</strong> asks why it broke, and
@@ -71,6 +89,10 @@ export function GuidePage() {
         {!user.preferences.intro_seen && <button className="btn" onClick={() => setPreferences({ intro_seen: true })}>Don’t show the introduction again</button>}
         <Link className="btn primary" to="/problems">Go to problems</Link>
       </div>
+      <section className="card prose-card" id="glossary">
+        <h2>Glossary</h2>
+        <GlossaryList />
+      </section>
     </article>
   );
 }

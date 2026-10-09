@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { modules } from '../modules.js';
+import * as flow from '../flow.js';
 import { requireUser } from '../auth.js';
 import { config } from '../config.js';
 import { notFound } from '../errors.js';
@@ -173,6 +174,8 @@ export async function problemRoutes(app: FastifyInstance) {
     const body = z.object({ to: z.string().trim().min(1).max(200), kind: z.string().max(20).optional(), system: z.string().max(100).optional(), url: z.string().max(2000).optional(), note: z.string().max(2000).optional() }).parse(req.body);
     return generic.linkRecords(requireUser(req), req.params.ref, body.to, body);
   });
+  app.get('/api/flow', async (req) => flow.processMap(requireUser(req, 'meta.read')));
+  app.get('/api/health-tips', async (req) => flow.healthTips(requireUser(req, 'meta.read')));
   app.get('/api/my-work', async (req) => generic.myWork(requireUser(req, 'problem.read')));
 
   app.get('/api/guides', async (req) => {

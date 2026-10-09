@@ -252,7 +252,11 @@ function changeGuidance(c: any) {
     { id: 'implement', label: 'Implement and record the outcome', hint: 'Successful, failed or rolled back.', done: !!c.outcome },
     { id: 'review', label: 'Review', hint: c.outcome && c.outcome !== 'successful' ? 'A failed or rolled back change needs a review.' : 'What went well, what to improve.', done: c.status === 'closed' },
   ];
+  const handover = c.status === 'closed' && c.outcome === 'successful' && c.problem_ref && !['resolved', 'closed'].includes(c.problem_status)
+    ? { label: `The fix is in: resolve ${c.problem_ref}`, hint: 'Then verify that its incidents stop before closing the problem.', action: 'resolve_problem' as const, target: c.problem_ref }
+    : null;
   return {
+    handover,
     phase: { draft: 'Request', assess: 'Assess', authorize: 'Authorise', scheduled: 'Scheduled', implementing: 'Implement', review: 'Review', closed: 'Closed', rejected: 'Rejected', cancelled: 'Cancelled' }[c.status as Status],
     purpose: 'Maximise successful changes: assess the risk, authorise, schedule and review.',
     steps,

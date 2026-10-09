@@ -114,6 +114,12 @@ incidents feed the problem candidates per CI, and reports show MTTA, MTTR, reope
 Viewers stay strictly read-only (auditors, stakeholders): end users report incidents through the service desk or,
 later, the self-service portal (#45), not with a viewer account.
 
+**How it all fits together**: the guide page shows the flow event → incident → problem → known error → change →
+resolved with live counts from your data, scenario walkthroughs and a glossary of ITIL terms (also as hover hints on
+form fields). Every record's guide panel ends with the hand-over to the next practice – "Ready to fix? Raise a
+change", "A known error matches: link it", "Recurring? Create a problem" – and the dashboard shows gentle health tips
+for the week. Agents get the same through MCP (`get_process_map`, `get_health_tips`, `next_steps.handover`).
+
 **Keep it simple**: a first-run setup wizard (administrators) chooses the modules, the support hours, a first
 monitoring source and optional example data – every step can be skipped and run again. Incidents, changes, events,
 the CMDB and service levels are modules that can be switched off under Administration: they disappear from menus,

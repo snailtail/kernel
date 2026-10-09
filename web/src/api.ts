@@ -26,6 +26,8 @@ export interface Guidance {
   purpose: string;
   steps: { id: string; label: string; hint: string; done: boolean | null }[];
   next: string;
+  /** The hand-over to the next practice in the flow (#37). */
+  handover?: { label: string; hint: string; action?: 'raise_change' | 'create_problem' | 'link_problem' | 'resolve_problem'; target?: string } | null;
 }
 
 export interface Problem {

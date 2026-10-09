@@ -20,6 +20,7 @@ import { canEdit, isManager, useSession } from '../session';
 const LIFECYCLE: Status[] = ['new', 'analysis', 'known_error', 'resolved', 'closed'];
 
 export function ProblemPage() {
+  const navigate = useNavigate();
   const { ref } = useParams();
   const { user, meta } = useSession();
   const { data: p, setData, error, reload } = useApi<ProblemDetail>(`/api/problems/${ref}`);
@@ -117,7 +118,12 @@ export function ProblemPage() {
 
       <div className="problem-grid">
         <div className="problem-main">
-          <GuidePanel guidance={p.next_steps} />
+          <GuidePanel guidance={p.next_steps} onHandover={async (h) => {
+            if (h.action === 'raise_change') {
+              const c = await api.post<{ ref: string }>(`/api/problems/${p.ref}/change`, {}).catch((err) => { alert((err as Error).message); return null; });
+              if (c) navigate(`/changes/${c.ref}`);
+            }
+          }} />
           <TextSection title="Description" hint="Symptoms, scope and business impact" value={p.description} editable={editable} onSave={(v, b) => save({ description: v }, { description: b }, true)} proposed={p.mcp_proposed?.includes('description')} onConfirm={() => confirmFields(['description'])} />
           {(p.status !== 'new' || p.analyses.length > 0) && <AnalysesSection problem={p} onChange={setData} />}
           <TextSection title="Root cause" hint="Findings from problem analysis" value={p.root_cause} editable={editable} onSave={(v, b) => save({ root_cause: v }, { root_cause: b }, true)} proposed={p.mcp_proposed?.includes('root_cause')} onConfirm={() => confirmFields(['root_cause'])} />

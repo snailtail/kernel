@@ -204,7 +204,13 @@ function incidentGuidance(i: any) {
     { id: 'resolve', label: 'Restore service and resolve', hint: 'Record how service was restored and a resolution code.', done: !open },
     ...(i.is_major || i.reopen_count > 0 ? [{ id: 'problem', label: 'Hand over to problem management', hint: i.is_major ? 'A major incident needs a problem record to find the root cause.' : 'It came back: a problem record finds out why.', done: !!i.problem_id }] : []),
   ];
+  const knownError = i.known_errors[0];
+  const handover =
+    !i.problem_id && knownError ? { label: `A known error matches: link it to ${knownError.ref}`, hint: 'Its workaround may restore service, and the problem then counts this incident.', action: 'link_problem' as const, target: knownError.ref }
+    : !i.problem_id && (i.is_major || i.reopen_count > 0) ? { label: i.is_major ? 'Major incident: create a problem' : 'Recurring? Create a problem', hint: 'Problem management finds the root cause so it does not happen again.', action: 'create_problem' as const }
+    : null;
   return {
+    handover,
     phase: open ? 'Restore service' : i.status === 'resolved' ? 'Confirm and close' : 'Closed',
     purpose: 'Restore normal service as quickly as possible and minimise the impact on the business.',
     steps,

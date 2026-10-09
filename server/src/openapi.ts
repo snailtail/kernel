@@ -128,6 +128,8 @@ export const OPERATIONS: Op[] = [
   { method: 'get', path: '/api/templates', tag: 'Reference data', summary: 'Templates for new incidents and problems' },
   { method: 'post', path: '/api/templates', tag: 'Reference data', summary: 'Create a template (problem managers)', body: setupMod.templateSchema },
   { method: 'put', path: '/api/templates/:id', tag: 'Reference data', summary: 'Update a template', body: setupMod.templateSchema },
+  { method: 'get', path: '/api/flow', tag: 'Guidance', summary: 'The process map (event → incident → problem → known error → change → resolution) with live counts' },
+  { method: 'get', path: '/api/health-tips', tag: 'Guidance', summary: 'Gentle health tips: things worth a look this week' },
   { method: 'get', path: '/api/notifications', tag: 'Notifications', summary: 'My notifications (newest first) and the unread count' },
   { method: 'post', path: '/api/notifications/read', tag: 'Notifications', summary: 'Mark notifications as read (ids, or all)' },
   { method: 'get', path: '/api/notifications/settings', tag: 'Notifications', summary: 'My notification settings: email, digest, events, chat webhook' },

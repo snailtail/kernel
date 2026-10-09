@@ -1,5 +1,6 @@
 // Process guidance: what the current phase is for and which steps remain, derived from the record itself.
 // Shown in the UI in guided mode and returned to MCP clients as next_steps.
+import { moduleEnabled } from './modules.js';
 
 interface GuidanceInput {
   status: string;
@@ -32,16 +33,44 @@ export interface Step {
   done: boolean | null;
 }
 
+/** The hand-over to the next practice in the flow (#37), e.g. a known error ready for a change. */
+export interface Handover {
+  label: string;
+  hint: string;
+  /** What the button does; absent for advice only. */
+  action?: 'raise_change' | 'create_problem' | 'link_problem' | 'resolve_problem';
+  /** The record the action concerns, e.g. the problem to link to. */
+  target?: string;
+}
+
 export interface Guidance {
   phase: string;
   purpose: string;
   steps: Step[];
   next: string;
+  handover?: Handover | null;
 }
 
 const has = (s: string) => s.trim().length > 0;
 
 export function guidanceFor(p: GuidanceInput): Guidance {
+  const g = phaseGuidance(p);
+  return { ...g, handover: handoverFor(p) };
+}
+
+/** Where the problem hands over to another practice, given which modules are on. */
+function handoverFor(p: GuidanceInput): Handover | null {
+  const changes = p.links.filter((l) => l.kind === 'change').length;
+  if (p.status === 'known_error' && p.ec_decision === 'fix' && changes === 0 && moduleEnabled('change')) {
+    return { label: 'Ready to fix? Raise a change', hint: 'The permanent fix is implemented through a change; it is prefilled from the root cause and the affected CIs.', action: 'raise_change' };
+  }
+  if (p.status === 'resolved') {
+    return { label: 'Verify that the incidents stopped', hint: 'Compare linked incidents and events before and after the fix before closing.' };
+  }
+  return null;
+}
+
+function phaseGuidance(p: GuidanceInput): Guidance {
   const count = (kind: string) => p.links.filter((l) => l.kind === kind).length;
   const openActions = p.actions.filter((a) => a.status === 'open').length;
   const triggerKind = p.detection === 'proactive' ? 'event' : 'incident';
