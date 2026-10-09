@@ -381,10 +381,18 @@ export async function resolveLinkedIncidents(user: User, problemRef: string, inp
   authorize(user, 'incident.update');
   const p = await getProblem(problemRef);
   const { rows } = await query("SELECT ref FROM incidents WHERE problem_id = $1 AND ref = ANY($2) AND status NOT IN ('resolved', 'closed')", [p.id, input.incidents.map((r) => r.toUpperCase())]);
+  // Each incident in its own transaction: one that cannot be resolved does not undo or hide the others.
+  const resolved: string[] = [];
+  const failed: { ref: string; error: string }[] = [];
   for (const r of rows) {
-    await transitionIncident(user, r.ref, { to: 'resolved', resolution_code: 'problem_fixed', resolution: input.resolution, comment: `Resolved with problem ${p.ref}` });
+    try {
+      await transitionIncident(user, r.ref, { to: 'resolved', resolution_code: 'problem_fixed', resolution: input.resolution, comment: `Resolved with problem ${p.ref}` });
+      resolved.push(r.ref);
+    } catch (err) {
+      failed.push({ ref: r.ref, error: (err as Error).message });
+    }
   }
-  return getProblem(problemRef);
+  return { ...(await getProblem(problemRef)), resolve_result: { resolved, failed } };
 }
 
 registerProblemExtra(async (p) => {

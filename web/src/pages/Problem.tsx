@@ -735,7 +735,9 @@ function ProblemIncidents({ problem: p, editable, onChange }: { problem: Problem
     const resolution = window.prompt(`Resolve ${open.length} open incident(s) with this problem's resolution?`, p.resolution || `Resolved by problem ${p.ref}.`);
     if (!resolution?.trim()) return;
     try {
-      onChange(await api.post<ProblemDetail>(`/api/problems/${p.ref}/resolve-incidents`, { incidents: open.map((i) => i.ref), resolution }));
+      const result = await api.post<ProblemDetail & { resolve_result: { resolved: string[]; failed: { ref: string; error: string }[] } }>(`/api/problems/${p.ref}/resolve-incidents`, { incidents: open.map((i) => i.ref), resolution });
+      onChange(result);
+      if (result.resolve_result.failed.length) setError(`Not resolved: ${result.resolve_result.failed.map((f) => `${f.ref} (${f.error})`).join('; ')}`);
     } catch (err) {
       setError((err as Error).message);
     }

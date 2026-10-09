@@ -111,6 +111,8 @@ workarounds at the top. Incidents move new → in progress → on hold → resol
 code, a major incident has stakeholder communication updates and needs a problem before it closes. Create a problem
 from an incident in one click; when the problem is resolved, its open incidents can be resolved together. Unlinked
 incidents feed the problem candidates per CI, and reports show MTTA, MTTR, reopen rate and incidents per CI.
+Viewers stay strictly read-only (auditors, stakeholders): end users report incidents through the service desk or,
+later, the self-service portal (#45), not with a viewer account.
 
 **Follow-up actions** track work that follows from a problem (vendor fixes, monitoring, runbook updates, review
 outcomes) with an owner and due date.

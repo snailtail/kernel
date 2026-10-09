@@ -88,7 +88,8 @@ describe('incident management (#28)', { skip }, () => {
     await analyst.put(`/api/incidents/${normal.ref}/problem`, { problem: prb.body.ref });
     const p = (await analyst.get(`/api/problems/${prb.body.ref}`)).body;
     assert.deepEqual(p.incidents.map((x: any) => x.ref).sort(), [i.ref, normal.ref].sort());
-    await analyst.post(`/api/problems/${prb.body.ref}/resolve-incidents`, { incidents: [normal.ref], resolution: 'Fixed by the problem resolution' });
+    const bulk = await analyst.post(`/api/problems/${prb.body.ref}/resolve-incidents`, { incidents: [normal.ref], resolution: 'Fixed by the problem resolution' });
+    assert.deepEqual(bulk.body.resolve_result, { resolved: [normal.ref], failed: [] });
     const done = (await analyst.get(`/api/incidents/${normal.ref}`)).body;
     assert.deepEqual([done.status, done.resolution_code], ['resolved', 'problem_fixed']);
     // Unlinking removes the problem link too.
