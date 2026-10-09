@@ -16,6 +16,7 @@
     "@elastic/ecs-pino-format": "^1.5.0",
     "@fastify/cookie": "^11.1.2",
     "@fastify/helmet": "^13.1.2",
+    "@fastify/rate-limit": "^11.2.1",
     "@fastify/static": "^10.1.5",
     "@modelcontextprotocol/sdk": "^1.32.1",
     "@opentelemetry/api": "^1.9.1",
@@ -35,6 +36,7 @@
     "pg": "^8.23.1",
     "pino": "^10.4.0",
     "qrcode": "^1.5.4",
+    "sharp": "^0.35.5",
     "undici": "^8.11.2",
     "zod": "^4.6.5"
   },
