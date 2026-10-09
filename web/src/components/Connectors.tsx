@@ -83,14 +83,14 @@ function ConnectorEditor({ connector: c, types, onClose, onDone }: { connector: 
   const [form, setForm] = useState({
     type: c.type ?? 'op5', name: c.name ?? '', source_system: c.source_system ?? 'OP5', base_url: c.config?.base_url ?? '', default_ci_type: c.config?.default_ci_type ?? 'virtual_machine',
     environment: c.config?.environment ?? 'prod', sync_events: c.config?.sync_events ?? true, username: '', password: '', private_allow: (c.private_allow ?? []).join(', '),
-    schedule_minutes: c.schedule_minutes ?? 60, enabled: c.enabled ?? true,
+    schedule_minutes: c.schedule_minutes ?? 60, enabled: c.enabled ?? true, insecure_http: c.config?.insecure_http ?? false, ca_pem: c.config?.ca_pem ?? '',
   });
   const [error, setError] = useState<string | null>(null);
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     const body = {
       type: form.type, name: form.name, source_system: form.source_system, schedule_minutes: Number(form.schedule_minutes), enabled: form.enabled,
-      config: { base_url: form.base_url, default_ci_type: form.default_ci_type, environment: form.environment, sync_events: form.sync_events },
+      config: { base_url: form.base_url, default_ci_type: form.default_ci_type, environment: form.environment, sync_events: form.sync_events, insecure_http: form.insecure_http, ca_pem: form.ca_pem.trim() },
       private_allow: form.private_allow.split(/[\s,]+/).filter(Boolean),
       ...(form.username || form.password ? { secret: { username: form.username, password: form.password } } : {}),
     };
@@ -115,6 +115,10 @@ function ConnectorEditor({ connector: c, types, onClose, onDone }: { connector: 
         <label>Environment<select value={form.environment} onChange={(e) => setForm({ ...form, environment: e.target.value })}>{['prod', 'test', 'dev', 'other'].map((x) => <option key={x}>{x}</option>)}</select></label>
         <label>Every (minutes)<input type="number" min={5} max={10080} value={form.schedule_minutes} onChange={(e) => setForm({ ...form, schedule_minutes: Number(e.target.value) })} /></label>
         <label className="full">Private network access <span className="muted small">(addresses or ranges on your LAN this connector may reach, e.g. 192.168.1.20 or 10.0.0.0/8)</span><input value={form.private_allow} onChange={(e) => setForm({ ...form, private_allow: e.target.value })} /></label>
+        {form.base_url.startsWith('http://') && (
+          <label className="check full warn-box"><input type="checkbox" checked={form.insecure_http} onChange={(e) => setForm({ ...form, insecure_http: e.target.checked })} /> Plain HTTP (lab only): the password is sent in clear text</label>
+        )}
+        <label className="full">CA certificate <span className="muted small">(optional PEM, for a server behind your own CA; verification is always on)</span><textarea rows={3} placeholder="-----BEGIN CERTIFICATE-----" value={form.ca_pem} onChange={(e) => setForm({ ...form, ca_pem: e.target.value })} /></label>
         <label className="check"><input type="checkbox" checked={form.sync_events} onChange={(e) => setForm({ ...form, sync_events: e.target.checked })} /> Also fetch current problems as alerts</label>
         <label className="check"><input type="checkbox" checked={form.enabled} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} /> Enabled</label>
         {error && <div className="error full">{error}</div>}

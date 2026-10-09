@@ -72,8 +72,11 @@ describe('connector framework and push contract (#18)', { skip }, () => {
   });
 
   test('an OP5 connector: write-only credentials, test, sync, alerts that clear, no overlapping runs', async () => {
-    const base = { type: 'op5', name: 'OP5 prod', source_system: 'OP5', config: { base_url: `http://127.0.0.1:${port}`, default_ci_type: 'virtual_machine' }, secret: { username: 'kernel', password: 'secret-pw' } };
+    const base = { type: 'op5', name: 'OP5 prod', source_system: 'OP5', config: { base_url: `http://127.0.0.1:${port}`, default_ci_type: 'virtual_machine', insecure_http: true }, secret: { username: 'kernel', password: 'secret-pw' } };
     assert.equal((await pm.post('/api/connectors', base)).status, 403);
+    const cleartext = await admin.post('/api/connectors', { ...base, config: { ...base.config, insecure_http: false } });
+    assert.match(cleartext.body.error, /clear text/, 'http with credentials needs an explicit lab flag');
+    assert.equal((await admin.post('/api/connectors', { ...base, name: 'x', source_system: 'x', config: { ...base.config, ca_pem: 'not a cert' } })).status, 400);
     assert.equal((await admin.post('/api/connectors', { ...base, private_allow: ['127.0.0.1'] })).status, 400, 'only private ranges can be allowed');
     const c = (await admin.post('/api/connectors', { ...base, private_allow: ['10.1.0.0/24'] })).body;
     assert.equal(c.has_secret, true);
@@ -115,7 +118,7 @@ describe('connector framework and push contract (#18)', { skip }, () => {
     const sq = new Client(k.base, (await bot.post('/api/tokens', { name: 'x' })).body.token);
     const r = (await sq.post('/api/cmdb/ci-batch', { source_system: 'OP5', cis: [ci('evil')] })).body;
     assert.match(r.cis.errors[0].error, /synced by a Kernel connector/);
-    const blocked = await admin.post('/api/connectors', { type: 'op5', name: 'Private', source_system: 'Private', config: { base_url: 'http://10.9.9.9' }, secret: { username: 'a', password: 'b' } });
+    const blocked = await admin.post('/api/connectors', { type: 'op5', name: 'Private', source_system: 'Private', config: { base_url: 'https://10.9.9.9' }, secret: { username: 'a', password: 'b' } });
     assert.equal((await admin.post(`/api/connectors/${blocked.body.id}/test`, {})).body.ok, false, 'a private address needs the connector allowlist');
   });
 });

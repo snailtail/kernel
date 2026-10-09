@@ -67,3 +67,30 @@ test('a connector may only open private ranges, never loopback, link-local or me
   assert.match(validatePrivateAllow(['10.0.0.0/2'])!, /invalid prefix/);
   assert.match(validatePrivateAllow(['op5.local'])!, /not an address/);
 });
+
+test('credentials never follow a redirect to another origin', async () => {
+  const seen: Record<string, string | undefined> = {};
+  const other = createServer((req, res) => { seen.other = req.headers.authorization; seen.cookie = req.headers.cookie; res.end('ok'); });
+  await new Promise<void>((r) => other.listen(0, '127.0.0.1', () => r()));
+  const otherPort = (other.address() as AddressInfo).port;
+  const first = createServer((req, res) => {
+    if (req.url === '/same') { seen.same = req.headers.authorization; return res.end('ok'); }
+    if (req.url === '/to-same') return res.writeHead(302, { Location: '/same' }).end();
+    res.writeHead(302, { Location: `http://127.0.0.1:${otherPort}/x` }).end();
+  });
+  await new Promise<void>((r) => first.listen(0, '127.0.0.1', () => r()));
+  const firstPort = (first.address() as AddressInfo).port;
+  process.env.KERNEL_OUTBOUND_ALLOW = '127.0.0.1';
+  try {
+    const headers = { Authorization: 'Basic c2VjcmV0', Cookie: 'session=1', Accept: 'application/json' };
+    await outboundFetch(`http://127.0.0.1:${firstPort}/to-same`, { headers });
+    assert.equal(seen.same, 'Basic c2VjcmV0', 'kept within the same origin');
+    await outboundFetch(`http://127.0.0.1:${firstPort}/away`, { headers });
+    assert.equal(seen.other, undefined, 'Authorization dropped on another origin (other port)');
+    assert.equal(seen.cookie, undefined);
+  } finally {
+    delete process.env.KERNEL_OUTBOUND_ALLOW;
+    first.close();
+    other.close();
+  }
+});

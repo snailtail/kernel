@@ -103,6 +103,10 @@ const OP5: ConnectorType = {
   label: 'OP5 Monitor',
   config: z.object({
     base_url: z.string().url().refine((u) => /^https?:\/\//.test(u), 'http(s) only'),
+    /** Plain HTTP sends the credentials in clear text: only for a lab, and only when explicitly chosen. */
+    insecure_http: z.boolean().default(false),
+    /** A CA certificate (PEM) to trust for this connector only, e.g. an internal company CA. */
+    ca_pem: z.string().max(20_000).regex(/^-----BEGIN CERTIFICATE-----[\s\S]+-----END CERTIFICATE-----\s*$/, 'Paste a PEM certificate').optional().or(z.literal('')),
     default_ci_type: z.string().max(50).default('virtual_machine'),
     environment: z.enum(['prod', 'test', 'dev', 'other']).default('prod'),
     sync_events: z.boolean().default(true),
@@ -172,6 +176,9 @@ export async function saveConnector(user: User, id: number | null, input: z.infe
   authorize(user, 'user.manage');
   const type = CONNECTOR_TYPES[input.type];
   const config = type.config.parse(input.config);
+  if (config.base_url?.startsWith('http://') && !config.insecure_http) {
+    throw badRequest('The connector would send its credentials in clear text over http. Use https, or tick "plain HTTP (lab only)".');
+  }
   const secret = input.secret ? type.secret.parse(input.secret) : null;
   if (!id && !secret) throw badRequest('Credentials are required for a new connector');
   const allowProblem = validatePrivateAllow(input.private_allow);
@@ -222,6 +229,7 @@ function contextFor(c: any): RunContext {
       const res = await outboundFetch(config.base_url.replace(/\/$/, '') + path, {
         headers: { Accept: 'application/json', ...(auth ? { Authorization: auth } : {}) },
         privateAllow: c.private_allow,
+        ca: config.ca_pem || undefined,
         timeoutMs: 30_000,
         maxBytes: 50_000_000,
       });

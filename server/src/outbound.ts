@@ -4,7 +4,9 @@
 //   reserved ranges are always blocked; private ranges (RFC 1918, ULA, CGNAT) only via KERNEL_OUTBOUND_ALLOW;
 // - redirects are followed manually (max 3), each hop re-checked; timeout and response size limit.
 import { lookup as dnsLookup, type LookupAddress } from 'node:dns';
+import { createHash } from 'node:crypto';
 import { BlockList, isIP } from 'node:net';
+import { rootCertificates } from 'node:tls';
 import { Agent, fetch as undiciFetch } from 'undici';
 
 export class OutboundBlockedError extends Error {}
@@ -84,20 +86,27 @@ export function checkedLookup(hostname: string, options: object, callback: Looku
 }
 
 const agent = new Agent({ connect: { lookup: checkedLookup as any, timeout: 5000 }, bodyTimeout: 10_000, headersTimeout: 10_000 });
-const allowAgents = new Map<string, { agent: Agent; list: BlockList }>();
-/** An agent whose lookup also accepts the given private ranges (one per distinct allowlist). */
-function agentFor(privateAllow?: string[]) {
-  if (!privateAllow?.length) return { agent, list: undefined };
-  const key = [...privateAllow].sort().join(',');
+const allowAgents = new Map<string, { agent: Agent; list: BlockList | undefined }>();
+/**
+ * An agent whose lookup also accepts the given private ranges, and that trusts an extra CA certificate (e.g. an
+ * internal OP5 behind a company CA). Certificate verification is never switched off.
+ */
+function agentFor(privateAllow?: string[], ca?: string) {
+  if (!privateAllow?.length && !ca) return { agent, list: undefined };
+  const key = `${[...(privateAllow ?? [])].sort().join(',')}|${ca ? createHash('sha256').update(ca).digest('hex') : ''}`;
   let entry = allowAgents.get(key);
   if (!entry) {
-    const list = parseList(privateAllow);
+    const list = privateAllow?.length ? parseList(privateAllow) : undefined;
     const lookup = (h: string, o: object, cb: LookupCallback) => checkedLookup(h, o, cb, list);
-    entry = { agent: new Agent({ connect: { lookup: lookup as any, timeout: 5000 }, bodyTimeout: 30_000, headersTimeout: 30_000 }), list };
+    const ctx = ca ? { ca: [...rootCertificates, ca] } : {};
+    entry = { agent: new Agent({ connect: { lookup: lookup as any, timeout: 5000, ...ctx }, bodyTimeout: 30_000, headersTimeout: 30_000 }), list };
     allowAgents.set(key, entry);
   }
   return entry;
 }
+
+/** Headers that carry credentials; never sent to another origin after a redirect. */
+const CREDENTIAL_HEADERS = /^(authorization|proxy-authorization|cookie|x-kernel-token)$/i;
 
 export interface OutboundResponse {
   status: number;
@@ -123,14 +132,15 @@ export function checkUrl(url: string, privateAllow?: BlockList): string | null {
 
 export async function outboundFetch(
   url: string,
-  init: { method?: string; headers?: Record<string, string>; body?: string; timeoutMs?: number; maxBytes?: number; privateAllow?: string[] } = {},
+  init: { method?: string; headers?: Record<string, string>; body?: string; timeoutMs?: number; maxBytes?: number; privateAllow?: string[]; ca?: string } = {},
 ): Promise<OutboundResponse> {
   const maxBytes = init.maxBytes ?? 1_000_000;
   if (init.privateAllow?.length) {
     const problem = validatePrivateAllow(init.privateAllow);
     if (problem) throw new OutboundBlockedError(problem);
   }
-  const { agent: dispatcher, list: privateList } = agentFor(init.privateAllow);
+  const { agent: dispatcher, list: privateList } = agentFor(init.privateAllow, init.ca);
+  const origin = new URL(url).origin;
   let current = url;
   for (let hop = 0; hop <= 3; hop++) {
     const problem = checkUrl(current, privateList);
@@ -139,7 +149,8 @@ export async function outboundFetch(
     try {
       res = await undiciFetch(current, {
         method: init.method ?? 'GET',
-        headers: init.headers,
+        // Credentials only go to the origin they were meant for, never to where a redirect points.
+        headers: new URL(current).origin === origin ? init.headers : Object.fromEntries(Object.entries(init.headers ?? {}).filter(([k]) => !CREDENTIAL_HEADERS.test(k))),
         body: init.body,
         redirect: 'manual',
         dispatcher,
