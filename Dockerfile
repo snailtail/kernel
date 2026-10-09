@@ -2,7 +2,7 @@
 
 # The base image is pinned by digest (#66); Dependabot proposes updates.
 
-FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS build
+FROM node:25-alpine@sha256:bdf2cca6fe3dabd014ea60163eca3f0f7015fbd5c7ee1b0e9ccb4ced6eb02ef4 AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY server/package.json server/
@@ -11,14 +11,14 @@ RUN npm ci --ignore-scripts
 COPY . .
 RUN npm run build
 
-FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS deps
+FROM node:25-alpine@sha256:bdf2cca6fe3dabd014ea60163eca3f0f7015fbd5c7ee1b0e9ccb4ced6eb02ef4 AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY server/package.json server/
 COPY web/package.json web/
 RUN npm ci --ignore-scripts --omit=dev --workspace server --include-workspace-root=false
 
-FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1
+FROM node:25-alpine@sha256:bdf2cca6fe3dabd014ea60163eca3f0f7015fbd5c7ee1b0e9ccb4ced6eb02ef4
 # Kernel runs with node alone: removing npm, npx and corepack drops their bundled dependencies from the image.
 RUN rm -rf /usr/local/lib/node_modules /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /opt/yarn* /usr/local/bin/yarn /usr/local/bin/yarnpkg
 WORKDIR /app
