@@ -20,7 +20,7 @@ interface Rule {
   group_by: 'service' | 'ci' | 'rule'; group_window_minutes: number; max_incidents_per_hour: number; auto_resolve: boolean; hold_down_minutes: number;
   conditions: { min_severity?: string; sources?: string[]; check_contains?: string; ci_types?: string[]; environments?: string[]; max_ci_criticality?: number; include_unmatched?: boolean; min_count?: number };
 }
-interface Source { id: number; name: string; kind: string; token_prefix: string; signed: boolean; ci_source_system: string; enabled: boolean; url: string; last_received_at: string | null; received_count: number; rejected_count: number }
+interface Source { id: number; name: string; kind: string; token_prefix: string; token_created_at: string; signed: boolean; ci_source_system: string; enabled: boolean; url: string; last_received_at: string | null; received_count: number; rejected_count: number }
 interface Window { id: number; ci: string | null; ci_name: string | null; group_name: string | null; include_dependencies: boolean; starts_at: string; ends_at: string; reason: string; covered_cis: number; created_by: string }
 
 const TABS = [['alerts', 'Alerts'], ['rules', 'Rules'], ['maintenance', 'Maintenance'], ['sources', 'Sources']] as const;
@@ -281,7 +281,7 @@ function SourcesTab() {
                 <tr key={s.id}>
                   <td><strong>{s.name}</strong>{!s.enabled && <span className="tag">disabled</span>}<div className="mono small muted">{full(s.url)}</div></td>
                   <td className="small">{KIND_LABEL[s.kind]}{s.signed && ' · signed'}{s.ci_source_system && <div className="muted">CMDB ids: {s.ci_source_system}</div>}</td>
-                  <td className="mono small">{s.token_prefix}…</td>
+                  <td className="mono small">{s.token_prefix}…<div className={`muted ${Date.now() - new Date(s.token_created_at).getTime() > 180 * 86400_000 ? 'attention' : ''}`}>issued {relativeTime(s.token_created_at)}</div></td>
                   <td className="num">{s.received_count}</td>
                   <td className={`num ${s.rejected_count ? 'attention' : ''}`}>{s.rejected_count}</td>
                   <td className="muted small">{s.last_received_at ? relativeTime(s.last_received_at) : 'never'}</td>
@@ -326,7 +326,7 @@ function SourcesTab() {
             <dt>Token</dt><dd className="mono">{secret.token}</dd>
             {secret.signing_secret && <><dt>Signing secret</dt><dd className="mono">{secret.signing_secret}</dd></>}
           </dl>
-          <p className="muted small">Send the token as <span className="mono">Authorization: Bearer …</span> or <span className="mono">X-Kernel-Token</span>. Tools that cannot set headers (Azure action groups) may append <span className="mono">?token=…</span>; Kernel never logs it.</p>
+          <p className="muted small">Send the token as <span className="mono">Authorization: Bearer …</span> or <span className="mono">X-Kernel-Token</span>. Use a header wherever the tool allows it (Alertmanager, Uptime Kuma, OP5 scripts). Only for tools that cannot set headers (Azure action groups) append <span className="mono">?token=…</span>: Kernel never logs it, but proxies and the sender's configuration may, so rotate such tokens regularly.</p>
         </Modal>
       )}
     </>

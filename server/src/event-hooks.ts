@@ -178,7 +178,7 @@ const newToken = () => `kernel_evt_${randomBytes(24).toString('base64url')}`;
 export async function listSources(user: User) {
   authorize(user, 'webhook.manage');
   const { rows } = await query(
-    `SELECT id, name, kind, token_prefix, signing_secret IS NOT NULL AS signed, ci_source_system, enabled, created_at, last_received_at, received_count, rejected_count
+    `SELECT id, name, kind, token_prefix, token_created_at, signing_secret IS NOT NULL AS signed, ci_source_system, enabled, created_at, last_received_at, received_count, rejected_count
      FROM event_sources ORDER BY name`,
   );
   return rows.map((r) => ({ ...r, url: `/api/event-hooks/${r.id}` }));
@@ -207,7 +207,7 @@ export async function createSource(user: User, input: z.infer<typeof sourceSchem
 export async function rotateSource(user: User, id: number) {
   authorize(user, 'webhook.manage');
   const token = newToken();
-  const { rows } = await query('UPDATE event_sources SET token_hash = $2, token_prefix = $3 WHERE id = $1 RETURNING name', [id, sha256(token), token.slice(0, 16)]);
+  const { rows } = await query('UPDATE event_sources SET token_hash = $2, token_prefix = $3, token_created_at = now() WHERE id = $1 RETURNING name', [id, sha256(token), token.slice(0, 16)]);
   if (!rows[0]) throw notFound('Source not found');
   await audit(null, { entity_type: 'event_source', entity_ref: rows[0].name, action: 'rotate_token', changes: {} });
   return { token };

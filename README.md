@@ -131,6 +131,10 @@ payloads are never stored. Alerts that never became incidents feed the problem c
 | OP5 / Naemon | `op5` | A notification command that posts `{"host_name","service_description","state","output","notification_type","timestamp"}` with `X-Kernel-Token` |
 | Anything else | `generic` | `{"events": [{"check","severity","host" or "ci","message","occurred_at"}]}`; optionally signed (Standard Webhooks) |
 
+Send the token in a header wherever the tool allows it. The `?token=` form is only for senders that cannot set
+headers (Azure action groups): Kernel redacts it from logs and traces, but proxies and the sender's own configuration
+may keep it, so rotate those tokens regularly (the source list shows each token's age).
+
 Scripts and agents can also report events with a token (`POST /api/events`) or the MCP tool `report_event`.
 
 **Follow-up actions** track work that follows from a problem (vendor fixes, monitoring, runbook updates, review
