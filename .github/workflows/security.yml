@@ -11,6 +11,9 @@ on:
 permissions:
   contents: read
 
+# Scanner images are pinned by tag and digest: the Trivy steps mount the Docker socket (root on the runner), so a
+# re-pushed tag must not run. Update both together when upgrading a scanner.
+
 concurrency:
   group: security-${{ github.ref }}
   cancel-in-progress: true
@@ -29,7 +32,7 @@ jobs:
       # Production dependencies must have no known high or critical vulnerability.
       - run: npm audit --omit=dev --audit-level=high
       - name: OSV scanner
-        run: docker run --rm -v "$PWD":/src ghcr.io/google/osv-scanner:v2.6.0 scan source --lockfile /src/package-lock.json
+        run: docker run --rm -v "$PWD":/src ghcr.io/google/osv-scanner:v2.6.0@sha256:afd838850ac1a0fcc15ff4a041dc9ba11123c3f0d2666217a5f0fcf9222b55fa scan source --lockfile /src/package-lock.json
 
   secrets:
     name: Secrets (gitleaks)
@@ -39,7 +42,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - run: docker run --rm -v "$PWD":/repo ghcr.io/gitleaks/gitleaks:v8.30.1 git /repo --config /repo/.gitleaks.toml --redact --no-banner
+      - run: docker run --rm -v "$PWD":/repo ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f git /repo --config /repo/.gitleaks.toml --redact --no-banner
 
   sast:
     name: Code (Semgrep)
@@ -50,7 +53,7 @@ jobs:
           persist-credentials: false
       # OWASP and Node rule sets plus Kernel's own rule against SQL built from input (.semgrep/kernel.yml).
       - run: >-
-          docker run --rm -v "$PWD":/src -w /src semgrep/semgrep:1.140.0 semgrep scan --metrics=off --error
+          docker run --rm -v "$PWD":/src -w /src semgrep/semgrep:1.140.0@sha256:4372a1de903521f9f10f877b6caf15d150d17e1ca592582682c8d02b77cbd4f6 semgrep scan --metrics=off --error
           --config p/owasp-top-ten --config p/typescript --config p/nodejs --config .semgrep/kernel.yml
           server/src web/src
 
@@ -64,11 +67,11 @@ jobs:
       - run: docker build -t kernel:ci .
       # Fail on fixable high or critical vulnerabilities in the image that would be deployed.
       - run: >-
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.67.2 image
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.67.2@sha256:e2b22eac59c02003d8749f5b8d9bd073b62e30fefaef5b7c8371204e0a4b0c08 image
           --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln,secret kernel:ci
       - name: SBOM (CycloneDX)
         run: >-
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD":/out aquasec/trivy:0.67.2 image
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD":/out aquasec/trivy:0.67.2@sha256:e2b22eac59c02003d8749f5b8d9bd073b62e30fefaef5b7c8371204e0a4b0c08 image
           --format cyclonedx --output /out/kernel-sbom.cdx.json kernel:ci
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
