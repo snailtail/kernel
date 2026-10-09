@@ -71,6 +71,7 @@ async function affected(problem: { id: number; impact: number }) {
     if (ci.class === 'service') services.set(ci.ref, { ref: ci.ref, name: ci.name, criticality: ci.criticality, via: [] });
   }
   // Bounded: the first 10 CIs; each walk is itself limited to 10 levels and 500 nodes.
+  // TODO(#53): pass the problem reader so scoping hides services and CIs they cannot see (user null = no filter).
   for (const ci of cis.slice(0, 10)) {
     const r = await computeImpact(null, ci.ref, impactSchema.parse({ direction: 'up' }));
     incomplete ||= r.truncated || r.depth_limit_reached;

@@ -60,7 +60,9 @@ describe('problems and known errors on CIs (#26)', { skip }, () => {
       ],
     });
     assert.equal(sent.body.stored, 4);
-    assert.match(sent.body.errors[0].error, /Unknown CI CI999999/);
+    assert.deepEqual(sent.body.errors, [], 'an ingest token cannot probe which CI refs exist');
+    const byPerson = await pm.post('/api/integrations/records', { records: [{ system: 'OP5', kind: 'event', reference: 'E5', ci: 'CI999999' }] });
+    assert.match(byPerson.body.errors[0].error, /Unknown CI CI999999/);
     const cand = (await analyst.get('/api/candidates')).body.candidates.find((c: any) => c.ci_ref === app);
     assert.equal(cand.count, 3, 'by ref and by unique name');
     const created = await analyst.post('/api/candidates/create', { record_ids: cand.records.map((r: any) => r.id), problem: { title: 'Payroll app errors', detection: 'proactive' } });

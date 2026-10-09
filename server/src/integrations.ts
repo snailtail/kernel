@@ -98,7 +98,8 @@ export async function ingestRecords(user: User, input: z.infer<typeof ingestSche
     );
     const sourceIds = new Map(bySource.map((s) => [`${s.source_system}\u0000${s.source_id}`, s.ci_id as number]));
     const ciIds = unique.map((r) => {
-      if (r.ci && !refIds.has(r.ci.toUpperCase())) errors.push({ reference: r.reference, error: `Unknown CI ${r.ci}; stored without it` });
+      // Only people get told a ref is unknown: an ingest-only token must not be able to probe which CIs exist.
+      if (r.ci && !refIds.has(r.ci.toUpperCase()) && user.role !== 'integration') errors.push({ reference: r.reference, error: `Unknown CI ${r.ci}; stored without it` });
       return (r.ci && refIds.get(r.ci.toUpperCase())) || (r.ci_source_system && sourceIds.get(`${r.ci_source_system}\u0000${r.ci_source_id}`)) || null;
     });
     await db.query(
