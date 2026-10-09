@@ -12,6 +12,8 @@ import { GuidePage } from './pages/Guide';
 import { KedbPage } from './pages/Kedb';
 import { ChangeInitialPassword, EnrollTwoFactor, LoginPage } from './pages/Login';
 import { ReauthPrompt } from './components/Reauth';
+import { AskHost } from './components/Ask';
+import { AuditPage } from './pages/Audit';
 import { NewProblemPage } from './pages/NewProblem';
 import { ProblemPage } from './pages/Problem';
 import { ProblemsPage } from './pages/Problems';
@@ -65,6 +67,7 @@ export function App() {
   return (
     <SessionContext.Provider value={{ user, meta, reloadMeta, logout, setPreferences }}>
       <ReauthPrompt />
+      <AskHost />
       <div className="shell">
         <aside className="sidebar">
           <div className="brand">
@@ -110,6 +113,7 @@ export function App() {
             <Route path="/reports" element={<ReportsPage />} />
             <Route path="/review" element={<ReviewPage />} />
             <Route path="/admin" element={<AdminPage />} />
+            <Route path="/admin/audit" element={<AuditPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/guide" element={<GuidePage />} />
             <Route path="/api-docs" element={<ApiDocsPage />} />

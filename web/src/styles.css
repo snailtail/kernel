@@ -732,3 +732,16 @@ a.stat:hover { border-color: var(--accent); text-decoration: none; }
 
 .scope-picker { border: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
 .scope-picker legend { font-weight: 550; font-size: 13px; margin-bottom: 4px; padding: 0; }
+
+/* Audit trail */
+.audit-filters input:not([type='date']) { width: 150px; }
+.audit-filters input[type='date'] { width: auto; }
+.audit-table tbody tr { cursor: pointer; vertical-align: top; }
+.audit-table tbody tr.open { background: var(--surface-2); }
+.audit-changes { margin: 0; display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
+.audit-changes > div { display: grid; grid-template-columns: 130px 1fr; gap: 8px; }
+.audit-changes dt { color: var(--text-2); }
+.audit-changes dd { margin: 0; overflow-wrap: anywhere; max-height: 180px; overflow: auto; }
+.audit-changes .before { color: var(--danger); text-decoration: line-through; }
+.audit-changes .after { color: var(--success); }
+.audit-changes-cell { max-width: 520px; }

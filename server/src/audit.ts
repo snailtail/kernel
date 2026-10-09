@@ -67,16 +67,17 @@ export async function audit(db: Db | null, entry: AuditEntry) {
       reason: entry.reason ?? '',
     };
     const hash = hashOf(prev, row);
-    await client.query(
+    const { rows: inserted } = await client.query(
       `INSERT INTO audit_log (at, actor_user_id, actor_name, actor_type, channel, token_prefix, ip, user_agent, request_id,
          entity_type, entity_ref, action, changes, reason, prev_hash, hash)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING id`,
       [row.at, row.actor_user_id, row.actor_name, row.actor_type, row.channel, row.token_prefix, row.ip, ctx.userAgent, row.request_id,
         row.entity_type, row.entity_ref, row.action, JSON.stringify(row.changes), row.reason, prev, hash],
     );
-    // A copy for the SIEM / Elasticsearch (#8): no field values, which may be long or sensitive.
+    // A copy for the SIEM / Elasticsearch (#8): no field values, which may be long or sensitive. The id and hash
+    // give an external anchor, so a rewritten chain in the database can be detected against Elasticsearch.
     auditLogger.info(
-      { event: { kind: 'event', category: ['configuration'], action: `${entry.entity_type}.${entry.action}` }, user: { id: ctx.userId, name: ctx.userName }, actor_type: ctx.actorType, entity: { type: entry.entity_type, ref: entry.entity_ref }, fields: Object.keys(entry.changes ?? {}), reason: entry.reason || undefined },
+      { event: { kind: 'event', category: ['configuration'], action: `${entry.entity_type}.${entry.action}` }, audit: { id: Number(inserted[0].id), hash }, user: { id: ctx.userId, name: ctx.userName }, actor_type: ctx.actorType, entity: { type: entry.entity_type, ref: entry.entity_ref }, fields: Object.keys(entry.changes ?? {}), reason: entry.reason || undefined },
       `${entry.entity_type}.${entry.action}`,
     );
   };

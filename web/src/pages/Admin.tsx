@@ -4,6 +4,8 @@ import { formatDate, relativeTime, ROLE_LABEL } from '../format';
 import { useApi } from '../hooks';
 import { isManager, useSession } from '../session';
 import { Modal } from '../components/Modal';
+import { askReason } from '../components/Ask';
+import { Link } from 'react-router';
 
 interface AdminUser {
   mfa_enabled: boolean;
@@ -21,7 +23,10 @@ export function AdminPage() {
   if (!isManager(user)) return <p className="empty">Administration requires the Problem Manager or Administrator role.</p>;
   return (
     <>
-      <header className="page-head"><h1>Administration</h1></header>
+      <header className="page-head">
+        <h1>Administration</h1>
+        {user.role === 'admin' && <Link className="btn" to="/admin/audit">Audit trail</Link>}
+      </header>
       {user.role === 'admin' && <SecurityCard />}
       {user.role === 'admin' && <WebhooksCard />}
       <SystemsCard />
@@ -88,7 +93,7 @@ function UserModal({ user, self, roles, onClose, onDone }: { user: AdminUser | n
       if (user) {
         const { username: _, password, ...fields } = form;
         const sensitive = !self && (password || fields.role !== user.role || fields.active !== user.active);
-        const reason = sensitive ? window.prompt('Reason for this change (recorded in the audit trail):')?.trim() : undefined;
+        const reason = sensitive ? await askReason(`Change ${user.username}`, "Changing someone's role, status or password needs a reason.", { confirmLabel: 'Save change' }) : undefined;
         if (sensitive && !reason) return;
         await api.patch(`/api/users/${user.id}`, { ...(password ? { ...fields, password } : fields), reason });
       } else {
@@ -120,7 +125,7 @@ function UserModal({ user, self, roles, onClose, onDone }: { user: AdminUser | n
         {user && user.mfa_enabled && (
           <div className="full">
             <button type="button" className="btn-link danger" onClick={async () => {
-              const reason = window.prompt(`Reason for resetting two-factor authentication for ${user.username} (recorded in the audit trail):`)?.trim();
+              const reason = await askReason(`Reset two-factor authentication`, `${user.username} will have to set up two-factor authentication again.`, { confirmLabel: 'Reset', danger: true });
               if (!reason) return;
               try { await api.post(`/api/users/${user.id}/mfa/reset`, { reason }); onDone(); } catch (err) { setError((err as Error).message); }
             }}>Reset two-factor authentication</button>
@@ -379,7 +384,7 @@ function WebhookModal({ hook, events, formats, onClose, onDone }: { hook: Webhoo
     }
   };
   const remove = async () => {
-    const reason = hook ? window.prompt(`Reason for deleting webhook ${hook.name} (recorded in the audit trail):`)?.trim() : '';
+    const reason = hook ? await askReason(`Delete ${hook.name}`, 'The webhook and its delivery log are deleted.', { confirmLabel: 'Delete webhook', danger: true }) : null;
     if (hook && reason) {
       await api.del(`/api/webhooks/${hook.id}?reason=${encodeURIComponent(reason)}`);
       onDone();
@@ -449,7 +454,7 @@ function SecurityCard() {
   const toggleRole = async (role: Role) => {
     if (!policy) return;
     const roles = policy.required_roles.includes(role) ? policy.required_roles.filter((r) => r !== role) : [...policy.required_roles, role];
-    const reason = window.prompt('Reason for changing the two-factor policy (recorded in the audit trail):')?.trim();
+    const reason = await askReason('Change two-factor policy', `Two-factor authentication will ${policy.required_roles.includes(role) ? 'no longer be' : 'be'} required for ${ROLE_LABEL[role]}.`, { confirmLabel: 'Change policy' });
     if (!reason) return;
     await api.put('/api/admin/mfa-policy', { required_roles: roles, reason });
     reloadPolicy();

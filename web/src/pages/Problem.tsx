@@ -57,6 +57,7 @@ export function ProblemPage() {
             <WatchButton problem={p} onChange={setData} />
             <Link to={`/problems/${p.ref}/print`}>Print / PDF</Link>
             <a href={`/api/problems/${p.ref}/export.md`}>Export Markdown</a>
+            {user.role === 'admin' && <Link to={`/admin/audit?entity_type=problem&entity_ref=${p.ref}`}>Audit trail</Link>}
           </span>
         </div>
         <EditableTitle value={p.title} editable={editable} onSave={(title) => save({ title }, { title: p.title })} />
