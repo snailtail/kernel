@@ -93,6 +93,11 @@ export const OPERATIONS: Op[] = [
   { method: 'get', path: '/api/problems/:ref/analyses/:id/check', tag: 'Analyses', summary: 'Quality check of an analysis against its method' },
   { method: 'post', path: '/api/problems/:ref/analyses/:id/confirm', tag: 'Analyses', summary: 'Confirm an analysis proposed via MCP (people only)' },
   { method: 'post', path: '/api/problems/:ref/confirm', tag: 'Problems', summary: 'Confirm text fields proposed via MCP (people only)', body: z.object({ fields: z.array(z.string()) }) },
+  { method: 'get', path: '/api/approvals', tag: 'Problems', summary: 'Decisions requested through MCP, waiting for a person' },
+  { method: 'post', path: '/api/approvals/:id/approve', tag: 'Problems', summary: 'Approve and carry out a requested decision (web UI only)', body: z.object({ note: z.string().optional() }) },
+  { method: 'post', path: '/api/approvals/:id/reject', tag: 'Problems', summary: 'Reject a requested decision (web UI only)', body: z.object({ note: z.string().optional() }) },
+  { method: 'get', path: '/api/admin/mcp-approvals', tag: 'Administration', summary: 'Whether decisions through MCP need approval in the web UI' },
+  { method: 'put', path: '/api/admin/mcp-approvals', tag: 'Administration', summary: 'Require (or not) approval of MCP decisions; reason required', body: z.object({ required: z.boolean(), reason: z.string() }) },
   { method: 'get', path: '/api/kedb', tag: 'Known errors', summary: 'Search the known error database', query: z.object({ q: z.string().optional(), include_resolved: z.enum(['true', 'false']).optional() }) },
 
   { method: 'get', path: '/api/reports', tag: 'Reports', summary: 'KPIs and trends for a period', query: reports.reportSchema },

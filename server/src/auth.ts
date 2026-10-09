@@ -29,6 +29,7 @@ export interface Preferences {
   /** Step-by-step guidance through the process; on unless turned off. */
   guided?: boolean;
   intro_seen?: boolean;
+  saved_views?: { name: string; page: 'problems' | 'actions'; query: string }[];
 }
 
 declare module 'fastify' {

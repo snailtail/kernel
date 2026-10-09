@@ -6,6 +6,7 @@ import { notFound } from '../errors.js';
 import { query } from '../db.js';
 import * as actions from '../actions.js';
 import * as analyses from '../analyses.js';
+import * as approvals from '../approvals.js';
 import * as generic from '../generic.js';
 import { GUIDES, guideById, guideMarkdown } from '../methods.js';
 import { problemContext } from '../problem-context.js';
@@ -191,6 +192,17 @@ export async function problemRoutes(app: FastifyInstance) {
     const body = z.object({ fields: z.array(z.enum(problems.PROPOSABLE as [string, ...string[]])).min(1) }).parse(req.body);
     return problems.confirmProposals(requireUser(req), req.params.ref, body.fields);
   });
+
+  app.get('/api/approvals', async (req) => {
+    requireUser(req, 'problem.read');
+    return approvals.listApprovals();
+  });
+  app.post<{ Params: { id: string } }>('/api/approvals/:id/approve', async (req) =>
+    approvals.decideApproval(req, requireUser(req), Number(req.params.id), true, approvals.decisionSchema.parse(req.body ?? {}).note),
+  );
+  app.post<{ Params: { id: string } }>('/api/approvals/:id/reject', async (req) =>
+    approvals.decideApproval(req, requireUser(req), Number(req.params.id), false, approvals.decisionSchema.parse(req.body ?? {}).note),
+  );
 
   app.get('/api/kedb', async (req) => {
     requireUser(req, 'kedb.read');

@@ -460,6 +460,14 @@ function SecurityCard() {
     reloadPolicy();
     reload();
   };
+  const { data: approvals, reload: reloadApprovals } = useApi<{ required: boolean }>('/api/admin/mcp-approvals');
+  const toggleApprovals = async () => {
+    if (!approvals) return;
+    const reason = await askReason('Decisions through MCP', approvals.required ? 'Agents will be able to make decisions without approval in the web UI.' : 'Agent decisions will wait for approval in the web UI.', { confirmLabel: 'Change setting', danger: approvals.required });
+    if (!reason) return;
+    await api.put('/api/admin/mcp-approvals', { required: !approvals.required, reason });
+    reloadApprovals();
+  };
   if (!data) return null;
   const failing = data.checks.filter((c) => !c.ok).length;
   return (
@@ -476,6 +484,16 @@ function SecurityCard() {
           </li>
         ))}
       </ul>
+      {approvals && (
+        <div className="mfa-policy">
+          <h3>Decisions through MCP</h3>
+          <label className="check">
+            <input type="checkbox" checked={approvals.required} onChange={toggleApprovals} />
+            AI agents' decisions (closing, accepting or deferring risk, marking duplicates) wait for a person to approve them in the web UI
+          </label>
+          {!approvals.required && <p className="warn-box">Agents act directly on a quoted confirmation, which a prompt injection could fabricate.</p>}
+        </div>
+      )}
       {policy && (
         <div className="mfa-policy">
           <h3>Two-factor policy</h3>

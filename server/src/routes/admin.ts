@@ -10,6 +10,7 @@ import { query } from '../db.js';
 import { badRequest, conflict, notFound } from '../errors.js';
 import { audit, auditQuerySchema, queryAudit, requireReason, verifyChain } from '../audit.js';
 import { csvCell } from '../reports.js';
+import { approvalsRequired, setApprovalsRequired } from '../approvals.js';
 import { ROLES } from '../workflow.js';
 
 const userFields = {
@@ -119,6 +120,17 @@ export async function adminRoutes(app: FastifyInstance) {
   app.post<Id>('/api/webhooks/:id/ping', async (req) => {
     const admin = requireUser(req, 'webhook.manage');
     return webhooks.ping(admin, Number(req.params.id));
+  });
+
+  app.get('/api/admin/mcp-approvals', async (req) => {
+    requireUser(req, 'mfa.policy');
+    return { required: await approvalsRequired() };
+  });
+  app.put('/api/admin/mcp-approvals', async (req) => {
+    const admin = requireUser(req, 'mfa.policy');
+    await requireStepUp(req);
+    const body = z.object({ required: z.boolean(), reason: z.string().max(1000).optional() }).parse(req.body);
+    return setApprovalsRequired(admin, body.required, requireReason(body.reason));
   });
 
   app.get('/api/admin/mfa-policy', async (req) => {

@@ -94,7 +94,16 @@ export async function authRoutes(app: FastifyInstance) {
 
   app.put('/api/auth/preferences', async (req) => {
     const user = requireUser(req);
-    const body = z.object({ theme: z.enum(['system', 'light', 'dark']).optional(), guided: z.boolean().optional(), intro_seen: z.boolean().optional() }).strict().parse(req.body);
+    const body = z
+      .object({
+        theme: z.enum(['system', 'light', 'dark']).optional(),
+        guided: z.boolean().optional(),
+        intro_seen: z.boolean().optional(),
+        // Saved list views: a name and the list's query string, e.g. "status=known_error&priority=1".
+        saved_views: z.array(z.object({ name: z.string().trim().min(1).max(60), page: z.enum(['problems', 'actions']), query: z.string().max(500) })).max(30).optional(),
+      })
+      .strict()
+      .parse(req.body);
     const { rows } = await query('UPDATE users SET preferences = preferences || $2 WHERE id = $1 RETURNING preferences', [user.id, body]);
     return rows[0].preferences;
   });

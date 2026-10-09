@@ -252,7 +252,12 @@ export async function getProblem(ref: string) {
     ),
   ]);
   const { resolveLinkUrls } = await import('./integrations.js');
-  const detail = { ...problem, links: await resolveLinkUrls(links.rows), activity: activity.rows, actions: actions.rows, analyses: analyses.rows, watchers: watchers.rows };
+  const { rows: approvals } = await query(
+    `SELECT a.id, a.kind, a.summary, a.human_confirmation, a.created_at, u.display_name AS requested_by, a.requested_via
+     FROM pending_approvals a JOIN users u ON u.id = a.requested_by WHERE a.problem_id = $1 AND a.status = 'pending' ORDER BY a.created_at`,
+    [problem.id],
+  );
+  const detail = { ...problem, links: await resolveLinkUrls(links.rows), activity: activity.rows, actions: actions.rows, analyses: analyses.rows, watchers: watchers.rows, pending_approvals: approvals };
   return { type: 'problem', ...detail, url: problemUrl(detail.ref), next_steps: guidanceFor(detail) };
 }
 

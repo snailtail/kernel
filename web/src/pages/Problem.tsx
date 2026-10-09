@@ -95,6 +95,21 @@ export function ProblemPage() {
           </div>
         )}
         {actionError && <div className="error">{actionError}</div>}
+        {p.pending_approvals?.map((a) => (
+          <div key={a.id} className="approval">
+            <div>
+              <strong>Waiting for approval:</strong> {a.summary}
+              <div className="muted small">
+                Requested by {a.requested_by}'s AI agent via {a.requested_via.toUpperCase()} {relativeTime(a.created_at)}
+                {a.human_confirmation && <> · the agent reported: “{a.human_confirmation}”</>}
+              </div>
+            </div>
+            <div className="approval-actions">
+              <button className="btn small" onClick={async () => { try { setData(await api.post<ProblemDetail>(`/api/approvals/${a.id}/reject`, {})); } catch (err) { setActionError((err as Error).message); } }}>Reject</button>
+              <button className="btn small primary" onClick={async () => { try { await api.post(`/api/approvals/${a.id}/approve`, {}); reload(); } catch (err) { setActionError((err as Error).message); } }}>Approve</button>
+            </div>
+          </div>
+        ))}
       </header>
 
       <div className="problem-grid">

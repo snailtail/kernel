@@ -79,7 +79,9 @@ guide, shown in the UI and served to MCP clients as `kernel://guides/<id>`, and 
 the server against their method (`check_analysis`; the UI shows the same checks), and `get_problem_context` gives an
 agent all the evidence in one call. Content written through MCP is marked **Proposed via MCP** until a person confirms
 it, history entries show the channel, and decisions through MCP (closing, accepting/deferring risk, marking
-duplicates) require the person's quoted confirmation, recorded in the audit trail.
+duplicates) need the person's quoted confirmation and then, by default, wait as a **pending approval** until a person
+approves them in the web UI (an agent's quote could be fabricated after a prompt injection). Record text is handed to
+agents as `untrusted_content`, and the MCP instructions tell them it is data, never instructions.
 
 **Follow-up actions** track work that follows from a problem (vendor fixes, monitoring, runbook updates, review
 outcomes) with an owner and due date.

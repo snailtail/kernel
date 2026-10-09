@@ -138,6 +138,7 @@ export interface ProblemDetail extends Problem {
   analyses: Analysis[];
   next_steps: Guidance;
   watchers: { id: number; display_name: string }[];
+  pending_approvals: { id: number; kind: string; summary: string; human_confirmation: string; created_at: string; requested_by: string; requested_via: string }[];
 }
 
 export interface Meta {

@@ -4,6 +4,7 @@ import type { User } from './auth.js';
 import { query } from './db.js';
 import { badRequest } from './errors.js';
 import { authorize, can } from './policy.js';
+import { listApprovals } from './approvals.js';
 import { addLink, LINK_KINDS, SELECT_ACTION } from './problems.js';
 import { recordTypes, recordUrl, typeForRef, type SearchHit } from './records.js';
 
@@ -51,7 +52,8 @@ export async function linkRecords(user: User, from: string, to: string, options:
 
 /** What the user should work on: their open problems and actions, and recent changes on what they watch. */
 export async function myWork(user: User) {
-  const [problems, actions, watched] = await Promise.all([
+  const decide = can(user.role, 'problem.accept_risk');
+  const [problems, actions, watched, decisions] = await Promise.all([
     query(
       `SELECT ref, title, status, priority, updated_at FROM problems WHERE assignee_id = $1 AND status NOT IN ('resolved', 'closed') ORDER BY priority, updated_at DESC LIMIT 50`,
       [user.id],
@@ -64,11 +66,16 @@ export async function myWork(user: User) {
        WHERE a.user_id IS DISTINCT FROM $1 AND a.created_at > now() - interval '7 days' ORDER BY a.created_at DESC LIMIT 30`,
       [user.id],
     ),
+    decide
+      ? query(`SELECT ref, title, priority, known_error_at FROM problems WHERE status = 'known_error' AND coalesce(ec_decision, 'pending') = 'pending' ORDER BY priority, known_error_at LIMIT 30`)
+      : Promise.resolve({ rows: [] as any[] }),
   ]);
   const problemType = recordTypes().find((t) => t.type === 'problem')!;
   return {
     problems: problems.rows.map((p) => ({ type: 'problem', ...p, url: recordUrl(problemType, p.ref) })),
     actions: actions.rows,
     watched_changes: watched.rows,
+    decisions: decisions.rows.map((p) => ({ type: 'problem', ...p, url: recordUrl(problemType, p.ref) })),
+    approvals: decide ? await listApprovals() : [],
   };
 }
