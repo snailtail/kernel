@@ -174,7 +174,7 @@ export const impactSchema = z.object({
  * Which CIs may this user see? Everyone with ci.read sees all today; scoping (#53) plugs in here so impact
  * results never reveal CIs the caller cannot read.
  */
-async function visible(_user: User, ids: number[]) {
+async function visible(_user: User | null, ids: number[]) {
   return new Set(ids);
 }
 
@@ -185,6 +185,11 @@ async function visible(_user: User, ids: number[]) {
  */
 export async function impact(user: User, ref: string, opts: z.infer<typeof impactSchema>) {
   authorize(user, 'ci.read');
+  return computeImpact(user, ref, opts);
+}
+
+/** The walk itself, also used for a problem's affected services (user null: the problem reader's view). */
+export async function computeImpact(user: User | null, ref: string, opts: z.infer<typeof impactSchema>) {
   const { rows: roots } = await query('SELECT id, ref, name, class FROM configuration_items WHERE ref = $1', [ref.toUpperCase()]);
   const root = roots[0];
   if (!root) throw notFound(`${ref} not found`);

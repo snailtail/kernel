@@ -1,6 +1,7 @@
 // External systems (link URL templates), inbound incident/event records, and problem candidates.
 import { z } from 'zod';
 import type { User } from './auth.js';
+import { linkRecordCis } from './problem-cis.js';
 import { audit } from './audit.js';
 import { authorize } from './policy.js';
 import { query, tx } from './db.js';
@@ -57,6 +58,9 @@ export const recordSchema = z.object({
   summary: z.string().trim().max(2000).default(''),
   occurred_at: z.iso.datetime({ offset: true }).optional(),
   problem_ref: z.string().trim().max(20).optional().describe('Link the record to this problem'),
+  ci: z.string().trim().max(30).optional().describe('The CI or service the record concerns (CI000012/SVC000003)'),
+  ci_source_system: z.string().trim().max(100).optional().describe('Or identify the CI by its source system and id'),
+  ci_source_id: z.string().trim().max(300).optional(),
 });
 export const ingestSchema = z.object({ records: z.array(recordSchema).min(1).max(500) });
 
@@ -71,6 +75,7 @@ async function linkRecord(db: Db, user: User, problem: { id: number; ref: string
     await db.query('UPDATE problems SET updated_at = now() WHERE id = $1', [problem.id]);
   }
   await db.query('UPDATE external_records SET problem_id = $1 WHERE system = $2 AND kind = $3 AND reference = $4', [problem.id, r.system, r.kind, r.reference]);
+  await linkRecordCis(db, user.id, problem, r);
   return rowCount === 1;
 }
 
@@ -83,16 +88,38 @@ export async function ingestRecords(user: User, input: z.infer<typeof ingestSche
   let linked = 0;
   const errors: { reference: string; error: string }[] = [];
   await tx(async (db) => {
+    // The CI a record concerns: by ref, by source system + id, or else by a service name that names exactly one CI.
+    const { rows: byRef } = await db.query('SELECT id, ref FROM configuration_items WHERE ref = ANY($1)', [unique.map((r) => r.ci?.toUpperCase() ?? '')]);
+    const refIds = new Map(byRef.map((c) => [c.ref as string, c.id as number]));
+    const { rows: bySource } = await db.query(
+      `SELECT s.source_system, s.source_id, s.ci_id FROM unnest($1::text[], $2::text[]) AS x(sys, sid)
+       JOIN ci_sources s ON s.source_system = x.sys AND s.source_id = x.sid`,
+      [unique.map((r) => r.ci_source_system ?? ''), unique.map((r) => r.ci_source_id ?? '')],
+    );
+    const sourceIds = new Map(bySource.map((s) => [`${s.source_system}\u0000${s.source_id}`, s.ci_id as number]));
+    const ciIds = unique.map((r) => {
+      if (r.ci && !refIds.has(r.ci.toUpperCase())) errors.push({ reference: r.reference, error: `Unknown CI ${r.ci}; stored without it` });
+      return (r.ci && refIds.get(r.ci.toUpperCase())) || (r.ci_source_system && sourceIds.get(`${r.ci_source_system}\u0000${r.ci_source_id}`)) || null;
+    });
     await db.query(
-      `INSERT INTO external_records (system, kind, reference, service, category, summary, occurred_at)
-       SELECT system, kind, reference, service, category, summary, coalesce(occurred_at, now())
-       FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::text[], $7::timestamptz[])
-         AS r(system, kind, reference, service, category, summary, occurred_at)
+      `INSERT INTO external_records (system, kind, reference, service, category, summary, occurred_at, ci_id)
+       SELECT system, kind, reference, service, category, summary, coalesce(occurred_at, now()), ci_id
+       FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::text[], $7::timestamptz[], $8::int[])
+         AS r(system, kind, reference, service, category, summary, occurred_at, ci_id)
        ON CONFLICT (system, kind, reference) DO UPDATE SET
          service = coalesce(nullif(excluded.service, ''), external_records.service),
          category = coalesce(nullif(excluded.category, ''), external_records.category),
-         summary = coalesce(nullif(excluded.summary, ''), external_records.summary)`,
-      [col('system'), col('kind'), col('reference'), col('service'), col('category'), col('summary'), col('occurred_at')],
+         summary = coalesce(nullif(excluded.summary, ''), external_records.summary),
+         ci_id = coalesce(excluded.ci_id, external_records.ci_id)`,
+      [col('system'), col('kind'), col('reference'), col('service'), col('category'), col('summary'), col('occurred_at'), ciIds],
+    );
+    await db.query(
+      `WITH unique_names AS (
+         SELECT lower(name) AS name, min(id) AS id FROM configuration_items WHERE status <> 'retired' GROUP BY lower(name) HAVING count(*) = 1)
+       UPDATE external_records r SET ci_id = u.id FROM unique_names u, unnest($1::text[], $2::text[], $3::text[]) AS x(system, kind, reference)
+       WHERE r.ci_id IS NULL AND r.service <> '' AND u.name = lower(trim(r.service))
+         AND r.system = x.system AND r.kind = x.kind AND r.reference = x.reference`,
+      [col('system'), col('kind'), col('reference')],
     );
     for (const r of unique.filter((r) => r.problem_ref)) {
       // A savepoint per link, so one bad problem_ref does not undo the batch.
@@ -131,14 +158,14 @@ export async function setRule(user: User, rule: z.infer<typeof ruleSchema>) {
 export async function listCandidates() {
   const rule = await getRule();
   const { rows } = await query(
-    `SELECT coalesce(nullif(service, ''), 'Unspecified') AS service, count(*)::int AS count,
-       count(*) FILTER (WHERE kind = 'incident')::int AS incidents, count(*) FILTER (WHERE kind = 'event')::int AS events,
-       min(occurred_at) AS first_at, max(occurred_at) AS last_at,
-       json_agg(json_build_object('id', id, 'system', system, 'kind', kind, 'reference', reference, 'summary', summary,
-                                  'category', category, 'occurred_at', occurred_at) ORDER BY occurred_at DESC) AS records
-     FROM external_records
-     WHERE problem_id IS NULL AND NOT dismissed AND occurred_at > now() - $1 * interval '1 day'
-     GROUP BY 1 HAVING count(*) >= $2 ORDER BY count(*) DESC`,
+    `SELECT coalesce(c.name, nullif(r.service, ''), 'Unspecified') AS service, c.ref AS ci_ref, c.class AS ci_class, count(*)::int AS count,
+       count(*) FILTER (WHERE r.kind = 'incident')::int AS incidents, count(*) FILTER (WHERE r.kind = 'event')::int AS events,
+       min(r.occurred_at) AS first_at, max(r.occurred_at) AS last_at,
+       json_agg(json_build_object('id', r.id, 'system', r.system, 'kind', r.kind, 'reference', r.reference, 'summary', r.summary,
+                                  'category', r.category, 'occurred_at', r.occurred_at) ORDER BY r.occurred_at DESC) AS records
+     FROM external_records r LEFT JOIN configuration_items c ON c.id = r.ci_id
+     WHERE r.problem_id IS NULL AND NOT r.dismissed AND r.occurred_at > now() - $1 * interval '1 day'
+     GROUP BY 1, 2, 3 HAVING count(*) >= $2 ORDER BY count(*) DESC`,
     [rule.window_days, rule.min_records],
   );
   return { rule, candidates: rows };

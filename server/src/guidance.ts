@@ -7,6 +7,7 @@ interface GuidanceInput {
   detection: string;
   category_id: number | null;
   affected_service: string;
+  affected_cis?: unknown[];
   assignee_id: number | null;
   is_major: boolean;
   root_cause: string;
@@ -58,7 +59,7 @@ export function guidanceFor(p: GuidanceInput): Guidance {
             hint: 'Linked records show the impact and help confirm the fix later.',
             done: count(triggerKind) + count('incident') + count('event') > 0,
           },
-          { id: 'categorise', label: 'Set category and affected service', hint: 'Needed for trend analysis and for finding related problems.', done: p.category_id !== null && has(p.affected_service) },
+          { id: 'categorise', label: 'Set category and affected CIs or service', hint: 'Needed for trend analysis, impact and finding related problems. Link the CIs and services from the CMDB when you can.', done: p.category_id !== null && (has(p.affected_service) || (p.affected_cis?.length ?? 0) > 0) },
           { id: 'owner', label: 'Assign an owner', hint: 'One person accountable for driving the analysis.', done: p.assignee_id !== null },
           { id: 'duplicates', label: 'Check for duplicates and known errors', hint: 'Search existing problems and the known error database before investing in analysis.', done: null },
         ],

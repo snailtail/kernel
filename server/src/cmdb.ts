@@ -327,6 +327,7 @@ export async function addCiComment(user: User, ref: string, body: string) {
 
 export async function addCiLink(user: User, ref: string, input: z.infer<typeof ciLinkSchema>) {
   authorize(user, 'ci.annotate');
+  if (input.kind === 'problem') throw badRequest('Problems are linked as affected CIs: POST /api/problems/:ref/cis (or link_ci_to_problem)');
   await tx(async (db) => {
     const ci = await loadCi(db, ref);
     const { rowCount } = await db.query(

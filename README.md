@@ -99,6 +99,12 @@ business services, and what it depends on; walks are bounded (10 levels, 500 nod
 incomplete. Connectors report relationships with `POST /api/ci-relationships/sync` and own what they report; manual
 relationships survive every sync. CI groups collect CIs by hand or by rules (tag, type, team, attribute…).
 
+**Problems on CIs**: problems and known errors link to the CIs and services they affect. The problem shows the
+services reached through the CMDB and suggests a higher impact when a critical service is affected; the CI page shows
+its known errors with their workarounds – what the service desk needs during an incident. Incoming incidents and
+events can name their CI (`ci`, or `ci_source_system` + `ci_source_id`; a service name that matches exactly one CI
+also works), candidates group by CI, and reports show CI hotspots and records no problem explains yet.
+
 **Follow-up actions** track work that follows from a problem (vendor fixes, monitoring, runbook updates, review
 outcomes) with an owner and due date.
 

@@ -4,6 +4,7 @@ import { api, asConflict, type Action, type Activity, type Conflict, type LinkKi
 import { MajorBadge, PriorityBadge, StatusBadge } from '../components/Badges';
 import { ActionList, ActionModal } from '../components/Actions';
 import { ApprovalDetails } from '../components/ApprovalDetails';
+import { AffectedCisPanel } from '../components/AffectedCis';
 import { AnalysesSection } from '../components/Analyses';
 import { GuidePanel } from '../components/Guide';
 import { SimilarProblems } from '../components/Similar';
@@ -132,6 +133,7 @@ export function ProblemPage() {
         </div>
         <aside className="problem-side">
           <DetailsPanel problem={p} editable={editable} onSave={save} />
+          <AffectedCisPanel problem={p} editable={canEdit(user)} onChange={setData} />
           <LinksPanel problem={p} editable={canEdit(user)} onChange={setData} />
           <SimilarProblems text={`${p.title} ${p.description}`} exclude={p.ref} duplicateRef={isManager(user) && p.status !== 'closed' ? p.ref : undefined} />
         </aside>

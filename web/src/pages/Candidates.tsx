@@ -7,7 +7,7 @@ import { useApi } from '../hooks';
 import { canEdit, isManager, useSession } from '../session';
 
 interface CandidateRecord { id: number; system: string; kind: 'incident' | 'event'; reference: string; summary: string; category: string; occurred_at: string }
-interface Candidate { service: string; count: number; incidents: number; events: number; first_at: string; last_at: string; records: CandidateRecord[] }
+interface Candidate { service: string; ci_ref: string | null; ci_class: string | null; count: number; incidents: number; events: number; first_at: string; last_at: string; records: CandidateRecord[] }
 interface Candidates { rule: { min_records: number; window_days: number }; candidates: Candidate[] }
 
 export function CandidatesPage() {
@@ -50,10 +50,10 @@ export function CandidatesPage() {
       )}
       <div className="candidates">
         {data?.candidates.map((c) => (
-          <article key={c.service} className="card candidate">
+          <article key={`${c.ci_ref ?? ''}${c.service}`} className="card candidate">
             <header>
               <div>
-                <h2>{c.service}</h2>
+                <h2>{c.service} {c.ci_ref && <Link to={`/cis/${c.ci_ref}`} className="mono small">{c.ci_ref}</Link>}</h2>
                 <p className="muted small">
                   {c.incidents} incident{c.incidents === 1 ? '' : 's'} · {c.events} event{c.events === 1 ? '' : 's'} · first {relativeTime(c.first_at)}, latest {relativeTime(c.last_at)}
                 </p>

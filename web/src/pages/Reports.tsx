@@ -1,3 +1,4 @@
+import { Link } from 'react-router';
 import { useState } from 'react';
 import { GroupedBars, HBars, LineChart } from '../components/Charts';
 import { CLOSURE_LABEL, formatDay, PRIORITY_LABEL } from '../format';
@@ -19,6 +20,8 @@ interface Report {
   hotspots: {
     services: { name: string; incidents: number; events: number; open_problems: number }[];
     categories: { name: string; logged: number; open: number }[];
+    cis: { ref: string; name: string; type_label: string; criticality: number; records: number; unlinked: number; open_problems: number; known_errors: number }[];
+    ci_types: { name: string; records: number; problems: number }[];
   };
   known_errors: { count: number; avg_age_days: number; with_workaround: number; with_decision: number; risk_accepted: number; review_due: number };
   actions: { created: number; completed: number; on_time_rate: number | null; open_now: number; overdue_now: number };
@@ -166,6 +169,36 @@ export function ReportsPage() {
               <HBars rows={r.hotspots.categories.map((c) => ({ label: c.name, value: c.logged, detail: `${c.open} still open` }))} empty="No problems logged in the period." />
             </section>
           </div>
+
+          {(r.hotspots.cis.length > 0 || r.hotspots.ci_types.length > 0) && (
+            <div className="grid-2 wide-left">
+              <section className="card flush">
+                <h2 className="pad">CI hotspots</h2>
+                <p className="muted small pad">Incidents and events per CI in the period. "Not linked" are records no problem explains yet: candidates for proactive problem management.</p>
+                <div className="table-wrap">
+                  <table className="table compact">
+                    <thead><tr><th>CI</th><th>Type</th><th className="num">Records</th><th className="num">Not linked</th><th className="num">Open problems</th><th className="num">Known errors</th></tr></thead>
+                    <tbody>
+                      {r.hotspots.cis.map((c) => (
+                        <tr key={c.ref}>
+                          <td><Link to={`/cis/${c.ref}`}><span className="mono small">{c.ref}</span> {c.name}</Link></td>
+                          <td className="muted">{c.type_label}</td>
+                          <td className="num">{c.records}</td>
+                          <td className={`num ${c.unlinked ? 'attention' : ''}`}>{c.unlinked}</td>
+                          <td className="num">{c.open_problems}</td>
+                          <td className="num">{c.known_errors}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+              <section className="card">
+                <h2>By CI type</h2>
+                <HBars rows={r.hotspots.ci_types.map((t) => ({ label: t.name, value: t.records, detail: `${t.records} records, ${t.problems} problems` }))} empty="No records on CIs in the period." />
+              </section>
+            </div>
+          )}
 
           <div className="grid-3">
             <section className="card">

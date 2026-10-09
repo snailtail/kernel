@@ -133,6 +133,10 @@ export interface Analysis {
 }
 
 export interface ProblemDetail extends Problem {
+  affected_cis: import('./components/AffectedCis').AffectedCi[];
+  affected_services: import('./components/AffectedCis').AffectedService[];
+  impact_hint: import('./components/AffectedCis').ImpactHint | null;
+  impact_incomplete: boolean;
   links: Link[];
   activity: Activity[];
   actions: Action[];

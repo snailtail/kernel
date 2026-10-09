@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { requireUser } from '../auth.js';
 import * as cmdb from '../cmdb.js';
 import * as graph from '../cmdb-graph.js';
+import * as problemCis from '../problem-cis.js';
 
 type RefParams = { Params: { ref: string } };
 
@@ -39,6 +40,10 @@ export async function cmdbRoutes(app: FastifyInstance) {
   );
   app.post('/api/ci-relationships/sync', { bodyLimit: 4 * 1024 * 1024 }, async (req) => graph.syncRelationships(requireUser(req), graph.syncSchema.parse(req.body)));
   app.get<RefParams>('/api/cis/:ref/impact', async (req) => graph.impact(requireUser(req), req.params.ref, graph.impactSchema.parse(req.query)));
+
+  // Problems ↔ CIs (#26)
+  app.post<RefParams>('/api/problems/:ref/cis', async (req) => problemCis.linkCiToProblem(requireUser(req), req.params.ref, problemCis.linkCiSchema.parse(req.body).ci));
+  app.delete<{ Params: { ref: string; ci: string } }>('/api/problems/:ref/cis/:ci', async (req) => problemCis.unlinkCiFromProblem(requireUser(req), req.params.ref, req.params.ci));
 
   type GroupParams = { Params: { id: string } };
   app.get('/api/ci-groups', async (req) => graph.listGroups(requireUser(req)));

@@ -18,7 +18,8 @@ export interface Ci {
   tags: string[]; attributes: Record<string, unknown>; created_at: string; updated_at: string; last_seen_at: string | null;
   source_systems: string[] | null; url: string;
 }
-interface CiDetail extends Ci { sources: Source[]; links: CiLink[]; activity: CiActivity[]; relationships: Relationship[]; groups: { id: number; name: string; purpose: string; membership: string }[] }
+interface CiProblem { ref: string; title: string; status: string; priority: number; workaround?: string; workaround_effectiveness?: string | null; ec_decision?: string | null }
+interface CiDetail extends Ci { problems: CiProblem[]; known_errors: CiProblem[]; recent_records: { system: string; kind: string; reference: string; summary: string; occurred_at: string; linked: boolean }[]; sources: Source[]; links: CiLink[]; activity: CiActivity[]; relationships: Relationship[]; groups: { id: number; name: string; purpose: string; membership: string }[] }
 
 const STATUSES = ['planned', 'active', 'maintenance', 'retired', 'missing'];
 const CRITICALITY: Record<number, string> = { 1: 'Business critical', 2: 'High', 3: 'Medium', 4: 'Low' };
@@ -158,6 +159,39 @@ export function CiPage() {
               <dt>Team</dt><dd>{ci.team || '–'}</dd>
             </dl>
           </section>
+          {ci.known_errors.length > 0 && (
+            <section className="card known-errors-card">
+              <h2>Known errors on this {ci.class === 'service' ? 'service' : 'CI'} <span className="count">{ci.known_errors.length}</span></h2>
+              {ci.known_errors.map((k) => (
+                <div key={k.ref} className="ke">
+                  <div><Link to={`/problems/${k.ref}`} className="mono">{k.ref}</Link> <strong>{k.title}</strong>{k.workaround_effectiveness && <span className="muted small"> · workaround {k.workaround_effectiveness}</span>}</div>
+                  {k.workaround ? <div className="workaround"><span className="muted small">Workaround</span><Markdown text={k.workaround} /></div> : <p className="muted small">No workaround documented.</p>}
+                </div>
+              ))}
+            </section>
+          )}
+          {(ci.problems.length > 0 || ci.recent_records.length > 0) && (
+            <section className="card">
+              <h2>Problems &amp; recent records</h2>
+              {ci.problems.length > 0 && (
+                <ul className="work-list">
+                  {ci.problems.map((p) => (
+                    <li key={p.ref}><div><Link to={`/problems/${p.ref}`} className="mono">{p.ref}</Link> {p.title}</div><span className="work-meta"><span className="tag">P{p.priority}</span><span className="muted small">{p.status.replace('_', ' ')}</span></span></li>
+                  ))}
+                </ul>
+              )}
+              {ci.recent_records.length > 0 && (
+                <ul className="work-list">
+                  {ci.recent_records.map((r) => (
+                    <li key={`${r.system}-${r.kind}-${r.reference}`}>
+                      <div><span className="tag">{r.kind}</span> <span className="mono">{r.reference}</span> <span className="muted small">{r.system}</span> {r.summary}</div>
+                      <span className="work-meta"><span className="muted small">{r.linked ? 'linked' : 'not linked'} · {relativeTime(r.occurred_at)}</span></span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          )}
           <ImpactSection key={ci.ref} ciRef={ci.ref} isService={ci.class === 'service'} />
           <RelationshipsSection ciRef={ci.ref} relationships={ci.relationships} editable={manage} onChange={setData} />
           <section className="card">
@@ -233,7 +267,7 @@ function CiLinks({ ci, editable, onChange }: { ci: CiDetail; editable: boolean; 
       {adding && (
         <form className="link-form" onSubmit={add}>
           <div className="row">
-            <select value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })}>{['incident', 'event', 'change', 'problem', 'document'].map((k) => <option key={k}>{k}</option>)}</select>
+            <select value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })}>{['incident', 'event', 'change', 'document'].map((k) => <option key={k}>{k}</option>)}</select>
             <input required placeholder="Reference" value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} />
           </div>
           <input placeholder="System" value={form.system} onChange={(e) => setForm({ ...form, system: e.target.value })} />

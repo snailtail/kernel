@@ -10,7 +10,8 @@ const clip = (s: unknown, n: number) => (typeof s === 'string' && s.length > n ?
 export async function problemContext(user: User, ref: string) {
   authorize(user, 'problem.read');
   const p: any = await getProblem(ref);
-  const [similar, sameService] = await Promise.all([
+  const ciIds: string[] = (p.affected_cis ?? []).map((c: any) => c.ref);
+  const [similar, sameService, ciRecords, ciKnownErrors] = await Promise.all([
     findSimilar(`${p.title} ${p.description}`, p.ref, 5),
     p.affected_service
       ? query(
@@ -20,6 +21,19 @@ export async function problemContext(user: User, ref: string) {
           [p.affected_service],
         )
       : Promise.resolve({ rows: [] as any[] }),
+    // Recent incidents/events on the affected CIs, and other known errors on them (a workaround may already exist).
+    query(
+      `SELECT r.system, r.kind, r.reference, r.summary, r.occurred_at, c.ref AS ci, r.problem_id IS NOT NULL AS linked
+       FROM external_records r JOIN configuration_items c ON c.id = r.ci_id
+       WHERE c.ref = ANY($1) AND r.occurred_at > now() - interval '30 days' ORDER BY r.occurred_at DESC LIMIT 25`,
+      [ciIds],
+    ),
+    query(
+      `SELECT DISTINCT ON (p.ref) p.ref, p.status, p.workaround, c.ref AS ci
+       FROM problem_cis pc JOIN problems p ON p.id = pc.problem_id JOIN configuration_items c ON c.id = pc.ci_id
+       WHERE c.ref = ANY($1) AND p.ref <> $2 AND p.status = 'known_error' ORDER BY p.ref LIMIT 10`,
+      [ciIds, p.ref],
+    ),
   ]);
   // Structured facts first; every piece of free text that people or other systems wrote goes under
   // untrusted_content, so agents can tell data from instructions (indirect prompt injection, #76).
@@ -32,6 +46,12 @@ export async function problemContext(user: User, ref: string) {
     },
     next_steps: p.next_steps,
     linked_records: p.links.map((l: any) => ({ kind: l.kind, reference: l.reference, system: l.system, url: l.url, linked_at: l.created_at })),
+    affected_cis: (p.affected_cis ?? []).map((c: any) => ({ ref: c.ref, type: c.type, ci_type: c.ci_type, status: c.status, environment: c.environment, criticality: c.criticality })),
+    affected_services: (p.affected_services ?? []).map((s: any) => ({ ref: s.ref, criticality: s.criticality, via: s.via })),
+    impact_hint: p.impact_hint,
+    impact_incomplete: p.impact_incomplete,
+    recent_records_for_cis: ciRecords.rows.map((r: any) => ({ ci: r.ci, system: r.system, kind: r.kind, reference: r.reference, occurred_at: r.occurred_at, linked: r.linked })),
+    known_errors_on_same_cis: ciKnownErrors.rows.map((k: any) => ({ ref: k.ref, ci: k.ci })),
     recent_records_for_service: sameService.rows.map((r: any) => ({ system: r.system, kind: r.kind, reference: r.reference, occurred_at: r.occurred_at, linked: r.linked })),
     analyses: p.analyses.map((a: any) => ({ id: a.id, technique: a.technique, proposed_via_mcp: a.proposed_via_mcp, check: checkAnalysis(a.technique, a.data, a.conclusion) })),
     open_actions: p.actions.filter((a: any) => a.status === 'open').map((a: any) => ({ id: a.id, owner: a.owner, due_date: a.due_date })),
@@ -43,6 +63,9 @@ export async function problemContext(user: User, ref: string) {
       workaround: clip(p.workaround, 2000),
       resolution: clip(p.resolution, 2000),
       link_notes: p.links.filter((l: any) => l.note).map((l: any) => ({ reference: l.reference, note: clip(l.note, 300) })),
+      ci_names: Object.fromEntries([...(p.affected_cis ?? []), ...(p.affected_services ?? [])].map((c: any) => [c.ref, c.name])),
+      ci_record_summaries: ciRecords.rows.filter((r: any) => r.summary).map((r: any) => ({ reference: r.reference, summary: clip(r.summary, 300) })),
+      known_error_workarounds: ciKnownErrors.rows.map((k: any) => ({ ref: k.ref, workaround: clip(k.workaround, 500) })),
       record_summaries: sameService.rows.filter((r: any) => r.summary).map((r: any) => ({ reference: r.reference, summary: clip(r.summary, 300) })),
       analysis_conclusions: p.analyses.map((a: any) => ({ id: a.id, title: a.title, conclusion: clip(a.conclusion, 1000) })),
       action_titles: p.actions.filter((a: any) => a.status === 'open').map((a: any) => ({ id: a.id, title: a.title })),

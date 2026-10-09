@@ -6,6 +6,7 @@ import { badRequest } from './errors.js';
 import { authorize, can } from './policy.js';
 import { listApprovals } from './approvals.js';
 import { addCiLink, CI_LINK_KINDS } from './cmdb.js';
+import { linkCiToProblem } from './problem-cis.js';
 import { addLink, LINK_KINDS, SELECT_ACTION } from './problems.js';
 import { recordTypes, recordUrl, typeForRef, type SearchHit } from './records.js';
 
@@ -45,6 +46,9 @@ export async function linkRecords(user: User, from: string, to: string, options:
   } catch {
     if (!kind) throw badRequest('Give the kind (incident, event, change, problem) for an external reference');
   }
+  // A problem and a CI: the CI is affected by the problem (#26), whichever side the link starts from.
+  if (kind === 'problem' && (source.type === 'ci' || source.type === 'service')) return (await linkCiToProblem(user, to, from)).affected_cis;
+  if (source.type === 'problem' && (kind === 'ci' || kind === 'service')) return (await linkCiToProblem(user, from, to)).affected_cis;
   if (source.type === 'ci' || source.type === 'service') {
     if (!(CI_LINK_KINDS as readonly string[]).includes(kind!)) throw badRequest(`A CI cannot link a ${kind}; use a CI relationship instead`);
     return (await addCiLink(user, from, { kind: kind as (typeof CI_LINK_KINDS)[number], reference: to, system: options.system ?? '', url: options.url ?? '', note: options.note ?? '' })).links;
