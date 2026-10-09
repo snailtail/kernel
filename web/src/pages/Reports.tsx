@@ -23,6 +23,7 @@ interface Report {
     cis: { ref: string; name: string; type_label: string; criticality: number; records: number; unlinked: number; open_problems: number; known_errors: number }[];
     ci_types: { name: string; records: number; problems: number }[];
   };
+  incidents: { opened: number; resolved: number; major: number; open_now: number; reopened: number; with_problem: number; mtta_median_min: number | null; mttr_median_h: number | null; by_ci: { ref: string; name: string; incidents: number; without_problem: number }[] };
   known_errors: { count: number; avg_age_days: number; with_workaround: number; with_decision: number; risk_accepted: number; review_due: number };
   actions: { created: number; completed: number; on_time_rate: number | null; open_now: number; overdue_now: number };
 }
@@ -196,6 +197,28 @@ export function ReportsPage() {
               <section className="card">
                 <h2>By CI type</h2>
                 <HBars rows={r.hotspots.ci_types.map((t) => ({ label: t.name, value: t.records, detail: `${t.records} records, ${t.problems} problems` }))} empty="No records on CIs in the period." />
+              </section>
+            </div>
+          )}
+
+          {r.incidents && (r.incidents.opened > 0 || r.incidents.open_now > 0) && (
+            <div className="grid-2 wide-left">
+              <section className="card">
+                <h2>Incidents</h2>
+                <dl className="kv">
+                  <dt>Opened in period</dt><dd>{r.incidents.opened}</dd>
+                  <dt>Resolved in period</dt><dd>{r.incidents.resolved}</dd>
+                  <dt>Open now</dt><dd>{r.incidents.open_now}</dd>
+                  <dt>Major incidents</dt><dd>{r.incidents.major}</dd>
+                  <dt>Median time to respond (MTTA)</dt><dd>{r.incidents.mtta_median_min === null ? '–' : `${r.incidents.mtta_median_min} min`}</dd>
+                  <dt>Median time to resolve (MTTR)</dt><dd>{r.incidents.mttr_median_h === null ? '–' : `${r.incidents.mttr_median_h} h`}</dd>
+                  <dt>Reopened</dt><dd className={r.incidents.reopened ? 'attention' : ''}>{r.incidents.opened ? Math.round((r.incidents.reopened / r.incidents.opened) * 100) : 0}%</dd>
+                  <dt>Linked to a problem</dt><dd>{r.incidents.opened ? Math.round((r.incidents.with_problem / r.incidents.opened) * 100) : 0}%</dd>
+                </dl>
+              </section>
+              <section className="card">
+                <h2>Incidents per CI</h2>
+                <HBars rows={r.incidents.by_ci.map((c) => ({ label: c.name, value: c.incidents, detail: `${c.incidents} incidents, ${c.without_problem} without a problem` }))} empty="No incidents on CIs in the period." />
               </section>
             </div>
           )}

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
-import { api, type ProblemDetail } from '../api';
+import { api } from '../api';
 
 export interface AffectedCi { ref: string; name: string; type: 'ci' | 'service'; type_label: string; status: string; criticality: number }
 export interface AffectedService { ref: string; name: string; criticality: number; via: string[] }
@@ -8,8 +8,10 @@ export interface ImpactHint { suggested_impact: number; reason: string; incomple
 
 const CRIT = ['', 'Business critical', 'High', 'Medium', 'Low'];
 
-/** The CIs and services a problem affects, the services reached through the CMDB, and an impact hint. */
-export function AffectedCisPanel({ problem: p, editable, onChange }: { problem: ProblemDetail; editable: boolean; onChange: (p: ProblemDetail) => void }) {
+interface WithAffected { ref: string; affected_cis: AffectedCi[]; affected_services: AffectedService[]; impact_hint: ImpactHint | null; impact_incomplete: boolean }
+
+/** The CIs and services a problem or incident affects, the services reached through the CMDB, and an impact hint. */
+export function AffectedCisPanel<T extends WithAffected>({ record: p, basePath, editable, onChange }: { record: T; basePath: string; editable: boolean; onChange: (p: T) => void }) {
   const [q, setQ] = useState('');
   const [hits, setHits] = useState<{ ref: string; name: string; type_label: string }[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -18,7 +20,7 @@ export function AffectedCisPanel({ problem: p, editable, onChange }: { problem: 
     const t = setTimeout(() => api.get<any[]>(`/api/cis?${new URLSearchParams({ q, limit: '6' })}`).then(setHits, () => setHits([])), 200);
     return () => clearTimeout(t);
   }, [q]);
-  const run = async (fn: () => Promise<ProblemDetail>) => {
+  const run = async (fn: () => Promise<T>) => {
     setError(null);
     try {
       onChange(await fn());
@@ -38,7 +40,7 @@ export function AffectedCisPanel({ problem: p, editable, onChange }: { problem: 
           <li key={c.ref} className="affected">
             <Link to={`/cis/${c.ref}`}><span className="mono small">{c.ref}</span> {c.name}</Link>
             <span className="muted small">{c.type_label}{c.status !== 'active' ? ` · ${c.status}` : ''}</span>
-            {editable && <button className="btn-icon small" aria-label={`Unlink ${c.ref}`} onClick={() => run(() => api.del(`/api/problems/${p.ref}/cis/${c.ref}`))}>×</button>}
+            {editable && <button className="btn-icon small" aria-label={`Unlink ${c.ref}`} onClick={() => run(() => api.del<T>(`${basePath}/cis/${c.ref}`))}>×</button>}
           </li>
         ))}
       </ul>
@@ -58,7 +60,7 @@ export function AffectedCisPanel({ problem: p, editable, onChange }: { problem: 
         <div className="hint-box">
           {p.impact_hint.reason}
           {editable && (
-            <button className="btn small" onClick={() => run(() => api.patch(`/api/problems/${p.ref}`, { impact: p.impact_hint!.suggested_impact }))}>Update impact</button>
+            <button className="btn small" onClick={() => run(() => api.patch<T>(basePath, { impact: p.impact_hint!.suggested_impact }))}>Update impact</button>
           )}
         </div>
       )}
@@ -68,7 +70,7 @@ export function AffectedCisPanel({ problem: p, editable, onChange }: { problem: 
           {hits.length > 0 && (
             <ul className="ci-hits">
               {hits.filter((h) => !linked.has(h.ref)).map((h) => (
-                <li key={h.ref}><button onClick={() => run(() => api.post(`/api/problems/${p.ref}/cis`, { ci: h.ref }))}><span className="mono small">{h.ref}</span> {h.name} <span className="muted small">{h.type_label}</span></button></li>
+                <li key={h.ref}><button onClick={() => run(() => api.post<T>(`${basePath}/cis`, { ci: h.ref }))}><span className="mono small">{h.ref}</span> {h.name} <span className="muted small">{h.type_label}</span></button></li>
               ))}
             </ul>
           )}

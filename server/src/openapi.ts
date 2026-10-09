@@ -5,6 +5,7 @@ import * as actions from './actions.js';
 import * as cmdb from './cmdb.js';
 import * as graph from './cmdb-graph.js';
 import * as problemCis from './problem-cis.js';
+import * as inc from './incidents.js';
 import { auditQuerySchema } from './audit.js';
 import { searchSchema } from './generic.js';
 import * as analyses from './analyses.js';
@@ -34,7 +35,7 @@ const user = z.object({
   active: z.boolean().optional(),
   password: z.string().min(10),
 });
-const ids = integrations.candidateActionSchema;
+const ids = integrations.candidateIdsSchema;
 
 export const OPERATIONS: Op[] = [
   { method: 'post', path: '/api/auth/login', tag: 'Authentication', summary: 'Sign in with username and password (sets a session cookie)', body: z.object({ username: z.string(), password: z.string() }), public: true },
@@ -112,6 +113,19 @@ export const OPERATIONS: Op[] = [
   { method: 'post', path: '/api/cis/:ref/comments', tag: 'CMDB', summary: 'Add a note', body: z.object({ body: z.string() }) },
   { method: 'post', path: '/api/cis/:ref/links', tag: 'CMDB', summary: 'Link a problem, incident, event, change or document', body: cmdb.ciLinkSchema },
   { method: 'delete', path: '/api/cis/:ref/links/:id', tag: 'CMDB', summary: 'Remove a link' },
+  { method: 'get', path: '/api/incidents', tag: 'Incidents', summary: 'List incidents (open by default)', query: inc.listIncidentsSchema },
+  { method: 'post', path: '/api/incidents', tag: 'Incidents', summary: 'Log an incident (optionally with affected CIs); supports Idempotency-Key', body: inc.createIncidentSchema },
+  { method: 'get', path: '/api/incidents/:ref', tag: 'Incidents', summary: 'An incident with affected CIs and services, known errors with workarounds, activity and next steps' },
+  { method: 'patch', path: '/api/incidents/:ref', tag: 'Incidents', summary: 'Update fields; send base to detect conflicting edits', body: inc.updateIncidentSchema },
+  { method: 'post', path: '/api/incidents/:ref/transition', tag: 'Incidents', summary: 'Change status: new, in_progress, on_hold (with reason), resolved (with code and resolution), closed', body: inc.transitionIncidentSchema },
+  { method: 'post', path: '/api/incidents/:ref/comments', tag: 'Incidents', summary: 'Add a work note, or a communication update on a major incident', body: inc.incidentCommentSchema },
+  { method: 'post', path: '/api/incidents/:ref/links', tag: 'Incidents', summary: 'Link an external incident, event, change or document', body: inc.incidentLinkSchema },
+  { method: 'delete', path: '/api/incidents/:ref/links/:id', tag: 'Incidents', summary: 'Remove a link' },
+  { method: 'post', path: '/api/incidents/:ref/cis', tag: 'Incidents', summary: 'Link an affected CI or service', body: problemCis.linkCiSchema },
+  { method: 'delete', path: '/api/incidents/:ref/cis/:ci', tag: 'Incidents', summary: 'Unlink a CI or service' },
+  { method: 'put', path: '/api/incidents/:ref/problem', tag: 'Incidents', summary: 'Link the incident to a problem (empty problem unlinks)', body: z.object({ problem: z.string() }) },
+  { method: 'post', path: '/api/incidents/:ref/problem', tag: 'Incidents', summary: 'Log a problem prefilled from the incident and link it', body: inc.problemFromIncidentSchema },
+  { method: 'post', path: '/api/problems/:ref/resolve-incidents', tag: 'Incidents', summary: "Resolve a problem's open incidents with resolution code problem_fixed", body: inc.resolveLinkedSchema },
   { method: 'post', path: '/api/problems/:ref/cis', tag: 'CMDB', summary: 'Link an affected CI or service to a problem', body: problemCis.linkCiSchema },
   { method: 'delete', path: '/api/problems/:ref/cis/:ci', tag: 'CMDB', summary: 'Unlink a CI or service from a problem' },
   { method: 'get', path: '/api/ci-relationship-types', tag: 'CMDB', summary: 'Relationship types with direction, inverse label and how outages propagate' },

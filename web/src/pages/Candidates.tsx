@@ -6,9 +6,15 @@ import { formatDate, LEVEL_LABEL, relativeTime } from '../format';
 import { useApi } from '../hooks';
 import { canEdit, isManager, useSession } from '../session';
 
-interface CandidateRecord { id: number; system: string; kind: 'incident' | 'event'; reference: string; summary: string; category: string; occurred_at: string }
+interface CandidateRecord { id: number | null; incident_ref: string | null; system: string; kind: 'incident' | 'event'; reference: string; summary: string; category: string; occurred_at: string }
 interface Candidate { service: string; ci_ref: string | null; ci_class: string | null; count: number; incidents: number; events: number; first_at: string; last_at: string; records: CandidateRecord[] }
 interface Candidates { rule: { min_records: number; window_days: number }; candidates: Candidate[] }
+
+/** External records by id, native incidents by ref. */
+const ids = (c: Candidate) => ({
+  record_ids: c.records.filter((r) => r.id !== null).map((r) => r.id as number),
+  incident_refs: c.records.filter((r) => r.incident_ref).map((r) => r.incident_ref as string),
+});
 
 export function CandidatesPage() {
   const { user } = useSession();
@@ -21,7 +27,7 @@ export function CandidatesPage() {
   const dismiss = async (c: Candidate) => {
     if (!confirm(`Dismiss ${c.count} records for ${c.service}? They will no longer count towards candidates.`)) return;
     try {
-      await api.post('/api/candidates/dismiss', { record_ids: c.records.map((r) => r.id) });
+      await api.post('/api/candidates/dismiss', { ...ids(c) });
       reload();
     } catch (err) {
       setError((err as Error).message);
@@ -62,9 +68,9 @@ export function CandidatesPage() {
             </header>
             <ul className="record-list">
               {c.records.slice(0, 8).map((r) => (
-                <li key={r.id}>
+                <li key={r.id ?? r.incident_ref}>
                   <span className={`kind kind-${r.kind}`}>{r.kind}</span>
-                  <span className="mono">{r.reference}</span>
+                  {r.incident_ref ? <Link to={`/incidents/${r.incident_ref}`} className="mono">{r.reference}</Link> : <span className="mono">{r.reference}</span>}
                   <span className="record-summary">{r.summary}</span>
                   <time className="muted small" title={formatDate(r.occurred_at)}>{relativeTime(r.occurred_at)}</time>
                 </li>
@@ -130,7 +136,7 @@ function CreateModal({ candidate: c, onClose }: { candidate: Candidate; onClose:
     e.preventDefault();
     try {
       const p = await api.post<ProblemDetail>('/api/candidates/create', {
-        record_ids: c.records.map((r) => r.id),
+        ...ids(c),
         problem: { ...form, category_id: form.category_id ? Number(form.category_id) : null, detection: 'proactive', affected_service: c.service === 'Unspecified' ? '' : c.service },
       });
       navigate(`/problems/${p.ref}`);
@@ -174,7 +180,7 @@ function LinkModal({ candidate: c, onClose }: { candidate: Candidate; onClose: (
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     try {
-      const p = await api.post<ProblemDetail>('/api/candidates/link', { ref, record_ids: c.records.map((r) => r.id) });
+      const p = await api.post<ProblemDetail>('/api/candidates/link', { ref, ...ids(c) });
       navigate(`/problems/${p.ref}`);
     } catch (err) {
       setError((err as Error).message);

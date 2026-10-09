@@ -873,3 +873,13 @@ kbd { font: 11px var(--mono); padding: 1px 6px; border: 1px solid var(--border-s
 td.attention { color: var(--warn); font-weight: 600; }
 .card.flush > h2.pad { padding-top: 18px; margin-bottom: 4px; }
 .card.flush > p.pad { margin-top: 0; }
+
+/* Incidents (#28) */
+.inc-new { color: var(--s-new); background: var(--s-new-bg); }
+.inc-in_progress { color: var(--s-analysis); background: var(--s-analysis-bg); }
+.inc-on_hold { color: var(--s-known); background: var(--s-known-bg); }
+.inc-resolved { color: var(--s-resolved); background: var(--s-resolved-bg); }
+.inc-closed { color: var(--s-closed); background: var(--s-closed-bg); }
+.activity li.communication { border-left: 3px solid var(--accent); padding-left: 10px; }
+dd.attention { color: var(--warn); }
+.details dd select { width: 100%; }

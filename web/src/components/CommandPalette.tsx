@@ -10,6 +10,7 @@ interface Item { id: string; label: string; hint?: string; go: () => void }
 const PAGES: [string, string, string][] = [
   ['My work', '/', 'g m'],
   ['Dashboard', '/dashboard', 'g d'],
+  ['Incidents', '/incidents', 'g t'],
   ['Problems', '/problems', 'g p'],
   ['Candidates', '/candidates', 'g c'],
   ['Known errors', '/kedb', 'g k'],
@@ -40,7 +41,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     const go = (path: string) => () => { navigate(path); onClose(); };
     const out: Item[] = [];
     const ref = q.trim().toUpperCase();
-    if (/^[A-Z]{2,5}\d{1,9}$/.test(ref)) out.push({ id: 'ref', label: `Open ${ref}`, hint: 'Enter', go: go(/^(CI|SVC)\d/.test(ref) ? `/cis/${ref}` : `/problems/${ref}`) });
+    if (/^[A-Z]{2,5}\d{1,9}$/.test(ref)) out.push({ id: 'ref', label: `Open ${ref}`, hint: 'Enter', go: go(/^(CI|SVC)\d/.test(ref) ? `/cis/${ref}` : /^INC\d{6}$/.test(ref) ? `/incidents/${ref}` : `/problems/${ref}`) });
     for (const h of hits) out.push({ id: `${h.type}-${h.ref}`, label: `${h.ref} ${h.title}`, hint: h.status.replace('_', ' '), go: go(new URL(h.url, location.origin).pathname) });
     const needle = q.trim().toLowerCase();
     const commands: Item[] = [
@@ -81,7 +82,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
 const SHORTCUTS: [string, string][] = [
   ['Ctrl+K or /', 'Search and go to…'],
   ['n', 'Log a problem'],
-  ['g m', 'My work'], ['g d', 'Dashboard'], ['g p', 'Problems'], ['g c', 'Candidates'], ['g k', 'Known errors'],
+  ['g m', 'My work'], ['g d', 'Dashboard'], ['g t', 'Incidents'], ['g p', 'Problems'], ['g c', 'Candidates'], ['g k', 'Known errors'],
   ['g a', 'Actions'], ['g i', 'CMDB'], ['g v', 'Review'], ['g r', 'Reports'], ['g s', 'Settings'],
   ['?', 'This help'],
 ];
@@ -96,7 +97,7 @@ export function ShortcutHelp({ onClose }: { onClose: () => void }) {
   );
 }
 
-const GOTO: Record<string, string> = { m: '/', d: '/dashboard', p: '/problems', c: '/candidates', k: '/kedb', a: '/actions', i: '/cis', v: '/review', r: '/reports', s: '/settings' };
+const GOTO: Record<string, string> = { m: '/', d: '/dashboard', p: '/problems', t: '/incidents', c: '/candidates', k: '/kedb', a: '/actions', i: '/cis', v: '/review', r: '/reports', s: '/settings' };
 
 /** Global keyboard shortcuts; ignored while typing in a field. */
 export function useShortcuts(open: (what: 'palette' | 'help') => void) {

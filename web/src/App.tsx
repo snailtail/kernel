@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { CommandPalette, ShortcutHelp, useShortcuts } from './components/CommandPalette';
 import { MyWorkPage } from './pages/MyWork';
+import { IncidentPage, IncidentsPage } from './pages/Incidents';
 import { CiGroupsPage, CiPage, CmdbListPage } from './pages/Cmdb';
 import { Navigate, NavLink, Route, Routes } from 'react-router';
 import { api, type Meta, type Preferences, type User } from './api';
@@ -106,6 +107,7 @@ export function App() {
           <nav>
             <NavLink to="/" end>{icons.actions}My work</NavLink>
             <NavLink to="/dashboard">{icons.dashboard}Dashboard</NavLink>
+            <NavLink to="/incidents">{icons.incidents}Incidents</NavLink>
             <NavLink to="/problems" end>{icons.problems}Problems</NavLink>
             <NavLink to="/candidates">{icons.candidates}Candidates</NavLink>
             <NavLink to="/kedb">{icons.kedb}Known Errors</NavLink>
@@ -138,6 +140,8 @@ export function App() {
             <Route path="/problems/:ref/print" element={<ProblemPrintPage />} />
             <Route path="/candidates" element={<CandidatesPage />} />
             <Route path="/kedb" element={<KedbPage />} />
+            <Route path="/incidents" element={<IncidentsPage />} />
+            <Route path="/incidents/:ref" element={<IncidentPage />} />
             <Route path="/cis" element={<CmdbListPage />} />
             <Route path="/cis/groups" element={<CiGroupsPage />} />
             <Route path="/cis/:ref" element={<CiPage />} />

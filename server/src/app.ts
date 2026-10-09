@@ -17,6 +17,7 @@ import { adminRoutes } from './routes/admin.js';
 import { authRoutes } from './routes/auth.js';
 import { integrationRoutes } from './routes/integrations.js';
 import { cmdbRoutes } from './routes/cmdb.js';
+import { incidentRoutes } from './routes/incidents.js';
 import { problemRoutes } from './routes/problems.js';
 
 declare module 'fastify' {
@@ -91,6 +92,7 @@ export async function buildApp(options: { logLevel?: string; serveWeb?: boolean 
   await app.register(adminRoutes);
   await app.register(integrationRoutes);
   await app.register(cmdbRoutes);
+  await app.register(incidentRoutes);
   await app.register(mcpRoutes);
 
   app.get('/api/openapi.json', async (req) => openApiDocument(config.publicUrl ?? `${req.protocol}://${req.host}`));

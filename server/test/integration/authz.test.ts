@@ -44,6 +44,8 @@ const MATRIX: [string, string, unknown, RoleName[]][] = [
   ['GET', '/api/cis', undefined, READERS],
   ['GET', '/api/ci-types', undefined, READERS],
   ['GET', '/api/ci-groups', undefined, READERS],
+  ['GET', '/api/incidents', undefined, READERS],
+  ['POST', '/api/incidents', { title: 'authz' }, ['admin', 'pm', 'analyst']],
   ['POST', '/api/ci-groups', { name: `g-${Math.random()}` }, MANAGERS],
   ['GET', '/api/ci-relationship-types', undefined, READERS],
   ['POST', '/api/cis', { name: `ci-${Math.random()}`, ci_type: 'other' }, MANAGERS],

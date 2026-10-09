@@ -27,7 +27,7 @@ export async function report({ from, to, bucket }: ReportParams) {
   const range = [from, to];
   const inRange = (col: string) => `${col} >= $1::date AND ${col} < $2::date + 1`;
 
-  const [flow, backlog, leadTimes, closures, reopened, detection, services, categories, knownErrors, actionStats, totals, cis, ciTypes] = await Promise.all([
+  const [flow, backlog, leadTimes, closures, reopened, detection, services, categories, knownErrors, actionStats, totals, cis, ciTypes, incidentStats, incidentCis] = await Promise.all([
     query(
       `WITH buckets AS (
          SELECT generate_series(date_trunc('${bucket}', $1::date), date_trunc('${bucket}', $2::date), '1 ${bucket}') AS start
@@ -144,6 +144,25 @@ export async function report({ from, to, bucket }: ReportParams) {
        ORDER BY 2 DESC, 3 DESC LIMIT 10`,
       range,
     ),
+    // Incidents (#28): volumes, time to respond (MTTA) and to resolve (MTTR), reopen rate, major incidents.
+    query(
+      `SELECT count(*) FILTER (WHERE ${inRange('created_at')})::int AS opened,
+         count(*) FILTER (WHERE ${inRange('resolved_at')})::int AS resolved,
+         count(*) FILTER (WHERE is_major AND ${inRange('created_at')})::int AS major,
+         count(*) FILTER (WHERE status NOT IN ('resolved', 'closed'))::int AS open_now,
+         count(*) FILTER (WHERE reopen_count > 0 AND ${inRange('created_at')})::int AS reopened,
+         count(*) FILTER (WHERE problem_id IS NOT NULL AND ${inRange('created_at')})::int AS with_problem,
+         percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM responded_at - created_at) / 60) FILTER (WHERE responded_at IS NOT NULL AND ${inRange('created_at')}) AS mtta_median_min,
+         percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM resolved_at - created_at) / 3600) FILTER (WHERE ${inRange('resolved_at')}) AS mttr_median_h
+       FROM incidents`,
+      range,
+    ),
+    query(
+      `SELECT c.ref, c.name, count(*)::int AS incidents, count(*) FILTER (WHERE i.problem_id IS NULL)::int AS without_problem
+       FROM incidents i JOIN incident_cis x ON x.incident_id = i.id JOIN configuration_items c ON c.id = x.ci_id
+       WHERE ${inRange('i.created_at')} GROUP BY c.ref, c.name ORDER BY 3 DESC LIMIT 10`,
+      range,
+    ),
   ]);
 
   const sum = (key: string) => flow.rows.reduce((n, r) => n + r[key], 0);
@@ -178,6 +197,7 @@ export async function report({ from, to, bucket }: ReportParams) {
       })),
     closures: closures.rows,
     hotspots: { services: services.rows, categories: categories.rows, cis: cis.rows, ci_types: ciTypes.rows },
+    incidents: { ...incidentStats.rows[0], mtta_median_min: round(incidentStats.rows[0].mtta_median_min), mttr_median_h: round(incidentStats.rows[0].mttr_median_h), by_ci: incidentCis.rows },
     known_errors: knownErrors.rows[0],
     actions: {
       created: a.created,

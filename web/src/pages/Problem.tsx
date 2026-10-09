@@ -133,7 +133,8 @@ export function ProblemPage() {
         </div>
         <aside className="problem-side">
           <DetailsPanel problem={p} editable={editable} onSave={save} />
-          <AffectedCisPanel problem={p} editable={canEdit(user)} onChange={setData} />
+          <AffectedCisPanel record={p} basePath={`/api/problems/${p.ref}`} editable={canEdit(user)} onChange={setData} />
+          <ProblemIncidents problem={p} editable={canEdit(user)} onChange={setData} />
           <LinksPanel problem={p} editable={canEdit(user)} onChange={setData} />
           <SimilarProblems text={`${p.title} ${p.description}`} exclude={p.ref} duplicateRef={isManager(user) && p.status !== 'closed' ? p.ref : undefined} />
         </aside>
@@ -722,5 +723,40 @@ function TransitionModal({ problem: p, to, onClose, onDone }: { problem: Problem
         </div>
       </form>
     </Modal>
+  );
+}
+
+/** Native incidents linked to the problem; once it is resolved, their open incidents can be resolved in one go. */
+function ProblemIncidents({ problem: p, editable, onChange }: { problem: ProblemDetail; editable: boolean; onChange: (p: ProblemDetail) => void }) {
+  const open = p.incidents.filter((i) => !['resolved', 'closed'].includes(i.status));
+  const [error, setError] = useState<string | null>(null);
+  if (!p.incidents.length) return null;
+  const resolveAll = async () => {
+    const resolution = window.prompt(`Resolve ${open.length} open incident(s) with this problem's resolution?`, p.resolution || `Resolved by problem ${p.ref}.`);
+    if (!resolution?.trim()) return;
+    try {
+      onChange(await api.post<ProblemDetail>(`/api/problems/${p.ref}/resolve-incidents`, { incidents: open.map((i) => i.ref), resolution }));
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+  return (
+    <section className="card">
+      <h2>Incidents <span className="count">{open.length ? `${open.length} open` : p.incidents.length}</span></h2>
+      <ul className="plain-list">
+        {p.incidents.map((i) => (
+          <li key={i.ref}>
+            <Link to={`/incidents/${i.ref}`} className="mono">{i.ref}</Link> {i.title} <span className="muted small">{i.status.replace('_', ' ')}</span>
+          </li>
+        ))}
+      </ul>
+      {editable && open.length > 0 && ['resolved', 'closed'].includes(p.status) && (
+        <div className="hint-box">
+          The problem is resolved: {open.length} linked incident{open.length > 1 ? 's are' : ' is'} still open.
+          <button className="btn small" onClick={resolveAll}>Resolve them</button>
+        </div>
+      )}
+      {error && <div className="error">{error}</div>}
+    </section>
   );
 }

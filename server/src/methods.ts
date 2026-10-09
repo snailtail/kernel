@@ -195,6 +195,27 @@ GUIDES.push({
   ],
 });
 
+GUIDES.push({
+  id: 'incident_triage',
+  title: 'Incident triage',
+  purpose: 'Restore service as quickly as possible: know what is affected, use known workarounds, prioritise and assign.',
+  when: 'Every new incident.',
+  steps: [
+    'Confirm the symptom and who is affected; record the affected CIs or services.',
+    'Look for a known error on those CIs: its workaround is often the fastest way to restore service.',
+    'Set impact and urgency from the affected services; priority follows.',
+    'Assign it to a person or group that can restore service.',
+    'For a major incident: declare it, communicate regularly, and log a problem to find the root cause.',
+    'Resolve with how service was restored and a resolution code; link recurring incidents to a problem.',
+  ],
+  stop: 'Service is restored, the resolution is recorded, and anything recurring or major is handed over to problem management.',
+  pitfalls: [
+    'Investigating the root cause while users wait: restore first, analyse in problem management.',
+    'Closing a recurring incident again without a problem record.',
+    'Leaving affected CIs empty, which hides known errors and impact.',
+  ],
+});
+
 export const guideById = (id: string) => GUIDES.find((g) => g.id === id);
 
 export function guideMarkdown(g: MethodGuide) {

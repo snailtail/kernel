@@ -105,6 +105,13 @@ its known errors with their workarounds – what the service desk needs during a
 events can name their CI (`ci`, or `ci_source_system` + `ci_source_id`; a service name that matches exactly one CI
 also works), candidates group by CI, and reports show CI hotspots and records no problem explains yet.
 
+**Incidents**: native incident management (INC000001…) next to links to incidents in other tools. Log an incident
+with its affected CIs and Kernel shows the services it affects, suggests the impact and puts known errors with their
+workarounds at the top. Incidents move new → in progress → on hold → resolved → closed; resolving needs a resolution
+code, a major incident has stakeholder communication updates and needs a problem before it closes. Create a problem
+from an incident in one click; when the problem is resolved, its open incidents can be resolved together. Unlinked
+incidents feed the problem candidates per CI, and reports show MTTA, MTTR, reopen rate and incidents per CI.
+
 **Follow-up actions** track work that follows from a problem (vendor fixes, monitoring, runbook updates, review
 outcomes) with an owner and due date.
 

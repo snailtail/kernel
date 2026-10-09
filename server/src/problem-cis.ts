@@ -65,13 +65,18 @@ async function affected(problem: { id: number; impact: number }) {
      WHERE pc.problem_id = $1 ORDER BY c.class DESC, c.criticality, c.name`,
     [problem.id],
   );
+  return affectedFrom(cis, problem.impact);
+}
+
+/** Shared by problems and incidents: services reached from the CIs, and an impact hint when it should be higher. */
+export async function affectedFrom(cis: { id: number; ref: string; name: string; class: string; criticality: number }[], currentImpact: number) {
   const services = new Map<string, { ref: string; name: string; criticality: number; via: string[] }>();
   let incomplete = false;
   for (const ci of cis) {
     if (ci.class === 'service') services.set(ci.ref, { ref: ci.ref, name: ci.name, criticality: ci.criticality, via: [] });
   }
   // Bounded: the first 10 CIs; each walk is itself limited to 10 levels and 500 nodes.
-  // TODO(#53): pass the problem reader so scoping hides services and CIs they cannot see (user null = no filter).
+  // TODO(#53): pass the record reader so scoping hides services and CIs they cannot see (user null = no filter).
   for (const ci of cis.slice(0, 10)) {
     const r = await computeImpact(null, ci.ref, impactSchema.parse({ direction: 'up' }));
     incomplete ||= r.truncated || r.depth_limit_reached;
@@ -89,12 +94,8 @@ async function affected(problem: { id: number; impact: number }) {
     affected_cis: cis.map(({ id: _, ...c }) => ({ ...c, type: c.class === 'service' ? 'service' : 'ci' })),
     affected_services: affectedServices,
     impact_hint:
-      worst && suggested && suggested < problem.impact
-        ? {
-            suggested_impact: suggested,
-            reason: `Affects ${worst.name} (${CRIT_LABEL[worst.criticality]}): consider impact ${IMPACT_LABEL[suggested]}.`,
-            incomplete,
-          }
+      worst && suggested && suggested < currentImpact
+        ? { suggested_impact: suggested, reason: `Affects ${worst.name} (${CRIT_LABEL[worst.criticality]}): consider impact ${IMPACT_LABEL[suggested]}.`, incomplete }
         : null,
     impact_incomplete: incomplete,
   };

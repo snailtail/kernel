@@ -19,6 +19,8 @@ export interface RecordType {
   type: string;
   /** Ref prefix, e.g. PRB in PRB000012. */
   prefix: string;
+  /** The full ref format when the prefix alone could match references from other tools. */
+  pattern?: RegExp;
   readAction: Action;
   /** Path of the record in the web UI. */
   uiPath: (ref: string) => string;
@@ -43,7 +45,7 @@ export const recordUrl = (t: RecordType, ref: string) => `${(config.publicUrl ??
 
 export function typeForRef(ref: string) {
   const prefix = ref.toUpperCase().match(/^[A-Z]+/)?.[0];
-  const t = recordTypes().find((r) => r.prefix === prefix);
+  const t = recordTypes().find((r) => r.prefix === prefix && (!r.pattern || r.pattern.test(ref.toUpperCase())));
   if (!t) throw notFound(`No record type for reference ${ref}`);
   return t;
 }

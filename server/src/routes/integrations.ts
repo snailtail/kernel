@@ -27,16 +27,19 @@ export async function integrationRoutes(app: FastifyInstance) {
   });
   app.put('/api/candidates/rule', async (req) => integrations.setRule(requireUser(req, 'candidate.rule'), integrations.ruleSchema.parse(req.body)));
   app.post('/api/candidates/create', { bodyLimit: 2 * 1024 * 1024 }, async (req, reply) => {
-    const body = integrations.candidateActionSchema.extend({ problem: createProblemSchema }).parse(req.body);
+    const body = { ...integrations.candidateActionSchema.parse(req.body), problem: createProblemSchema.parse((req.body as any)?.problem) };
     const created = await integrations.createFromCandidate(requireUser(req), body);
     reply.code(201);
     return created;
   });
   app.post('/api/candidates/link', async (req) => {
-    const body = integrations.candidateActionSchema.extend({ ref: z.string() }).parse(req.body);
-    return integrations.linkCandidate(requireUser(req), body.ref, body.record_ids);
+    const body = { ...integrations.candidateActionSchema.parse(req.body), ref: z.string().parse((req.body as any)?.ref) };
+    return integrations.linkCandidate(requireUser(req), body.ref, body.record_ids, body.incident_refs);
   });
   app.post('/api/candidates/dismiss', async (req) =>
-    integrations.dismissRecords(requireUser(req), integrations.candidateActionSchema.parse(req.body).record_ids),
+    {
+      const body = integrations.candidateActionSchema.parse(req.body);
+      return integrations.dismissRecords(requireUser(req), body.record_ids, body.incident_refs);
+    },
   );
 }

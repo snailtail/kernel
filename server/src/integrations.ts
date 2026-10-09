@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import type { User } from './auth.js';
 import { linkRecordCis } from './problem-cis.js';
+import { linkIncidentToProblem } from './incidents.js';
 import { audit } from './audit.js';
 import { authorize } from './policy.js';
 import { query, tx } from './db.js';
@@ -155,49 +156,75 @@ export async function setRule(user: User, rule: z.infer<typeof ruleSchema>) {
   return rule;
 }
 
-/** Services with at least min_records unlinked, undismissed records within the last window_days. */
+/**
+ * CIs and services with at least min_records unlinked, undismissed records within the last window_days: incidents and
+ * events reported from other tools, and native incidents (#28), in one pipeline.
+ */
 export async function listCandidates() {
   const rule = await getRule();
   const { rows } = await query(
-    `SELECT coalesce(c.name, nullif(r.service, ''), 'Unspecified') AS service, c.ref AS ci_ref, c.class AS ci_class, count(*)::int AS count,
+    `WITH recs AS (
+       SELECT r.id, NULL::text AS incident_ref, r.system, r.kind, r.reference, r.summary, r.category, r.occurred_at, r.service, r.ci_id
+       FROM external_records r
+       WHERE r.problem_id IS NULL AND NOT r.dismissed AND r.occurred_at > now() - $1 * interval '1 day'
+       UNION ALL
+       SELECT NULL, i.ref, 'Kernel', 'incident', i.ref, i.title, coalesce(cat.name, ''), i.created_at, '',
+              (SELECT x.ci_id FROM incident_cis x JOIN configuration_items c ON c.id = x.ci_id WHERE x.incident_id = i.id ORDER BY c.criticality, c.id LIMIT 1)
+       FROM incidents i LEFT JOIN categories cat ON cat.id = i.category_id
+       WHERE i.problem_id IS NULL AND NOT i.candidate_dismissed AND i.created_at > now() - $1 * interval '1 day'
+         AND i.resolution_code IS DISTINCT FROM 'duplicate' AND i.resolution_code IS DISTINCT FROM 'cancelled'
+     )
+     SELECT coalesce(c.name, nullif(r.service, ''), 'Unspecified') AS service, c.ref AS ci_ref, c.class AS ci_class, count(*)::int AS count,
        count(*) FILTER (WHERE r.kind = 'incident')::int AS incidents, count(*) FILTER (WHERE r.kind = 'event')::int AS events,
        min(r.occurred_at) AS first_at, max(r.occurred_at) AS last_at,
-       json_agg(json_build_object('id', r.id, 'system', r.system, 'kind', r.kind, 'reference', r.reference, 'summary', r.summary,
-                                  'category', r.category, 'occurred_at', r.occurred_at) ORDER BY r.occurred_at DESC) AS records
-     FROM external_records r LEFT JOIN configuration_items c ON c.id = r.ci_id
-     WHERE r.problem_id IS NULL AND NOT r.dismissed AND r.occurred_at > now() - $1 * interval '1 day'
+       json_agg(json_build_object('id', r.id, 'incident_ref', r.incident_ref, 'system', r.system, 'kind', r.kind, 'reference', r.reference,
+                                  'summary', r.summary, 'category', r.category, 'occurred_at', r.occurred_at) ORDER BY r.occurred_at DESC) AS records
+     FROM recs r LEFT JOIN configuration_items c ON c.id = r.ci_id
      GROUP BY 1, 2, 3 HAVING count(*) >= $2 ORDER BY count(*) DESC`,
     [rule.window_days, rule.min_records],
   );
   return { rule, candidates: rows };
 }
 
-export const candidateActionSchema = z.object({ record_ids: z.array(z.number().int()).min(1).max(1000) });
+export const candidateIdsSchema = z.object({
+  record_ids: z.array(z.number().int()).max(1000).default([]),
+  /** Native incidents (INC…) in the candidate. */
+  incident_refs: z.array(z.string().max(20)).max(1000).default([]),
+});
+export const candidateActionSchema = candidateIdsSchema.refine((v) => v.record_ids.length + v.incident_refs.length > 0, 'Give record_ids or incident_refs');
 
 async function recordsById(db: Db, ids: number[]) {
+  if (!ids.length) return [];
   const { rows } = await db.query('SELECT * FROM external_records WHERE id = ANY($1) AND problem_id IS NULL', [ids]);
-  if (!rows.length) throw badRequest('None of the records are unlinked any more');
   return rows;
 }
 
-export async function createFromCandidate(user: User, input: z.infer<typeof candidateActionSchema> & { problem: z.infer<typeof createProblemSchema> }) {
+export async function createFromCandidate(user: User, input: { record_ids: number[]; incident_refs?: string[]; problem: z.infer<typeof createProblemSchema> }) {
   const created = await createProblem(user, input.problem);
-  await linkCandidate(user, created.ref, input.record_ids);
+  await linkCandidate(user, created.ref, input.record_ids, input.incident_refs ?? []);
   return getProblem(created.ref);
 }
 
-export async function linkCandidate(user: User, ref: string, recordIds: number[]) {
+export async function linkCandidate(user: User, ref: string, recordIds: number[], incidentRefs: string[] = []) {
   authorize(user, 'candidate.act');
+  let linked = 0;
   await tx(async (db) => {
     const problem = await loadForUpdate(db, ref);
-    for (const r of await recordsById(db, recordIds)) await linkRecord(db, user, problem, r);
+    for (const r of await recordsById(db, recordIds)) {
+      await linkRecord(db, user, problem, r);
+      linked++;
+    }
   });
+  const { rows: open } = await query('SELECT ref FROM incidents WHERE ref = ANY($1) AND problem_id IS NULL', [incidentRefs.map((r) => r.toUpperCase())]);
+  for (const i of open) await linkIncidentToProblem(user, i.ref, ref);
+  if (!linked && !open.length) throw badRequest('None of the records are unlinked any more');
   return getProblem(ref);
 }
 
-export async function dismissRecords(user: User, recordIds: number[]) {
+export async function dismissRecords(user: User, recordIds: number[], incidentRefs: string[] = []) {
   authorize(user, 'candidate.act');
   const { rowCount } = await query('UPDATE external_records SET dismissed = true WHERE id = ANY($1) AND problem_id IS NULL', [recordIds]);
-  await audit(null, { entity_type: 'external_record', action: 'dismiss', changes: { record_ids: recordIds, dismissed: rowCount } });
-  return { dismissed: rowCount };
+  const { rowCount: incidents } = await query('UPDATE incidents SET candidate_dismissed = true WHERE ref = ANY($1) AND problem_id IS NULL', [incidentRefs.map((r) => r.toUpperCase())]);
+  await audit(null, { entity_type: 'external_record', action: 'dismiss', changes: { record_ids: recordIds, incident_refs: incidentRefs, dismissed: (rowCount ?? 0) + (incidents ?? 0) } });
+  return { dismissed: (rowCount ?? 0) + (incidents ?? 0) };
 }

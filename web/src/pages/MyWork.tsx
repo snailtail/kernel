@@ -10,6 +10,7 @@ import { useSession } from '../session';
 
 interface MyWork {
   problems: { ref: string; title: string; status: Status; priority: number; updated_at: string; url: string }[];
+  incidents: { ref: string; title: string; status: string; priority: number; is_major: boolean; created_at: string }[];
   actions: Action[];
   watched_changes: { ref: string; title: string; kind: string; body: string; created_at: string; by: string | null }[];
   decisions: { ref: string; title: string; priority: number; known_error_at: string }[];
@@ -25,7 +26,7 @@ export function MyWorkPage() {
     await api.post<ProblemDetail>(`/api/approvals/${id}/${approve ? 'approve' : 'reject'}`, {});
     reload();
   };
-  const nothing = !data.problems.length && !data.actions.length && !data.decisions.length && !data.approvals.length;
+  const nothing = !data.problems.length && !data.incidents.length && !data.actions.length && !data.decisions.length && !data.approvals.length;
   return (
     <>
       <header className="page-head">
@@ -76,6 +77,20 @@ export function MyWorkPage() {
               <li key={d.ref}>
                 <div><Link to={`/problems/${d.ref}`} className="mono">{d.ref}</Link> {d.title}</div>
                 <span className="work-meta"><PriorityBadge priority={d.priority} /><span className="muted small">known error {relativeTime(d.known_error_at)}</span></span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {data.incidents.length > 0 && (
+        <section className="card">
+          <h2>My incidents <span className="count">{data.incidents.length}</span></h2>
+          <ul className="work-list">
+            {data.incidents.map((i) => (
+              <li key={i.ref}>
+                <div><Link to={`/incidents/${i.ref}`} className="mono">{i.ref}</Link> <Link to={`/incidents/${i.ref}`} className="work-title">{i.title}</Link></div>
+                <span className="work-meta">{i.is_major && <span className="badge major">Major</span>}<PriorityBadge priority={i.priority} /><span className="muted small">{i.status.replace('_', ' ')}</span></span>
               </li>
             ))}
           </ul>
