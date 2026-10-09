@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
+import { CommandPalette, ShortcutHelp, useShortcuts } from './components/CommandPalette';
+import { MyWorkPage } from './pages/MyWork';
 import { Navigate, NavLink, Route, Routes } from 'react-router';
 import { api, type Meta, type Preferences, type User } from './api';
 import { icons } from './components/Icons';
@@ -26,6 +28,7 @@ import { SessionContext, canEdit, isManager } from './session';
 export function App() {
   const [user, setUser] = useState<User | null | undefined>(undefined);
   const [meta, setMeta] = useState<Meta | null>(null);
+  const [overlay, setOverlay] = useState<'palette' | 'help' | null>(null);
 
   const reloadMeta = useCallback(async () => setMeta(await api.get<Meta>('/api/meta')), []);
 
@@ -84,6 +87,9 @@ export function App() {
     <SessionContext.Provider value={{ user, meta, reloadMeta, logout, setPreferences }}>
       <ReauthPrompt />
       <AskHost />
+      <Shortcuts open={setOverlay} />
+      {overlay === 'palette' && <CommandPalette onClose={() => setOverlay(null)} />}
+      {overlay === 'help' && <ShortcutHelp onClose={() => setOverlay(null)} />}
       <div className="shell">
         <aside className="sidebar">
           <div className="brand">
@@ -93,8 +99,12 @@ export function App() {
               <div className="brand-sub">Problem Management</div>
             </div>
           </div>
+          <button className="search-trigger" onClick={() => setOverlay('palette')}>
+            {icons.search}<span>Search</span><kbd>Ctrl K</kbd>
+          </button>
           <nav>
-            <NavLink to="/" end>{icons.dashboard}Dashboard</NavLink>
+            <NavLink to="/" end>{icons.actions}My work</NavLink>
+            <NavLink to="/dashboard">{icons.dashboard}Dashboard</NavLink>
             <NavLink to="/problems" end>{icons.problems}Problems</NavLink>
             <NavLink to="/candidates">{icons.candidates}Candidates</NavLink>
             <NavLink to="/kedb">{icons.kedb}Known Errors</NavLink>
@@ -118,7 +128,8 @@ export function App() {
         </aside>
         <main className="main">
           <Routes>
-            <Route path="/" element={<DashboardPage />} />
+            <Route path="/" element={<MyWorkPage />} />
+            <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/problems" element={<ProblemsPage />} />
             <Route path="/problems/new" element={<NewProblemPage />} />
             <Route path="/problems/:ref" element={<ProblemPage />} />
@@ -139,4 +150,10 @@ export function App() {
       </div>
     </SessionContext.Provider>
   );
+}
+
+/** Mounted inside the router so shortcuts can navigate. */
+function Shortcuts({ open }: { open: (what: 'palette' | 'help') => void }) {
+  useShortcuts(open);
+  return null;
 }

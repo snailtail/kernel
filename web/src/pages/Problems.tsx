@@ -5,6 +5,7 @@ import { ProblemTable } from '../components/ProblemTable';
 import { PRIORITY_LABEL, STATUS_LABEL } from '../format';
 import { useApi } from '../hooks';
 import { canEdit, useSession } from '../session';
+import { SavedViews } from '../components/SavedViews';
 
 export function ProblemsPage() {
   const { user, meta } = useSession();
@@ -38,6 +39,7 @@ export function ProblemsPage() {
     <>
       <header className="page-head">
         <h1>Problems</h1>
+        <SavedViews page="problems" />
         {canEdit(user) && <Link className="btn primary" to="/problems/new">Log problem</Link>}
       </header>
       <div className="filters">

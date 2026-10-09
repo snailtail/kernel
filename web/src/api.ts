@@ -18,6 +18,7 @@ export interface Preferences {
   theme?: 'system' | 'light' | 'dark';
   guided?: boolean;
   intro_seen?: boolean;
+  saved_views?: { name: string; page: 'problems' | 'actions'; query: string }[];
 }
 
 export interface Guidance {

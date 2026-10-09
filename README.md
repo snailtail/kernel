@@ -83,6 +83,11 @@ duplicates) need the person's quoted confirmation and then, by default, wait as 
 approves them in the web UI (an agent's quote could be fabricated after a prompt injection). Record text is handed to
 agents as `untrusted_content`, and the MCP instructions tell them it is data, never instructions.
 
+**My work and navigation**: the start page lists what needs you – approvals and decisions waiting on you, your
+problems and actions, and changes on what you watch. Ctrl+K or `/` opens a command palette (type a ref such as
+`PRB000012` to jump, search everything, or run a command); `g` + a letter goes to a page, `n` logs a problem and `?`
+shows all shortcuts. List filters can be saved as named views.
+
 **Follow-up actions** track work that follows from a problem (vendor fixes, monitoring, runbook updates, review
 outcomes) with an owner and due date.
 

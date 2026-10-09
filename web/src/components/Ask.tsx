@@ -7,6 +7,8 @@ interface Request {
   label: string;
   confirmLabel: string;
   danger?: boolean;
+  audited?: boolean;
+  multiline?: boolean;
   resolve: (value: string | null) => void;
 }
 
@@ -19,7 +21,15 @@ let open: ((r: Request) => void) | null = null;
 export function askReason(title: string, message: string, options: { confirmLabel?: string; danger?: boolean } = {}): Promise<string | null> {
   return new Promise((resolve) => {
     if (!open) return resolve(window.prompt(message)?.trim() || null);
-    open({ title, message, label: 'Reason', confirmLabel: options.confirmLabel ?? 'Continue', danger: options.danger, resolve });
+    open({ title, message, label: 'Reason', confirmLabel: options.confirmLabel ?? 'Continue', danger: options.danger, audited: true, multiline: true, resolve });
+  });
+}
+
+/** Asks for a short text (e.g. a name); resolves with it, or null when cancelled. */
+export function askText(title: string, label: string, options: { confirmLabel?: string; message?: string } = {}): Promise<string | null> {
+  return new Promise((resolve) => {
+    if (!open) return resolve(window.prompt(label)?.trim() || null);
+    open({ title, message: options.message ?? '', label, confirmLabel: options.confirmLabel ?? 'Save', resolve });
   });
 }
 
@@ -47,10 +57,14 @@ export function AskHost() {
   return (
     <Modal title={req.title} onClose={() => close(null)}>
       <form className="form" onSubmit={submit}>
-        <p className="hint full">{req.message}</p>
+        {req.message && <p className="hint full">{req.message}</p>}
         <label className="full">
-          {req.label} <span className="muted small">(recorded in the audit trail)</span>
-          <textarea autoFocus rows={3} value={value} onChange={(e) => setValue(e.target.value)} maxLength={1000} />
+          {req.label} {req.audited && <span className="muted small">(recorded in the audit trail)</span>}
+          {req.multiline ? (
+            <textarea autoFocus rows={3} value={value} onChange={(e) => setValue(e.target.value)} maxLength={1000} />
+          ) : (
+            <input autoFocus value={value} onChange={(e) => setValue(e.target.value)} maxLength={60} />
+          )}
         </label>
         <div className="actions full">
           <button type="button" className="btn" onClick={() => close(null)}>Cancel</button>
