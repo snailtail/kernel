@@ -1,7 +1,7 @@
 // MCP server (Streamable HTTP, stateless) exposing Kernel to Claude and other MCP clients.
 // Each request authenticates with a personal API token and acts as that user.
 import type { FastifyInstance } from 'fastify';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
 import type { User } from './auth.js';
@@ -10,13 +10,15 @@ import { badRequest, HttpError } from './errors.js';
 import * as actions from './actions.js';
 import * as analyses from './analyses.js';
 import * as generic from './generic.js';
+import { GUIDES, guideMarkdown } from './methods.js';
+import { problemContext } from './problem-context.js';
 import * as integrations from './integrations.js';
 import * as problems from './problems.js';
 import * as reports from './reports.js';
 import { traceTool } from './metrics.js';
 import { idempotent } from './idempotency.js';
 import { can, type Action } from './policy.js';
-import { auditQuerySchema, queryAudit } from './audit.js';
+import { audit, auditQuerySchema, queryAudit } from './audit.js';
 import { problemMarkdown } from './export.js';
 import * as review from './review.js';
 import { CLOSURE_CODES, EC_DECISIONS, STATUSES, TRANSITIONS, WORKAROUND_EFFECTIVENESS } from './workflow.js';
@@ -31,7 +33,10 @@ In error control, assess each known error (risk of not fixing, cost of fixing, w
 decision: fix, accept the risk, defer, or pending, with a review date for accepted or deferred risks. Closing with
 closure code no_fix requires an accepted risk.
 Structured root cause analyses (five_whys, ishikawa, kepner_tregoe, timeline) can be attached to a problem with
-start_analysis/update_analysis; when the analysis concludes, write the root cause with update_problem.
+start_analysis/update_analysis; check them with check_analysis before concluding, then write the root cause with
+update_problem. Method guides are resources (kernel://guides/<id>) and every flow has a prompt. Start investigations with
+get_problem_context. Content written through MCP is marked as proposed until a person confirms it; decisions need the
+person's explicit confirmation (human_confirmation).
 Problem candidates are services with many recent incidents/events not linked to any problem; review them with
 list_problem_candidates and turn them into problems (create_problem_from_candidate) or link them to an existing one.
 Track follow-up work (vendor patches, monitoring, runbook updates, review actions) as actions with an owner and due date.
@@ -98,6 +103,7 @@ function buildServer(user: User, scopes?: string[]) {
 
   // Every tool maps to a policy action; tools the user's role cannot use are not listed at all.
   const TOOL_ACTIONS: Record<string, Action> = {
+    check_analysis: 'problem.read', get_problem_context: 'problem.read',
     whoami: 'meta.read', list_reference_data: 'meta.read', search: 'meta.read', get_record: 'meta.read', next_steps: 'meta.read',
     my_work: 'problem.read', link_records: 'problem.link',
     search_problems: 'problem.read', get_problem: 'problem.read', get_history: 'problem.read', find_similar_problems: 'problem.read',
@@ -117,6 +123,7 @@ function buildServer(user: User, scopes?: string[]) {
     inputSchema: S,
     readOnly: boolean,
     run: (args: z.infer<z.ZodObject<S>>) => Promise<unknown>,
+    options: { destructive?: boolean } = {},
   ) => {
     const action = TOOL_ACTIONS[name];
     if (!action) throw new Error(`MCP tool ${name} has no policy action`);
@@ -126,7 +133,7 @@ function buildServer(user: User, scopes?: string[]) {
     if (scopes && !scopes.includes(scope) && !(scope === 'ingest' && scopes.includes('write'))) return;
     server.registerTool(
       name,
-      { description, inputSchema, annotations: { readOnlyHint: readOnly, destructiveHint: false } },
+      { description, inputSchema, annotations: { readOnlyHint: readOnly, destructiveHint: !!options.destructive, idempotentHint: readOnly } },
       (async (args: any) => {
         try {
           return json(await traceTool(name, () => run(args)));
@@ -137,6 +144,23 @@ function buildServer(user: User, scopes?: string[]) {
         }
       }) as any,
     );
+  };
+
+  /**
+   * Decisions made through MCP (close, accept/defer risk, mark duplicate) need the human's explicit confirmation,
+   * quoted by the agent; it is recorded in the audit trail as the reason (#76, #67).
+   */
+  const HUMAN_CONFIRMATION = z
+    .string()
+    .min(3)
+    .max(1000)
+    .optional()
+    .describe('Required for decisions: quote the person\'s explicit confirmation, e.g. "Yes, close it as resolved". Ask them first; never decide on their behalf.');
+  const requireConfirmation = async (ref: string, tool: string, confirmation: string | undefined) => {
+    if (!confirmation?.trim()) {
+      throw new Error(`${tool} is a decision: ask the person to confirm it, then call again with human_confirmation quoting their answer.`);
+    }
+    await audit(null, { entity_type: 'problem', entity_ref: ref.toUpperCase(), action: 'mcp_human_confirmation', changes: { tool }, reason: confirmation.trim() });
   };
 
   tool('whoami', 'Show the Kernel user this connection acts as, and its role.', {}, true, async () => user);
@@ -209,9 +233,13 @@ function buildServer(user: User, scopes?: string[]) {
   tool(
     'mark_duplicate',
     'Mark a problem as a duplicate of another: links them, moves incident/event links to the original and closes the duplicate. Problem managers only.',
-    { ref: z.string().describe('The duplicate'), of: z.string().describe('The original problem to keep') },
+    { ref: z.string().describe('The duplicate'), of: z.string().describe('The original problem to keep'), human_confirmation: HUMAN_CONFIRMATION },
     false,
-    async ({ ref, of }) => compactProblem(await problems.markDuplicate(user, ref, of), 5),
+    async ({ ref, of, human_confirmation }) => {
+      await requireConfirmation(ref, 'Marking a duplicate', human_confirmation);
+      return compactProblem(await problems.markDuplicate(user, ref, of), 5);
+    },
+    { destructive: true },
   );
 
   // ---- Cross-practice tools: the same verbs for every record type (docs/api-conventions.md) ----
@@ -390,13 +418,18 @@ function buildServer(user: User, scopes?: string[]) {
       comment: z.string().optional().describe('Why the status changes'),
       closure_code: z.enum(CLOSURE_CODES).optional().describe('Required when closing'),
       acknowledge_open_actions: z.boolean().optional().describe('Close even though follow-up actions are still open'),
+      human_confirmation: HUMAN_CONFIRMATION,
       root_cause: z.string().optional(),
       workaround: z.string().optional(),
       resolution: z.string().optional(),
       major_review: z.string().optional(),
     },
     false,
-    async ({ ref, ...args }) => compactProblem(await problems.transitionProblem(user, ref, problems.transitionSchema.parse(args)), 5),
+    async ({ ref, human_confirmation, ...args }) => {
+      if (args.to === 'closed') await requireConfirmation(ref, 'Closing a problem', human_confirmation);
+      return compactProblem(await problems.transitionProblem(user, ref, problems.transitionSchema.parse(args)), 5);
+    },
+    { destructive: true },
   );
 
   tool(
@@ -446,9 +479,11 @@ function buildServer(user: User, scopes?: string[]) {
       decision_note: z.string().optional().describe('Rationale for the decision'),
       review_date: z.string().nullable().optional().describe('YYYY-MM-DD, when to reconsider an accepted or deferred risk'),
       workaround_effectiveness: z.enum(WORKAROUND_EFFECTIVENESS).nullable().optional(),
+      human_confirmation: HUMAN_CONFIRMATION,
     },
     false,
-    async ({ ref, risk_level, risk, fix_cost, decision, decision_note, review_date, workaround_effectiveness }) => {
+    async ({ ref, risk_level, risk, fix_cost, decision, decision_note, review_date, workaround_effectiveness, human_confirmation }) => {
+      if (decision === 'accept' || decision === 'defer') await requireConfirmation(ref, `Deciding to ${decision} the risk`, human_confirmation);
       const p = await problems.assessProblem(
         user,
         ref,
@@ -459,6 +494,7 @@ function buildServer(user: User, scopes?: string[]) {
       );
       return Object.fromEntries(Object.entries(p).filter(([k]) => k === 'ref' || k === 'status' || k.startsWith('ec_') || k.startsWith('workaround')));
     },
+    { destructive: true },
   );
 
   const ANALYSIS_FORMATS = `Data formats per technique:
@@ -482,6 +518,22 @@ function buildServer(user: User, scopes?: string[]) {
   );
 
   tool(
+    'check_analysis',
+    'Check an analysis against its method (e.g. every 5 Whys answer backed by evidence or marked as an assumption, KT causes tested against IS and IS NOT, all Ishikawa categories considered). Address every error before concluding.',
+    { ref: z.string(), analysis_id: z.number().int() },
+    true,
+    async ({ ref, analysis_id }) => analyses.checkProblemAnalysis(user, ref, analysis_id),
+  );
+
+  tool(
+    'get_problem_context',
+    'Everything needed to investigate a problem in one call: the problem, next steps, linked incidents/events/changes with times, recent records for the same service, analyses with their quality check, open actions, recent work notes and similar problems/known errors.',
+    { ref: z.string() },
+    true,
+    async ({ ref }) => problemContext(user, ref),
+  );
+
+  tool(
     'update_analysis',
     `Update an analysis. data replaces the whole data object, so send the complete structure. Get analysis ids from get_problem.\n${ANALYSIS_FORMATS}`,
     {
@@ -499,39 +551,104 @@ function buildServer(user: User, scopes?: string[]) {
       ),
   );
 
-  const prompt = (name: string, title: string, description: string, body: (ref: string) => string) =>
+
+  // Shared rules for every guided flow (#76): the method comes from the guide, the evidence from Kernel, the decisions
+  // from the human.
+  const RULES = `Rules for this flow:
+- Start with get_problem_context to see the evidence; read the method guide resource named below and follow its steps.
+- Work step by step with me. Propose, but let me confirm or correct; mark anything unverified as an assumption.
+- Record progress as you go (analysis tools, add_comment for findings). Everything you write is shown as "proposed via MCP" until a person confirms it.
+- Run check_analysis before concluding and address every error.
+- Decisions (closing, accepting or deferring risk, marking duplicates) are mine: ask, then pass my answer as human_confirmation.`;
+
+  const prompt = (name: string, title: string, description: string, body: (ref: string) => string, guide?: string) =>
     server.registerPrompt(name, { title, description, argsSchema: { ref: z.string().describe('Problem reference, e.g. PRB000012') } }, ({ ref }) => ({
-      messages: [{ role: 'user', content: { type: 'text', text: body(ref.toUpperCase()) } }],
+      messages: [{ role: 'user', content: { type: 'text', text: `${body(ref.toUpperCase())}\n\n${guide ? `Method guide: kernel://guides/${guide}\n` : ''}${RULES}` } }],
+    }));
+  const globalPrompt = (name: string, title: string, description: string, text: string, guide: string) =>
+    server.registerPrompt(name, { title, description }, () => ({
+      messages: [{ role: 'user', content: { type: 'text', text: `${text}\n\nMethod guide: kernel://guides/${guide}\n${RULES}` } }],
     }));
 
   prompt('five_whys', '5 Whys analysis', 'Facilitate a 5 Whys root cause analysis on a problem, recording it in Kernel.', (ref) =>
     `Facilitate a 5 Whys root cause analysis for problem ${ref} in Kernel.
-1. Read the problem with get_problem, including links, notes and any existing analyses.
-2. Agree a precise problem statement with me, then start a five_whys analysis with start_analysis.
-3. Ask one "why?" at a time. Propose a likely "because" based on the evidence, but let me confirm or correct it. Record each step with update_analysis.
-4. Stop when we reach a cause that, if removed, would prevent recurrence and is within our control (usually 4–6 steps). Watch for branches; note them as separate analyses if needed.
-5. Write the conclusion on the analysis, and when I agree, update the problem root cause with update_problem. Suggest follow-up actions with add_action.`);
+1. Agree a precise problem statement with me, then start a five_whys analysis with start_analysis.
+2. Ask one "why?" at a time. Propose a likely "because" from the evidence and record its evidence, or mark it as an assumption. Update the analysis after each step.
+3. Stop at a cause within our control whose removal prevents recurrence; set root_cause_in_control. Note branches as separate analyses.
+4. Write the conclusion, run check_analysis, and when I agree update the root cause with update_problem. Propose follow-up actions with add_action, including verifying assumptions.`, 'five_whys');
+
+  prompt('ishikawa', 'Ishikawa analysis', 'Map contributing causes in a fishbone diagram and narrow them down with evidence.', (ref) =>
+    `Run an Ishikawa (fishbone) analysis for problem ${ref} in Kernel.
+1. Start an ishikawa analysis with the problem statement as the effect.
+2. Go through each category with me (People, Process, Technology, Supplier, Environment, Measurement); add possible causes, or mark the category as considered when nothing applies.
+3. For each cause, find evidence in the context that supports or rules it out.
+4. Conclude the contributing causes, run check_analysis, and propose the root cause and actions. Suggest a 5 Whys on the most likely cause if needed.`, 'ishikawa');
 
   prompt('kepner_tregoe', 'Kepner-Tregoe problem analysis', 'Run a Kepner-Tregoe problem analysis (IS / IS NOT) on a problem.', (ref) =>
     `Run a Kepner-Tregoe problem analysis for problem ${ref} in Kernel.
-1. Read the problem with get_problem, and linked incidents/events/changes.
-2. Start a kepner_tregoe analysis with start_analysis. Work through WHAT, WHERE, WHEN and EXTENT with me: what IS affected, what could be but IS NOT, and the distinctions between them. Record answers with update_analysis as we go.
-3. List changes related to the distinctions, derive possible causes, and for each define a test: does it explain both the IS and the IS NOT? Mark results.
-4. Conclude with the most probable cause and how to verify it. Record the conclusion, update the root cause when I agree, and propose verification steps as actions.`);
+1. Start a kepner_tregoe analysis. Work through WHAT, WHERE, WHEN and EXTENT with me: what IS affected, what could be but IS NOT, and the distinctions.
+2. List changes related to the distinctions and derive possible causes.
+3. Test each cause against both IS and IS NOT and record the result.
+4. Conclude with the most probable cause and how to verify it; run check_analysis; propose verification steps as actions.`, 'kepner_tregoe');
+
+  prompt('timeline', 'Build a timeline', 'Build an incident/change timeline for a problem from the linked records and history.', (ref) =>
+    `Build a timeline for problem ${ref} in Kernel.
+1. From get_problem_context, take the linked incidents, events and changes with their times, and the recent records for the service.
+2. Ask me for missing changes, deployments and recovery steps; start a timeline analysis and add the events in order with sources.
+3. Identify the last change before the first symptom, and what slowed detection or recovery.
+4. Run check_analysis and write the conclusion.`, 'timeline');
 
   prompt('triage_problem', 'Triage a new problem', 'Check a newly logged problem for duplicates, priority, category and ownership.', (ref) =>
     `Triage problem ${ref} in Kernel as a problem manager would.
-1. Read it with get_problem.
-2. Search for duplicates and related known errors (search_problems with status "all", search_known_errors) using its key terms.
-3. Assess impact and urgency against the evidence and the ITIL 4 priority matrix; check category, affected service, and detection (reactive/proactive).
-4. Recommend: duplicate or not, priority, category, owner (list_reference_data for users), and first analysis steps. Ask me before changing anything, then apply agreed changes with update_problem and move it to analysis with transition_problem.`);
+1. Read the context; look for duplicates and known errors (find_similar_problems, search_known_errors).
+2. Assess impact and urgency against the evidence; check category, affected service and detection (reactive/proactive).
+3. Recommend: duplicate or not, priority, category, owner (list_reference_data) and the first analysis technique. Apply what I agree with update_problem and move it to analysis.`, 'triage');
+
+  prompt('assess_known_error', 'Error control assessment', 'Assess a known error: risk of not fixing, workaround effectiveness, cost of fixing, and prepare the decision.', (ref) =>
+    `Prepare the error control assessment for known error ${ref} in Kernel.
+1. Check the workaround is documented and ask how well it works in practice.
+2. Estimate the risk of not fixing (recurrence, impact, cost of applying the workaround) and the cost/risk of a permanent fix, from the evidence and from me.
+3. Record them with assess_known_error (without a decision unless I make one) and summarise the trade-off.
+4. The decision to fix, accept or defer is mine (a problem manager's): ask, then record it with human_confirmation and a review date for accept/defer.`, 'error_control');
 
   prompt('major_problem_review', 'Draft a major problem review', 'Draft the major problem review from the problem record and its history.', (ref) =>
     `Draft a major problem review for problem ${ref} in Kernel.
-Read it with get_problem (use a large activity_limit), including analyses, actions, links and notes. Write a concise review covering:
-what happened and the business impact; timeline; root cause; what went well; what could be improved; how recurrence is prevented;
-follow-up actions with owners and due dates (existing ones and new ones you recommend).
-Show me the draft first. When I approve it, save it with update_problem (major_review) and create any new actions with add_action.`);
+Cover: what happened and the business impact; timeline; root cause; what went well; what could be improved; how recurrence is prevented; follow-up actions with owners and due dates.
+Show me the draft first. When I approve it, save it with update_problem (major_review) and create new actions with add_action.`, 'major_problem_review');
+
+  prompt('verify_resolution', 'Verify a resolution', 'Check that a resolved problem has stopped recurring before it is closed.', (ref) =>
+    `Verify the resolution of problem ${ref} in Kernel.
+1. Find when the fix was implemented (resolution, linked change).
+2. Compare linked incidents/events and recent records for the service before and after the fix.
+3. Report whether the problem recurred. If not, recommend closing; if it did, recommend reopening analysis. Either way the decision is mine.`, 'verify_resolution');
+
+  globalPrompt('review_candidates', 'Review problem candidates', 'Proactive problem management: go through the problem candidates and propose link, new problem or dismissal for each.',
+    `Review the problem candidates in Kernel (list_problem_candidates).
+For each candidate: look for an existing problem or known error that explains the records (find_similar_problems, search_known_errors), then propose linking them (link_candidate_records), logging a proactive problem (create_problem_from_candidate) or dismissing them with a reason. Act only on what I agree to.`, 'review_candidates');
+
+  globalPrompt('problem_review_board', 'Prepare the problem review meeting', 'Prepare the agenda for the problem review meeting and help record the outcome.',
+    `Prepare the problem review meeting from get_review_agenda.
+Summarise each section briefly, highlight what needs a decision, and suggest the next step and owner per item. During or after the meeting, record the agreed outcomes as notes (add_comment) and actions (add_action) – only what I confirm.`, 'problem_review_board');
+
+  // ---- Resources: method guides and problems as attachable context ----
+  if (can(user.role, 'meta.read')) {
+    for (const g of GUIDES) {
+      server.registerResource(
+        `guide-${g.id}`,
+        `kernel://guides/${g.id}`,
+        { title: `Method guide: ${g.title}`, description: g.purpose, mimeType: 'text/markdown' },
+        async (uri) => ({ contents: [{ uri: uri.href, mimeType: 'text/markdown', text: guideMarkdown(g) }] }),
+      );
+    }
+  }
+  if (can(user.role, 'problem.read')) {
+    server.registerResource(
+      'problem',
+      new ResourceTemplate('kernel://problems/{ref}', { list: undefined }),
+      { title: 'Problem record with investigation context', mimeType: 'application/json' },
+      async (uri, { ref }) => ({ contents: [{ uri: uri.href, mimeType: 'application/json', text: JSON.stringify(await problemContext(user, String(ref)), null, 2) }] }),
+    );
+  }
 
   const actionShape = {
     title: z.string().describe('What needs to be done'),
@@ -589,6 +706,7 @@ Show me the draft first. When I approve it, save it with update_problem (major_r
     { ref: z.string(), link_id: z.number().int() },
     false,
     async ({ ref, link_id }) => (await problems.removeLink(user, ref, link_id)).links,
+    { destructive: true },
   );
 
   return server;

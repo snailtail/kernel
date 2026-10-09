@@ -99,7 +99,10 @@ describe('MCP server', { skip }, () => {
     const { data: p } = await call(mcp, 'create_problem', { title: 'Printer queue stalls' });
     await call(mcp, 'transition_problem', { ref: p.ref, to: 'analysis' });
     await call(mcp, 'transition_problem', { ref: p.ref, to: 'known_error', root_cause: 'Driver leak' });
-    const res = await call(mcp, 'assess_known_error', { ref: p.ref, risk_level: 3, decision: 'accept', review_date: '2099-06-01' });
+    const unconfirmed = await call(mcp, 'assess_known_error', { ref: p.ref, risk_level: 3, decision: 'accept', review_date: '2099-06-01' });
+    assert.equal(unconfirmed.isError, true, 'accepting risk needs the human');
+    assert.match(unconfirmed.text, /human_confirmation/);
+    const res = await call(mcp, 'assess_known_error', { ref: p.ref, risk_level: 3, decision: 'accept', review_date: '2099-06-01', human_confirmation: 'Yes, accept it until Q2' });
     assert.equal(res.isError, false, res.text);
     assert.equal(res.data.ec_decision, 'accept');
     assert.equal(res.data.ec_review_date, '2099-06-01');
@@ -116,7 +119,10 @@ describe('MCP server', { skip }, () => {
     assert.equal(updated.data.conclusion, 'Cold cache');
 
     const { prompts } = await mcp.listPrompts();
-    assert.deepEqual(prompts.map((x) => x.name).sort(), ['five_whys', 'kepner_tregoe', 'major_problem_review', 'triage_problem']);
+    assert.deepEqual(prompts.map((x) => x.name).sort(), [
+      'assess_known_error', 'five_whys', 'ishikawa', 'kepner_tregoe', 'major_problem_review', 'problem_review_board',
+      'review_candidates', 'timeline', 'triage_problem', 'verify_resolution',
+    ]);
     const prompt = await mcp.getPrompt({ name: 'five_whys', arguments: { ref: p.ref.toLowerCase() } });
     assert.match((prompt.messages[0].content as any).text, new RegExp(p.ref));
   });
@@ -138,6 +144,48 @@ describe('MCP server', { skip }, () => {
     assert.deepEqual(update.changes.impact, { from: 3, to: 1 });
     const { tools } = await mcp.listTools();
     assert.ok(!tools.some((t) => t.name === 'query_audit_log'), 'admin-only tool hidden from a problem manager');
+  });
+
+  test('guided investigation: guides, context, checks, proposals and confirmations (#76)', async () => {
+    const { resources } = await mcp.listResources();
+    assert.ok(resources.some((r) => r.uri === 'kernel://guides/five_whys'));
+    const guide: any = await mcp.readResource({ uri: 'kernel://guides/five_whys' });
+    assert.match(guide.contents[0].text, /^# 5 Whys/);
+
+    const { data: p } = await call(mcp, 'create_problem', { title: 'Guided flow test', description: 'Nightly export fails' });
+    const ctx = await call(mcp, 'get_problem_context', { ref: p.ref });
+    assert.equal(ctx.data.problem.ref, p.ref);
+    assert.equal(ctx.data.next_steps.phase, 'Problem identification');
+    const asResource: any = await mcp.readResource({ uri: `kernel://problems/${p.ref}` });
+    assert.equal(JSON.parse(asResource.contents[0].text).problem.ref, p.ref);
+
+    const started = await call(mcp, 'start_analysis', { ref: p.ref, technique: 'five_whys' });
+    const id = started.data[0].id;
+    assert.equal(started.data[0].proposed_via_mcp, true);
+    const weak = await call(mcp, 'check_analysis', { ref: p.ref, analysis_id: id });
+    assert.equal(weak.data.ready, false);
+    const step = (because: string) => ({ why: 'Why?', because, evidence: 'log', assumption: false });
+    await call(mcp, 'update_analysis', {
+      ref: p.ref, analysis_id: id, conclusion: 'Disk quota on the export host',
+      data: { problem_statement: 'Nightly export fails since Monday', whys: [step('Write fails'), step('Disk full'), step('Quota too small'), step('Growth not monitored')], root_cause_in_control: true },
+    });
+    assert.equal((await call(mcp, 'check_analysis', { ref: p.ref, analysis_id: id })).data.ready, true);
+
+    await call(mcp, 'update_problem', { ref: p.ref, root_cause: 'Disk quota too small and not monitored' });
+    const pm = await k.login('pm');
+    const record = (await pm.get(`/api/problems/${p.ref}`)).body;
+    assert.deepEqual(record.mcp_proposed, ['root_cause']);
+    assert.equal(record.activity.find((a: any) => a.kind === 'update').channel, 'mcp');
+    const confirmed = await pm.post(`/api/problems/${p.ref}/confirm`, { fields: ['root_cause'] });
+    assert.deepEqual(confirmed.body.mcp_proposed, []);
+    const analysisOk = await pm.post(`/api/problems/${p.ref}/analyses/${id}/confirm`, {});
+    assert.equal(analysisOk.body.analyses[0].proposed_via_mcp, false);
+    assert.equal(analysisOk.body.analyses[0].confirmed_by, 'Pm');
+
+    const close = await call(mcp, 'transition_problem', { ref: p.ref, to: 'closed', closure_code: 'cancelled' });
+    assert.equal(close.isError, true, 'closing needs the human');
+    const tools = (await mcp.listTools()).tools;
+    assert.equal(tools.find((t) => t.name === 'transition_problem')?.annotations?.destructiveHint, true);
   });
 
   test('reports helpful errors', async () => {

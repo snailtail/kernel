@@ -1,8 +1,10 @@
 // Structured root cause analysis techniques attached to problems.
 import { z } from 'zod';
 import type { User } from './auth.js';
-import { tx } from './db.js';
-import { badRequest, conflict, notFound } from './errors.js';
+import { query, tx } from './db.js';
+import { badRequest, conflict, forbidden, notFound } from './errors.js';
+import { currentContext } from './context.js';
+import { checkAnalysis } from './analysis-checks.js';
 import { authorize } from './policy.js';
 import { getProblem, loadForUpdate, logActivity } from './problems.js';
 
@@ -22,11 +24,28 @@ const isIsNot = z.object({ is: text, is_not: text, distinction: text }).default(
 export const DATA_SCHEMAS = {
   five_whys: z.object({
     problem_statement: text,
-    whys: z.array(z.object({ why: text, because: text })).max(15).default([]),
+    whys: z
+      .array(
+        z.object({
+          why: text,
+          because: text,
+          /** What supports the answer: a log line, metric, change ref… */
+          evidence: text,
+          /** True when the answer is not yet verified. */
+          assumption: z.boolean().default(false),
+        }),
+      )
+      .max(15)
+      .default([]),
+    /** Whether the last cause is within our control (stop criterion). */
+    root_cause_in_control: z.boolean().nullable().default(null),
   }),
   ishikawa: z.object({
     effect: text,
-    categories: z.array(z.object({ name: z.string().max(100), causes: z.array(z.string().max(1000)).max(30).default([]) })).max(10).default([]),
+    categories: z
+      .array(z.object({ name: z.string().max(100), causes: z.array(z.string().max(1000)).max(30).default([]), considered: z.boolean().default(false) }))
+      .max(10)
+      .default([]),
   }),
   kepner_tregoe: z.object({
     problem_statement: text,
@@ -103,9 +122,9 @@ export async function createAnalysis(user: User, ref: string, input: z.infer<typ
     if (problem.status === 'closed') throw conflict('Reopen the problem before adding analyses');
     const title = input.title || TECHNIQUE_LABEL[input.technique];
     const { rows } = await db.query(
-      `INSERT INTO problem_analyses (problem_id, technique, title, data, conclusion, created_by, updated_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $6) RETURNING id`,
-      [problem.id, input.technique, title, JSON.stringify(data), input.conclusion ?? '', user.id],
+      `INSERT INTO problem_analyses (problem_id, technique, title, data, conclusion, created_by, updated_by, proposed_via_mcp)
+       VALUES ($1, $2, $3, $4, $5, $6, $6, $7) RETURNING id`,
+      [problem.id, input.technique, title, JSON.stringify(data), input.conclusion ?? '', user.id, currentContext().channel === 'mcp'],
     );
     await logActivity(db, problem.id, user.id, 'analysis', `Started ${TECHNIQUE_LABEL[input.technique]} analysis`, { analysis_id: rows[0].id });
     await db.query('UPDATE problems SET updated_at = now() WHERE id = $1', [problem.id]);
@@ -131,8 +150,10 @@ export async function updateAnalysis(user: User, ref: string, id: number, input:
     }
     const data = input.data === undefined ? current.data : parseData(current.technique, input.data);
     await db.query(
-      `UPDATE problem_analyses SET title = $2, data = $3, conclusion = $4, updated_by = $5, updated_at = now() WHERE id = $1`,
-      [id, input.title ?? current.title, JSON.stringify(data), input.conclusion ?? current.conclusion, user.id],
+      `UPDATE problem_analyses SET title = $2, data = $3, conclusion = $4, updated_by = $5, updated_at = now(),
+         proposed_via_mcp = $6, confirmed_by = CASE WHEN $6 THEN NULL ELSE confirmed_by END, confirmed_at = CASE WHEN $6 THEN NULL ELSE confirmed_at END
+       WHERE id = $1`,
+      [id, input.title ?? current.title, JSON.stringify(data), input.conclusion ?? current.conclusion, user.id, currentContext().channel === 'mcp'],
     );
     // One activity entry per analysis per 30 minutes, so autosaves do not flood the log.
     const { rows: recent } = await db.query(
@@ -157,4 +178,30 @@ export async function deleteAnalysis(user: User, ref: string, id: number) {
     await logActivity(db, problem.id, user.id, 'analysis', `Removed analysis: ${rows[0].title}`, { analysis_id: id });
   });
   return getProblem(ref);
+}
+
+/** A person confirms an analysis an agent wrote or changed. */
+export async function confirmAnalysis(user: User, ref: string, id: number) {
+  authorize(user, 'analysis.write');
+  if (currentContext().channel === 'mcp') throw forbidden('Analyses can only be confirmed by a person in the web UI or REST API');
+  await tx(async (db) => {
+    const problem = await loadForUpdate(db, ref);
+    const { rowCount } = await db.query(
+      'UPDATE problem_analyses SET proposed_via_mcp = false, confirmed_by = $3, confirmed_at = now() WHERE id = $1 AND problem_id = $2 AND proposed_via_mcp',
+      [id, problem.id, user.id],
+    );
+    if (rowCount) await logActivity(db, problem.id, user.id, 'analysis', 'Confirmed an analysis proposed via MCP', { analysis_id: id });
+  });
+  return getProblem(ref);
+}
+
+/** Quality check of an analysis against its method (see analysis-checks.ts). */
+export async function checkProblemAnalysis(user: User, ref: string, id: number) {
+  authorize(user, 'problem.read');
+  const { rows } = await query(
+    'SELECT a.technique, a.data, a.conclusion FROM problem_analyses a JOIN problems p ON p.id = a.problem_id WHERE p.ref = $1 AND a.id = $2',
+    [ref.toUpperCase(), id],
+  );
+  if (!rows[0]) throw notFound('Analysis not found');
+  return checkAnalysis(rows[0].technique, rows[0].data, rows[0].conclusion);
 }

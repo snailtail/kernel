@@ -65,6 +65,8 @@ export interface Problem {
   ec_review_due: boolean;
   workaround_effectiveness: Effectiveness | null;
   workaround_reviewed_at: string | null;
+  /** Text fields written through MCP and not yet confirmed by a person. */
+  mcp_proposed: string[];
 }
 
 export type EcDecision = 'pending' | 'fix' | 'accept' | 'defer';
@@ -88,6 +90,7 @@ export interface Activity {
   data: any;
   created_at: string;
   user_name: string | null;
+  channel?: string;
   ref?: string;
   title?: string;
 }
@@ -123,6 +126,9 @@ export interface Analysis {
   created_at: string;
   updated_at: string;
   updated_by: string;
+  proposed_via_mcp?: boolean;
+  confirmed_by?: string | null;
+  confirmed_at?: string | null;
 }
 
 export interface ProblemDetail extends Problem {

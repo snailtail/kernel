@@ -73,6 +73,14 @@ field changes, never long texts. Signing secrets are shown once, can be rotated,
 automatically, anyone can watch or unwatch, and the dashboard shows changes on watched problems
 (MCP: `watch_problem`).
 
+**Guided investigations for people and AI agents**: every flow (5 Whys, Ishikawa, Kepner-Tregoe, timeline, triage,
+error control, major problem review, verifying a resolution, reviewing candidates, the review meeting) has a method
+guide, shown in the UI and served to MCP clients as `kernel://guides/<id>`, and an MCP prompt. Analyses are checked on
+the server against their method (`check_analysis`; the UI shows the same checks), and `get_problem_context` gives an
+agent all the evidence in one call. Content written through MCP is marked **Proposed via MCP** until a person confirms
+it, history entries show the channel, and decisions through MCP (closing, accepting/deferring risk, marking
+duplicates) require the person's quoted confirmation, recorded in the audit trail.
+
 **Follow-up actions** track work that follows from a problem (vendor fixes, monitoring, runbook updates, review
 outcomes) with an owner and due date.
 
@@ -217,8 +225,9 @@ claude mcp add --transport http kernel http://dockerhost:8080/mcp \
   --header "Authorization: Bearer kernel_pat_..."
 ```
 
-Prompts (slash commands in Claude Code, e.g. `/mcp__kernel__five_whys PRB000012`): `five_whys`, `kepner_tregoe`,
-`triage_problem`, `major_problem_review`. They let Claude facilitate the analysis or review with you and record the
+Prompts (slash commands in Claude Code, e.g. `/mcp__kernel__five_whys PRB000012`): `five_whys`, `ishikawa`,
+`kepner_tregoe`, `timeline`, `triage_problem`, `assess_known_error`, `major_problem_review`, `verify_resolution`,
+`review_candidates`, `problem_review_board`. Resources: `kernel://guides/<id>` and `kernel://problems/{ref}`. They let Claude facilitate the analysis or review with you and record the
 result in Kernel.
 
 Tools: `whoami`, `list_reference_data`, `search_problems`, `get_problem`, `search_known_errors`, `get_dashboard`,

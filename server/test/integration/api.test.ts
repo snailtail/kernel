@@ -296,7 +296,8 @@ describe('REST API', { skip }, () => {
       const fw = (await analyst.post(`/api/problems/${p.ref}/analyses`, { technique: 'five_whys', title: 'Why timeouts' })).body.analyses[1];
       const data = { problem_statement: 'Orders time out', whys: [{ why: 'Why?', because: 'Pool exhausted' }] };
       const updated = await analyst.patch(`/api/problems/${p.ref}/analyses/${fw.id}`, { data, conclusion: 'Sync lookup' });
-      assert.deepEqual(updated.body.analyses[1].data, data);
+      assert.equal(updated.body.analyses[1].data.whys[0].because, 'Pool exhausted');
+      assert.equal(updated.body.analyses[1].data.whys[0].assumption, false, 'defaults filled in');
       assert.equal(updated.body.analyses[1].conclusion, 'Sync lookup');
       await analyst.patch(`/api/problems/${p.ref}/analyses/${fw.id}`, { conclusion: 'Sync lookup holds connections' });
       const logged = updated.body.activity.filter((a: any) => a.kind === 'analysis' && a.data.analysis_id === fw.id);

@@ -87,6 +87,12 @@ export const OPERATIONS: Op[] = [
   { method: 'get', path: '/api/records/:ref/next-steps', tag: 'Records', summary: 'Process phase and remaining steps for a record' },
   { method: 'post', path: '/api/records/:ref/links', tag: 'Records', summary: 'Link a record to another record or an external reference', body: z.object({ to: z.string(), kind: z.string().optional(), system: z.string().optional(), url: z.string().optional(), note: z.string().optional() }) },
   { method: 'get', path: '/api/my-work', tag: 'Records', summary: 'Your open problems and actions, and changes on what you watch' },
+  { method: 'get', path: '/api/guides', tag: 'Guidance', summary: 'Method guides for investigation and process flows (5 Whys, Ishikawa, KT, timeline, error control…)' },
+  { method: 'get', path: '/api/guides/:id', tag: 'Guidance', summary: 'One method guide, with a Markdown rendering' },
+  { method: 'get', path: '/api/problems/:ref/context', tag: 'Guidance', summary: 'Everything needed to investigate a problem, in one size-limited response' },
+  { method: 'get', path: '/api/problems/:ref/analyses/:id/check', tag: 'Analyses', summary: 'Quality check of an analysis against its method' },
+  { method: 'post', path: '/api/problems/:ref/analyses/:id/confirm', tag: 'Analyses', summary: 'Confirm an analysis proposed via MCP (people only)' },
+  { method: 'post', path: '/api/problems/:ref/confirm', tag: 'Problems', summary: 'Confirm text fields proposed via MCP (people only)', body: z.object({ fields: z.array(z.string()) }) },
   { method: 'get', path: '/api/kedb', tag: 'Known errors', summary: 'Search the known error database', query: z.object({ q: z.string().optional(), include_resolved: z.enum(['true', 'false']).optional() }) },
 
   { method: 'get', path: '/api/reports', tag: 'Reports', summary: 'KPIs and trends for a period', query: reports.reportSchema },

@@ -746,3 +746,21 @@ a.stat:hover { border-color: var(--accent); text-decoration: none; }
 .audit-changes .after { color: var(--success); }
 .audit-changes-cell { max-width: 520px; }
 .integration-only { margin: 0 auto; }
+
+/* Guided investigations and MCP proposals (#76) */
+.why-fields { grid-template-columns: 1fr 1fr; }
+.why-fields .why-evidence { grid-column: 1; font-size: 13px; }
+.why-fields .check { grid-column: 2; align-self: center; }
+.stop-question { max-width: 520px; }
+.method-guide .guide-body { margin-top: 8px; padding: 10px 14px; border-left: 3px solid var(--accent); background: var(--accent-soft); border-radius: 0 8px 8px 0; font-size: 13px; }
+.method-guide .guide-body p { margin: 0 0 6px; }
+.method-guide .guide-body ol { margin: 0 0 6px; padding-left: 18px; }
+.quality { border: 1px solid var(--s-known); background: var(--s-known-bg); border-radius: 8px; padding: 8px 12px; font-size: 13px; }
+.quality.ready { border-color: var(--success); background: var(--success-soft); }
+.quality ul { margin: 4px 0 0; padding-left: 18px; }
+.quality li.finding-error { color: var(--text); font-weight: 550; }
+.quality li.finding-warning { color: var(--text-2); }
+.proposed { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 12px; border-radius: 8px; background: var(--accent-soft); border: 1px dashed var(--accent); font-size: 13px; }
+.badge.proposed-badge { background: var(--accent-soft); color: var(--accent); border: 1px dashed var(--accent); font-size: 11px; margin-left: 6px; vertical-align: middle; }
+.section-actions { display: flex; gap: 14px; }
+.tag.channel { margin-left: 6px; }

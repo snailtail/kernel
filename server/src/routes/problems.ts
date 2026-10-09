@@ -2,10 +2,13 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireUser } from '../auth.js';
 import { config } from '../config.js';
+import { notFound } from '../errors.js';
 import { query } from '../db.js';
 import * as actions from '../actions.js';
 import * as analyses from '../analyses.js';
 import * as generic from '../generic.js';
+import { GUIDES, guideById, guideMarkdown } from '../methods.js';
+import { problemContext } from '../problem-context.js';
 import * as problems from '../problems.js';
 import * as reports from '../reports.js';
 import { problemMarkdown } from '../export.js';
@@ -166,6 +169,28 @@ export async function problemRoutes(app: FastifyInstance) {
     return generic.linkRecords(requireUser(req), req.params.ref, body.to, body);
   });
   app.get('/api/my-work', async (req) => generic.myWork(requireUser(req, 'problem.read')));
+
+  app.get('/api/guides', async (req) => {
+    requireUser(req, 'meta.read');
+    return GUIDES;
+  });
+  app.get<{ Params: { id: string } }>('/api/guides/:id', async (req) => {
+    requireUser(req, 'meta.read');
+    const g = guideById(req.params.id);
+    if (!g) throw notFound('No such guide');
+    return { ...g, markdown: guideMarkdown(g) };
+  });
+  app.get<RefParams>('/api/problems/:ref/context', async (req) => problemContext(requireUser(req), req.params.ref));
+  app.get<{ Params: { ref: string; id: string } }>('/api/problems/:ref/analyses/:id/check', async (req) =>
+    analyses.checkProblemAnalysis(requireUser(req), req.params.ref, Number(req.params.id)),
+  );
+  app.post<{ Params: { ref: string; id: string } }>('/api/problems/:ref/analyses/:id/confirm', async (req) =>
+    analyses.confirmAnalysis(requireUser(req), req.params.ref, Number(req.params.id)),
+  );
+  app.post<RefParams>('/api/problems/:ref/confirm', async (req) => {
+    const body = z.object({ fields: z.array(z.enum(problems.PROPOSABLE as [string, ...string[]])).min(1) }).parse(req.body);
+    return problems.confirmProposals(requireUser(req), req.params.ref, body.fields);
+  });
 
   app.get('/api/kedb', async (req) => {
     requireUser(req, 'kedb.read');

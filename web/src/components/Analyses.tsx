@@ -120,8 +120,15 @@ function AnalysisEditor({ problem: p, analysis, editable, onChange }: { problem:
       setError((err as Error).message);
     }
   };
+  const confirm = async () => {
+    try {
+      onChange(await api.post<ProblemDetail>(`/api/problems/${p.ref}/analyses/${analysis.id}/confirm`));
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
   const remove = async () => {
-    if (!confirm(`Remove the analysis "${analysis.title}"?`)) return;
+    if (!window.confirm(`Remove the analysis "${analysis.title}"?`)) return;
     onChange(await api.del<ProblemDetail>(`/api/problems/${p.ref}/analyses/${analysis.id}`));
   };
 
@@ -133,12 +140,19 @@ function AnalysisEditor({ problem: p, analysis, editable, onChange }: { problem:
         <span className="tag">{TECHNIQUE_LABEL[analysis.technique]}</span>
         <span className="muted small">Updated by {analysis.updated_by} {relativeTime(analysis.updated_at)}</span>
       </div>
-      <p className="muted small">{TECHNIQUE_HINT[analysis.technique]}</p>
+      {analysis.proposed_via_mcp && (
+        <div className="proposed">
+          <span><strong>Proposed via MCP.</strong> An AI agent wrote or changed this analysis; review it before relying on it.</span>
+          {editable && <button className="btn small" onClick={confirm}>Confirm analysis</button>}
+        </div>
+      )}
+      <MethodGuide technique={analysis.technique} />
       <Editor data={data} set={setData} readOnly={!editable} />
       <label className="conclusion">
         Conclusion
         <textarea rows={3} value={conclusion} readOnly={!editable} onChange={(e) => setConclusion(e.target.value)} placeholder="What does this analysis tell us about the root cause?" />
       </label>
+      <QualityCheck problemRef={p.ref} analysisId={analysis.id} version={analysis.updated_at} dirty={dirty} />
       {error && <div className="error">{error}</div>}
       {conflict && (
         <div className="conflict">
@@ -173,7 +187,7 @@ const replaceAt = <T,>(list: T[], i: number, value: T) => list.map((x, j) => (j 
 const removeAt = <T,>(list: T[], i: number) => list.filter((_, j) => j !== i);
 
 function FiveWhys({ data, set, readOnly }: EditorProps) {
-  const whys: { why: string; because: string }[] = data.whys ?? [];
+  const whys: { why: string; because: string; evidence?: string; assumption?: boolean }[] = data.whys ?? [];
   return (
     <div className="five-whys">
       <label>Problem statement
@@ -186,18 +200,27 @@ function FiveWhys({ data, set, readOnly }: EditorProps) {
             <div className="why-fields">
               <input value={w.why} readOnly={readOnly} placeholder={i === 0 ? 'Why does this happen?' : 'Why?'} onChange={(e) => set({ ...data, whys: replaceAt(whys, i, { ...w, why: e.target.value }) })} />
               <input value={w.because} readOnly={readOnly} placeholder="Because…" onChange={(e) => set({ ...data, whys: replaceAt(whys, i, { ...w, because: e.target.value }) })} />
+              <input className="why-evidence" value={w.evidence ?? ''} readOnly={readOnly || !!w.assumption} placeholder={w.assumption ? 'Assumption – verify with an action' : 'Evidence: log line, metric, change ref…'} onChange={(e) => set({ ...data, whys: replaceAt(whys, i, { ...w, evidence: e.target.value }) })} />
+              <label className="check small"><input type="checkbox" disabled={readOnly} checked={!!w.assumption} onChange={(e) => set({ ...data, whys: replaceAt(whys, i, { ...w, assumption: e.target.checked }) })} /> Assumption</label>
             </div>
             {!readOnly && <button className="btn-icon small" aria-label="Remove step" onClick={() => set({ ...data, whys: removeAt(whys, i) })}>×</button>}
           </li>
         ))}
       </ol>
-      {!readOnly && <button className="btn-link small" onClick={() => set({ ...data, whys: [...whys, { why: '', because: '' }] })}>+ Ask why</button>}
+      {!readOnly && <button className="btn-link small" onClick={() => set({ ...data, whys: [...whys, { why: '', because: '', evidence: '', assumption: false }] })}>+ Ask why</button>}
+      <label className="stop-question">Is the last cause within our control?
+        <select disabled={readOnly} value={data.root_cause_in_control === true ? 'yes' : data.root_cause_in_control === false ? 'no' : ''} onChange={(e) => set({ ...data, root_cause_in_control: e.target.value === '' ? null : e.target.value === 'yes' })}>
+          <option value="">Not decided</option>
+          <option value="yes">Yes – removing it prevents recurrence</option>
+          <option value="no">No – keep asking why it can affect us</option>
+        </select>
+      </label>
     </div>
   );
 }
 
 function Ishikawa({ data, set, readOnly }: EditorProps) {
-  const categories: { name: string; causes: string[] }[] = data.categories ?? [];
+  const categories: { name: string; causes: string[]; considered?: boolean }[] = data.categories ?? [];
   return (
     <div className="ishikawa">
       <label>Effect (the problem)
@@ -217,6 +240,9 @@ function Ishikawa({ data, set, readOnly }: EditorProps) {
               placeholder="One cause per line"
               onChange={(e) => set({ ...data, categories: replaceAt(categories, i, { ...c, causes: e.target.value.split('\n') }) })}
             />
+            {!c.causes.some((x) => x.trim()) && (
+              <span className="check small"><input type="checkbox" disabled={readOnly} checked={!!c.considered} onChange={(e) => set({ ...data, categories: replaceAt(categories, i, { ...c, considered: e.target.checked }) })} /> Considered – nothing applies</span>
+            )}
           </label>
         ))}
       </div>
@@ -368,6 +394,49 @@ function Timeline({ data, set, readOnly: locked }: EditorProps) {
           {editing && <button className="btn-link small" onClick={add}>+ Event</button>}
           {events.length > 0 && <button className="btn-link small" onClick={() => setEditing(!editing)}>{editing ? 'Done editing' : 'Edit events'}</button>}
         </div>
+      )}
+    </div>
+  );
+}
+
+interface Guide { id: string; title: string; purpose: string; when: string; steps: string[]; stop: string; pitfalls: string[]; example?: { good: string; bad: string } }
+
+/** The method guide for a technique: the same text agents get as an MCP resource. */
+function MethodGuide({ technique }: { technique: Technique }) {
+  const [open, setOpen] = useState(false);
+  const [guide, setGuide] = useState<Guide | null>(null);
+  useEffect(() => {
+    if (open && !guide) api.get<Guide>(`/api/guides/${technique}`).then(setGuide).catch(() => {});
+  }, [open, guide, technique]);
+  return (
+    <div className="method-guide">
+      <button className="btn-link small" onClick={() => setOpen(!open)}>{open ? 'Hide method guide' : `How to do a ${TECHNIQUE_LABEL[technique]} analysis`}</button>
+      {!open && <span className="muted small"> · {TECHNIQUE_HINT[technique]}</span>}
+      {open && guide && (
+        <div className="guide-body">
+          <p>{guide.purpose} <span className="muted">{guide.when}</span></p>
+          <ol>{guide.steps.map((s) => <li key={s}>{s}</li>)}</ol>
+          <p><strong>Done when:</strong> {guide.stop}</p>
+          <p className="muted small"><strong>Pitfalls:</strong> {guide.pitfalls.join(' ')}</p>
+          {guide.example && <p className="muted small">Good: {guide.example.good}<br />Bad: {guide.example.bad}</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Server-side quality check of the saved analysis (same check agents run with check_analysis). */
+function QualityCheck({ problemRef, analysisId, version, dirty }: { problemRef: string; analysisId: number; version: string; dirty: boolean }) {
+  const [check, setCheck] = useState<{ ready: boolean; findings: { level: 'error' | 'warning'; message: string }[] } | null>(null);
+  useEffect(() => {
+    api.get<typeof check>(`/api/problems/${problemRef}/analyses/${analysisId}/check`).then(setCheck).catch(() => {});
+  }, [problemRef, analysisId, version]);
+  if (!check) return null;
+  return (
+    <div className={`quality ${check.ready ? 'ready' : ''}`}>
+      <strong>{check.ready ? '✓ Ready to conclude' : 'Before concluding'}</strong>{dirty && <span className="muted small"> (checks the saved version)</span>}
+      {check.findings.length > 0 && (
+        <ul>{check.findings.map((f) => <li key={f.message} className={`finding-${f.level}`}>{f.message}</li>)}</ul>
       )}
     </div>
   );

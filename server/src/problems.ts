@@ -5,6 +5,7 @@ import type pg from 'pg';
 import type { User } from './auth.js';
 import { afterCommit, query, tx } from './db.js';
 import { audit } from './audit.js';
+import { currentContext } from './context.js';
 import { recordUrl, registerRecordType, type RecordType } from './records.js';
 import { authorize } from './policy.js';
 import { logDomainEvent } from './log.js';
@@ -97,7 +98,7 @@ const SELECT_PROBLEM = `
          p.known_error_at, p.resolved_at, p.closed_at, p.created_at, p.updated_at,
          p.ec_risk_level, p.ec_risk, p.ec_fix_cost, p.ec_decision, p.ec_decision_note, p.ec_decided_by,
          db.display_name AS ec_decided_by_name, p.ec_decided_at, p.ec_review_date::text AS ec_review_date,
-         p.workaround_effectiveness, p.workaround_reviewed_at,
+         p.workaround_effectiveness, p.workaround_reviewed_at, p.mcp_proposed,
          (p.status = 'known_error' AND p.ec_review_date <= current_date) AS ec_review_due
   FROM problems p
   LEFT JOIN categories c ON c.id = p.category_id
@@ -118,12 +119,13 @@ export const SELECT_ACTION = `
 
 
 export async function logActivity(db: Db, problemId: number, userId: number, kind: string, body = '', data: object = {}) {
-  await db.query('INSERT INTO problem_activity (problem_id, user_id, kind, body, data) VALUES ($1, $2, $3, $4, $5)', [
+  await db.query('INSERT INTO problem_activity (problem_id, user_id, kind, body, data, channel) VALUES ($1, $2, $3, $4, $5, $6)', [
     problemId,
     userId,
     kind,
     body,
     JSON.stringify(data),
+    currentContext().channel,
   ]);
   const { rows } = await db.query(
     `SELECT p.ref, p.status, p.priority, p.is_major, p.detection, p.affected_service, c.name AS category, u.username
@@ -232,14 +234,16 @@ export async function getProblem(ref: string) {
       [problem.id],
     ),
     query(
-      `SELECT a.id, a.kind, a.body, a.data, a.created_at, u.display_name AS user_name
+      `SELECT a.id, a.kind, a.body, a.data, a.channel, a.created_at, u.display_name AS user_name
        FROM problem_activity a LEFT JOIN users u ON u.id = a.user_id WHERE a.problem_id = $1 ORDER BY a.created_at DESC, a.id DESC`,
       [problem.id],
     ),
     query(`${SELECT_ACTION} WHERE a.problem_id = $1 ORDER BY a.status = 'open' DESC, a.due_date NULLS LAST, a.id`, [problem.id]),
     query(
-      `SELECT a.id, a.technique, a.title, a.data, a.conclusion, a.created_at, a.updated_at, u.display_name AS updated_by
-       FROM problem_analyses a JOIN users u ON u.id = a.updated_by WHERE a.problem_id = $1 ORDER BY a.created_at`,
+      `SELECT a.id, a.technique, a.title, a.data, a.conclusion, a.created_at, a.updated_at, u.display_name AS updated_by,
+              a.proposed_via_mcp, a.confirmed_at, cu.display_name AS confirmed_by
+       FROM problem_analyses a JOIN users u ON u.id = a.updated_by LEFT JOIN users cu ON cu.id = a.confirmed_by
+       WHERE a.problem_id = $1 ORDER BY a.created_at`,
       [problem.id],
     ),
     query(
@@ -272,6 +276,33 @@ export async function createProblem(user: User, input: z.infer<typeof createProb
 }
 
 const same = (a: unknown, b: unknown) => (a ?? null) === (b ?? null);
+
+/** Text fields an agent writes stay "proposed via MCP" until a person edits or confirms them (#76). */
+export const PROPOSABLE = ['description', 'root_cause', 'workaround', 'resolution', 'major_review', 'ec_risk', 'ec_fix_cost', 'ec_decision_note'];
+
+export async function trackProposals(db: Db, problemId: number, fields: string[]) {
+  const texts = fields.filter((f) => PROPOSABLE.includes(f));
+  if (!texts.length) return;
+  if (currentContext().channel === 'mcp') {
+    await db.query('UPDATE problems SET mcp_proposed = ARRAY(SELECT DISTINCT unnest(mcp_proposed || $2::text[])) WHERE id = $1', [problemId, texts]);
+  } else {
+    await db.query('UPDATE problems SET mcp_proposed = ARRAY(SELECT unnest(mcp_proposed) EXCEPT SELECT unnest($2::text[])) WHERE id = $1', [problemId, texts]);
+  }
+}
+
+/** A person confirms content an agent proposed. */
+export async function confirmProposals(user: User, ref: string, fields: string[]) {
+  authorize(user, 'problem.update');
+  if (currentContext().channel === 'mcp') throw forbidden('Proposals can only be confirmed by a person in the web UI or REST API');
+  await tx(async (db) => {
+    const p = await loadForUpdate(db, ref);
+    const confirm = fields.filter((f) => p.mcp_proposed.includes(f));
+    if (!confirm.length) return;
+    await db.query('UPDATE problems SET mcp_proposed = ARRAY(SELECT unnest(mcp_proposed) EXCEPT SELECT unnest($2::text[])) WHERE id = $1', [p.id, confirm]);
+    await logActivity(db, p.id, user.id, 'update', `Confirmed ${confirm.join(', ')} proposed via MCP`, { confirmed: confirm });
+  });
+  return getProblem(ref);
+}
 
 /** Rejects an edit whose base values no longer match the record (someone else changed those fields). */
 export async function checkBase(db: Db, problemId: number, current: Record<string, unknown>, input: object, base?: Record<string, unknown>) {
@@ -307,6 +338,7 @@ export async function updateProblem(user: User, ref: string, { base, ...input }:
     );
     // Full before/after, also for long texts, so no earlier version is ever lost.
     const data = Object.fromEntries(changed.map(([k, v]) => [k, { from: current[k] ?? null, to: v }]));
+    await trackProposals(db, current.id, changed.map(([k]) => k));
     if (input.assignee_id) await watch(db, current.id, input.assignee_id);
     await logActivity(db, current.id, user.id, 'update', `Updated ${changed.map(([k]) => k).join(', ')}`, data);
   });
@@ -350,6 +382,7 @@ export async function transitionProblem(user: User, ref: string, input: z.infer<
         .filter((k) => fields[k] !== current[k])
         .map((k) => [k, { from: current[k], to: fields[k] }]),
     );
+    await trackProposals(db, current.id, Object.keys(texts));
     await logActivity(db, current.id, user.id, 'status', input.comment ?? '', { from, to: input.to, closure_code, ...texts });
   });
   return getProblem(ref);
@@ -499,6 +532,7 @@ export async function assessProblem(user: User, ref: string, { base, ...input }:
     const body = decisionChanged && decided
       ? `Recorded decision: ${input.ec_decision}`
       : `Updated error control assessment (${changed.map(([k]) => ASSESSMENT_LABELS[k]).join(', ')})`;
+    await trackProposals(db, current.id, changed.map(([k]) => k));
     await logActivity(db, current.id, user.id, 'assessment', body, Object.fromEntries(changed.map(([k, v]) => [k, { from: current[k] ?? null, to: v }])));
   });
   return getProblem(ref);

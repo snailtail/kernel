@@ -42,6 +42,14 @@ export function ProblemPage() {
     }
   };
 
+  const confirmFields = async (fields: string[]) => {
+    try {
+      setData(await api.post<ProblemDetail>(`/api/problems/${p.ref}/confirm`, { fields }));
+    } catch (err) {
+      setActionError((err as Error).message);
+    }
+  };
+
   const allowed = [...meta.transitions[p.status]].sort((a, b) => Number(b === NEXT_STATUS[p.status]) - Number(a === NEXT_STATUS[p.status])).filter((to) => {
     if (!canEdit(user)) return false;
     if ((to === 'closed' || p.status === 'closed') && !isManager(user)) return false;
@@ -92,15 +100,15 @@ export function ProblemPage() {
       <div className="problem-grid">
         <div className="problem-main">
           <GuidePanel guidance={p.next_steps} />
-          <TextSection title="Description" hint="Symptoms, scope and business impact" value={p.description} editable={editable} onSave={(v, b) => save({ description: v }, { description: b }, true)} />
+          <TextSection title="Description" hint="Symptoms, scope and business impact" value={p.description} editable={editable} onSave={(v, b) => save({ description: v }, { description: b }, true)} proposed={p.mcp_proposed?.includes('description')} onConfirm={() => confirmFields(['description'])} />
           {(p.status !== 'new' || p.analyses.length > 0) && <AnalysesSection problem={p} onChange={setData} />}
-          <TextSection title="Root cause" hint="Findings from problem analysis" value={p.root_cause} editable={editable} onSave={(v, b) => save({ root_cause: v }, { root_cause: b }, true)} />
-          <TextSection title="Workaround" hint="How to reduce or eliminate the impact until resolved" value={p.workaround} editable={editable} onSave={(v, b) => save({ workaround: v }, { workaround: b }, true)} />
+          <TextSection title="Root cause" hint="Findings from problem analysis" value={p.root_cause} editable={editable} onSave={(v, b) => save({ root_cause: v }, { root_cause: b }, true)} proposed={p.mcp_proposed?.includes('root_cause')} onConfirm={() => confirmFields(['root_cause'])} />
+          <TextSection title="Workaround" hint="How to reduce or eliminate the impact until resolved" value={p.workaround} editable={editable} onSave={(v, b) => save({ workaround: v }, { workaround: b }, true)} proposed={p.mcp_proposed?.includes('workaround')} onConfirm={() => confirmFields(['workaround'])} />
           {(p.known_error_at || p.status === 'known_error') && <ErrorControlSection problem={p} onChange={setData} />}
-          <TextSection title="Resolution" hint="The permanent solution, usually implemented through a change" value={p.resolution} editable={editable} onSave={(v, b) => save({ resolution: v }, { resolution: b }, true)} />
+          <TextSection title="Resolution" hint="The permanent solution, usually implemented through a change" value={p.resolution} editable={editable} onSave={(v, b) => save({ resolution: v }, { resolution: b }, true)} proposed={p.mcp_proposed?.includes('resolution')} onConfirm={() => confirmFields(['resolution'])} />
           {p.is_major && (
             <TextSection title="Major problem review" hint="What went well, what could be improved, how to prevent recurrence, follow-up actions"
-              value={p.major_review} editable={editable} onSave={(v, b) => save({ major_review: v }, { major_review: b }, true)} />
+              value={p.major_review} editable={editable} onSave={(v, b) => save({ major_review: v }, { major_review: b }, true)}  proposed={p.mcp_proposed?.includes('major_review')} onConfirm={() => confirmFields(['major_review'])} />
           )}
           <ActionsSection problem={p} onChange={setData} />
           <ActivitySection problem={p} onChange={setData} />
@@ -150,7 +158,7 @@ function EditableTitle({ value, editable, onSave }: { value: string; editable: b
   );
 }
 
-function TextSection(props: { title: string; hint: string; value: string; editable: boolean; onSave: (v: string, base: string) => Promise<void> }) {
+function TextSection(props: { title: string; hint: string; value: string; editable: boolean; onSave: (v: string, base: string) => Promise<void>; proposed?: boolean; onConfirm?: () => void }) {
   const [draft, setDraft] = useState<string | null>(null);
   const [base, setBase] = useState('');
   const [busy, setBusy] = useState(false);
@@ -176,8 +184,11 @@ function TextSection(props: { title: string; hint: string; value: string; editab
   return (
     <section className="card text-section">
       <div className="section-head">
-        <h2>{props.title}</h2>
-        {props.editable && draft === null && <button className="btn-link" onClick={start}>Edit</button>}
+        <h2>{props.title} {props.proposed && <span className="badge proposed-badge" title="Written by an AI agent through MCP; not yet confirmed by a person">Proposed via MCP</span>}</h2>
+        <span className="section-actions">
+          {props.proposed && props.editable && props.onConfirm && draft === null && <button className="btn-link" onClick={props.onConfirm}>Confirm</button>}
+          {props.editable && draft === null && <button className="btn-link" onClick={start}>Edit</button>}
+        </span>
       </div>
       {draft !== null ? (
         <>
@@ -345,11 +356,16 @@ function ErrorControlSection({ problem: p, onChange }: { problem: ProblemDetail;
   const editable = canEdit(user) && p.status !== 'closed';
   const decision = p.ec_decision ?? 'pending';
   const empty = !p.ec_risk && !p.ec_fix_cost && !p.ec_decision_note && !p.ec_risk_level && !p.workaround_effectiveness;
+  const proposedEc = (p.mcp_proposed ?? []).filter((f) => f.startsWith('ec_'));
+  const confirmEc = async () => onChange(await api.post<ProblemDetail>(`/api/problems/${p.ref}/confirm`, { fields: proposedEc }));
   return (
     <section className="card error-control">
       <div className="section-head">
-        <h2>Error control</h2>
-        {editable && <button className="btn-link" onClick={() => setEditing(true)}>{empty ? 'Assess' : 'Edit'}</button>}
+        <h2>Error control {proposedEc.length > 0 && <span className="badge proposed-badge">Proposed via MCP</span>}</h2>
+        <span className="section-actions">
+          {proposedEc.length > 0 && editable && <button className="btn-link" onClick={confirmEc}>Confirm</button>}
+          {editable && <button className="btn-link" onClick={() => setEditing(true)}>{empty ? 'Assess' : 'Edit'}</button>}
+        </span>
       </div>
       <div className="ec-chips">
         <span className={`badge decision-${decision}`}>{DECISION_LABEL[decision]}</span>
@@ -590,6 +606,7 @@ export function ActivityLine({ activity: a }: { activity: Activity }) {
     <div className={`activity-item kind-${a.kind}`}>
       <div className="activity-head">
         <strong>{a.user_name ?? 'System'}</strong> {text}
+        {(a.channel === 'mcp' || a.channel === 'api') && <span className="tag channel" title={a.channel === 'mcp' ? 'Through MCP (an AI agent or MCP client)' : 'Through the REST API'}>via {a.channel.toUpperCase()}</span>}
         <time title={formatDate(a.created_at)}>{relativeTime(a.created_at)}</time>
       </div>
       {(a.kind === 'comment' || (a.kind === 'status' && a.body)) && <Markdown text={a.body} className="activity-body" />}
