@@ -100,7 +100,7 @@ export async function audit(db: Db | null, entry: AuditEntry) {
     if ((entry.entity_type === 'user' || entry.entity_type === 'session') && entityRef && !entityRef.startsWith('#')) {
       const { rows: u } = await client.query('SELECT id FROM users WHERE username = $1', [entityRef]);
       const d = digestOf(entityRef);
-      entityRef = u[0] ? `#${u[0].id}` : 'digest' in d ? d.digest : 'unknown account';
+      entityRef = u[0] ? `#${u[0].id}` : ((d as { digest?: string }).digest ?? 'unknown account');
     }
     // Serialise appends so the hash chain has a single order.
     await client.query('SELECT pg_advisory_xact_lock(4713)');
