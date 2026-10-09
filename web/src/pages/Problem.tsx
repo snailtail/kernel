@@ -9,6 +9,8 @@ import { AnalysesSection } from '../components/Analyses';
 import { GuidePanel } from '../components/Guide';
 import { SimilarProblems } from '../components/Similar';
 import { Markdown } from '../components/Markdown';
+import { richPaste } from '../components/RichPaste';
+import { AttachmentsPanel } from '../components/Attachments';
 import { Modal } from '../components/Modal';
 import {
   CLOSURE_LABEL, DECISION_LABEL, EFFECTIVENESS_LABEL, FIELD_LABEL, formatDate, formatDay, LEVEL_LABEL, LINK_LABEL, PRIORITY_LABEL, relativeTime, RISK_LABEL,
@@ -124,14 +126,14 @@ export function ProblemPage() {
               if (c) navigate(`/changes/${c.ref}`);
             }
           }} />
-          <TextSection title="Description" hint="Symptoms, scope and business impact" value={p.description} editable={editable} onSave={(v, b) => save({ description: v }, { description: b }, true)} proposed={p.mcp_proposed?.includes('description')} onConfirm={() => confirmFields(['description'])} />
+          <TextSection recordRef={p.ref} title="Description" hint="Symptoms, scope and business impact" value={p.description} editable={editable} onSave={(v, b) => save({ description: v }, { description: b }, true)} proposed={p.mcp_proposed?.includes('description')} onConfirm={() => confirmFields(['description'])} />
           {(p.status !== 'new' || p.analyses.length > 0) && <AnalysesSection problem={p} onChange={setData} />}
-          <TextSection title="Root cause" hint="Findings from problem analysis" value={p.root_cause} editable={editable} onSave={(v, b) => save({ root_cause: v }, { root_cause: b }, true)} proposed={p.mcp_proposed?.includes('root_cause')} onConfirm={() => confirmFields(['root_cause'])} />
-          <TextSection title="Workaround" hint="How to reduce or eliminate the impact until resolved" value={p.workaround} editable={editable} onSave={(v, b) => save({ workaround: v }, { workaround: b }, true)} proposed={p.mcp_proposed?.includes('workaround')} onConfirm={() => confirmFields(['workaround'])} />
+          <TextSection recordRef={p.ref} title="Root cause" hint="Findings from problem analysis" value={p.root_cause} editable={editable} onSave={(v, b) => save({ root_cause: v }, { root_cause: b }, true)} proposed={p.mcp_proposed?.includes('root_cause')} onConfirm={() => confirmFields(['root_cause'])} />
+          <TextSection recordRef={p.ref} title="Workaround" hint="How to reduce or eliminate the impact until resolved" value={p.workaround} editable={editable} onSave={(v, b) => save({ workaround: v }, { workaround: b }, true)} proposed={p.mcp_proposed?.includes('workaround')} onConfirm={() => confirmFields(['workaround'])} />
           {(p.known_error_at || p.status === 'known_error') && <ErrorControlSection problem={p} onChange={setData} />}
-          <TextSection title="Resolution" hint="The permanent solution, usually implemented through a change" value={p.resolution} editable={editable} onSave={(v, b) => save({ resolution: v }, { resolution: b }, true)} proposed={p.mcp_proposed?.includes('resolution')} onConfirm={() => confirmFields(['resolution'])} />
+          <TextSection recordRef={p.ref} title="Resolution" hint="The permanent solution, usually implemented through a change" value={p.resolution} editable={editable} onSave={(v, b) => save({ resolution: v }, { resolution: b }, true)} proposed={p.mcp_proposed?.includes('resolution')} onConfirm={() => confirmFields(['resolution'])} />
           {p.is_major && (
-            <TextSection title="Major problem review" hint="What went well, what could be improved, how to prevent recurrence, follow-up actions"
+            <TextSection recordRef={p.ref} title="Major problem review" hint="What went well, what could be improved, how to prevent recurrence, follow-up actions"
               value={p.major_review} editable={editable} onSave={(v, b) => save({ major_review: v }, { major_review: b }, true)}  proposed={p.mcp_proposed?.includes('major_review')} onConfirm={() => confirmFields(['major_review'])} />
           )}
           <ActionsSection problem={p} onChange={setData} />
@@ -139,6 +141,7 @@ export function ProblemPage() {
         </div>
         <aside className="problem-side">
           <DetailsPanel problem={p} editable={editable} onSave={save} />
+          <AttachmentsPanel recordRef={p.ref} editable={editable} canDelete={(a) => a.uploaded_by === user.id || user.role === 'admin' || user.role === 'problem_manager'} />
           {meta.modules?.cmdb !== false && <AffectedCisPanel record={p} basePath={`/api/problems/${p.ref}`} editable={canEdit(user)} onChange={setData} />}
           {meta.modules?.change !== false && <ProblemChanges problem={p} editable={canEdit(user) && !['resolved', 'closed'].includes(p.status)} />}
           {meta.modules?.incident !== false && <ProblemIncidents problem={p} editable={canEdit(user)} onChange={setData} />}
@@ -185,11 +188,12 @@ function EditableTitle({ value, editable, onSave }: { value: string; editable: b
   );
 }
 
-function TextSection(props: { title: string; hint: string; value: string; editable: boolean; onSave: (v: string, base: string) => Promise<void>; proposed?: boolean; onConfirm?: () => void }) {
+function TextSection(props: { recordRef: string; title: string; hint: string; value: string; editable: boolean; onSave: (v: string, base: string) => Promise<void>; proposed?: boolean; onConfirm?: () => void }) {
   const [draft, setDraft] = useState<string | null>(null);
   const [base, setBase] = useState('');
   const [busy, setBusy] = useState(false);
   const [conflict, setConflict] = useState<Conflict | null>(null);
+  const [pasteError, setPasteError] = useState<string | null>(null);
   const start = () => {
     setBase(props.value);
     setDraft(props.value);
@@ -233,8 +237,9 @@ function TextSection(props: { title: string; hint: string; value: string; editab
               </div>
             </div>
           )}
-          <textarea autoFocus rows={Math.max(5, draft.split('\n').length + 1)} value={draft} placeholder={props.hint} onChange={(e) => setDraft(e.target.value)} />
-          <span className="muted small">Markdown supported: **bold**, _italic_, `code`, lists, tables, links.</span>
+          <textarea autoFocus rows={Math.max(5, draft.split('\n').length + 1)} value={draft} placeholder={props.hint} onChange={(e) => setDraft(e.target.value)} {...richPaste(props.recordRef, setDraft, setPasteError)} />
+          {pasteError && <div className="error small">{pasteError}</div>}
+          <span className="muted small">Markdown supported. Paste a screenshot or formatted text; Ctrl+Shift+V pastes plain text.</span>
           <div className="actions">
             <button className="btn" onClick={() => setDraft(null)} disabled={busy}>Cancel</button>
             <button className="btn primary" onClick={() => commit()} disabled={busy || !!conflict}>Save</button>
@@ -553,7 +558,7 @@ function ActivitySection({ problem: p, onChange }: { problem: ProblemDetail; onC
       </div>
       {canEdit(user) && (
         <form onSubmit={submit} className="comment-form">
-          <textarea rows={3} placeholder="Add a work note: findings, analysis steps, decisions…" value={body} onChange={(e) => setBody(e.target.value)} />
+          <textarea rows={3} placeholder="Add a work note: findings, analysis steps, decisions… Paste screenshots and logs here." value={body} onChange={(e) => setBody(e.target.value)} {...richPaste(p.ref, setBody, setError)} />
           {error && <div className="error">{error}</div>}
           <div className="actions">
             <button className="btn primary" disabled={busy || !body.trim()}>Add note</button>

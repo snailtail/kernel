@@ -21,6 +21,7 @@ import * as sla from './sla.js';
 import * as notifications from './notifications.js';
 import * as flow from './flow.js';
 import * as people from './people.js';
+import * as attachments from './attachments.js';
 import * as generic from './generic.js';
 import { typeForRef } from './records.js';
 import { GUIDES, guideMarkdown } from './methods.js';
@@ -61,7 +62,9 @@ get_problem returns next_steps: the current phase, its purpose and the remaining
 user through the process and to decide what to do next.
 Before creating a problem, search existing problems and the known error database to avoid duplicates.`;
 
-const json = (value: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(value, null, 2) }] });
+/** Tool results are JSON text, unless a tool returns MCP content itself (an image for a multimodal model). */
+const json = (value: unknown) =>
+  value && typeof value === 'object' && 'mcpContent' in value ? { content: (value as { mcpContent: any[] }).mcpContent } : { content: [{ type: 'text' as const, text: JSON.stringify(value, null, 2) }] };
 
 async function resolveCategory(name?: string | null) {
   if (name === undefined) return undefined;
@@ -124,6 +127,7 @@ function buildServer(user: User, scopes?: string[]) {
     search_cis: 'ci.read', get_ci: 'ci.read', list_ci_types: 'ci.read', create_ci: 'ci.manage', update_ci: 'ci.manage',
     transition_ci: 'ci.manage', upsert_cis: 'ci.ingest',
     link_ci_to_problem: 'problem.link', unlink_ci_from_problem: 'problem.link',
+    list_attachments: 'meta.read', read_attachment: 'meta.read', add_attachment: 'attachment.add',
     search_people: 'person.read', get_person: 'person.read', add_affected_person: 'incident.update',
     get_process_map: 'meta.read', get_health_tips: 'meta.read',
     list_slas: 'meta.read', get_service_catalogue: 'ci.read', get_my_notifications: 'meta.read',
@@ -492,6 +496,30 @@ function buildServer(user: User, scopes?: string[]) {
       const p: any = await incidents.createProblemFromIncident(user, ref, incidents.problemFromIncidentSchema.parse(overrides));
       return { ref: p.ref, url: p.url, status: p.status, affected_cis: p.affected_cis.map((c: any) => c.ref) };
     },
+  );
+
+  // ---- Attachments (#51) ----
+  tool('list_attachments', 'Attachments of a record (problem, incident, change, CI): screenshots, logs, configuration, PDFs. Text attachments flagged with credential/token/private_key may contain secrets.', { ref: z.string() }, true, async ({ ref }) =>
+    (await attachments.listAttachments(user, ref)).map((a: any) => ({ id: a.id, filename: a.filename, kind: a.kind, size: a.size, flags: a.flags, created_at: a.created_at })),
+  );
+  tool(
+    'read_attachment',
+    'Read an attachment: text attachments as lines (from/limit; first_error_line points at the first ERROR/Exception), images as an image. PDFs and other files are not readable here.',
+    { id: z.number().int(), from: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(2000).optional() },
+    true,
+    async ({ id, from, limit }) => {
+      const meta = (await attachments.getAttachmentData(user, id, 'preview')) as { attachment: any; contentType: string; data: Buffer };
+      if (meta.attachment.kind === 'image') return { mcpContent: [{ type: 'image', data: meta.data.toString('base64'), mimeType: meta.contentType }, { type: 'text', text: `${meta.attachment.filename} (${meta.attachment.width}×${meta.attachment.height})` }] };
+      if (meta.attachment.kind !== 'text') throw new Error(`${meta.attachment.filename} is a ${meta.attachment.kind}; only text and images can be read`);
+      return attachments.getAttachmentText(user, id, from ?? 0, limit ?? 500);
+    },
+  );
+  tool(
+    'add_attachment',
+    'Attach a text file (a log excerpt, an analysis, a configuration) to a record. Do not attach secrets or personal data.',
+    { ref: z.string(), filename: z.string().max(150), text: z.string().max(2_000_000) },
+    false,
+    async ({ ref, filename, text }) => attachments.addAttachment(user, ref, filename, Buffer.from(text, 'utf8')),
   );
 
   // ---- People (#39) ----
