@@ -85,7 +85,7 @@ describe('CMDB core (#16)', { skip }, () => {
     assert.equal(fixed.updated, 1);
     const ref = (await pm.get('/api/cis?q=db01-corrected')).body[0].ref;
     const log = (await admin.get(`/api/audit?entity_type=ci&entity_ref=${ref}`)).body;
-    assert.ok(log.some((e: any) => e.changes.override === true && e.changes.reason === 'Wrong name in vCenter'));
+    assert.ok(log.some((e: any) => e.action === 'source_override' && e.changes.override === true && e.reason === 'Wrong name in vCenter'));
     await pm.post('/api/cis/upsert', { items: [items[0]], override_reason: 'Restore' });
     assert.equal((await vc.get('/api/cis')).status, 403, 'integrations cannot read the CMDB');
   });

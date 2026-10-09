@@ -20,7 +20,7 @@ describe('audit trail', { skip }, () => {
 
     const entries = (await admin.get(`/api/audit?entity_type=problem&entity_ref=${p.ref}`)).body;
     const update = entries.find((e: any) => e.action === 'update');
-    assert.equal(update.actor_name, 'analyst');
+    assert.equal(update.actor_name, 'Analyst', 'the display name, joined from users (not stored in the trail)');
     assert.equal(update.actor_type, 'user');
     assert.equal(update.channel, 'web');
     assert.deepEqual(update.changes.impact, { from: 3, to: 1 });
@@ -34,14 +34,14 @@ describe('audit trail', { skip }, () => {
     const created = await admin.post('/api/users', { username: 'auditee', display_name: 'Auditee', role: 'viewer', password: 'a fine long passphrase' });
     assert.equal((await admin.patch(`/api/users/${created.body.id}`, { role: 'analyst' })).status, 400);
     assert.equal((await admin.patch(`/api/users/${created.body.id}`, { role: 'analyst', reason: 'Joined the problem team' })).status, 200);
-    const userEntries = (await admin.get('/api/audit?entity_type=user&entity_ref=auditee')).body;
+    const userEntries = (await admin.get(`/api/audit?entity_type=user&entity_ref=%23${created.body.id}`)).body;
     const roleChange = userEntries.find((e: any) => e.action === 'update');
     assert.deepEqual(roleChange.changes.role, { from: 'viewer', to: 'analyst' });
     assert.equal(roleChange.reason, 'Joined the problem team');
     assert.ok(userEntries.some((e: any) => e.action === 'create'));
 
     const logins = (await admin.get('/api/audit?entity_type=session&action=login')).body;
-    assert.ok(logins.some((e: any) => e.entity_ref === 'analyst' && e.actor_name === 'analyst'));
+    assert.ok(logins.some((e: any) => /^#\d+$/.test(e.entity_ref) && e.actor_name === 'Analyst'));
     const tokens = (await admin.get('/api/audit?entity_type=api_token')).body;
     assert.ok(tokens.some((e: any) => e.action === 'create' && e.changes.scopes));
     assert.equal((await analyst.get('/api/audit')).status, 403);
@@ -68,7 +68,7 @@ describe('audit trail', { skip }, () => {
     const { pool } = await import('../../src/db.js');
     // Start a fresh chain for this test (owner rights bypass the trigger, as an attacker with superuser would).
     await pool.query('ALTER TABLE audit_log DISABLE TRIGGER audit_log_no_truncate');
-    await pool.query('TRUNCATE audit_log');
+    await pool.query('TRUNCATE audit_log, audit_context');
     await pool.query('ALTER TABLE audit_log ENABLE TRIGGER audit_log_no_truncate');
     await analyst.post('/api/problems', { title: 'Keyed' });
     const last = (await pool.query('SELECT hash, hash_version FROM audit_log ORDER BY id DESC LIMIT 1')).rows[0];

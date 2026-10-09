@@ -54,6 +54,34 @@ export function hashOf(prev: string, row: Record<string, unknown>, version = 1) 
   return createHash('sha256').update(prev).update(canonical(row)).digest('hex');
 }
 
+/**
+ * Personal data stays out of the append-only trail (#57): personal fields and free text become a digest and length;
+ * short code-like values (statuses, refs, ids, dates, numbers) stay readable. The full texts are in the record
+ * histories, which can be anonymised; the digest still proves what was there.
+ */
+const PERSONAL = /^(email|display_name|username|reporter|ip|address|phone|caller|name_of_person)$/i;
+const TOKEN = /^[A-Za-z0-9_.:\/#+-]{0,64}$/;
+/**
+ * Keyed, so a digest of a short personal value (a name, an email, a personal identity number) cannot be reversed by
+ * trying candidates without KERNEL_SECRET_KEY, which is not in the database. Equal texts still give equal digests.
+ */
+const digestKey = () => (process.env.KERNEL_SECRET_KEY ? createHash('sha256').update('kernel-audit-digest:' + process.env.KERNEL_SECRET_KEY).digest() : null);
+export const digestOf = (v: string) => {
+  const key = digestKey();
+  return key
+    ? { digest: `hmac-sha256:${createHmac('sha256', key).update(v).digest('hex')}`, length: v.length }
+    : { digest: `sha256:${createHash('sha256').update(v).digest('hex')}`, length: v.length };
+};
+export function minimise(value: unknown, key = ''): unknown {
+  if (typeof value === 'string') return PERSONAL.test(key) || !TOKEN.test(value) ? digestOf(value) : value;
+  if (Array.isArray(value)) return value.map((v) => minimise(v, key));
+  if (value && typeof value === 'object' && !(value instanceof Date)) {
+    // In { field: { from, to } } the field name decides, not "from"/"to".
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, minimise(v, k === 'from' || k === 'to' ? key : k)]));
+  }
+  return value;
+}
+
 /** Secrets never enter the audit trail, only the fact that they changed. */
 function redact(changes: Record<string, unknown>) {
   const out: Record<string, unknown> = {};
@@ -66,6 +94,12 @@ export async function audit(db: Db | null, entry: AuditEntry) {
   const base = currentContext();
   const ctx = entry.actor ? { ...base, userId: entry.actor.id, userName: entry.actor.name, actorType: base.actorType === 'anonymous' ? ('user' as const) : base.actorType } : base;
   const write = async (client: Db) => {
+    // A username as reference becomes the user's id, so no name lands in the trail.
+    let entityRef = entry.entity_ref ?? '';
+    if ((entry.entity_type === 'user' || entry.entity_type === 'session') && entityRef && !entityRef.startsWith('#')) {
+      const { rows: u } = await client.query('SELECT id FROM users WHERE username = $1', [entityRef]);
+      entityRef = u[0] ? `#${u[0].id}` : digestOf(entityRef).digest;
+    }
     // Serialise appends so the hash chain has a single order.
     await client.query('SELECT pg_advisory_xact_lock(4713)');
     const { rows: last } = await client.query('SELECT hash FROM audit_log ORDER BY id DESC LIMIT 1');
@@ -74,16 +108,18 @@ export async function audit(db: Db | null, entry: AuditEntry) {
     const row = {
       at: (now[0].at as Date).toISOString(),
       actor_user_id: ctx.userId,
-      actor_name: ctx.userName,
+      // Names are joined from users when shown; an erased user shows as "deleted user #id".
+      actor_name: '',
       actor_type: ctx.actorType,
       channel: ctx.channel,
       token_prefix: ctx.tokenPrefix,
-      ip: ctx.ip,
+      // IP and user agent are kept in audit_context for a limited time instead.
+      ip: '',
       request_id: ctx.requestId,
       entity_type: entry.entity_type,
-      entity_ref: entry.entity_ref ?? '',
+      entity_ref: entityRef,
       action: entry.action,
-      changes: JSON.parse(JSON.stringify(redact(entry.changes ?? {}))),
+      changes: minimise(JSON.parse(JSON.stringify(redact(entry.changes ?? {})))) as Record<string, unknown>,
       reason: entry.reason ?? '',
     };
     const version = currentHashVersion();
@@ -92,16 +128,17 @@ export async function audit(db: Db | null, entry: AuditEntry) {
       `INSERT INTO audit_log (at, actor_user_id, actor_name, actor_type, channel, token_prefix, ip, user_agent, request_id,
          entity_type, entity_ref, action, changes, reason, prev_hash, hash, hash_version)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING id`,
-      [row.at, row.actor_user_id, row.actor_name, row.actor_type, row.channel, row.token_prefix, row.ip, ctx.userAgent, row.request_id,
+      [row.at, row.actor_user_id, row.actor_name, row.actor_type, row.channel, row.token_prefix, row.ip, '', row.request_id,
         row.entity_type, row.entity_ref, row.action, JSON.stringify(row.changes), row.reason, prev, hash, version],
     );
+    if (ctx.ip || ctx.userAgent) await client.query('INSERT INTO audit_context (audit_id, ip, user_agent) VALUES ($1, $2, $3)', [inserted[0].id, ctx.ip ?? null, ctx.userAgent ?? null]);
     // A copy for the SIEM / Elasticsearch (#8): no field values, which may be long or sensitive. The id and hash
     // give an external anchor, so a rewritten chain in the database can be detected against Elasticsearch.
     // Emitted only after commit, so a rolled-back change leaves no anchor.
     const anchor = { id: Number(inserted[0].id), hash };
     afterCommit(client, () => anchorSink(anchor));
     afterCommit(client, () => auditLogger.info(
-      { event: { kind: 'event', category: ['configuration'], action: `${entry.entity_type}.${entry.action}` }, audit: { id: Number(inserted[0].id), hash }, user: { id: ctx.userId, name: ctx.userName }, actor_type: ctx.actorType, entity: { type: entry.entity_type, ref: entry.entity_ref }, fields: Object.keys(entry.changes ?? {}), reason: entry.reason || undefined },
+      { event: { kind: 'event', category: ['configuration'], action: `${entry.entity_type}.${entry.action}` }, audit: { id: Number(inserted[0].id), hash }, user: { id: ctx.userId }, actor_type: ctx.actorType, entity: { type: entry.entity_type, ref: entry.entity_ref }, fields: Object.keys(entry.changes ?? {}), reason: entry.reason || undefined },
       `${entry.entity_type}.${entry.action}`,
     ));
   };
@@ -110,8 +147,13 @@ export async function audit(db: Db | null, entry: AuditEntry) {
 }
 
 /** For sensitive administrative actions the reason is mandatory. */
+/** Obvious personal identifiers: email addresses and Swedish personal identity numbers. */
+const PII_IN_TEXT = /[^\s@]+@[^\s@]+\.[a-z]{2,}|\b(19|20)?\d{6}[-+]?\d{4}\b/i;
+
 export function requireReason(reason: string | undefined): string {
   if (!reason?.trim()) throw badRequest('A reason is required for this action', );
+  // Reasons are kept verbatim in the append-only trail (ADR 0001), so they must not carry personal details.
+  if (PII_IN_TEXT.test(reason)) throw badRequest('The reason seems to contain an email address or a personal identity number. Refer to people by their account or a record ref instead.');
   return reason.trim().slice(0, 1000);
 }
 
@@ -135,20 +177,24 @@ export async function queryAudit(f: z.infer<typeof auditQuerySchema>) {
     params.push(v);
     where.push(sql.replace('?', `$${params.length}`));
   };
-  if (f.actor) add('actor_name ILIKE ?', `%${f.actor}%`);
-  if (f.actor_type) add('actor_type = ?', f.actor_type);
-  if (f.entity_type) add('entity_type = ?', f.entity_type);
-  if (f.entity_ref) add('entity_ref ILIKE ?', `%${f.entity_ref}%`);
-  if (f.action) add('action ILIKE ?', `%${f.action}%`);
-  if (f.ip) add('ip = ?', f.ip);
-  if (f.from) add('at >= ?::timestamptz', f.from);
-  if (f.to) add("at < ?::date + interval '1 day'", f.to);
-  if (f.before_id) add('id < ?', f.before_id);
+  // Names come from users (an erased user shows as "deleted user #id"); IP and user agent from audit_context while kept.
+  const actorName = "coalesce(nullif(a.actor_name, ''), u.display_name, CASE WHEN a.actor_user_id IS NOT NULL THEN 'deleted user #' || a.actor_user_id END)";
+  if (f.actor) add(`${actorName} ILIKE ?`, `%${f.actor}%`);
+  if (f.actor_type) add('a.actor_type = ?', f.actor_type);
+  if (f.entity_type) add('a.entity_type = ?', f.entity_type);
+  if (f.entity_ref) add('a.entity_ref ILIKE ?', `%${f.entity_ref}%`);
+  if (f.action) add('a.action ILIKE ?', `%${f.action}%`);
+  if (f.ip) add("coalesce(nullif(a.ip, ''), x.ip) = ?", f.ip);
+  if (f.from) add('a.at >= ?::timestamptz', f.from);
+  if (f.to) add("a.at < ?::date + interval '1 day'", f.to);
+  if (f.before_id) add('a.id < ?', f.before_id);
   params.push(f.limit);
   const { rows } = await query(
-    `SELECT id, at, actor_user_id, actor_name, actor_type, channel, token_prefix, ip, user_agent, request_id,
-            entity_type, entity_ref, action, changes, reason
-     FROM audit_log ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY id DESC LIMIT $${params.length}`,
+    `SELECT a.id, a.at, a.actor_user_id, ${actorName} AS actor_name, a.actor_type, a.channel, a.token_prefix,
+            coalesce(nullif(a.ip, ''), x.ip) AS ip, coalesce(nullif(a.user_agent, ''), x.user_agent) AS user_agent, a.request_id,
+            a.entity_type, a.entity_ref, a.action, a.changes, a.reason
+     FROM audit_log a LEFT JOIN users u ON u.id = a.actor_user_id AND u.erased_at IS NULL LEFT JOIN audit_context x ON x.audit_id = a.id
+     ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY a.id DESC LIMIT $${params.length}`,
     params,
   );
   return rows;

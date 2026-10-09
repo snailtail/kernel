@@ -59,7 +59,7 @@ export function AskHost() {
       <form className="form" onSubmit={submit}>
         {req.message && <p className="hint full">{req.message}</p>}
         <label className="full">
-          {req.label} {req.audited && <span className="muted small">(recorded in the audit trail)</span>}
+          {req.label} {req.audited && <span className="muted small">(kept permanently in the audit trail – no personal details; refer to people by account or record ref)</span>}
           {req.multiline ? (
             <textarea autoFocus rows={3} value={value} onChange={(e) => setValue(e.target.value)} maxLength={1000} />
           ) : (

@@ -121,6 +121,7 @@ export const OPERATIONS: Op[] = [
   { method: 'post', path: '/api/cis/:ref/comments', tag: 'CMDB', summary: 'Add a note', body: z.object({ body: z.string() }) },
   { method: 'post', path: '/api/cis/:ref/links', tag: 'CMDB', summary: 'Link a problem, incident, event, change or document', body: cmdb.ciLinkSchema },
   { method: 'delete', path: '/api/cis/:ref/links/:id', tag: 'CMDB', summary: 'Remove a link' },
+  { method: 'post', path: '/api/users/:id/erase', tag: 'Administration', summary: 'Erase (anonymise) a user account with a reason; the audit trail stays valid (ADR 0001)' },
   { method: 'get', path: '/api/admin/modules', tag: 'Administration', summary: 'Modules (practices) and whether they are on' },
   { method: 'put', path: '/api/admin/modules', tag: 'Administration', summary: 'Switch modules on or off (administrators); nothing is deleted', body: setupMod.modulesSchema },
   { method: 'get', path: '/api/setup', tag: 'Administration', summary: 'First-run setup state' },

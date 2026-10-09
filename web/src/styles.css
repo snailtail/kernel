@@ -1017,3 +1017,4 @@ tr.total td { border-bottom: 2px solid var(--border-strong); }
 .run-failed { color: var(--danger); background: var(--danger-soft); }
 .run-refused { color: var(--s-known); background: var(--s-known-bg); }
 .run-running { color: var(--s-analysis); background: var(--s-analysis-bg); }
+.danger-zone { border-top: 1px solid var(--border); padding-top: 10px; }

@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { hashPassword, requireUser } from '../auth.js';
 import { backupStatus } from '../backups.js';
@@ -85,6 +86,29 @@ export async function adminRoutes(app: FastifyInstance) {
     // Changing role, status or password signs the user out everywhere.
     await query('DELETE FROM sessions WHERE user_id = $1 AND user_id <> $2', [id, admin.id]);
     return rows[0];
+  });
+
+  // Erasure (GDPR): the account is anonymised, sessions and tokens end. Records keep the user's id, so the audit
+  // trail stays intact and shows "deleted user #id"; personal data is no longer stored anywhere in Kernel.
+  app.post<{ Params: { id: string } }>('/api/users/:id/erase', async (req) => {
+    const admin = requireUser(req, 'user.manage');
+    await requireStepUp(req);
+    const id = Number(req.params.id);
+    const reason = requireReason(z.object({ reason: z.string().max(1000).optional() }).parse(req.body ?? {}).reason);
+    if (id === admin.id) throw badRequest('You cannot erase your own account');
+    const { rows } = await query(
+      `UPDATE users SET username = 'deleted-' || id, display_name = 'Deleted user #' || id, email = '', active = false, erased_at = now(),
+              password_hash = $2, mfa_secret = NULL, mfa_enabled_at = NULL, preferences = '{}', ci_source_systems = '{}', change_templates = '{}'
+       WHERE id = $1 AND erased_at IS NULL RETURNING id`,
+      [id, await hashPassword(randomBytes(32).toString('base64url'))],
+    );
+    if (!rows[0]) throw notFound('No such user, or already erased');
+    await query('DELETE FROM sessions WHERE user_id = $1', [id]);
+    await query('UPDATE api_tokens SET revoked_at = coalesce(revoked_at, now()) WHERE user_id = $1', [id]);
+    await query('DELETE FROM notification_settings WHERE user_id = $1', [id]);
+    await query('DELETE FROM known_devices WHERE user_id = $1', [id]).catch(() => {});
+    await audit(null, { entity_type: 'user', entity_ref: `#${id}`, action: 'erase', reason });
+    return { ok: true };
   });
 
   app.get('/api/admin/backups', async (req) => {

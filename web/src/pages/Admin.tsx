@@ -147,6 +147,20 @@ function UserModal({ user, self, roles, onClose, onDone }: { user: AdminUser | n
         {user && !self && (
           <label className="check full"><input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Active</label>
         )}
+        {user && !self && (
+          <div className="full danger-zone">
+            <button type="button" className="btn danger small" onClick={async () => {
+              const reason = await askReason(`Erase ${user.username}`, 'The account is anonymised and signed out everywhere; records keep a reference to "deleted user". Audit entries from before personal data was kept out of the trail may still name the user until they are re-based (see the security status).', { danger: true, confirmLabel: 'Erase user' });
+              if (!reason) return;
+              try {
+                await api.post(`/api/users/${user.id}/erase`, { reason });
+                onDone();
+              } catch (err) {
+                setError((err as Error).message);
+              }
+            }}>Erase user (GDPR)</button>
+          </div>
+        )}
         {user && user.mfa_enabled && (
           <div className="full">
             <button type="button" className="btn-link danger" onClick={async () => {

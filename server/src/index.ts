@@ -21,6 +21,8 @@ await migrate(log);
 await bootstrapAdmin(log);
 await encryptLegacySecrets(log);
 setInterval(() => query('DELETE FROM sessions WHERE expires_at < now()').catch(() => {}), 3600_000).unref();
+// IP addresses and user agents of audit entries are kept for a limited time (settings.privacy.audit_context_days).
+setInterval(() => query("DELETE FROM audit_context WHERE created_at < now() - coalesce((SELECT (value->>'audit_context_days')::int FROM settings WHERE key = 'privacy'), 365) * interval '1 day'").catch(() => {}), 86400_000).unref();
 asSystem(() => {
   startWorker(log);
   startEventWorker(log);

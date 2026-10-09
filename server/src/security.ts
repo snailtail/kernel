@@ -109,7 +109,7 @@ export interface SecurityCheck {
 
 /** A checklist of the security-relevant configuration, for the admin Security page. */
 export async function securityStatus(): Promise<{ checks: SecurityCheck[] }> {
-  const [admins, mustChange, neverExpiring, backups, mfaAdmins, dbRole] = await Promise.all([
+  const [admins, mustChange, neverExpiring, backups, mfaAdmins, dbRole, legacyAudit] = await Promise.all([
     query("SELECT count(*)::int AS n FROM users WHERE role = 'admin' AND active"),
     query('SELECT count(*)::int AS n FROM users WHERE must_change_password AND active'),
     query('SELECT count(*)::int AS n FROM api_tokens WHERE expires_at IS NULL'),
@@ -117,6 +117,7 @@ export async function securityStatus(): Promise<{ checks: SecurityCheck[] }> {
     query("SELECT count(*) FILTER (WHERE mfa_enabled_at IS NULL)::int AS without, count(*)::int AS total FROM users WHERE active AND role IN ('admin', 'problem_manager')"),
     query(`SELECT current_user AS me, (SELECT tableowner FROM pg_tables WHERE tablename = 'audit_log') AS owner,
              (SELECT rolsuper FROM pg_roles WHERE rolname = current_user) AS superuser`),
+    query("SELECT count(*)::int AS n FROM audit_log WHERE actor_name <> '' OR ip <> ''"),
   ]);
   const role = dbRole.rows[0];
   const m = mfaAdmins.rows[0];
@@ -131,6 +132,14 @@ export async function securityStatus(): Promise<{ checks: SecurityCheck[] }> {
         detail: https
           ? 'Kernel is published over HTTPS; session cookies are Secure for HTTPS requests.'
           : 'Set KERNEL_PUBLIC_URL to the https:// address (behind a TLS proxy with KERNEL_TRUST_PROXY) or KERNEL_SECURE_COOKIES=true.',
+      },
+      {
+        id: 'audit_personal_data',
+        label: 'Personal data in the audit trail',
+        ok: legacyAudit.rows[0].n === 0,
+        detail: legacyAudit.rows[0].n
+          ? `${legacyAudit.rows[0].n} audit entries from before personal data was kept out of the trail still contain names or IP addresses. Re-basing them is a one-time decision for the database owner; see docs/adr/0001-personal-data-and-the-audit-trail.md.`
+          : 'The audit trail stores user ids, digests and codes only; names and IP addresses are kept outside it.',
       },
       { id: 'secret_key', label: 'Secrets encryption key', ok: secretsConfigured(), detail: secretsConfigured() ? 'KERNEL_SECRET_KEY is set; stored secrets are encrypted.' : 'Set KERNEL_SECRET_KEY (≥ 32 random characters).' },
       { id: 'initial_password', label: 'Initial passwords changed', ok: mustChange.rows[0].n === 0, detail: mustChange.rows[0].n ? `${mustChange.rows[0].n} account(s) still use a generated password.` : 'No account uses a generated password.' },
