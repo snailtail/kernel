@@ -5,6 +5,7 @@ import type { User } from './auth.js';
 import { query } from './db.js';
 import { moduleEnabled, type Module } from './modules.js';
 import { can, type Action } from './policy.js';
+import { listCandidates } from './integrations.js';
 
 interface Count { label: string; value: number; link: string }
 interface Node {
@@ -17,9 +18,35 @@ interface Node {
   counts: Count[];
 }
 
-const n = async (sql: string, params: unknown[] = []) => Number((await query(sql, params)).rows[0].n);
+/** All counts in one round trip (each is a small indexed count). */
+// TODO(#53): when access scoping arrives, these counts must be limited to what the viewer may read.
+const COUNTS_SQL = `SELECT (SELECT count(*) FROM alerts WHERE status = 'open' AND suppressed = '')::int AS c0,
+    (SELECT count(*) FROM alerts WHERE status = 'open' AND suppressed = '' AND incident_id IS NULL)::int AS c1,
+    (SELECT count(*) FROM incidents WHERE status NOT IN ('resolved', 'closed'))::int AS c2,
+    (SELECT count(*) FROM incidents WHERE problem_id IS NULL AND (reopen_count > 0 OR is_major) AND status <> 'closed')::int AS c3,
+    (SELECT count(*) FROM incidents WHERE status NOT IN ('resolved', 'closed') AND (resolution_breached_at IS NOT NULL OR resolution_due_at < now() + interval '1 hour'))::int AS c4,
+    (SELECT count(*) FROM problems WHERE status = 'new')::int AS c5,
+    (SELECT count(*) FROM problems WHERE status = 'analysis')::int AS c6,
+    (SELECT count(*) FROM problems WHERE status = 'known_error')::int AS c8,
+    (SELECT count(*) FROM problems WHERE status = 'known_error' AND coalesce(ec_decision, 'pending') = 'pending')::int AS c9,
+    (SELECT count(*) FROM problems p WHERE status = 'known_error' AND ec_decision = 'fix' AND NOT EXISTS (SELECT 1 FROM changes c WHERE c.problem_id = p.id))::int AS c10,
+    (SELECT count(*) FROM changes WHERE status = 'authorize')::int AS c11,
+    (SELECT count(*) FROM changes WHERE status = 'scheduled')::int AS c12,
+    (SELECT count(*) FROM changes WHERE status IN ('implementing', 'review'))::int AS c13,
+    (SELECT count(*) FROM problems WHERE status = 'resolved')::int AS c14,
+    (SELECT count(*) FROM problems WHERE status = 'known_error' AND coalesce(ec_decision, 'pending') = 'pending' AND known_error_at < now() - interval '14 days')::int AS c15,
+    (SELECT count(*) FROM problems WHERE assignee_id IS NULL AND status IN ('new', 'analysis'))::int AS c16,
+    (SELECT count(*) FROM problem_actions WHERE status = 'open' AND due_date < current_date)::int AS c17,
+    (SELECT count(*) FROM incidents WHERE category_id IS NULL AND status NOT IN ('resolved', 'closed'))::int AS c18,
+    (SELECT count(*) FROM incidents i WHERE priority <= 2 AND status NOT IN ('resolved', 'closed') AND NOT EXISTS (SELECT 1 FROM incident_cis x WHERE x.incident_id = i.id))::int AS c19,
+    (SELECT count(DISTINCT ci_id) FROM ci_sources s JOIN configuration_items c ON c.id = s.ci_id WHERE c.status = 'active' AND s.last_seen_at < now() - interval '30 days')::int AS c20`;
+async function counts(): Promise<Record<string, number>> {
+  return (await query(COUNTS_SQL)).rows[0];
+}
 
 export async function processMap(user: User) {
+  const c = await counts();
+  const candidates = (await listCandidates()).candidates.length;
   const readable = (a: Action) => can(user.role, a);
   const nodes: Node[] = [];
   if (moduleEnabled('event') && readable('event.read')) {
@@ -29,8 +56,8 @@ export async function processMap(user: User) {
       concepts: ['Alerts are deduplicated per CI and check', 'Rules open incidents', 'Maintenance suppresses alerts'],
       hands_over: [{ to: 'incident', when: 'An event rule matches, or someone opens an incident from an alert' }, { to: 'problem', when: 'Alerts keep recurring without an incident (problem candidates)' }],
       counts: [
-        { label: 'open alerts', value: await n("SELECT count(*) AS n FROM alerts WHERE status = 'open' AND suppressed = ''"), link: '/events' },
-        { label: 'without an incident', value: await n("SELECT count(*) AS n FROM alerts WHERE status = 'open' AND suppressed = '' AND incident_id IS NULL"), link: '/events' },
+        { label: 'open alerts', value: c.c0, link: '/events' },
+        { label: 'without an incident', value: c.c1, link: '/events' },
       ],
     });
   }
@@ -41,9 +68,9 @@ export async function processMap(user: User) {
       concepts: ['Impact × urgency = priority', 'SLA response and resolution targets', 'Major incidents need a problem'],
       hands_over: [{ to: 'problem', when: 'It recurs, it is major, or the cause is unknown' }, { to: 'known_error', when: 'A known error on its CI already has a workaround' }],
       counts: [
-        { label: 'open', value: await n("SELECT count(*) AS n FROM incidents WHERE status NOT IN ('resolved', 'closed')"), link: '/incidents' },
-        { label: 'recurring or major without a problem', value: await n("SELECT count(*) AS n FROM incidents WHERE problem_id IS NULL AND (reopen_count > 0 OR is_major) AND status <> 'closed'"), link: '/incidents?status=all' },
-        ...(moduleEnabled('sla') ? [{ label: 'breaching or breached', value: await n("SELECT count(*) AS n FROM incidents WHERE status NOT IN ('resolved', 'closed') AND (resolution_breached_at IS NOT NULL OR resolution_due_at < now() + interval '1 hour')"), link: '/incidents?breaching_within=60' }] : []),
+        { label: 'open', value: c.c2, link: '/incidents' },
+        { label: 'recurring or major without a problem', value: c.c3, link: '/incidents?status=all' },
+        ...(moduleEnabled('sla') ? [{ label: 'breaching or breached', value: c.c4, link: '/incidents?breaching_within=60' }] : []),
       ],
     });
   }
@@ -53,9 +80,9 @@ export async function processMap(user: User) {
     concepts: ['Reactive (from incidents) or proactive (from trends)', 'Root cause analysis: 5 Whys, Ishikawa, Kepner-Tregoe, timeline'],
     hands_over: [{ to: 'known_error', when: 'The root cause is documented' }],
     counts: [
-      { label: 'new', value: await n("SELECT count(*) AS n FROM problems WHERE status = 'new'"), link: '/problems?status=new' },
-      { label: 'under analysis', value: await n("SELECT count(*) AS n FROM problems WHERE status = 'analysis'"), link: '/problems?status=analysis' },
-      { label: 'problem candidates', value: await n("SELECT count(DISTINCT coalesce(ci_id::text, service)) AS n FROM external_records WHERE problem_id IS NULL AND NOT dismissed AND occurred_at > now() - interval '7 days'"), link: '/candidates' },
+      { label: 'new', value: c.c5, link: '/problems?status=new' },
+      { label: 'under analysis', value: c.c6, link: '/problems?status=analysis' },
+      { label: 'problem candidates', value: candidates, link: '/candidates' },
     ],
   });
   nodes.push({
@@ -64,10 +91,10 @@ export async function processMap(user: User) {
     concepts: ['Known error database', 'Workaround effectiveness', 'Error control decision'],
     hands_over: [{ to: 'change', when: 'The decision is to fix it' }, { to: 'resolution', when: 'The fix is already in place' }],
     counts: [
-      { label: 'known errors', value: await n("SELECT count(*) AS n FROM problems WHERE status = 'known_error'"), link: '/kedb' },
-      { label: 'awaiting a decision', value: await n("SELECT count(*) AS n FROM problems WHERE status = 'known_error' AND coalesce(ec_decision, 'pending') = 'pending'"), link: '/review' },
+      { label: 'known errors', value: c.c8, link: '/kedb' },
+      { label: 'awaiting a decision', value: c.c9, link: '/review' },
       ...(moduleEnabled('change')
-        ? [{ label: 'to fix, without a change', value: await n("SELECT count(*) AS n FROM problems p WHERE status = 'known_error' AND ec_decision = 'fix' AND NOT EXISTS (SELECT 1 FROM changes c WHERE c.problem_id = p.id)"), link: '/kedb' }]
+        ? [{ label: 'to fix, without a change', value: c.c10, link: '/kedb' }]
         : []),
     ],
   });
@@ -78,9 +105,9 @@ export async function processMap(user: User) {
       concepts: ['Standard, normal and emergency changes', 'Change authority', 'Backout plan'],
       hands_over: [{ to: 'resolution', when: 'The change succeeded' }, { to: 'incident', when: 'Incidents follow it (possibly change-related)' }],
       counts: [
-        { label: 'waiting for authorisation', value: await n("SELECT count(*) AS n FROM changes WHERE status = 'authorize'"), link: '/changes?status=authorize' },
-        { label: 'scheduled', value: await n("SELECT count(*) AS n FROM changes WHERE status = 'scheduled'"), link: '/changes?tab=schedule' },
-        { label: 'in implementation or review', value: await n("SELECT count(*) AS n FROM changes WHERE status IN ('implementing', 'review')"), link: '/changes' },
+        { label: 'waiting for authorisation', value: c.c11, link: '/changes?status=authorize' },
+        { label: 'scheduled', value: c.c12, link: '/changes?tab=schedule' },
+        { label: 'in implementation or review', value: c.c13, link: '/changes' },
       ],
     });
   }
@@ -89,7 +116,7 @@ export async function processMap(user: User) {
     purpose: 'The permanent fix is in place. Verify that the incidents stopped, then close – and learn from major problems.',
     concepts: ['Verify before closing', 'Major problem review', 'Continual improvement'],
     hands_over: [{ to: 'problem', when: 'It recurs: reopen the analysis' }],
-    counts: [{ label: 'resolved, awaiting verification', value: await n("SELECT count(*) AS n FROM problems WHERE status = 'resolved'"), link: '/problems?status=resolved' }],
+    counts: [{ label: 'resolved, awaiting verification', value: c.c14, link: '/problems?status=resolved' }],
   });
   return {
     nodes,
@@ -102,18 +129,19 @@ export async function processMap(user: User) {
 
 /** Gentle, dismissible coaching: things worth a look this week, never blocking anyone. */
 export async function healthTips(user: User) {
+  const c = await counts();
   const tips: { id: string; text: string; count: number; link: string }[] = [];
   const add = (id: string, count: number, text: string, link: string) => count > 0 && tips.push({ id, count, text, link });
-  add('ke_no_decision', await n("SELECT count(*) AS n FROM problems WHERE status = 'known_error' AND coalesce(ec_decision, 'pending') = 'pending' AND known_error_at < now() - interval '14 days'"),
+  add('ke_no_decision', c.c15,
     'known errors have waited more than two weeks for a fix/accept/defer decision.', '/review');
-  add('no_owner', await n("SELECT count(*) AS n FROM problems WHERE assignee_id IS NULL AND status IN ('new', 'analysis')"), 'open problems have no owner.', '/problems?assignee=none');
-  add('overdue_actions', await n("SELECT count(*) AS n FROM problem_actions WHERE status = 'open' AND due_date < current_date"), 'follow-up actions are overdue.', '/actions');
+  add('no_owner', c.c16, 'open problems have no owner.', '/problems?assignee=none');
+  add('overdue_actions', c.c17, 'follow-up actions are overdue.', '/actions');
   if (moduleEnabled('incident') && can(user.role, 'incident.read')) {
-    add('incident_no_category', await n("SELECT count(*) AS n FROM incidents WHERE category_id IS NULL AND status NOT IN ('resolved', 'closed')"), 'open incidents have no category, which hides them from trend reports.', '/incidents');
-    if (moduleEnabled('cmdb')) add('p1_no_ci', await n("SELECT count(*) AS n FROM incidents i WHERE priority <= 2 AND status NOT IN ('resolved', 'closed') AND NOT EXISTS (SELECT 1 FROM incident_cis x WHERE x.incident_id = i.id)"), 'P1/P2 incidents have no CI: linking one shows impact and known workarounds.', '/incidents?priority=1');
+    add('incident_no_category', c.c18, 'open incidents have no category, which hides them from trend reports.', '/incidents');
+    if (moduleEnabled('cmdb')) add('p1_no_ci', c.c19, 'P1/P2 incidents have no CI: linking one shows impact and known workarounds.', '/incidents?priority=1');
   }
   if (moduleEnabled('cmdb') && can(user.role, 'ci.read')) {
-    add('ci_not_seen', await n("SELECT count(DISTINCT ci_id) AS n FROM ci_sources s JOIN configuration_items c ON c.id = s.ci_id WHERE c.status = 'active' AND s.last_seen_at < now() - interval '30 days'"), 'active CIs have not been seen by their source for 30 days – retired, or a broken sync?', '/cis');
+    add('ci_not_seen', c.c20, 'active CIs have not been seen by their source for 30 days – retired, or a broken sync?', '/cis');
   }
   return tips;
 }
