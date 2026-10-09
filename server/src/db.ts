@@ -5,7 +5,17 @@ import { config } from './config.js';
 // Return DATE columns as 'YYYY-MM-DD' strings instead of local-midnight Date objects.
 pg.types.setTypeParser(pg.types.builtins.DATE, (value) => value);
 
-export const pool = new pg.Pool({ connectionString: config.databaseUrl });
+/** Connection string for the runtime role, or the owner when no separate role is configured. */
+export function runtimeUrl() {
+  if (!config.appDbPassword) return config.databaseUrl;
+  const u = new URL(config.databaseUrl);
+  u.username = encodeURIComponent(config.appDbUser);
+  u.password = encodeURIComponent(config.appDbPassword);
+  return u.toString();
+}
+
+// Connections open lazily, so the role can be created by migrate() before the first query.
+export const pool = new pg.Pool({ connectionString: runtimeUrl() });
 
 export async function query<T extends pg.QueryResultRow = any>(sql: string, params: unknown[] = []) {
   return pool.query<T>(sql, params);
@@ -47,11 +57,40 @@ export async function tx<T>(fn: (client: pg.PoolClient) => Promise<T>): Promise<
   }
 }
 
-/** Applies SQL files in migrations/ that have not been applied yet, in filename order. */
+/**
+ * Creates or updates the least-privilege runtime role: data access only, read/insert-only on audit_log, no DDL,
+ * no ownership (so it cannot disable the audit triggers). Idempotent; runs after every migration.
+ */
+export async function ensureAppRole(client: pg.PoolClient | pg.Client, user: string, password: string) {
+  const role = client.escapeIdentifier(user);
+  await client.query(`DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = ${client.escapeLiteral(user)}) THEN CREATE ROLE ${role}; END IF; END $$`);
+  await client.query(`ALTER ROLE ${role} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD ${client.escapeLiteral(password)}`);
+  await client.query(`DO $$ BEGIN EXECUTE format('GRANT CONNECT ON DATABASE %I TO ${role}', current_database()); END $$`);
+  await client.query(`GRANT USAGE ON SCHEMA public TO ${role}`);
+  await client.query(`REVOKE CREATE ON SCHEMA public FROM ${role}`);
+  await client.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${role}`);
+  await client.query(`GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ${role}`);
+  await client.query(`REVOKE UPDATE, DELETE, TRUNCATE ON audit_log FROM ${role}`);
+  await client.query(`REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON schema_migrations FROM ${role}`);
+}
+
+/** Applies SQL files in migrations/ that have not been applied yet, in filename order (as the owner). */
 export async function migrate(log: (msg: string) => void) {
+  const owner = new pg.Client({ connectionString: config.databaseUrl });
+  await owner.connect();
+  try {
+    await migrateWith(owner, log);
+    if (config.appDbPassword) await ensureAppRole(owner, config.appDbUser, config.appDbPassword);
+  } finally {
+    await owner.end();
+  }
+}
+
+async function migrateWith(client: pg.Client, log: (msg: string) => void) {
   const dir = new URL('../migrations/', import.meta.url);
   const files = (await readdir(dir)).filter((f) => f.endsWith('.sql')).sort();
-  await tx(async (client) => {
+  await client.query('BEGIN');
+  try {
     // Serialise concurrent starts (several replicas) on the same database.
     await client.query('SELECT pg_advisory_xact_lock(4711)');
     await client.query(
@@ -64,13 +103,19 @@ export async function migrate(log: (msg: string) => void) {
       await client.query(await readFile(new URL(file, dir), 'utf8'));
       await client.query('INSERT INTO schema_migrations (name) VALUES ($1)', [file]);
     }
-  });
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  }
 }
 
 export async function waitForDb(log: (msg: string) => void, attempts = 30) {
   for (let i = 1; ; i++) {
     try {
-      await pool.query('SELECT 1');
+      const c = new pg.Client({ connectionString: config.databaseUrl });
+      await c.connect();
+      await c.end();
       return;
     } catch (err) {
       if (i >= attempts) throw err;

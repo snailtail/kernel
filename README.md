@@ -110,6 +110,7 @@ Open http://localhost:8080 and sign in as `admin`. Database migrations run autom
 | `KERNEL_PUBLIC_URL` | – | Public URL of the UI, used for links in webhook messages |
 | `KERNEL_LOG_FORMAT` | `json` | `ecs` writes Elastic Common Schema JSON logs |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | – | Enables OpenTelemetry traces and metrics over OTLP (standard `OTEL_*` variables apply) |
+| `KERNEL_APP_DB_PASSWORD` | – | Run the app as the least-privilege role `kernel_app` (created and granted automatically; `DATABASE_URL`'s owner only runs migrations). Strongly recommended |
 | `KERNEL_SECRET_KEY` | – | Encrypts stored secrets at rest (≥ 32 random characters); required for webhooks |
 | `KERNEL_OUTBOUND_ALLOW` | – | CIDRs/addresses on private networks that webhooks may reach (loopback, link-local and metadata addresses are always blocked) |
 | `KERNEL_WEBHOOK_RETENTION_DAYS` | `30` | Successful deliveries are deleted after this many days, failed after three times as long |
@@ -143,6 +144,12 @@ To deploy to the test server, push your commits and run `scripts/deploy.sh`. It 
   from elsewhere, so nobody can lock a user out deliberately.
 - The generated initial admin password must be changed at first login. **Administration → Security status** lists the
   security-relevant configuration.
+- **Audit trail**: every change and administrative action is recorded with actor, actor type (web user, API token,
+  MCP, integration, system), channel, IP and before/after values, plus a mandatory reason for sensitive admin actions.
+  The table is append-only (triggers, and the runtime role has no UPDATE/DELETE and does not own it), entries are
+  hash-chained and verified hourly, and each entry's id and hash go to the `kernel.audit` log stream as an external
+  anchor. Administration → Audit trail searches and exports it; MCP has `get_history` and `query_audit_log`.
+- With `KERNEL_APP_DB_PASSWORD` the app runs as a least-privilege PostgreSQL role without DDL rights.
 - Containers run with a read-only filesystem, no Linux capabilities beyond what PostgreSQL needs,
   `no-new-privileges` and memory/PID limits. PostgreSQL is not published on the host.
 - Reference deployment: Cloudflare Tunnel with Cloudflare Access in front of the public hostname, the MCP endpoint

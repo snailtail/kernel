@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { currentContext } from './context.js';
-import { query, tx } from './db.js';
+import { afterCommit, query, tx } from './db.js';
 import { badRequest } from './errors.js';
 import { logger } from './log.js';
 
@@ -19,6 +19,12 @@ export interface AuditEntry {
 }
 
 const auditLogger = logger.child({ event: { dataset: 'kernel.audit' } });
+
+/** Receives each committed entry's id and hash (tests replace it to observe anchors). */
+export let anchorSink: (a: { id: number; hash: string }) => void = () => {};
+export const setAnchorSink = (fn: typeof anchorSink) => {
+  anchorSink = fn;
+};
 const GENESIS = '0'.repeat(64);
 
 /** JSON with sorted keys at every level, so jsonb's own key ordering cannot change the hash. */
@@ -76,10 +82,13 @@ export async function audit(db: Db | null, entry: AuditEntry) {
     );
     // A copy for the SIEM / Elasticsearch (#8): no field values, which may be long or sensitive. The id and hash
     // give an external anchor, so a rewritten chain in the database can be detected against Elasticsearch.
-    auditLogger.info(
+    // Emitted only after commit, so a rolled-back change leaves no anchor.
+    const anchor = { id: Number(inserted[0].id), hash };
+    afterCommit(client, () => anchorSink(anchor));
+    afterCommit(client, () => auditLogger.info(
       { event: { kind: 'event', category: ['configuration'], action: `${entry.entity_type}.${entry.action}` }, audit: { id: Number(inserted[0].id), hash }, user: { id: ctx.userId, name: ctx.userName }, actor_type: ctx.actorType, entity: { type: entry.entity_type, ref: entry.entity_ref }, fields: Object.keys(entry.changes ?? {}), reason: entry.reason || undefined },
       `${entry.entity_type}.${entry.action}`,
-    );
+    ));
   };
   if (db) await write(db);
   else await tx(write);

@@ -109,13 +109,16 @@ export interface SecurityCheck {
 
 /** A checklist of the security-relevant configuration, for the admin Security page. */
 export async function securityStatus(): Promise<{ checks: SecurityCheck[] }> {
-  const [admins, mustChange, neverExpiring, backups, mfaAdmins] = await Promise.all([
+  const [admins, mustChange, neverExpiring, backups, mfaAdmins, dbRole] = await Promise.all([
     query("SELECT count(*)::int AS n FROM users WHERE role = 'admin' AND active"),
     query('SELECT count(*)::int AS n FROM users WHERE must_change_password AND active'),
     query('SELECT count(*)::int AS n FROM api_tokens WHERE expires_at IS NULL'),
     backupStatus(),
     query("SELECT count(*) FILTER (WHERE mfa_enabled_at IS NULL)::int AS without, count(*)::int AS total FROM users WHERE active AND role IN ('admin', 'problem_manager')"),
+    query(`SELECT current_user AS me, (SELECT tableowner FROM pg_tables WHERE tablename = 'audit_log') AS owner,
+             (SELECT rolsuper FROM pg_roles WHERE rolname = current_user) AS superuser`),
   ]);
+  const role = dbRole.rows[0];
   const m = mfaAdmins.rows[0];
   // A trusted proxy does not by itself mean TLS; require an https public URL or explicitly secure cookies.
   const https = config.secureCookies || /^https:\/\//i.test(config.publicUrl ?? '');
@@ -136,6 +139,15 @@ export async function securityStatus(): Promise<{ checks: SecurityCheck[] }> {
         label: 'Two-factor authentication',
         ok: m.without === 0,
         detail: m.without ? `${m.without} of ${m.total} administrators/problem managers have no two-factor authentication. Require it under Two-factor policy.` : 'All administrators and problem managers use two-factor authentication.',
+      },
+      {
+        id: 'db_role',
+        label: 'Least-privilege database role',
+        ok: role.me !== role.owner && !role.superuser,
+        detail:
+          role.me !== role.owner && !role.superuser
+            ? `Kernel runs as "${role.me}", which cannot change the schema or the audit trail.`
+            : `Kernel runs as the table owner "${role.me}"${role.superuser ? ' (a superuser)' : ''}; set KERNEL_APP_DB_PASSWORD so it uses a restricted role.`,
       },
       { id: 'admins', label: 'Administrators', ok: admins.rows[0].n >= 1 && admins.rows[0].n <= 3, detail: `${admins.rows[0].n} active administrator(s); keep it small but more than one person able to recover.` },
       { id: 'tokens', label: 'API tokens expire', ok: neverExpiring.rows[0].n === 0, detail: neverExpiring.rows[0].n ? `${neverExpiring.rows[0].n} token(s) never expire; revoke and recreate them with an expiry.` : 'All tokens have an expiry date.' },

@@ -7,7 +7,11 @@ function env(name: string, fallback?: string): string {
 export const config = {
   port: Number(env('PORT', '8080')),
   host: env('HOST', '0.0.0.0'),
+  // DATABASE_URL is the owner: it runs migrations. With KERNEL_APP_DB_PASSWORD set, the application itself connects
+  // as a least-privilege role (KERNEL_APP_DB_USER, default kernel_app) that cannot change the schema or audit trail.
   databaseUrl: env('DATABASE_URL', 'postgres://kernel:kernel@localhost:5432/kernel'),
+  appDbUser: process.env.KERNEL_APP_DB_USER || 'kernel_app',
+  appDbPassword: process.env.KERNEL_APP_DB_PASSWORD || null,
   // Used only on first start, when the users table is empty.
   adminPassword: process.env.KERNEL_ADMIN_PASSWORD,
   sessionDays: Number(env('KERNEL_SESSION_DAYS', '7')),
