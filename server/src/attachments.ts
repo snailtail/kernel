@@ -215,3 +215,33 @@ export async function storageUse() {
   const { rows } = await query('SELECT coalesce(sum(length(data)), 0)::bigint AS bytes, count(DISTINCT attachment_id)::int AS files FROM attachment_blobs');
   return { bytes: Number(rows[0].bytes), files: rows[0].files as number, quota_bytes: s.max_total_gb * 1024 ** 3 };
 }
+
+// ---- What may go to an AI provider (MCP) -------------------------------------------------------
+
+export interface AiDataPolicy { attachment_images: boolean; flagged_text: boolean }
+
+export async function aiDataPolicy(): Promise<AiDataPolicy> {
+  const { rows } = await query("SELECT value FROM settings WHERE key = 'ai_data'");
+  return { attachment_images: false, flagged_text: false, ...(rows[0]?.value ?? {}) };
+}
+
+export async function setAiDataPolicy(actor: User, policy: AiDataPolicy, reason: string) {
+  await query("INSERT INTO settings (key, value) VALUES ('ai_data', $1) ON CONFLICT (key) DO UPDATE SET value = excluded.value", [JSON.stringify(policy)]);
+  await audit(null, { entity_type: 'setting', entity_ref: 'ai_data', action: 'update', changes: { ...policy }, reason });
+  void actor;
+  return policy;
+}
+
+/** An attachment for an AI agent: refused unless the policy allows images, and never flagged text by default. */
+export async function attachmentForAgent(user: User, id: number, from: number, limit: number) {
+  const policy = await aiDataPolicy();
+  const file = await getAttachmentData(user, id, 'preview');
+  const a = file.attachment;
+  if (a.kind === 'image') {
+    if (!policy.attachment_images) throw forbidden(`${a.filename} is an image. Images are not shared with AI agents on this installation (an administrator can allow it under Security status).`);
+    return { image: file.data.toString('base64'), mimeType: file.contentType, filename: a.filename, width: a.width, height: a.height };
+  }
+  if (a.kind !== 'text') throw badRequest(`${a.filename} is a ${a.kind}; only text and images can be read`);
+  if (a.flags.length && !policy.flagged_text) throw forbidden(`${a.filename} may contain sensitive data (${a.flags.join(', ')}), so it is not sent to AI agents. A person can read it in Kernel.`);
+  return getAttachmentText(user, id, from, limit);
+}

@@ -88,6 +88,12 @@ describe('attachments (#51, #74)', { skip }, () => {
     const call = (name: string, args: object) => mcp.callTool({ name, arguments: args }) as Promise<any>;
     const list = JSON.parse((await call('list_attachments', { ref: inc })).content[0].text);
     const image = list.find((a: any) => a.kind === 'image');
+    const refused = await call('read_attachment', { id: image.id });
+    assert.equal(refused.isError, true, 'images are not sent to the AI provider by default');
+    const flagged = (await analyst.get(`/api/records/${inc}/attachments`)).body.find((a: any) => a.flags.length);
+    assert.equal((await call('read_attachment', { id: flagged.id })).isError, true, 'flagged text is not sent either');
+    assert.equal((await analyst.put('/api/admin/ai-data', { attachment_images: true, flagged_text: false, reason: 'Screenshots help triage' })).status, 403);
+    assert.equal((await admin.put('/api/admin/ai-data', { attachment_images: true, flagged_text: false, reason: 'Screenshots help triage' })).status, 200);
     const read = await call('read_attachment', { id: image.id });
     assert.equal(read.content[0].type, 'image');
     assert.equal(read.content[0].mimeType, 'image/webp');
@@ -100,6 +106,9 @@ describe('attachments (#51, #74)', { skip }, () => {
   });
 
   test('only the upload route reads raw bodies, within the configured size', async () => {
+    const anonymous = await fetch(`${k.base}/api/records/${prb}/attachments?filename=x.log`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: new Uint8Array(1024) });
+    assert.equal(anonymous.status, 401, 'refused before the body is read');
+    assert.equal((await upload(viewer, prb, 'x.log', Buffer.from('hello'))).status, 403);
     const big = new Uint8Array(5 * 1024 * 1024);
     const login = await fetch(`${k.base}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: big });
     assert.ok([413, 415].includes(login.status), `sign-in refuses raw bodies (${login.status})`);
@@ -107,6 +116,12 @@ describe('attachments (#51, #74)', { skip }, () => {
     await query(`UPDATE settings SET value = value || '{"max_file_mb": 1}' WHERE key = 'attachments'`);
     const tooBig = await upload(analyst, prb, 'big.log', Buffer.alloc(2 * 1024 * 1024, 'a'));
     assert.equal(tooBig.status, 413);
+    // Chunked (no Content-Length): counted while reading and stopped at the limit.
+    const chunks = new ReadableStream({ start(c) { for (let n = 0; n < 40; n++) c.enqueue(new Uint8Array(64 * 1024).fill(97)); c.close(); } });
+    const chunked = await fetch(`${k.base}/api/records/${prb}/attachments?filename=big.log`, {
+      method: 'POST', headers: { 'Content-Type': 'application/octet-stream', Cookie: analyst.cookie!, 'X-Kernel-Request': '1' }, body: chunks, duplex: 'half',
+    } as RequestInit);
+    assert.equal(chunked.status, 413);
     await query(`UPDATE settings SET value = value || '{"max_file_mb": 10}' WHERE key = 'attachments'`);
     const sec = (await admin.get('/api/admin/security')).body.checks.find((c: any) => c.id === 'attachment_storage');
     assert.equal(sec.ok, true);

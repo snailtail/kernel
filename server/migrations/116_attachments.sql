@@ -45,3 +45,7 @@ END $$;
 CREATE TRIGGER cis_attachments AFTER DELETE ON configuration_items FOR EACH ROW EXECUTE FUNCTION kernel_delete_ci_attachments();
 
 INSERT INTO settings (key, value) VALUES ('attachments', '{"max_file_mb": 10, "max_per_record": 100, "max_total_gb": 10}') ON CONFLICT (key) DO NOTHING;
+
+-- What attachments may be sent to an AI provider through MCP. Off by default: screenshots often show names and data,
+-- and flagged text may hold secrets. Administrators decide (Administration → Security status).
+INSERT INTO settings (key, value) VALUES ('ai_data', '{"attachment_images": false, "flagged_text": false}') ON CONFLICT (key) DO NOTHING;

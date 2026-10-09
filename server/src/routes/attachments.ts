@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
+import { Transform } from 'node:stream';
 import { z } from 'zod';
 import * as att from '../attachments.js';
 import { requireUser } from '../auth.js';
@@ -30,12 +31,25 @@ export async function attachmentRoutes(app: FastifyInstance) {
   // event hooks…) never buffer raw bodies. HARD_LIMIT bounds what Fastify reads; the configured limit is checked from
   // Content-Length before reading, and each user has an upload rate.
   app.addContentTypeParser('application/octet-stream', { parseAs: 'buffer', bodyLimit: att.HARD_LIMIT }, (_req, body, done) => done(null, body));
-  app.addHook('preParsing', async (req) => {
-    if (req.method !== 'POST') return;
-    const user = requireUser(req);
+  app.addHook('preParsing', async (req, _reply, payload) => {
+    if (req.method !== 'POST') return payload;
+    // Who may upload is decided before a byte of the body is read.
+    const user = requireUser(req, 'attachment.add');
     rateLimit(`upload:${user.id}`, 60, 60_000);
-    const max = await att.maxUploadBytes();
-    if (Number(req.headers['content-length'] ?? 0) > max + 64 * 1024) throw new HttpError(413, `Files may be at most ${Math.round(max / 1024 / 1024)} MB`);
+    const max = (await att.maxUploadBytes()) + 64 * 1024;
+    const tooLarge = () => new HttpError(413, `Files may be at most ${Math.round((max - 64 * 1024) / 1024 / 1024)} MB`);
+    if (Number(req.headers['content-length'] ?? 0) > max) throw tooLarge();
+    // Chunked uploads carry no length: count while reading and stop at the limit.
+    let seen = 0;
+    const counted = new Transform({
+      transform(chunk: Buffer, _enc, done) {
+        seen += chunk.length;
+        if (seen > max) return done(tooLarge());
+        done(null, chunk);
+      },
+    });
+    payload.on('error', (err) => counted.destroy(err));
+    return payload.pipe(counted);
   });
 
   app.get<{ Params: { ref: string } }>('/api/records/:ref/attachments', async (req) => att.listAttachments(requireUser(req), req.params.ref));

@@ -504,14 +504,14 @@ function buildServer(user: User, scopes?: string[]) {
   );
   tool(
     'read_attachment',
-    'Read an attachment: text attachments as lines (from/limit; first_error_line points at the first ERROR/Exception), images as an image. PDFs and other files are not readable here.',
+    'Read an attachment: text attachments as lines (from/limit; first_error_line points at the first ERROR/Exception), images as an image when the installation allows images for AI. Text flagged as possibly containing secrets is not returned. PDFs and other files are not readable here.',
     { id: z.number().int(), from: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(2000).optional() },
     true,
     async ({ id, from, limit }) => {
-      const meta = (await attachments.getAttachmentData(user, id, 'preview')) as { attachment: any; contentType: string; data: Buffer };
-      if (meta.attachment.kind === 'image') return { mcpContent: [{ type: 'image', data: meta.data.toString('base64'), mimeType: meta.contentType }, { type: 'text', text: `${meta.attachment.filename} (${meta.attachment.width}×${meta.attachment.height})` }] };
-      if (meta.attachment.kind !== 'text') throw new Error(`${meta.attachment.filename} is a ${meta.attachment.kind}; only text and images can be read`);
-      return attachments.getAttachmentText(user, id, from ?? 0, limit ?? 500);
+      // What may reach the AI provider is the installation's data policy (images and flagged text are off by default).
+      const r: any = await attachments.attachmentForAgent(user, id, from ?? 0, limit ?? 500);
+      if (r.image) return { mcpContent: [{ type: 'image', data: r.image, mimeType: r.mimeType }, { type: 'text', text: `${r.filename} (${r.width}×${r.height})` }] };
+      return r;
     },
   );
   tool(

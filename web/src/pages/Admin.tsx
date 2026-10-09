@@ -507,6 +507,16 @@ function SecurityCard() {
     await api.put('/api/admin/mcp-approvals', { required: !approvals.required, reason });
     reloadApprovals();
   };
+  const { data: aiData, reload: reloadAiData } = useApi<{ attachment_images: boolean; flagged_text: boolean }>('/api/admin/ai-data');
+  const toggleAiData = async (key: 'attachment_images' | 'flagged_text') => {
+    if (!aiData) return;
+    const on = !aiData[key];
+    const what = key === 'attachment_images' ? 'Screenshots and other images' : 'Text attachments flagged as possibly containing secrets or personal identity numbers';
+    const reason = await askReason('Attachments for AI agents', `${what} will ${on ? '' : 'no longer '}be sent to the AI provider when an agent reads them through MCP.`, { confirmLabel: 'Change setting', danger: on });
+    if (!reason) return;
+    await api.put('/api/admin/ai-data', { ...aiData, [key]: on, reason });
+    reloadAiData();
+  };
   if (!data) return null;
   const failing = data.checks.filter((c) => !c.ok).length;
   return (
@@ -531,6 +541,14 @@ function SecurityCard() {
             AI agents' decisions (closing, accepting or deferring risk, marking duplicates) wait for a person to approve them in the web UI
           </label>
           {!approvals.required && <p className="warn-box">Agents act directly on a quoted confirmation, which a prompt injection could fabricate.</p>}
+        </div>
+      )}
+      {aiData && (
+        <div className="mfa-policy">
+          <h3>Attachments for AI agents</h3>
+          <p className="muted small">What an AI agent may read through MCP is sent to the AI provider. Text attachments without flags are always readable.</p>
+          <label className="check"><input type="checkbox" checked={aiData.attachment_images} onChange={() => toggleAiData('attachment_images')} /> Images (screenshots may show names, customer data or credentials)</label>
+          <label className="check"><input type="checkbox" checked={aiData.flagged_text} onChange={() => toggleAiData('flagged_text')} /> Text flagged as possibly containing secrets or personal identity numbers</label>
         </div>
       )}
       {policy && (
