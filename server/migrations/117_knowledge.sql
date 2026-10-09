@@ -28,6 +28,9 @@ CREATE TABLE articles (
 );
 CREATE INDEX articles_search_idx ON articles USING gin (search);
 CREATE INDEX articles_status_idx ON articles (status);
+-- One synced article per known error, and it is always internal: a known error's cause can hold hostnames,
+-- addresses and security details that must not reach end users unreviewed.
+ALTER TABLE articles ADD CONSTRAINT articles_synced_internal CHECK (NOT synced_with_problem OR audience = 'internal');
 -- One synced article per known error.
 CREATE UNIQUE INDEX articles_problem_sync_idx ON articles (problem_id) WHERE synced_with_problem;
 
@@ -85,10 +88,22 @@ CREATE FUNCTION kernel_known_error_article_body(p problems) RETURNS text LANGUAG
 $$;
 
 CREATE FUNCTION kernel_sync_known_error_articles() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+  changed text := concat_ws(', ',
+    CASE WHEN NEW.title IS DISTINCT FROM OLD.title THEN 'title' END,
+    CASE WHEN NEW.description IS DISTINCT FROM OLD.description THEN 'symptoms' END,
+    CASE WHEN NEW.root_cause IS DISTINCT FROM OLD.root_cause THEN 'cause' END,
+    CASE WHEN NEW.workaround IS DISTINCT FROM OLD.workaround THEN 'workaround' END);
 BEGIN
-  UPDATE articles SET title = NEW.title, body = kernel_known_error_article_body(NEW), updated_at = now()
-   WHERE problem_id = NEW.id AND synced_with_problem AND status <> 'retired'
-     AND (title IS DISTINCT FROM NEW.title OR body IS DISTINCT FROM kernel_known_error_article_body(NEW));
+  -- Every synced change leaves a trace in the article's history.
+  WITH synced AS (
+    UPDATE articles SET title = NEW.title, body = kernel_known_error_article_body(NEW), updated_at = now()
+     WHERE problem_id = NEW.id AND synced_with_problem AND status <> 'retired'
+       AND (title IS DISTINCT FROM NEW.title OR body IS DISTINCT FROM kernel_known_error_article_body(NEW))
+    RETURNING id
+  )
+  INSERT INTO article_activity (article_id, kind, body, data)
+  SELECT id, 'update', 'Synced from ' || NEW.ref || ': ' || coalesce(nullif(changed, ''), 'text'), jsonb_build_object('problem', NEW.ref, 'fields', changed) FROM synced;
   IF NEW.status IN ('resolved', 'closed') AND OLD.status NOT IN ('resolved', 'closed') THEN
     WITH retired AS (
       UPDATE articles SET status = 'retired', retired_at = now(), updated_at = now()

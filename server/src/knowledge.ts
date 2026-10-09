@@ -146,6 +146,9 @@ export async function updateArticle(user: User, ref: string, { base, ...input }:
     if (cur.synced_with_problem && (input.title !== undefined || input.body !== undefined)) {
       throw conflict(`${cur.ref} follows its known error: edit the problem's symptoms, cause or workaround instead`);
     }
+    if (cur.synced_with_problem && input.audience === 'end_users') {
+      throw conflict(`${cur.ref} follows a known error and stays internal: its cause may hold technical or security details. Write a separate article for end users.`);
+    }
     if (cur.status === 'published' && cur.audience !== 'end_users' && input.audience === 'end_users') authorize(user, 'article.publish_public');
     if (base) {
       const stale = Object.keys(base).filter((k) => k in input && JSON.stringify(cur[k] ?? null) !== JSON.stringify((base as any)[k] ?? null));

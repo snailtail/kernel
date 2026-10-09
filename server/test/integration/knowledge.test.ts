@@ -36,6 +36,9 @@ describe('knowledge (#47)', { skip }, () => {
     await analyst.patch(`/api/problems/${ke}`, { workaround: 'Restart the export service' });
     assert.match((await viewer.get(`/api/articles/${a.ref}`)).body.body, /Restart the export service/);
     assert.equal((await analyst.patch(`/api/articles/${a.ref}`, { body: 'edited' })).status, 409, 'edit the problem instead');
+    assert.equal((await pm.patch(`/api/articles/${a.ref}`, { audience: 'end_users' })).status, 409, 'known-error articles stay internal');
+    const synced = (await viewer.get(`/api/articles/${a.ref}`)).body.activity;
+    assert.ok(synced.some((x: any) => x.body === `Synced from ${ke}: workaround`), 'synced changes are in the history');
 
     await analyst.post(`/api/problems/${ke}/transition`, { to: 'resolved', resolution: 'Font cache fixed in CHG-1' });
     const retired = (await viewer.get(`/api/articles/${a.ref}`)).body;
@@ -85,7 +88,9 @@ describe('knowledge (#47)', { skip }, () => {
     await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('pm')}` } } }));
     const call = async (name: string, args: object) => (await mcp.callTool({ name, arguments: args })) as any;
     const found = JSON.parse((await call('search_knowledge', { q: 'payroll login' })).content[0].text);
-    assert.ok(found.length > 0);
+    assert.ok(found.articles.length > 0 && found.articles[0].title_untrusted && !found.articles[0].title);
+    const one = JSON.parse((await call('get_article', { ref: found.articles[0].ref })).content[0].text);
+    assert.ok(one.untrusted_content.body !== undefined && one.body === undefined, 'article text is marked as untrusted');
     const drafted = JSON.parse((await call('create_article', { title: 'Agent wrote this', body: 'Steps…' })).content[0].text);
     assert.equal(drafted.status, 'draft');
     assert.equal((await call('transition_article', { ref: drafted.ref, to: 'published' })).isError, true);
