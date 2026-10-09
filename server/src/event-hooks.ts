@@ -63,7 +63,16 @@ const kumaSchema = z.object({
     .object({ status: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]), time: z.string(), msg: z.string().default('') })
     .nullable()
     .optional(),
-  monitor: z.object({ id: z.number().optional(), name: z.string(), url: z.string().nullable().optional(), hostname: z.string().nullable().optional() }).nullable().optional(),
+  monitor: z
+    .object({
+      id: z.number().optional(),
+      name: z.string().max(200),
+      url: z.string().max(2000).nullable().optional(),
+      hostname: z.string().max(255).nullable().optional(),
+      tags: z.array(z.object({ name: z.string().max(100), value: z.string().max(200).nullable().optional() })).max(50).default([]),
+    })
+    .nullable()
+    .optional(),
   msg: z.string().default(''),
 });
 
@@ -125,11 +134,16 @@ export function adapt(kind: Kind, body: unknown): NormalisedEvent[] {
       const b = parse(kumaSchema);
       if (!b.heartbeat || !b.monitor) return []; // "Test" notifications carry no heartbeat
       const at = notTooOld(new Date(b.heartbeat.time.replace(' ', 'T') + (/[zZ+]/.test(b.heartbeat.time.slice(10)) ? '' : 'Z')));
+      // Tags map a monitor to the CMDB: ci:CI000012, or service:<name> matched like a host name.
+      const tag = (name: string) => b.monitor!.tags.find((t) => t.name.toLowerCase() === name)?.value ?? undefined;
       return [{
-        host: hostOf(b.monitor.hostname ?? b.monitor.url ?? undefined),
-        check: `uptime: ${b.monitor.name}`.slice(0, 200),
+        ci: tag('ci'),
+        host: tag('service') ?? hostOf(b.monitor.hostname ?? b.monitor.url ?? undefined),
+        // Deduplicated on the monitor id, so renaming a monitor keeps its alert.
+        check: b.monitor.id !== undefined ? `uptime #${b.monitor.id}` : `uptime: ${b.monitor.name}`.slice(0, 200),
         severity: (['critical', 'clear', 'warning', 'info'] as const)[b.heartbeat.status],
-        message: (b.heartbeat.msg || b.msg).slice(0, 2000),
+        maintenance: b.heartbeat.status === 3 || undefined,
+        message: `${b.monitor.name}: ${b.heartbeat.msg || b.msg}`.slice(0, 2000),
         occurred_at: iso(at),
         url: b.monitor.url && /^https?:\/\//.test(b.monitor.url) ? b.monitor.url : undefined,
       }];

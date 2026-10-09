@@ -35,6 +35,8 @@ export const eventSchema = z.object({
   message: z.string().max(2000).default(''),
   occurred_at: z.iso.datetime({ offset: true }).optional(),
   url: httpUrl.optional().describe('Link back to the alert in the monitoring tool'),
+  /** The source reports the check as under maintenance: record it, but suppress it. */
+  maintenance: z.boolean().optional(),
 });
 export type NormalisedEvent = z.infer<typeof eventSchema>;
 export const reportEventsSchema = z.object({
@@ -404,7 +406,7 @@ async function processOne(db: Db, source: string, ciSourceSystem: string, e: Nor
   let outcome = fresh ? (alert.flap_count > 0 && !alert.inserted ? 'reopened' : 'opened') : 'deduplicated';
   let incident: string | null = null;
   if (fresh) {
-    const suppressed = await suppressionFor(db, ci);
+    const suppressed = e.maintenance ? `Maintenance in ${source}` : await suppressionFor(db, ci);
     await db.query('UPDATE alerts SET suppressed = $2 WHERE id = $1', [alert.id, suppressed]);
     alert.suppressed = suppressed;
     if (suppressed) outcome = 'suppressed';

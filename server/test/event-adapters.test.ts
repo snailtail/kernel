@@ -15,7 +15,13 @@ test('Alertmanager: one event per alert, labels mapped, resolved clears', () => 
 
 test('Uptime Kuma: down/up, test notifications ignored, stale heartbeats refused', () => {
   const down = adapt('uptime_kuma', fixture('uptime-kuma-down'));
-  assert.deepEqual([down[0].check, down[0].host, down[0].severity], ['uptime: Webshop', 'shop.example.com', 'critical']);
+  assert.deepEqual([down[0].check, down[0].host, down[0].severity, down[0].message], ['uptime #3', 'shop.example.com', 'critical', 'Webshop: Request failed with status code 503']);
+  const tagged = fixture('uptime-kuma-down');
+  tagged.monitor.tags = [{ name: 'ci', value: 'CI000012' }];
+  assert.equal(adapt('uptime_kuma', tagged)[0].ci, 'CI000012');
+  const maint = fixture('uptime-kuma-down');
+  maint.heartbeat.status = 3;
+  assert.equal(adapt('uptime_kuma', maint)[0].maintenance, true);
   assert.equal(adapt('uptime_kuma', fixture('uptime-kuma-up'))[0].severity, 'clear');
   assert.deepEqual(adapt('uptime_kuma', fixture('uptime-kuma-test')), []);
   assert.throws(() => adapt('uptime_kuma', fixture('uptime-kuma-down', -2 * 3600_000)), /replay window/);
