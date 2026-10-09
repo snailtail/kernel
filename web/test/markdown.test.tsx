@@ -30,3 +30,11 @@ test('raw HTML is shown as text, never rendered', () => {
   assert.doesNotMatch(out, /<img|<script/);
   assert.match(out, /&lt;script&gt;/);
 });
+
+test('attachment images render from Kernel only; external images are never loaded', () => {
+  const out = html('Error: ![screenshot.png](attachment:42) and ![x](https://tracker.example/p.gif) and [log](attachment:7)');
+  assert.match(out, /<img src="\/api\/attachments\/42\/preview" alt="screenshot.png"/);
+  assert.doesNotMatch(out, /<img[^>]*tracker/, 'an external image is at most a link, never loaded');
+  assert.match(out, /href="\/api\/attachments\/7"/);
+  assert.doesNotMatch(html('![x](attachment:1)" onerror="alert(1))'), /onerror="/);
+});

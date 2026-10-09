@@ -1,6 +1,7 @@
 // A small Markdown renderer that builds React elements directly (never HTML strings), so user text cannot inject
 // markup. Supports headings, paragraphs, lists, blockquotes, code blocks, tables, bold, italic, inline code and
-// http(s)/mailto links — enough for problem records and work notes.
+// http(s)/mailto links — enough for problem records and work notes. Images only from Kernel's own attachments
+// (`![name](attachment:12)`): external images are never loaded, as they would track readers.
 import type { ReactNode } from 'react';
 
 // http(s), mailto and app-relative paths; not protocol-relative (//host) or backslash tricks (/\host).
@@ -9,7 +10,7 @@ const SAFE_URL = /^(https?:\/\/|mailto:|\/(?![\/\\]))/i;
 function inline(text: string, keyPrefix = ''): ReactNode[] {
   const out: ReactNode[] = [];
   // Order matters: code first (its content is literal), then links, bold, italic.
-  const pattern = /(`[^`]+`)|\[([^\]]+)\]\(([^)\s]+)\)|(\*\*[^*]+\*\*|__[^_]+__)|(\*[^*\s][^*]*\*|_[^_\s][^_]*_)|(https?:\/\/[^\s<>()]+[^\s<>().,;:!?'"])/g;
+  const pattern = /(`[^`]+`)|!\[([^\]]*)\]\(attachment:(\d+)\)|\[([^\]]+)\]\(([^)\s]+)\)|(\*\*[^*]+\*\*|__[^_]+__)|(\*[^*\s][^*]*\*|_[^_\s][^_]*_)|(https?:\/\/[^\s<>()]+[^\s<>().,;:!?'"])/g;
   let last = 0;
   let m: RegExpExecArray | null;
   let i = 0;
@@ -17,11 +18,18 @@ function inline(text: string, keyPrefix = ''): ReactNode[] {
     if (m.index > last) out.push(text.slice(last, m.index));
     const key = `${keyPrefix}${i++}`;
     if (m[1]) out.push(<code key={key}>{m[1].slice(1, -1)}</code>);
-    else if (m[2] !== undefined) {
-      out.push(SAFE_URL.test(m[3]) ? <a key={key} href={m[3]} target="_blank" rel="noreferrer noopener">{inline(m[2], key)}</a> : m[0]);
-    } else if (m[4]) out.push(<strong key={key}>{inline(m[4].slice(2, -2), key)}</strong>);
-    else if (m[5]) out.push(<em key={key}>{inline(m[5].slice(1, -1), key)}</em>);
-    else if (m[6]) out.push(<a key={key} href={m[6]} target="_blank" rel="noreferrer noopener">{m[6]}</a>);
+    else if (m[3]) {
+      out.push(
+        <a key={key} className="md-image" href={`/api/attachments/${m[3]}?inline=1`} target="_blank" rel="noreferrer" title="Open full size">
+          <img src={`/api/attachments/${m[3]}/preview`} alt={m[2] || 'image'} loading="lazy" />
+        </a>,
+      );
+    } else if (m[4] !== undefined) {
+      const href = /^attachment:\d+$/.test(m[5]) ? `/api/attachments/${m[5].slice(11)}` : m[5];
+      out.push(SAFE_URL.test(href) ? <a key={key} href={href} target="_blank" rel="noreferrer noopener">{inline(m[4], key)}</a> : m[0]);
+    } else if (m[6]) out.push(<strong key={key}>{inline(m[6].slice(2, -2), key)}</strong>);
+    else if (m[7]) out.push(<em key={key}>{inline(m[7].slice(1, -1), key)}</em>);
+    else if (m[8]) out.push(<a key={key} href={m[8]} target="_blank" rel="noreferrer noopener">{m[8]}</a>);
     last = pattern.lastIndex;
   }
   if (last < text.length) out.push(text.slice(last));

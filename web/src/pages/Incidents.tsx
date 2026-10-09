@@ -2,6 +2,8 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { api, type Guidance } from '../api';
 import { GuidePanel } from '../components/Guide';
+import { richPaste } from '../components/RichPaste';
+import { AttachmentsPanel } from '../components/Attachments';
 import { IncidentPeoplePanel, PersonPicker, type PersonLite, type PersonRef } from '../components/People';
 import { AffectedCisPanel, type AffectedCi, type AffectedService, type ImpactHint } from '../components/AffectedCis';
 import { MajorBadge, PriorityBadge } from '../components/Badges';
@@ -279,7 +281,7 @@ export function IncidentPage() {
             <h2>Work notes &amp; history</h2>
             {editable && (
               <form className="comment-form" onSubmit={async (e) => { e.preventDefault(); if (await run(() => api.post(`${path}/comments`, { body: note, kind: noteKind }))) setNote(''); }}>
-                <textarea rows={2} placeholder={noteKind === 'communication' ? 'Stakeholder update: what is affected, what we are doing, next update at…' : 'Add a work note'} value={note} onChange={(e) => setNote(e.target.value)} />
+                <textarea rows={2} placeholder={noteKind === 'communication' ? 'Stakeholder update: what is affected, what we are doing, next update at…' : 'Add a work note – paste screenshots and logs here'} value={note} onChange={(e) => setNote(e.target.value)} {...richPaste(i.ref, setNote, setActionError)} />
                 <div className="actions">
                   {i.is_major && (
                     <select value={noteKind} onChange={(e) => setNoteKind(e.target.value as 'comment')} aria-label="Kind of note">
@@ -343,6 +345,7 @@ export function IncidentPage() {
             </dl>
           </section>
           <IncidentPeoplePanel record={i} basePath={path} editable={editable} onChange={setData} />
+          <AttachmentsPanel recordRef={i.ref} editable={editable} canDelete={(a) => a.uploaded_by === user.id || manager} />
           {meta.modules?.cmdb !== false && <AffectedCisPanel record={i} basePath={path} editable={editable} onChange={setData} />}
           <section className="card">
             <h2>Problem</h2>

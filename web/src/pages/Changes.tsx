@@ -4,6 +4,8 @@ import { api, type Guidance } from '../api';
 import { AffectedCisPanel, type AffectedCi, type AffectedService } from '../components/AffectedCis';
 import { GuidePanel } from '../components/Guide';
 import { Markdown } from '../components/Markdown';
+import { richPaste } from '../components/RichPaste';
+import { AttachmentsPanel } from '../components/Attachments';
 import { Modal } from '../components/Modal';
 import { Term } from '../components/Glossary';
 import { formatDate, relativeTime } from '../format';
@@ -358,7 +360,7 @@ export function ChangePage() {
             <h2>Notes &amp; history</h2>
             {editable && (
               <form className="comment-form" onSubmit={async (e) => { e.preventDefault(); if (await run(() => api.post(`${path}/comments`, { body: note }))) setNote(''); }}>
-                <textarea rows={2} placeholder="Add a note" value={note} onChange={(e) => setNote(e.target.value)} />
+                <textarea rows={2} placeholder="Add a note – paste screenshots and logs here" value={note} onChange={(e) => setNote(e.target.value)} {...richPaste(c.ref, setNote, setActionError)} />
                 <div className="actions"><button className="btn primary" disabled={!note.trim()}>Add note</button></div>
               </form>
             )}
@@ -378,6 +380,7 @@ export function ChangePage() {
           </section>
         </div>
         <aside className="problem-side">
+          <AttachmentsPanel recordRef={c.ref} editable={editable} canDelete={(a) => a.uploaded_by === user.id || user.role === 'admin' || user.role === 'problem_manager'} />
           <section className="card">
             <h2>Window</h2>
             <dl className="kv">
