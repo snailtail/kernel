@@ -39,7 +39,8 @@ export const visibilitySettings = async () => (Date.now() - loadedAt > 30_000 ? 
 export async function viewerFor(user: { id: number; role: Role }, channel: string) {
   const s = await visibilitySettings();
   const { rows } = await query('SELECT array_agg(team_id ORDER BY team_id) AS teams FROM team_members WHERE user_id = $1', [user.id]);
-  const scoped = Object.entries(s.team_scoped).filter(([, on]) => on).map(([k]) => k);
+  // Managers are never team-scoped, so their viewer carries no scoped practices (and their rows take the cheap path).
+  const scoped = ['admin', 'problem_manager'].includes(user.role) ? [] : Object.entries(s.team_scoped).filter(([, on]) => on).map(([k]) => k);
   const flags = channel === 'mcp' && !s.aiRestricted ? 'noai' : '';
   return `u:${user.id}:${user.role}:${(rows[0]?.teams ?? []).join(',')}:${scoped.join(',')}:${flags}`;
 }

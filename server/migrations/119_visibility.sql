@@ -64,15 +64,37 @@ BEGIN
   RETURN true;
 END $$;
 
+-- The cheap path, inlined into the policies: an unrestricted row in a practice that is not team-scoped for this
+-- viewer is visible without calling kernel_can_see; so is team-scoped work of the viewer's teams. kernel.scoped,
+-- kernel.uid and kernel.teams are set together with kernel.viewer (db.ts), in the same round trip.
+CREATE FUNCTION kernel_scoped(kind text) RETURNS boolean LANGUAGE sql STABLE AS $$
+  SELECT kind = ANY(string_to_array(coalesce(current_setting('kernel.scoped', true), ''), ','))
+$$;
+CREATE FUNCTION kernel_uid() RETURNS int LANGUAGE sql STABLE AS $$
+  SELECT nullif(coalesce(current_setting('kernel.uid', true), ''), '')::int
+$$;
+CREATE FUNCTION kernel_teams() RETURNS int[] LANGUAGE sql STABLE AS $$
+  SELECT coalesce(string_to_array(nullif(coalesce(current_setting('kernel.teams', true), ''), ''), ',')::int[], '{}')
+$$;
+
 ALTER TABLE problems ENABLE ROW LEVEL SECURITY;
 ALTER TABLE problems FORCE ROW LEVEL SECURITY;
-CREATE POLICY problems_visible ON problems USING (kernel_can_see('problem', restricted, restricted_teams, team_id, assignee_id, created_by, id));
+CREATE POLICY problems_visible ON problems USING (CASE
+  WHEN restricted THEN kernel_can_see('problem', restricted, restricted_teams, team_id, assignee_id, created_by, id)
+  WHEN NOT kernel_scoped('problem') THEN true
+  ELSE team_id IS NULL OR team_id = ANY(kernel_teams()) OR assignee_id = kernel_uid() OR created_by = kernel_uid() END);
 ALTER TABLE incidents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE incidents FORCE ROW LEVEL SECURITY;
-CREATE POLICY incidents_visible ON incidents USING (kernel_can_see('incident', restricted, restricted_teams, team_id, assignee_id, created_by, id));
+CREATE POLICY incidents_visible ON incidents USING (CASE
+  WHEN restricted THEN kernel_can_see('incident', restricted, restricted_teams, team_id, assignee_id, created_by, id)
+  WHEN NOT kernel_scoped('incident') THEN true
+  ELSE team_id IS NULL OR team_id = ANY(kernel_teams()) OR assignee_id = kernel_uid() OR created_by = kernel_uid() END);
 ALTER TABLE changes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE changes FORCE ROW LEVEL SECURITY;
-CREATE POLICY changes_visible ON changes USING (kernel_can_see('change', restricted, restricted_teams, team_id, assignee_id, created_by, id));
+CREATE POLICY changes_visible ON changes USING (CASE
+  WHEN restricted THEN kernel_can_see('change', restricted, restricted_teams, team_id, assignee_id, created_by, id)
+  WHEN NOT kernel_scoped('change') THEN true
+  ELSE team_id IS NULL OR team_id = ANY(kernel_teams()) OR assignee_id = kernel_uid() OR created_by = kernel_uid() END);
 
 -- Child rows follow their record (RLS applies inside the EXISTS), so hidden records hide their history, links,
 -- CIs and counts too, and nothing can be added to a record its viewer cannot see.

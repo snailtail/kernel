@@ -30,7 +30,12 @@ async function borrow() {
   const client = await rawPool.connect();
   const viewer = currentContext().viewer;
   if (viewerOf.get(client) !== viewer) {
-    await client.query("SELECT set_config('kernel.viewer', $1, false)", [viewer]);
+    // Parts of the viewer also go into their own settings, which the policies read inline without parsing.
+    const [, uid = '', , teams = '', scoped = ''] = viewer.startsWith('u:') ? viewer.split(':') : [];
+    await client.query(
+      "SELECT set_config('kernel.viewer', $1, false), set_config('kernel.uid', $2, false), set_config('kernel.teams', $3, false), set_config('kernel.scoped', $4, false)",
+      [viewer, uid, teams, scoped],
+    );
     viewerOf.set(client, viewer);
   }
   return client;
