@@ -21,9 +21,11 @@ const userFields = {
   active: z.boolean(),
   /** Source systems an integration account may report CIs for (exact names, e.g. vCenter). */
   ci_source_systems: z.array(z.string().trim().min(1).max(100)).max(20),
+  /** Standard change templates a pipeline (integration) account may register changes from. */
+  change_templates: z.array(z.number().int()).max(50),
 };
 const password = z.string();
-const USER_COLUMNS = 'id, username, display_name, email, role, active, ci_source_systems, created_at, mfa_enabled_at IS NOT NULL AS mfa_enabled';
+const USER_COLUMNS = 'id, username, display_name, email, role, active, ci_source_systems, change_templates, created_at, mfa_enabled_at IS NOT NULL AS mfa_enabled';
 
 export async function adminRoutes(app: FastifyInstance) {
   app.get('/api/users', async (req) => {
@@ -34,12 +36,12 @@ export async function adminRoutes(app: FastifyInstance) {
   app.post('/api/users', async (req, reply) => {
     requireUser(req, 'user.manage');
     await requireStepUp(req);
-    const body = z.object({ ...userFields, email: userFields.email.default(''), active: userFields.active.default(true), ci_source_systems: userFields.ci_source_systems.default([]), password }).parse(req.body);
+    const body = z.object({ ...userFields, email: userFields.email.default(''), active: userFields.active.default(true), ci_source_systems: userFields.ci_source_systems.default([]), change_templates: userFields.change_templates.default([]), password }).parse(req.body);
     await checkPassword(body.password, body);
     try {
       const { rows } = await query(
-        `INSERT INTO users (username, display_name, email, role, active, ci_source_systems, password_hash) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING ${USER_COLUMNS}`,
-        [body.username, body.display_name, body.email, body.role, body.active, body.ci_source_systems, await hashPassword(body.password)],
+        `INSERT INTO users (username, display_name, email, role, active, ci_source_systems, change_templates, password_hash) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING ${USER_COLUMNS}`,
+        [body.username, body.display_name, body.email, body.role, body.active, body.ci_source_systems, body.change_templates, await hashPassword(body.password)],
       );
       await audit(null, { entity_type: 'user', entity_ref: body.username, action: 'create', changes: { display_name: body.display_name, email: body.email, role: body.role, active: body.active, ci_source_systems: body.ci_source_systems } });
       reply.code(201);
@@ -62,7 +64,8 @@ export async function adminRoutes(app: FastifyInstance) {
     const { rows: before } = await query(`SELECT ${USER_COLUMNS} FROM users WHERE id = $1`, [id]);
     if (!before[0]) throw notFound();
     // Changing someone's role, status or password is sensitive: a reason is required and recorded.
-    const sourcesChanged = fields.ci_source_systems !== undefined && JSON.stringify(fields.ci_source_systems) !== JSON.stringify(before[0].ci_source_systems);
+    const sourcesChanged = (fields.ci_source_systems !== undefined && JSON.stringify(fields.ci_source_systems) !== JSON.stringify(before[0].ci_source_systems))
+      || (fields.change_templates !== undefined && JSON.stringify(fields.change_templates) !== JSON.stringify(before[0].change_templates));
     const sensitive = id !== admin.id && (newPassword || sourcesChanged || (fields.role && fields.role !== before[0].role) || (fields.active !== undefined && fields.active !== before[0].active));
     const why = sensitive ? requireReason(reason) : reason;
     if (newPassword) await checkPassword(newPassword, { username: before[0].username, ...fields });

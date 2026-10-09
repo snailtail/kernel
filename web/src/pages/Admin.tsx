@@ -16,6 +16,7 @@ interface AdminUser {
   role: Role;
   active: boolean;
   ci_source_systems: string[];
+  change_templates: number[];
   created_at: string;
 }
 
@@ -84,6 +85,7 @@ function UserModal({ user, self, roles, onClose, onDone }: { user: AdminUser | n
     role: user?.role ?? ('analyst' as Role),
     active: user?.active ?? true,
     sources: (user?.ci_source_systems ?? []).join(', '),
+    templates: (user?.change_templates ?? []).join(', '),
     password: '',
   });
   const [error, setError] = useState<string | null>(null);
@@ -92,18 +94,19 @@ function UserModal({ user, self, roles, onClose, onDone }: { user: AdminUser | n
     e.preventDefault();
     setError(null);
     const ci_source_systems = form.role === 'integration' ? form.sources.split(',').map((s) => s.trim()).filter(Boolean) : user?.ci_source_systems ?? [];
+    const change_templates = form.role === 'integration' ? form.templates.split(/[\s,]+/).filter(Boolean).map(Number).filter((n) => Number.isInteger(n)) : user?.change_templates ?? [];
     try {
       if (user) {
-        const { username: _, password, sources: __, ...rest } = form;
-        const fields = { ...rest, ci_source_systems };
-        const sourcesChanged = JSON.stringify(ci_source_systems) !== JSON.stringify(user.ci_source_systems);
+        const { username: _, password, sources: __, templates: ___, ...rest } = form;
+        const fields = { ...rest, ci_source_systems, change_templates };
+        const sourcesChanged = JSON.stringify(ci_source_systems) !== JSON.stringify(user.ci_source_systems) || JSON.stringify(change_templates) !== JSON.stringify(user.change_templates);
         const sensitive = !self && (password || sourcesChanged || fields.role !== user.role || fields.active !== user.active);
-        const reason = sensitive ? await askReason(`Change ${user.username}`, "Changing someone's role, status, password or CI sources needs a reason.", { confirmLabel: 'Save change' }) : undefined;
+        const reason = sensitive ? await askReason(`Change ${user.username}`, "Changing someone's role, status, password, CI sources or change templates needs a reason.", { confirmLabel: 'Save change' }) : undefined;
         if (sensitive && !reason) return;
         await api.patch(`/api/users/${user.id}`, { ...(password ? { ...fields, password } : fields), reason });
       } else {
-        const { sources: _, ...rest } = form;
-        await api.post('/api/users', { ...rest, ci_source_systems });
+        const { sources: _, templates: __, ...rest } = form;
+        await api.post('/api/users', { ...rest, ci_source_systems, change_templates });
       }
       onDone();
     } catch (err) {
@@ -126,6 +129,12 @@ function UserModal({ user, self, roles, onClose, onDone }: { user: AdminUser | n
           <label className="full">CI source systems
             <input placeholder="vCenter, Azure" value={form.sources} onChange={(e) => setForm({ ...form, sources: e.target.value })} />
             <span className="muted small">The source systems this account may report CIs for, exactly as it names them. Empty means none.</span>
+          </label>
+        )}
+        {form.role === 'integration' && (
+          <label className="full">Standard change templates
+            <input placeholder="Template ids, e.g. 3, 7" value={form.templates} onChange={(e) => setForm({ ...form, templates: e.target.value })} />
+            <span className="muted small">Pre-approved templates this pipeline account may register changes from (ids under Changes → Standard changes). Empty means none.</span>
           </label>
         )}
         <label className="full">{user ? 'New password (leave empty to keep)' : 'Password'}

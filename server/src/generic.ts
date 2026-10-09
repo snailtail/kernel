@@ -111,7 +111,7 @@ export async function myWork(user: User) {
       : Promise.resolve({ rows: [] as any[] }),
     can(user.role, 'change.approve')
       ? query(
-          `SELECT c.ref, c.title, c.change_type, c.planned_start FROM changes c WHERE c.status = 'authorize' AND c.created_by IS DISTINCT FROM $1
+          `SELECT c.ref, c.title, c.change_type, c.planned_start FROM changes c WHERE c.status = 'authorize' AND c.created_by IS DISTINCT FROM $1 AND c.assignee_id IS DISTINCT FROM $1
            AND NOT EXISTS (SELECT 1 FROM change_votes v WHERE v.change_id = c.id AND v.user_id = $1) ORDER BY c.planned_start NULLS LAST LIMIT 30`,
           [user.id],
         )

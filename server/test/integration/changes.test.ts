@@ -87,11 +87,11 @@ describe('change enablement (#29)', { skip }, () => {
 
   test('standard changes come from templates; pipelines register them as done', async () => {
     assert.equal((await analyst.post('/api/changes', { title: 'x', change_type: 'standard' })).status, 400);
-    const t = (await pm.post('/api/change-templates', { name: 'Deploy billing-app', implementation_plan: 'Run the pipeline', backout_plan: 'Redeploy previous version' })).body;
+    const t = (await pm.post('/api/change-templates', { name: 'Deploy billing-app', max_risk: 'high', ci_types: ['application'], implementation_plan: 'Run the pipeline', backout_plan: 'Redeploy previous version' })).body;
     const c = await create({ title: 'Deploy 4.2', template_id: t.id, cis: [app], planned_start: at(5), planned_end: at(6) });
     assert.deepEqual([c.change_type, c.approvals.required, c.backout_plan], ['standard', 0, 'Redeploy previous version']);
     assert.equal((await analyst.post(`/api/changes/${c.ref}/transition`, { to: 'scheduled' })).body.status, 'scheduled', 'pre-approved');
-    await admin.post('/api/users', { username: 'ci-pipeline', display_name: 'Pipeline', role: 'integration', password: 'four quiet harbour lamps' });
+    await admin.post('/api/users', { username: 'ci-pipeline', display_name: 'Pipeline', role: 'integration', password: 'four quiet harbour lamps', change_templates: [t.id] });
     const bot = new Client(k.base);
     await bot.post('/api/auth/login', { username: 'ci-pipeline', password: 'four quiet harbour lamps' });
     const pipeline = new Client(k.base, (await bot.post('/api/tokens', { name: 'deploy' })).body.token);
@@ -103,6 +103,39 @@ describe('change enablement (#29)', { skip }, () => {
     const done = (await viewer.get(`/api/changes/${reg.body.ref}`)).body;
     assert.deepEqual([done.status, done.source, done.outcome, done.links[0].kind], ['closed', 'pipeline', 'successful', 'pull_request']);
     assert.equal((await pipeline.post('/api/changes', { title: 'x' })).status, 403, 'pipelines only register standard changes');
+  });
+
+  test('standard templates are scoped: account allowlist, CI types, risk and freezes', async () => {
+    const low = (await pm.post('/api/change-templates', { name: 'Restart app (low risk)', ci_types: ['application'], implementation_plan: 'Restart', backout_plan: 'None needed' })).body;
+    const scratch = (await pm.post('/api/cis', { name: 'scratch-app', ci_type: 'application', criticality: 4 })).body.ref;
+    await admin.post('/api/users', { username: 'other-pipe', display_name: 'Other', role: 'integration', password: 'four quiet harbour lamps', change_templates: [] });
+    const bot = new Client(k.base);
+    await bot.post('/api/auth/login', { username: 'other-pipe', password: 'four quiet harbour lamps' });
+    const other = new Client(k.base, (await bot.post('/api/tokens', { name: 'x' })).body.token);
+    const reg = (as: Client, body: object) => as.post('/api/changes/register', { template_id: low.id, title: 'Restart', actual_start: at(-1), cis: [scratch], ...body });
+    assert.match((await reg(other, {})).body.error, /may not use the standard change/, 'pipeline accounts only use their templates');
+    assert.match((await analyst.post('/api/changes', { title: 'Restart billing', template_id: low.id, cis: [app] })).body.error, /exceeds what/, 'a critical service needs a normal change');
+    assert.match((await analyst.post('/api/changes', { title: 'Restart db', template_id: low.id, cis: [db] })).body.error, /does not cover/);
+    assert.equal((await analyst.post('/api/changes', { title: 'Restart nothing', template_id: low.id })).status, 400, 'CIs are required');
+    assert.equal((await analyst.post('/api/changes', { title: 'Restart scratch', template_id: low.id, cis: [scratch] })).status, 201);
+    await admin.patch(`/api/users/${(await admin.get('/api/users')).body.find((u: any) => u.username === 'other-pipe').id}`, { change_templates: [low.id], reason: 'Allowed to restart apps' });
+    assert.equal((await reg(other, {})).status, 201);
+    await pm.post('/api/change-freezes', { name: 'Release freeze', starts_at: at(-3), ends_at: at(3) });
+    assert.match((await reg(other, { title: 'During freeze' })).body.error, /Release freeze/, 'freezes apply to registrations');
+  });
+
+  test('the approved window is locked; implementers cannot approve', async () => {
+    const lab = (await pm.post('/api/cis', { name: 'lab-box', ci_type: 'other', criticality: 4 })).body.ref;
+    const pmUser = (await pm.get('/api/auth/me')).body;
+    const c = await create({ title: 'Locked window', cis: [lab], ...plans, planned_start: at(300), planned_end: at(301), assignee_id: pmUser.id });
+    await analyst.post(`/api/changes/${c.ref}/transition`, { to: 'assess' });
+    await analyst.post(`/api/changes/${c.ref}/transition`, { to: 'authorize' });
+    assert.match((await pm.post(`/api/changes/${c.ref}/votes`, { decision: 'approve' })).body.error, /requested or will implement/);
+    assert.equal((await admin.post(`/api/changes/${c.ref}/votes`, { decision: 'approve' })).body.status, 'scheduled');
+    assert.equal((await analyst.patch(`/api/changes/${c.ref}`, { planned_start: at(310), planned_end: at(311) })).status, 409, 'an authorised window cannot move');
+    const replan = await analyst.post(`/api/changes/${c.ref}/transition`, { to: 'assess', comment: 'Needs a new window' });
+    assert.deepEqual([replan.body.status, replan.body.votes.length], ['assess', 0], 're-planning means re-authorising');
+    assert.equal((await analyst.patch(`/api/changes/${c.ref}`, { planned_start: at(310), planned_end: at(311) })).status, 200);
   });
 
   test('emergency changes skip the window but still need approval before implementation', async () => {

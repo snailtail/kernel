@@ -89,7 +89,7 @@ export const registerSchema = z.object({
 
 // ---- Policy ------------------------------------------------------------------------------------
 
-interface Policy { approvals: Record<Risk, number>; related_hours: number }
+interface Policy { approvals: Record<Risk, number>; related_hours: number; allow_self_approval?: boolean }
 async function policy(): Promise<Policy> {
   const { rows } = await query("SELECT value FROM settings WHERE key = 'change_policy'");
   return { approvals: { low: 1, medium: 1, high: 2 }, related_hours: 24, ...(rows[0]?.value ?? {}) };
@@ -179,7 +179,7 @@ export async function listChanges(user: User, f: z.infer<typeof listChangesSchem
   if (f.ci) add('EXISTS (SELECT 1 FROM change_cis x JOIN configuration_items ci ON ci.id = x.ci_id WHERE x.change_id = c.id AND ci.ref = ?)', f.ci.toUpperCase());
   if (f.awaiting_my_vote) {
     where.push("c.status = 'authorize'");
-    add('c.created_by IS DISTINCT FROM ? AND NOT EXISTS (SELECT 1 FROM change_votes v WHERE v.change_id = c.id AND v.user_id = $' + params.length + ')', user.id);
+    add('c.created_by IS DISTINCT FROM ? AND c.assignee_id IS DISTINCT FROM ? AND NOT EXISTS (SELECT 1 FROM change_votes v WHERE v.change_id = c.id AND v.user_id = ?)', user.id);
   }
   if (f.q) {
     const terms = f.q.split(/\s+/).map((t) => t.replace(/[^\p{L}\p{N}_.-]/gu, '')).filter(Boolean);
@@ -232,7 +232,7 @@ export async function getChange(user: User, ref: string) {
     affected_services: assessed.services,
     votes: votes.rows,
     approvals,
-    can_vote: c.status === 'authorize' && can(user.role, 'change.approve') && c.created_by !== user.id && !votes.rows.some((v) => v.user_id === user.id),
+    can_vote: c.status === 'authorize' && can(user.role, 'change.approve') && (pol.allow_self_approval || (c.created_by !== user.id && c.assignee_id !== user.id)) && !votes.rows.some((v) => v.user_id === user.id),
     ...(await conflictsFor(c.id, c.planned_start, c.planned_end)),
     activity: activity.rows,
     links: links.rows,
@@ -322,8 +322,8 @@ export async function createChange(user: User, input: z.infer<typeof createChang
     await validateAssignee(db, fields.assignee_id);
     let values: Record<string, unknown> = { ...fields };
     if (template_id) {
-      const { rows } = await db.query('SELECT * FROM change_templates WHERE id = $1 AND active', [template_id]);
-      if (!rows[0]) throw badRequest('Unknown or inactive standard change template');
+      const t = await checkTemplateScope(user, template_id, cis ?? [], fields.planned_start ?? null, fields.planned_end ?? null);
+      const rows = [t];
       // A standard change is pre-approved: its plans come from the template.
       values = {
         ...values, change_type: 'standard', template_id,
@@ -367,9 +367,9 @@ export async function updateChange(user: User, ref: string, { base, ...input }: 
     }
     if (['closed', 'rejected', 'cancelled'].includes(current.status)) throw conflict(`A ${current.status} change cannot be edited`);
     // Once authorised, what was approved must not change silently: plans, type and risk are locked.
-    const locked = ['change_type', 'risk', 'implementation_plan', 'backout_plan', 'test_plan'].filter((k) => k in input && (input as any)[k] !== current[k]);
+    const locked = ['change_type', 'risk', 'implementation_plan', 'backout_plan', 'test_plan', 'planned_start', 'planned_end'].filter((k) => k in input && norm(k, (input as any)[k]) !== norm(k, current[k]));
     if (['authorize', 'scheduled', 'implementing', 'review'].includes(current.status) && locked.length) {
-      throw conflict(`${locked.join(', ')} cannot change after the change was submitted for authorisation; move it back to assess first`);
+      throw conflict(`${locked.join(', ')} cannot change after the change was submitted for authorisation: what was approved is what happens. Move it back to assess to re-plan (it is then authorised again).`);
     }
     if (input.change_type === 'standard' && !current.template_id) throw badRequest('A standard change needs a pre-approved template');
     if (input.change_type && current.template_id && input.change_type !== 'standard') throw badRequest('A change from a standard template stays standard');
@@ -441,7 +441,11 @@ export async function voteOnChange(user: User, ref: string, input: z.infer<typeo
   await tx(async (db) => {
     const c = await loadChange(db, ref);
     if (c.status !== 'authorize') throw conflict('The change is not waiting for authorisation');
-    if (c.created_by === user.id) throw forbidden('You cannot approve your own change');
+    // Segregation of duties: neither the requester nor the implementer approves, unless policy allows it with a reason.
+    if (c.created_by === user.id || c.assignee_id === user.id) {
+      if (!(await policy()).allow_self_approval) throw forbidden('You requested or will implement this change, so you cannot approve it');
+      if (!input.comment.trim()) throw badRequest('Give a reason for approving a change you requested or implement');
+    }
     const { rowCount } = await db.query('INSERT INTO change_votes (change_id, user_id, decision, comment) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING', [c.id, user.id, input.decision, input.comment]);
     if (!rowCount) throw conflict('You have already voted on this change');
     await logChange(db, c.id, user.id, 'vote', input.comment, { decision: input.decision });
@@ -525,26 +529,52 @@ export async function raiseChangeForProblem(user: User, problemRef: string, over
   }));
 }
 
+/**
+ * A standard change is only pre-approved within its template's scope: the account may use the template (integration
+ * accounts are bound to theirs), the CIs are of an allowed type, the assessed risk is within max_risk, and the window
+ * is not in a change freeze. Anything else needs a normal change.
+ */
+async function checkTemplateScope(user: User, templateId: number, ciRefs: string[], start: string | null, end: string | null) {
+  const { rows } = await query('SELECT * FROM change_templates WHERE id = $1 AND active', [templateId]);
+  const t = rows[0];
+  if (!t) throw badRequest('Unknown or inactive standard change template');
+  if (user.role === 'integration') {
+    const { rows: me } = await query('SELECT change_templates FROM users WHERE id = $1', [user.id]);
+    if (!(me[0]?.change_templates ?? []).includes(t.id)) throw forbidden(`This account may not use the standard change "${t.name}". An administrator can allow it under Users.`);
+  }
+  if (!ciRefs.length) throw badRequest('A standard change must name the CIs it changes');
+  const { rows: cis } = await query('SELECT ref, name, ci_type, criticality FROM configuration_items WHERE ref = ANY($1)', [ciRefs.map((r) => r.toUpperCase())]);
+  if (cis.length !== new Set(ciRefs.map((r) => r.toUpperCase())).size) throw badRequest('Unknown CI in cis');
+  const wrongType = t.ci_types.length ? cis.filter((c) => !t.ci_types.includes(c.ci_type)) : [];
+  if (wrongType.length) throw forbidden(`"${t.name}" does not cover ${wrongType.map((c) => c.name).join(', ')} (${wrongType[0].ci_type}); request a normal change`);
+  const { risk, reason } = await assessRisk(cis, 'standard');
+  if (RISKS.indexOf(risk) > RISKS.indexOf(t.max_risk)) throw forbidden(`${risk} risk (${reason}) exceeds what "${t.name}" is pre-approved for (${t.max_risk}); request a normal change`);
+  if (start && end) {
+    const { rows: frozen } = await query('SELECT name FROM change_freezes WHERE starts_at < $2 AND ends_at > $1 LIMIT 1', [start, end]);
+    if (frozen[0]) throw conflict(`Change freeze "${frozen[0].name}" is in force; standard changes may not run`);
+  }
+  return t;
+}
+
 /** A pipeline registers a standard change it carried out; no approval (the template is pre-approved). */
 export async function registerStandardChange(user: User, input: z.infer<typeof registerSchema>) {
   authorize(user, 'change.register');
+  const t = await checkTemplateScope(user, input.template_id, input.cis, input.actual_start, input.actual_end ?? input.actual_start);
   const created = await tx(async (db) => {
-    const { rows: t } = await db.query('SELECT * FROM change_templates WHERE id = $1 AND active', [input.template_id]);
-    if (!t[0]) throw badRequest('Unknown or inactive standard change template');
     const status = input.outcome ? 'closed' : 'implementing';
     const { rows } = await db.query(
       `INSERT INTO changes (title, description, change_type, template_id, status, implementation_plan, test_plan, backout_plan,
                             actual_start, actual_end, outcome, source, created_by, closed_at, planned_start, planned_end)
        VALUES ($1, $2, 'standard', $3, $4, $5, $6, $7, $8, $9, $10, 'pipeline', $11, CASE WHEN $4 = 'closed' THEN now() END, $8, coalesce($9, $8::timestamptz + interval '1 hour'))
        RETURNING id, ref`,
-      [input.title, input.description || t[0].description, t[0].id, status, t[0].implementation_plan, t[0].test_plan, t[0].backout_plan,
+      [input.title, input.description || t.description, t.id, status, t.implementation_plan, t.test_plan, t.backout_plan,
         input.actual_start, input.actual_end ?? (input.outcome ? new Date().toISOString() : null), input.outcome ?? null, user.id],
     );
     await attachCis(db, rows[0].id, input.cis, user.id);
     for (const l of input.links) {
       await db.query('INSERT INTO change_links (change_id, kind, reference, url, created_by) VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING', [rows[0].id, l.kind, l.reference, l.url, user.id]);
     }
-    await logChange(db, rows[0].id, user.id, 'created', `Standard change ${rows[0].ref} registered by a pipeline`, { template: t[0].name, cis: input.cis, outcome: input.outcome ?? null });
+    await logChange(db, rows[0].id, user.id, 'created', `Standard change ${rows[0].ref} registered by a pipeline`, { template: t.name, cis: input.cis, outcome: input.outcome ?? null });
     return rows[0];
   });
   return { ref: created.ref, url: changeUrl(created.ref) };
@@ -554,6 +584,10 @@ export async function registerStandardChange(user: User, input: z.infer<typeof r
 
 export const templateSchema = z.object({
   name: z.string().trim().min(1).max(200),
+  /** The highest assessed risk the template may be used for; above it, a normal change is needed. */
+  max_risk: z.enum(RISKS).default('low'),
+  /** CI types the template may change; empty means any type (within max_risk). */
+  ci_types: z.array(z.string().max(50)).max(30).default([]),
   description: text.default(''),
   implementation_plan: text.min(1),
   test_plan: text.default(''),
