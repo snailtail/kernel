@@ -131,6 +131,8 @@ export const OPERATIONS: Op[] = [
   { method: 'get', path: '/api/templates', tag: 'Reference data', summary: 'Templates for new incidents and problems' },
   { method: 'post', path: '/api/templates', tag: 'Reference data', summary: 'Create a template (problem managers)', body: setupMod.templateSchema },
   { method: 'put', path: '/api/templates/:id', tag: 'Reference data', summary: 'Update a template', body: setupMod.templateSchema },
+  { method: 'get', path: '/api/admin/ai-data', tag: 'Administration', summary: 'What attachments may be sent to AI agents through MCP' },
+  { method: 'put', path: '/api/admin/ai-data', tag: 'Administration', summary: 'Allow or refuse images and flagged text for AI agents (with a reason)' },
   { method: 'get', path: '/api/records/:ref/attachments', tag: 'Attachments', summary: 'Attachments of a record (problem, incident, change, CI)' },
   { method: 'post', path: '/api/records/:ref/attachments', tag: 'Attachments', summary: 'Attach a file: the raw bytes as application/octet-stream, the name in ?filename=. Images are re-encoded (metadata removed); the type is detected from the content' },
   { method: 'get', path: '/api/attachments/:id', tag: 'Attachments', summary: 'Download an attachment (?inline=1 shows images and PDFs in place)' },
