@@ -9,6 +9,7 @@ import { migrate, pool, query, waitForDb } from './db.js';
 import { encryptLegacySecrets, startWorker } from './webhooks.js';
 import { startEventWorker } from './events.js';
 import { startSlaWorker } from './sla.js';
+import { startNotificationWorker } from './notifications.js';
 
 const app = await buildApp();
 const log = (msg: string) => app.log.info(msg);
@@ -23,6 +24,7 @@ asSystem(() => {
   startWorker(log);
   startEventWorker(log);
   startSlaWorker(log);
+  startNotificationWorker(log);
   startChainVerification((msg) => app.log.error(msg));
   setInterval(() => pruneIdempotencyKeys().catch(() => {}), 3600_000).unref();
 });

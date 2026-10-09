@@ -13,6 +13,7 @@ import { createProblem, createProblemSchema, getProblem, loadForUpdate, logActiv
 import { recordUrl, registerRecordType, type RecordType } from './records.js';
 import { logIncident } from './incident-log.js';
 import { recomputeSla, slaClock, slaOnTransition } from './sla.js';
+import { managers, notify } from './notifications.js';
 import { pool } from './db.js';
 
 export { logIncident };
@@ -249,6 +250,13 @@ export async function insertIncident(
   }
   await logIncident(db, rows[0].id, actorId, 'created', `Incident ${rows[0].ref} logged${source === 'event' ? ' from monitoring' : ''}`, { title: fields.title, ci_ids: ciIds, source });
   await recomputeSla(db, rows[0].id, { reselect: true });
+  const path = `/incidents/${rows[0].ref}`;
+  if (fields.assignee_id) {
+    await notify(db, { users: [fields.assignee_id], event: 'assigned', ref: rows[0].ref, title: fields.title, summary: 'An incident was assigned to you.', path, dedupe: `assigned:${rows[0].ref}:${Date.now()}`, actorId });
+  }
+  if (fields.is_major) {
+    await notify(db, { users: await managers(db), event: 'major_incident', ref: rows[0].ref, title: fields.title, summary: 'A major incident was declared.', path, dedupe: `major:${rows[0].ref}`, actorId });
+  }
   return rows[0] as { id: number; ref: string };
 }
 
@@ -267,6 +275,13 @@ export async function updateIncident(user: User, ref: string, { base, ...input }
     if (!changed.length) return;
     await db.query(`UPDATE incidents SET ${changed.map(([k], n) => `${k} = $${n + 2}`).join(', ')} WHERE id = $1`, [current.id, ...changed.map(([, v]) => v)]);
     if (input.assignee_id && !current.responded_at) await db.query('UPDATE incidents SET responded_at = now() WHERE id = $1', [current.id]);
+    const path = `/incidents/${current.ref}`;
+    if (input.assignee_id && input.assignee_id !== current.assignee_id) {
+      await notify(db, { users: [input.assignee_id], event: 'assigned', ref: current.ref, title: input.title ?? current.title, summary: `${user.display_name} assigned an incident to you.`, path, dedupe: `assigned:${current.ref}:${Date.now()}`, actorId: user.id });
+    }
+    if (input.is_major === true && !current.is_major) {
+      await notify(db, { users: await managers(db), event: 'major_incident', ref: current.ref, title: input.title ?? current.title, summary: `${user.display_name} declared a major incident.`, path, dedupe: `major:${current.ref}`, actorId: user.id });
+    }
     if ((input.impact !== undefined && input.impact !== current.impact) || (input.urgency !== undefined && input.urgency !== current.urgency)) {
       await recomputeSla(db, current.id, { reason: 'Priority changed' });
     }

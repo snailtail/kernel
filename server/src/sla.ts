@@ -9,6 +9,7 @@ import { computeImpact, impactSchema } from './cmdb-graph.js';
 import { query, tx } from './db.js';
 import { conflict, notFound } from './errors.js';
 import { logIncident } from './incident-log.js';
+import { managers, notify } from './notifications.js';
 import { authorize } from './policy.js';
 import type { Db } from './problems.js';
 
@@ -230,6 +231,11 @@ export async function checkSlaEvents(now = Date.now()) {
           if (!rowCount) continue;
           fired++;
           if (kind === 'breach') await db.query(`UPDATE incidents SET ${target}_breached_at = now() WHERE id = $1 AND ${target}_breached_at IS NULL`, [i.id]);
+          await notify(db, {
+            users: i.assignee_id ? [i.assignee_id] : await managers(db), event: kind === 'breach' ? 'sla_breach' : 'sla_warning', ref: i.ref, title: i.title,
+            summary: `${target === 'response' ? 'Response' : 'Resolution'} target ${kind === 'breach' ? 'breached' : 'at risk (75 % used)'}.`,
+            path: `/incidents/${i.ref}`, dedupe: `sla:${kind}:${i.ref}:${target}`,
+          });
           await logIncident(db, i.id, null, 'sla', kind === 'breach' ? `${target === 'response' ? 'Response' : 'Resolution'} target breached` : `${target === 'response' ? 'Response' : 'Resolution'} target at risk: 75 % used`, {
             target, kind, sla: clock.name, due_at: c.due_at, elapsed_minutes: c.elapsed_minutes, target_minutes: c.target_minutes,
           });

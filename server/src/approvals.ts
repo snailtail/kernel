@@ -1,5 +1,6 @@
 // Pending approvals: decisions an AI agent requests through MCP (closing a problem, accepting/deferring risk,
 // marking a duplicate) are carried out only when a person approves them in the web UI (#76).
+import { managers, notify } from './notifications.js';
 import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { User } from './auth.js';
@@ -33,6 +34,7 @@ export async function requestApproval(user: User, ref: string, kind: ApprovalKin
       [p.id, kind, JSON.stringify(payload), summary, user.id, confirmation],
     );
     await logActivity(db, p.id, user.id, 'update', `Requested approval: ${summary}`, { approval_id: rows[0].id, approval: 'requested' });
+    await notify(db, { users: await managers(db), event: 'approval_needed', ref: p.ref, title: summary, summary: 'An AI agent asked for a decision. Nothing happens until a person approves.', path: `/problems/${p.ref}`, dedupe: `mcp-approval:${rows[0].id}` });
     return rows[0].id as number;
   });
   return {

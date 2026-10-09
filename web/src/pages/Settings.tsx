@@ -1,3 +1,4 @@
+import { NotificationSettingsCard } from '../components/Notifications';
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
 import { api } from '../api';
@@ -29,6 +30,7 @@ export function SettingsPage() {
         </div>
       </header>
       <PreferencesCard />
+      <NotificationSettingsCard />
       <section className="card">
         <h2>Two-factor authentication</h2>
         <TwoFactor />

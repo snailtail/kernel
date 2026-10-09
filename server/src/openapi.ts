@@ -9,6 +9,7 @@ import * as inc from './incidents.js';
 import * as events from './events.js';
 import * as ch from './changes.js';
 import * as slaMod from './sla.js';
+import * as notif from './notifications.js';
 import * as hooks from './event-hooks.js';
 import { auditQuerySchema } from './audit.js';
 import { searchSchema } from './generic.js';
@@ -117,6 +118,12 @@ export const OPERATIONS: Op[] = [
   { method: 'post', path: '/api/cis/:ref/comments', tag: 'CMDB', summary: 'Add a note', body: z.object({ body: z.string() }) },
   { method: 'post', path: '/api/cis/:ref/links', tag: 'CMDB', summary: 'Link a problem, incident, event, change or document', body: cmdb.ciLinkSchema },
   { method: 'delete', path: '/api/cis/:ref/links/:id', tag: 'CMDB', summary: 'Remove a link' },
+  { method: 'get', path: '/api/notifications', tag: 'Notifications', summary: 'My notifications (newest first) and the unread count' },
+  { method: 'post', path: '/api/notifications/read', tag: 'Notifications', summary: 'Mark notifications as read (ids, or all)' },
+  { method: 'get', path: '/api/notifications/settings', tag: 'Notifications', summary: 'My notification settings: email, digest, events, chat webhook' },
+  { method: 'put', path: '/api/notifications/settings', tag: 'Notifications', summary: 'Update my notification settings', body: notif.settingsSchema },
+  { method: 'get', path: '/api/notifications/unsubscribe', tag: 'Notifications', summary: 'One-click unsubscribe from a signed email link (no login)' },
+  { method: 'post', path: '/api/notifications/unsubscribe', tag: 'Notifications', summary: 'One-click unsubscribe (RFC 8058 List-Unsubscribe-Post)' },
   { method: 'get', path: '/api/slas', tag: 'Service levels', summary: 'SLAs with targets per priority' },
   { method: 'post', path: '/api/slas', tag: 'Service levels', summary: 'Create an SLA (problem managers)', body: slaMod.slaSchema },
   { method: 'put', path: '/api/slas/:id', tag: 'Service levels', summary: 'Update an SLA', body: slaMod.slaSchema },

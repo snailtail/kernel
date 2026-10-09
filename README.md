@@ -114,6 +114,12 @@ incidents feed the problem candidates per CI, and reports show MTTA, MTTR, reope
 Viewers stay strictly read-only (auditors, stakeholders): end users report incidents through the service desk or,
 later, the self-service portal (#45), not with a viewer account.
 
+**Notifications**: everything that concerns you – assignments, approvals waiting for you, decisions on what you
+requested, SLA warnings and breaches, major incidents, updates on what you watch – appears under Notifications (the
+bell). Each person chooses what also reaches them by email (instant or a daily digest at 07:00) or a personal Slack
+or Teams webhook; defaults are quiet. Every email has a one-click unsubscribe link. Email needs `SMTP_URL` (and
+optionally `KERNEL_MAIL_FROM`) in `.env`, e.g. `SMTP_URL=smtp://user:password@smtp.example.com:587`.
+
 **Service levels**: SLAs set response and resolution targets per priority in business time, on a calendar evaluated
 in its own time zone (24/7, or office hours with Swedish public holidays, plus extra closed days). One default SLA
 works out of the box; a service can have its own, and an incident gets the SLA of its most critical service through

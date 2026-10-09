@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { CommandPalette, ShortcutHelp, useShortcuts } from './components/CommandPalette';
 import { MyWorkPage } from './pages/MyWork';
+import { NotificationBell, NotificationsPage } from './components/Notifications';
 import { IncidentPage, IncidentsPage } from './pages/Incidents';
 import { Navigate, NavLink, Route, Routes } from 'react-router';
 import { api, type Meta, type Preferences, type User } from './api';
@@ -129,6 +130,7 @@ export function App() {
             {isManager(user) && <NavLink to="/admin">{icons.admin}Administration</NavLink>}
           </nav>
           <div className="sidebar-foot">
+            <NotificationBell />
             <NavLink to="/guide" className="help-link">{icons.help}How it works</NavLink>
             <NavLink to="/settings" className="user-chip">
               <span className="avatar">{user.display_name.slice(0, 1).toUpperCase()}</span>
@@ -152,6 +154,7 @@ export function App() {
             <Route path="/candidates" element={<CandidatesPage />} />
             <Route path="/kedb" element={<KedbPage />} />
             <Route path="/events" element={<EventsPage />} />
+            <Route path="/notifications" element={<NotificationsPage />} />
             <Route path="/services" element={<ServiceLevelsPage />} />
             <Route path="/changes" element={<ChangesPage />} />
             <Route path="/changes/:ref" element={<ChangePage />} />

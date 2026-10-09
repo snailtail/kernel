@@ -1,4 +1,5 @@
 // Follow-up actions on problems (e.g. "vendor to deliver patch", "add alerting"), with owner and due date.
+import { notify } from './notifications.js';
 import { z } from 'zod';
 import type { User } from './auth.js';
 import { query, tx } from './db.js';
@@ -70,6 +71,9 @@ export async function createAction(user: User, ref: string, input: z.infer<typeo
       [...Object.values(input), problem.id, user.id],
     );
     await logActivity(db, problem.id, user.id, 'action', `Added action: ${input.title}`, { action_id: rows[0].id, change: 'added' });
+    if (input.owner_id) {
+      await notify(db, { users: [input.owner_id], event: 'assigned', ref: problem.ref, title: input.title, summary: `An action on ${problem.ref} was assigned to you.`, path: `/problems/${problem.ref}`, dedupe: `action:${rows[0].id}:${input.owner_id}`, actorId: user.id });
+    }
     await db.query('UPDATE problems SET updated_at = now() WHERE id = $1', [problem.id]);
   });
   return getProblem(ref);
@@ -93,6 +97,9 @@ export async function updateAction(user: User, ref: string, actionId: number, in
       [actionId, ...changed.map(([, v]) => v)],
     );
     const title = input.title ?? current.title;
+    if (input.owner_id && input.owner_id !== current.owner_id) {
+      await notify(db, { users: [input.owner_id], event: 'assigned', ref: problem.ref, title, summary: `An action on ${problem.ref} was assigned to you.`, path: `/problems/${problem.ref}`, dedupe: `action:${actionId}:${input.owner_id}:${Date.now()}`, actorId: user.id });
+    }
     const body = statusChange
       ? `${input.status === 'done' ? 'Completed' : input.status === 'cancelled' ? 'Cancelled' : 'Reopened'} action: ${title}`
       : `Updated action: ${title}`;

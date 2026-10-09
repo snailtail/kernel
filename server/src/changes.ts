@@ -11,6 +11,7 @@ import { query, tx } from './db.js';
 import { badRequest, conflict, forbidden, notFound } from './errors.js';
 import { authorize, can } from './policy.js';
 import { getProblem, loadForUpdate, logActivity, registerProblemExtra, type Db } from './problems.js';
+import { managers, notify } from './notifications.js';
 import { recordUrl, registerRecordType, type RecordType } from './records.js';
 
 export const CHANGE_TYPES = ['standard', 'normal', 'emergency'] as const;
@@ -377,6 +378,9 @@ export async function updateChange(user: User, ref: string, { base, ...input }: 
     const changed = Object.entries(input).filter(([k, v]) => v !== undefined && norm(k, current[k]) !== norm(k, v));
     if (!changed.length) return;
     await db.query(`UPDATE changes SET ${changed.map(([k], n) => `${k} = $${n + 2}`).join(', ')} WHERE id = $1`, [current.id, ...changed.map(([, v]) => v)]);
+    if (input.assignee_id && input.assignee_id !== current.assignee_id) {
+      await notify(db, { users: [input.assignee_id], event: 'assigned', ref: current.ref, title: input.title ?? current.title, summary: 'A change was assigned to you.', path: `/changes/${current.ref}`, dedupe: `assigned:${current.ref}:${Date.now()}`, actorId: user.id });
+    }
     await logChange(db, current.id, user.id, 'update', `Updated ${changed.map(([k]) => k).join(', ')}`, Object.fromEntries(changed.map(([k, v]) => [k, { from: current[k] ?? null, to: v }])));
   });
   return getChange(user, ref);
@@ -428,6 +432,10 @@ export async function transitionChange(user: User, ref: string, input: z.infer<t
     await logChange(db, c.id, user.id, 'status', input.comment ?? input.cancel_reason ?? '', {
       from, to: input.to, ...(input.outcome ? { outcome: input.outcome } : {}), ...(input.override_freeze_reason ? { override_freeze_reason: input.override_freeze_reason } : {}),
     });
+    const path = `/changes/${c.ref}`;
+    if (input.to === 'authorize') {
+      await notify(db, { users: await managers(db, [c.created_by, c.assignee_id]), event: 'approval_needed', ref: c.ref, title: c.title, summary: `A ${c.change_type} change waits for authorisation.`, path, dedupe: `approve:${c.ref}:${Date.now()}`, actorId: user.id });
+    }
     if (c.problem_id && input.to === 'review') {
       await logActivity(db, c.problem_id, user.id, 'link', `Change ${c.ref} implemented: ${input.outcome?.replace('_', ' ')}`, { kind: 'change', reference: c.ref, outcome: input.outcome });
     }
@@ -452,6 +460,7 @@ export async function voteOnChange(user: User, ref: string, input: z.infer<typeo
     if (input.decision === 'reject') {
       await db.query("UPDATE changes SET status = 'rejected' WHERE id = $1", [c.id]);
       await logChange(db, c.id, null, 'status', 'Rejected by the change authority', { from: 'authorize', to: 'rejected' });
+      await notify(db, { users: [c.created_by], event: 'decision', ref: c.ref, title: c.title, summary: `${user.display_name} rejected the change${input.comment ? `: ${input.comment}` : ''}.`, path: `/changes/${c.ref}`, dedupe: `decision:${c.ref}:${Date.now()}`, actorId: user.id });
       return;
     }
     const { rows: cis } = await db.query('SELECT ci.ref, ci.name, ci.criticality FROM change_cis x JOIN configuration_items ci ON ci.id = x.ci_id WHERE x.change_id = $1', [c.id]);
@@ -461,6 +470,7 @@ export async function voteOnChange(user: User, ref: string, input: z.infer<typeo
     if (n[0].n >= required && c.change_type !== 'emergency') {
       await db.query("UPDATE changes SET status = 'scheduled' WHERE id = $1", [c.id]);
       await logChange(db, c.id, null, 'status', `Authorised (${n[0].n} of ${required} approvals)`, { from: 'authorize', to: 'scheduled' });
+      await notify(db, { users: [c.created_by, c.assignee_id], event: 'decision', ref: c.ref, title: c.title, summary: 'The change is authorised and scheduled.', path: `/changes/${c.ref}`, dedupe: `decision:${c.ref}:${Date.now()}`, actorId: user.id });
     }
   });
   return getChange(user, ref);

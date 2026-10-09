@@ -16,6 +16,7 @@ import * as incidents from './incidents.js';
 import * as events from './events.js';
 import * as changes from './changes.js';
 import * as sla from './sla.js';
+import * as notifications from './notifications.js';
 import * as generic from './generic.js';
 import { typeForRef } from './records.js';
 import { GUIDES, guideMarkdown } from './methods.js';
@@ -119,7 +120,7 @@ function buildServer(user: User, scopes?: string[]) {
     search_cis: 'ci.read', get_ci: 'ci.read', list_ci_types: 'ci.read', create_ci: 'ci.manage', update_ci: 'ci.manage',
     transition_ci: 'ci.manage', upsert_cis: 'ci.ingest',
     link_ci_to_problem: 'problem.link', unlink_ci_from_problem: 'problem.link',
-    list_slas: 'meta.read', get_service_catalogue: 'ci.read',
+    list_slas: 'meta.read', get_service_catalogue: 'ci.read', get_my_notifications: 'meta.read',
     list_incidents: 'incident.read', get_incident: 'incident.read', create_incident: 'incident.create', update_incident: 'incident.update',
     transition_incident: 'incident.update', resolve_incident: 'incident.update', link_incident_to_problem: 'incident.update',
     create_problem_from_incident: 'problem.create', link_ci_to_incident: 'incident.update',
@@ -484,6 +485,9 @@ function buildServer(user: User, scopes?: string[]) {
     },
   );
 
+  tool('get_my_notifications', 'My notifications: assignments, approvals waiting for me, SLA warnings, major incidents, updates on what I watch.', { unread_only: z.boolean().optional() }, true, ({ unread_only }) =>
+    notifications.listNotifications(user, !!unread_only, 50),
+  );
   tool('list_slas', 'Service level agreements: response and resolution targets per priority (business minutes) and their business-hours calendars.', {}, true, () => sla.listSlas(user));
   tool('get_service_catalogue', 'The service catalogue: services with owner, team, SLA, support hours, how to get help and open incidents.', {}, true, () => sla.serviceCatalogue(user));
 

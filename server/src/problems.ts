@@ -12,6 +12,7 @@ import { logDomainEvent } from './log.js';
 import { recordActivity } from './metrics.js';
 import { badRequest, conflict, forbidden, notFound } from './errors.js';
 import { guidanceFor } from './guidance.js';
+import { notify } from './notifications.js';
 import { enqueue as enqueueWebhooks, eventFor } from './webhooks.js';
 import { canEdit, checkTransition, CLOSURE_CODES, EC_DECISIONS, isManager, STATUSES, WORKAROUND_EFFECTIVENESS, type Status } from './workflow.js';
 
@@ -119,7 +120,7 @@ export const SELECT_ACTION = `
 
 
 export async function logActivity(db: Db, problemId: number, userId: number, kind: string, body = '', data: object = {}) {
-  await db.query('INSERT INTO problem_activity (problem_id, user_id, kind, body, data, channel) VALUES ($1, $2, $3, $4, $5, $6)', [
+  const { rows: inserted } = await db.query('INSERT INTO problem_activity (problem_id, user_id, kind, body, data, channel) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id', [
     problemId,
     userId,
     kind,
@@ -135,6 +136,20 @@ export async function logActivity(db: Db, problemId: number, userId: number, kin
   const p = rows[0];
   // The unified audit trail (#57): same transaction, full before/after values.
   await audit(db, { entity_type: 'problem', entity_ref: p?.ref ?? String(problemId), action: kind, changes: kind === 'comment' ? { body } : { ...(data as object), ...(body && kind !== 'update' ? { summary: body } : {}) } });
+  // People: watchers hear about notes and status changes (in-app by default), assignees about assignments.
+  if (p && (kind === 'comment' || kind === 'status')) {
+    const { rows: watchers } = await db.query('SELECT user_id FROM problem_watchers WHERE problem_id = $1', [problemId]);
+    const { rows: t } = await db.query('SELECT title FROM problems WHERE id = $1', [problemId]);
+    await notify(db, {
+      users: watchers.map((w) => w.user_id), event: 'watched_update', ref: p.ref, title: t[0]?.title ?? '',
+      summary: kind === 'comment' ? `${p.username ?? 'Someone'} added a note` : `Moved to ${(data as any).to?.replace('_', ' ')}`,
+      path: `/problems/${p.ref}`, dedupe: `watch:${inserted[0].id}`, actorId: userId,
+    });
+  }
+  if (p && kind === 'update' && (data as any).assignee_id?.to) {
+    const { rows: t } = await db.query('SELECT title FROM problems WHERE id = $1', [problemId]);
+    await notify(db, { users: [(data as any).assignee_id.to], event: 'assigned', ref: p.ref, title: t[0]?.title ?? '', summary: 'A problem was assigned to you.', path: `/problems/${p.ref}`, dedupe: `assigned:${p.ref}:${inserted[0].id}`, actorId: userId });
+  }
   const event = eventFor(kind, data);
   const summary = body || defaultSummary(kind, data);
   await enqueueWebhooks(db, event, problemId, userId, summary, data);
@@ -283,6 +298,9 @@ export async function createProblem(user: User, input: z.infer<typeof createProb
     await watch(db, rows[0].id, user.id);
     await watch(db, rows[0].id, input.assignee_id);
     await logActivity(db, rows[0].id, user.id, 'created', `Problem record ${rows[0].ref} logged`);
+    if (input.assignee_id) {
+      await notify(db, { users: [input.assignee_id], event: 'assigned', ref: rows[0].ref, title: input.title, summary: 'A problem was assigned to you.', path: `/problems/${rows[0].ref}`, dedupe: `assigned:${rows[0].ref}:created`, actorId: user.id });
+    }
     return rows[0].ref as string;
   });
   return getProblem(ref);

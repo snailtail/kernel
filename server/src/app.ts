@@ -21,6 +21,7 @@ import { incidentRoutes } from './routes/incidents.js';
 import { eventRoutes } from './routes/events.js';
 import { changeRoutes } from './routes/changes.js';
 import { slaRoutes } from './routes/sla.js';
+import { notificationRoutes } from './routes/notifications.js';
 import { problemRoutes } from './routes/problems.js';
 
 declare module 'fastify' {
@@ -100,6 +101,7 @@ export async function buildApp(options: { logLevel?: string; serveWeb?: boolean 
   await app.register(eventRoutes);
   await app.register(changeRoutes);
   await app.register(slaRoutes);
+  await app.register(notificationRoutes);
   await app.register(mcpRoutes);
 
   app.get('/api/openapi.json', async (req) => openApiDocument(config.publicUrl ?? `${req.protocol}://${req.host}`));
