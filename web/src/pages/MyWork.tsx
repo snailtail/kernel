@@ -1,6 +1,7 @@
 import { Link } from 'react-router';
 import { api, type Action, type ProblemDetail, type Status } from '../api';
 import { ActionList } from '../components/Actions';
+import { ApprovalDetails } from '../components/ApprovalDetails';
 import { PriorityBadge, StatusBadge } from '../components/Badges';
 import { isGuided } from '../components/Guide';
 import { relativeTime } from '../format';
@@ -12,7 +13,7 @@ interface MyWork {
   actions: Action[];
   watched_changes: { ref: string; title: string; kind: string; body: string; created_at: string; by: string | null }[];
   decisions: { ref: string; title: string; priority: number; known_error_at: string }[];
-  approvals: { id: number; ref: string; title: string; summary: string; requested_by: string; created_at: string; human_confirmation: string }[];
+  approvals: { id: number; ref: string; title: string; summary: string; payload: Record<string, unknown>; requested_by: string; created_at: string; human_confirmation: string; changed_since_request: boolean }[];
 }
 
 /** One calm place for everything that needs me, most urgent first. */
@@ -55,6 +56,7 @@ export function MyWorkPage() {
                 <div>
                   <Link to={`/problems/${a.ref}`} className="mono">{a.ref}</Link> <strong>{a.summary}</strong>
                   <div className="muted small">{a.title} · requested by {a.requested_by}'s agent {relativeTime(a.created_at)}</div>
+                  <ApprovalDetails payload={a.payload} changedSince={a.changed_since_request} />
                 </div>
                 <span className="approval-actions">
                   <button className="btn small" onClick={() => decide(a.id, false)}>Reject</button>

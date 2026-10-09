@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router';
 import { api, asConflict, type Action, type Activity, type Conflict, type LinkKind, type ProblemDetail, type Status } from '../api';
 import { MajorBadge, PriorityBadge, StatusBadge } from '../components/Badges';
 import { ActionList, ActionModal } from '../components/Actions';
+import { ApprovalDetails } from '../components/ApprovalDetails';
 import { AnalysesSection } from '../components/Analyses';
 import { GuidePanel } from '../components/Guide';
 import { SimilarProblems } from '../components/Similar';
@@ -103,6 +104,7 @@ export function ProblemPage() {
                 Requested by {a.requested_by}'s AI agent via {a.requested_via.toUpperCase()} {relativeTime(a.created_at)}
                 {a.human_confirmation && <> · the agent reported: “{a.human_confirmation}”</>}
               </div>
+              <ApprovalDetails payload={a.payload} changedSince={a.changed_since_request} />
             </div>
             <div className="approval-actions">
               <button className="btn small" onClick={async () => { try { setData(await api.post<ProblemDetail>(`/api/approvals/${a.id}/reject`, {})); } catch (err) { setActionError((err as Error).message); } }}>Reject</button>

@@ -41,10 +41,19 @@ export async function requestApproval(user: User, ref: string, kind: ApprovalKin
   };
 }
 
+const EXPIRE_DAYS = 14;
+
+/** Marks requests older than 14 days as expired (they are probably no longer what anyone wants). */
+export async function expireApprovals() {
+  await query(`UPDATE pending_approvals SET status = 'expired' WHERE status = 'pending' AND created_at < now() - $1 * interval '1 day'`, [EXPIRE_DAYS]);
+}
+
 export async function listApprovals(ref?: string) {
+  await expireApprovals();
   const { rows } = await query(
-    `SELECT a.id, p.ref, p.title, a.kind, a.summary, a.status, a.human_confirmation, a.created_at, a.requested_via,
-            ru.display_name AS requested_by, du.display_name AS decided_by, a.decided_at, a.result
+    `SELECT a.id, p.ref, p.title, a.kind, a.summary, a.payload, a.status, a.human_confirmation, a.created_at, a.requested_via,
+            ru.display_name AS requested_by, du.display_name AS decided_by, a.decided_at, a.result,
+            p.updated_at > a.created_at AS changed_since_request
      FROM pending_approvals a JOIN problems p ON p.id = a.problem_id
      JOIN users ru ON ru.id = a.requested_by LEFT JOIN users du ON du.id = a.decided_by
      WHERE ${ref ? 'p.ref = $1' : "a.status = 'pending'"} ORDER BY a.created_at DESC LIMIT 100`,
@@ -56,16 +65,25 @@ export async function listApprovals(ref?: string) {
 /** A person approves or rejects in the web UI (never through a token or MCP). */
 export async function decideApproval(req: FastifyRequest, user: User, id: number, approve: boolean, note?: string) {
   if (req.headers.authorization) throw forbidden('Approvals are decided by a person in the web UI');
+  await expireApprovals();
+  const { rows: found } = await query('SELECT a.kind FROM pending_approvals a WHERE a.id = $1', [id]);
+  if (!found[0]) throw notFound('Approval not found');
+  authorize(user, ACTION[found[0].kind as ApprovalKind]);
+  // Claim atomically: a double click or two approvers can never carry out the same decision twice.
   const { rows } = await query(
-    `SELECT a.*, p.ref FROM pending_approvals a JOIN problems p ON p.id = a.problem_id WHERE a.id = $1`,
-    [id],
+    `UPDATE pending_approvals a SET status = 'processing', decided_by = $2, decided_at = now()
+     FROM problems p WHERE a.id = $1 AND a.status = 'pending' AND p.id = a.problem_id
+     RETURNING a.*, p.ref`,
+    [id, user.id],
   );
   const a = rows[0];
-  if (!a) throw notFound('Approval not found');
-  if (a.status !== 'pending') throw conflict(`Already ${a.status}`);
-  authorize(user, ACTION[a.kind as ApprovalKind]);
+  if (!a) {
+    const { rows: current } = await query('SELECT status FROM pending_approvals WHERE id = $1', [id]);
+    throw conflict(`This request is already ${current[0].status}`);
+  }
+  const finish = (status: string, result: string) => query('UPDATE pending_approvals SET status = $2, result = $3 WHERE id = $1', [id, status, result]);
   if (!approve) {
-    await query(`UPDATE pending_approvals SET status = 'rejected', decided_by = $2, decided_at = now(), result = $3 WHERE id = $1`, [id, user.id, note ?? '']);
+    await finish('rejected', note ?? '');
     await audit(null, { entity_type: 'problem', entity_ref: a.ref, action: 'approval_rejected', changes: { approval_id: id, kind: a.kind }, reason: note });
     return getProblem(a.ref);
   }
@@ -76,12 +94,12 @@ export async function decideApproval(req: FastifyRequest, user: User, id: number
     else if (a.kind === 'risk_decision') await assessProblem(user, a.ref, assessmentSchema.parse(a.payload));
     else await markDuplicate(user, a.ref, a.payload.of);
   } catch (err) {
-    await query(`UPDATE pending_approvals SET status = 'failed', decided_by = $2, decided_at = now(), result = $3 WHERE id = $1`, [id, user.id, (err as Error).message]);
+    await finish('failed', (err as Error).message);
     throw err;
   }
-  await query(`UPDATE pending_approvals SET status = 'approved', decided_by = $2, decided_at = now(), result = $3 WHERE id = $1`, [id, user.id, note ?? '']);
+  await finish('approved', note ?? '');
   await audit(null, { entity_type: 'problem', entity_ref: a.ref, action: 'approval_approved', changes: { approval_id: id, kind: a.kind }, reason });
-  return getProblem(a.payload.of && a.kind === 'mark_duplicate' ? a.payload.of : a.ref);
+  return getProblem(a.kind === 'mark_duplicate' ? a.payload.of : a.ref);
 }
 
 export const decisionSchema = z.object({ note: z.string().max(1000).optional() });

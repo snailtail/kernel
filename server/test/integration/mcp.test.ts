@@ -194,7 +194,15 @@ describe('MCP server', { skip }, () => {
     assert.notEqual((await pm.get(`/api/problems/${p.ref}`)).body.status, 'closed', 'not closed until approved');
     const bearer = new Client(k.base, await k.tokenFor('pm'));
     assert.equal((await bearer.post(`/api/approvals/${requested.data.pending_approval}/approve`, {})).status, 403, 'approvals need a person in the web UI');
-    const rejected = await pm.post(`/api/approvals/${requested.data.pending_approval}/reject`, { note: 'Not yet' });
+    const pending = (await pm.get(`/api/problems/${p.ref}`)).body.pending_approvals[0];
+    assert.equal(pending.payload.closure_code, 'cancelled', 'the approver sees exactly what will be written');
+    // Two approvers at once: only one wins.
+    const [r1, r2] = await Promise.all([
+      pm.post(`/api/approvals/${requested.data.pending_approval}/reject`, { note: 'Not yet' }),
+      pm.post(`/api/approvals/${requested.data.pending_approval}/reject`, { note: 'Not yet' }),
+    ]);
+    assert.deepEqual([r1.status, r2.status].sort(), [200, 409]);
+    const rejected = r1.status === 200 ? r1 : r2;
     assert.notEqual(rejected.body.status, 'closed');
     assert.equal((await pm.post(`/api/approvals/${requested.data.pending_approval}/approve`, {})).status, 409);
     const tools = (await mcp.listTools()).tools;
