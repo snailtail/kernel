@@ -33,6 +33,7 @@ const ApiDocsPage = lazy(() => import('./pages/ApiDocs').then((m) => ({ default:
 const GuidePage = lazy(() => import('./pages/Guide').then((m) => ({ default: m.GuidePage })));
 const KnowledgePage = lazy(() => import('./pages/Knowledge').then((m) => ({ default: m.KnowledgePage })));
 const ArticlePage = lazy(() => import('./pages/Knowledge').then((m) => ({ default: m.ArticlePage })));
+const TeamsPage = lazy(() => import('./pages/Teams').then((m) => ({ default: m.TeamsPage })));
 const PeoplePage = lazy(() => import('./pages/People').then((m) => ({ default: m.PeoplePage })));
 const PersonPage = lazy(() => import('./pages/People').then((m) => ({ default: m.PersonPage })));
 const AuditPage = lazy(() => import('./pages/Audit').then((m) => ({ default: m.AuditPage })));
@@ -132,6 +133,7 @@ export function App() {
             {on('knowledge') && <NavLink to="/knowledge">{icons.knowledge}Knowledge</NavLink>}
             <NavLink to="/actions">{icons.actions}Actions</NavLink>
             {on('cmdb') && <NavLink to="/cis">{icons.cmdb}CMDB</NavLink>}
+            {on('incident') && <NavLink to="/teams">{icons.teams}Teams</NavLink>}
             {on('incident') && <NavLink to="/people">{icons.people}People</NavLink>}
             <NavLink to="/review">{icons.review}Review</NavLink>
             <NavLink to="/reports">{icons.reports}Reports</NavLink>
@@ -175,6 +177,7 @@ export function App() {
             <Route path="/cis/:ref" element={<CiPage />} />
             <Route path="/knowledge" element={<KnowledgePage />} />
             <Route path="/knowledge/:ref" element={<ArticlePage />} />
+            <Route path="/teams" element={<TeamsPage />} />
             <Route path="/people" element={<PeoplePage />} />
             <Route path="/people/:id" element={<PersonPage />} />
             <Route path="/actions" element={<ActionsPage />} />

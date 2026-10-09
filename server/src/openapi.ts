@@ -15,6 +15,7 @@ import * as notif from './notifications.js';
 import * as setupMod from './setup.js';
 import * as ppl from './people.js';
 import * as kb from './knowledge.js';
+import * as tm from './teams.js';
 import * as hooks from './event-hooks.js';
 import { auditQuerySchema } from './audit.js';
 import { searchSchema } from './generic.js';
@@ -132,6 +133,12 @@ export const OPERATIONS: Op[] = [
   { method: 'get', path: '/api/templates', tag: 'Reference data', summary: 'Templates for new incidents and problems' },
   { method: 'post', path: '/api/templates', tag: 'Reference data', summary: 'Create a template (problem managers)', body: setupMod.templateSchema },
   { method: 'put', path: '/api/templates/:id', tag: 'Reference data', summary: 'Update a template', body: setupMod.templateSchema },
+  { method: 'get', path: '/api/teams', tag: 'Teams', summary: 'Teams with members, the services and CIs they support, and their open work' },
+  { method: 'post', path: '/api/teams', tag: 'Teams', summary: 'Create a team (administrators)', body: tm.teamSchema },
+  { method: 'put', path: '/api/teams/:id', tag: 'Teams', summary: 'Update a team; deactivating needs its open work reassigned first', body: tm.teamSchema },
+  { method: 'delete', path: '/api/teams/:id', tag: 'Teams', summary: 'Remove a team without open work' },
+  { method: 'put', path: '/api/teams/:id/members', tag: 'Teams', summary: 'Set the members and leads (administrators, or the team lead)', body: tm.membersSchema },
+  { method: 'get', path: '/api/teams/:id/queue', tag: 'Teams', summary: "A team's queue: unassigned, mine and at risk of breaching" },
   { method: 'get', path: '/api/articles', tag: 'Knowledge', summary: 'Search knowledge articles (published by default; drafts for roles that write articles)', query: kb.listArticlesSchema },
   { method: 'post', path: '/api/articles', tag: 'Knowledge', summary: 'Draft an article', body: kb.createArticleSchema },
   { method: 'get', path: '/api/articles/:ref', tag: 'Knowledge', summary: 'An article with its CIs, history, feedback and where it was used' },

@@ -1,6 +1,7 @@
 // Cross-practice operations over the record type registry: one predictable surface for agents and scripts.
 import { z } from 'zod';
 import { linkArticleCi } from './knowledge.js';
+import { myTeams } from './teams.js';
 import type { User } from './auth.js';
 import { query } from './db.js';
 import { badRequest } from './errors.js';
@@ -131,7 +132,17 @@ export async function myWork(user: User) {
       : Promise.resolve({ rows: [] as any[] }),
   ]);
   const problemType = recordTypes().find((t) => t.type === 'problem')!;
+  const teams = can(user.role, 'team.read') ? await myTeams(user.id) : [];
+  const teamQueue = can(user.role, 'incident.read') && teams.length
+    ? (await query(
+        `SELECT i.ref, i.title, i.status, i.priority, i.is_major, i.created_at, i.team_id, t.name AS team FROM incidents i JOIN teams t ON t.id = i.team_id
+         WHERE i.assignee_id IS NULL AND i.status NOT IN ('resolved', 'closed') AND i.team_id = ANY($1) ORDER BY i.priority, i.created_at LIMIT 50`,
+        [teams.map((t) => t.id)],
+      )).rows
+    : [];
   return {
+    teams,
+    team_queue: teamQueue,
     problems: problems.rows.map((p) => ({ type: 'problem', ...p, url: recordUrl(problemType, p.ref) })),
     incidents: incidents.rows,
     change_votes: changeVotes.rows,

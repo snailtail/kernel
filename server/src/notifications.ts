@@ -18,6 +18,7 @@ import { formatBody } from './webhooks.js';
 /** The events people can be notified about, with quiet defaults per channel. */
 export const EVENTS = {
   assigned: { label: 'Something is assigned to me', email: true, chat: true },
+  team_queue: { label: "New work in my team's queue (no one assigned yet)", email: false, chat: true },
   approval_needed: { label: 'Something waits for my approval', email: true, chat: true },
   decision: { label: 'A decision on something I requested', email: true, chat: false },
   sla_breach: { label: 'An SLA is breached on my incident', email: true, chat: true },

@@ -1056,3 +1056,16 @@ tr.total td { border-bottom: 2px solid var(--border-strong); }
 .article-body { font-size: 1rem; line-height: 1.6; }
 .warn-badge { background: var(--s-known-bg); color: var(--s-known); margin-left: 6px; }
 .kb-suggest ul { margin: 4px 0 0; }
+/* Teams (#42) */
+.teams-layout { display: grid; grid-template-columns: minmax(220px, 280px) 1fr; gap: 16px; align-items: start; }
+@media (max-width: 800px) { .teams-layout { grid-template-columns: 1fr; } }
+.team-list ul { margin: 0; }
+.team-item { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; text-align: left; padding: 10px 16px; border: 0; border-bottom: 1px solid var(--border); background: none; color: var(--text); font: inherit; cursor: pointer; }
+.team-item:hover { background: var(--surface-2); }
+.team-item.on { background: var(--accent-soft); }
+.team-name { font-weight: 600; display: flex; gap: 6px; align-items: center; }
+.team-detail { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.queue-tabs { padding: 8px 12px 0; }
+.row-risk td:first-child { box-shadow: inset 3px 0 0 var(--danger); }
+.members-list { display: flex; flex-direction: column; gap: 6px; max-height: 50vh; overflow: auto; }
+.member-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }

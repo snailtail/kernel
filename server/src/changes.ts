@@ -1,6 +1,7 @@
 // Change enablement (#29): maximise successful changes by assessing risk, authorising, scheduling without collisions
 // or freezes, and reviewing. Problems raise changes for their permanent fix; incidents on CIs shortly after a change on
 // what they depend on are flagged as possibly change-related.
+import { checkAssigneeInTeam, validTeam } from './teams.js';
 import { z } from 'zod';
 import type { User } from './auth.js';
 import { audit } from './audit.js';
@@ -46,6 +47,7 @@ export const changeFields = {
   implementation_plan: text,
   test_plan: text,
   backout_plan: text,
+  team_id: z.number().int().nullable(),
   assignee_id: z.number().int().nullable(),
 };
 export const createChangeSchema = z
@@ -161,7 +163,7 @@ async function conflictsFor(changeId: number, start: string | Date | null, end: 
 // ---- Reading -----------------------------------------------------------------------------------
 
 const SELECT_CHANGE = `
-  SELECT c.*, a.display_name AS assignee, r.display_name AS requested_by, p.ref AS problem_ref, p.title AS problem_title, p.status AS problem_status,
+  SELECT c.*, a.display_name AS assignee, (SELECT name FROM teams WHERE id = c.team_id) AS team, r.display_name AS requested_by, p.ref AS problem_ref, p.title AS problem_title, p.status AS problem_status,
          t.name AS template
   FROM changes c LEFT JOIN users a ON a.id = c.assignee_id LEFT JOIN users r ON r.id = c.created_by
   LEFT JOIN problems p ON p.id = c.problem_id LEFT JOIN change_templates t ON t.id = c.template_id`;
@@ -325,6 +327,8 @@ export async function createChange(user: User, input: z.infer<typeof createChang
   const { cis, problem, template_id, ...fields } = input;
   const ref = await tx(async (db) => {
     await validateAssignee(db, fields.assignee_id);
+    await validTeam(db, fields.team_id);
+    await checkAssigneeInTeam(db, fields.team_id, fields.assignee_id);
     let values: Record<string, unknown> = { ...fields };
     if (template_id) {
       const t = await checkTemplateScope(user, template_id, cis ?? [], fields.planned_start ?? null, fields.planned_end ?? null);
@@ -379,6 +383,8 @@ export async function updateChange(user: User, ref: string, { base, ...input }: 
     if (input.change_type === 'standard' && !current.template_id) throw badRequest('A standard change needs a pre-approved template');
     if (input.change_type && current.template_id && input.change_type !== 'standard') throw badRequest('A change from a standard template stays standard');
     await validateAssignee(db, input.assignee_id);
+    await validTeam(db, input.team_id);
+    await checkAssigneeInTeam(db, input.team_id !== undefined ? input.team_id : current.team_id, input.assignee_id !== undefined ? input.assignee_id : current.assignee_id);
     const changed = Object.entries(input).filter(([k, v]) => v !== undefined && norm(k, current[k]) !== norm(k, v));
     if (!changed.length) return;
     await db.query(`UPDATE changes SET ${changed.map(([k], n) => `${k} = $${n + 2}`).join(', ')} WHERE id = $1`, [current.id, ...changed.map(([, v]) => v)]);
