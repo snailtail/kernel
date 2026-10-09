@@ -71,10 +71,20 @@ Changing a record's visibility needs a reason and is audited. So are the setting
   records whose text carries a random marker, then calls every GET route in the OpenAPI document and every read-only
   MCP tool and resource as people who may not see them.
 - Tests run Kernel as the least-privilege role, as production does. The few tamper tests use an owner connection.
-- A superuser or the schema owner bypasses RLS, as they bypass everything else. Database access remains a
-  trust boundary (see the security status).
-- Performance: unrestricted, unscoped rows return early from the policy function. Restricted rows have partial
-  indexes. Team ids travel in the viewer string, so policies need no per-row membership lookup. If very large
-  installations need it, the function can be inlined into the policy.
+- A superuser or the schema owner bypasses RLS, as they bypass everything else. Also, any SQL the app role runs can
+  call `set_config` on the viewer, so an SQL injection would bypass RLS as well. That is accepted: all SQL is
+  parameterised, and Semgrep (`.semgrep/kernel.yml`) rejects SQL built from input.
+- Performance: the policies inline the common cases.
+  - An unrestricted row in a practice that is not team-scoped for the viewer is visible at once.
+  - Team-scoped work compares team ids from `kernel.teams` and `kernel.uid`. These are set together with the viewer
+    in one round trip, so there is no per-row lookup or parsing.
+  - Only restricted rows call `kernel_can_see()`, and they have partial indexes.
+  - Measured on 100,000 incidents (1 % restricted), median of repeated runs through the development tunnel:
+
+    | Query | system | analyst | analyst, incidents team-scoped |
+    |---|---|---|---|
+    | count(*) of open incidents | 46 ms | 61 ms (1.3×) | 80–87 ms (1.8×) |
+    | 200 newest | 68 ms | 73 ms (1.1×) | 95 ms (1.4×) |
+    | full-text search | 47–50 ms | 62 ms (1.3×) | 86–90 ms (1.8×) |
 - Organisation scoping for customer contacts (the portal, #45) builds on the same mechanism and is not part of this
   change.
