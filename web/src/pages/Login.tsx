@@ -7,7 +7,8 @@ export function LoginPage({ onLogin }: { onLogin: (user: User) => void }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [challenge, setChallenge] = useState<string | null>(null);
+  // After SSO or Cloudflare Access, accounts with two-factor authentication still enter their code (?mfa=…).
+  const [challenge, setChallenge] = useState<string | null>(() => new URLSearchParams(window.location.search).get('mfa'));
   const [code, setCode] = useState('');
   const [options, setOptions] = useState<{ sso: { label: string } | null; cf_access: boolean; local_login: 'all' | 'admins' } | null>(null);
   useEffect(() => {
@@ -16,8 +17,9 @@ export function LoginPage({ onLogin }: { onLogin: (user: User) => void }) {
       // Behind Cloudflare Access, people have signed in already: start a Kernel session from its token.
       if (o.cf_access) {
         try {
-          await api.post('/api/auth/access', {});
-          onLogin(await api.get<User>('/api/auth/me'));
+          const r = await api.post<{ ok?: boolean; mfa_required?: boolean; mfa_token?: string }>('/api/auth/access', {});
+          if (r.mfa_required) setChallenge(r.mfa_token!);
+          else onLogin(await api.get<User>('/api/auth/me'));
         } catch {
           // no Access token (or no account): the other options remain
         }
@@ -33,6 +35,7 @@ export function LoginPage({ onLogin }: { onLogin: (user: User) => void }) {
     try {
       if (challenge) {
         onLogin(await api.post<User>('/api/auth/login/mfa', { mfa_token: challenge, code }));
+        window.history.replaceState(null, '', window.location.pathname);
       } else {
         const res = await api.post<User & { mfa_required?: boolean; mfa_token?: string }>('/api/auth/login', { username, password });
         if (res.mfa_required) setChallenge(res.mfa_token!);

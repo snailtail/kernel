@@ -13,6 +13,8 @@ describe('single sign-on (#41)', { skip }, () => {
   const pending = new Map<string, { challenge: string; nonce: string }>();
   let identity: Record<string, unknown> = {};
   let nonceOverride: string | null = null;
+  let accessKey: CryptoKey;
+  let certs: Server;
 
   before(async () => {
     process.env.KERNEL_SECRET_KEY = 'sso-test-key-0123456789abcdefghijklmnop';
@@ -46,13 +48,21 @@ describe('single sign-on (#41)', { skip }, () => {
     });
     await new Promise<void>((r) => idp.listen(0, '127.0.0.1', () => r()));
     issuer = `http://127.0.0.1:${(idp.address() as AddressInfo).port}`;
+    // Keys for signed Cloudflare Access tokens, served locally (KERNEL_TEST_CF_CERTS_URL).
+    const access = await generateKeyPair('RS256');
+    accessKey = access.privateKey;
+    const accessJwk = { ...(await exportJWK(access.publicKey)), kid: 'k1', alg: 'RS256', use: 'sig' };
+    certs = createServer((_req, res) => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ keys: [accessJwk] })); });
+    await new Promise<void>((r) => certs.listen(0, '127.0.0.1', () => r()));
+    process.env.KERNEL_TEST_CF_CERTS_URL = `http://127.0.0.1:${(certs.address() as AddressInfo).port}/certs`;
     k = await startKernel();
     [admin, analyst] = await Promise.all([k.login('admin'), k.login('analyst')]);
   });
   after(async () => {
-    for (const v of ['KERNEL_SECRET_KEY', 'KERNEL_OUTBOUND_ALLOW', 'KERNEL_PUBLIC_URL']) delete process.env[v];
+    for (const v of ['KERNEL_SECRET_KEY', 'KERNEL_OUTBOUND_ALLOW', 'KERNEL_PUBLIC_URL', 'KERNEL_TEST_CF_CERTS_URL']) delete process.env[v];
     await k?.close();
     idp?.close();
+    certs?.close();
   });
 
   /** The browser's part: start, "sign in" at the provider, come back with a code. */
@@ -122,6 +132,37 @@ describe('single sign-on (#41)', { skip }, () => {
     assert.equal((await new Client(k.base).post('/api/auth/login', { username: 'admin', password: 'correct horse battery' })).status, 200);
   });
 
+  test('the provider\'s MFA is not trusted by default, and only with evidence in the ID token', async () => {
+    const { query } = await import('../../src/db.js');
+    assert.equal((await query("SELECT value->>'trust_idp_mfa' AS t FROM settings WHERE key = 'sso'")).rows[0].t, 'false');
+    await admin.put('/api/admin/mfa-policy', { required_roles: ['problem_manager'], reason: 'Managers need two factors' });
+    await admin.put('/api/admin/sso', { enabled: true, issuer, client_id: 'kernel', role_map: [{ group: 'kernel-pm', role: 'problem_manager' }], trust_idp_mfa: true, reason: 'Trust Entra MFA with evidence' });
+    const without = await signIn({ sub: 'u-300', email: 'p1@example.com', name: 'P One', groups: ['kernel-pm'], amr: ['pwd'] });
+    const c1 = without.res.headers.getSetCookie().find((c) => c.startsWith('kernel_session='))!.split(';')[0];
+    const blocked = await fetch(`${k.base}/api/problems`, { headers: { Cookie: c1 } });
+    assert.equal(blocked.status, 403, 'no amr "mfa": Kernel asks for its own second factor');
+    const withMfa = await signIn({ sub: 'u-301', email: 'p2@example.com', name: 'P Two', groups: ['kernel-pm'], amr: ['pwd', 'mfa'] });
+    const c2 = withMfa.res.headers.getSetCookie().find((c) => c.startsWith('kernel_session='))!.split(';')[0];
+    assert.equal((await fetch(`${k.base}/api/problems`, { headers: { Cookie: c2 } })).status, 200);
+    await admin.put('/api/admin/mfa-policy', { required_roles: [], reason: 'Back' });
+  });
+
+  test('a step-up callback with an old authentication time is refused', async () => {
+    identity = { sub: 'u-302', email: 'p3@example.com', name: 'P Three', groups: ['kernel-pm'], auth_time: Math.floor(Date.now() / 1000) - 3600 };
+    const start = await fetch(`${k.base}/api/auth/sso/start?prompt=login`, { redirect: 'manual' });
+    const auth = new URL(start.headers.get('location')!);
+    assert.equal(auth.searchParams.get('prompt'), 'login');
+    const code = 'stepup-old';
+    pending.set(code, { challenge: auth.searchParams.get('code_challenge')!, nonce: auth.searchParams.get('nonce')! });
+    const res = await fetch(`${k.base}/api/auth/sso/callback?code=${code}&state=${auth.searchParams.get('state')}&iss=${encodeURIComponent(issuer)}`, { redirect: 'manual' });
+    assert.equal(res.status, 401);
+    identity = { ...identity, auth_time: Math.floor(Date.now() / 1000) };
+    const start2 = await fetch(`${k.base}/api/auth/sso/start?prompt=login`, { redirect: 'manual' });
+    const auth2 = new URL(start2.headers.get('location')!);
+    pending.set('stepup-new', { challenge: auth2.searchParams.get('code_challenge')!, nonce: auth2.searchParams.get('nonce')! });
+    assert.equal((await fetch(`${k.base}/api/auth/sso/callback?code=stepup-new&state=${auth2.searchParams.get('state')}&iss=${encodeURIComponent(issuer)}`, { redirect: 'manual' })).status, 302);
+  });
+
   test('Cloudflare Access sign-in is off until configured and needs a valid token', async () => {
     assert.equal((await fetch(`${k.base}/api/auth/access`, { method: 'POST' })).status, 404);
     assert.equal((await admin.put('/api/admin/cf-access', { enabled: true, team_domain: 'evil.example.com', audience: 'x'.repeat(20), reason: 'x' })).status, 400);
@@ -129,5 +170,25 @@ describe('single sign-on (#41)', { skip }, () => {
     assert.equal((await fetch(`${k.base}/api/auth/access`, { method: 'POST', headers: { 'Cf-Access-Jwt-Assertion': 'x' } })).status, 403, 'same-origin only');
     assert.equal((await fetch(`${k.base}/api/auth/access`, { method: 'POST', headers: { 'X-Kernel-Request': '1' } })).status, 401);
     assert.equal((await fetch(`${k.base}/api/auth/access`, { method: 'POST', headers: { 'X-Kernel-Request': '1', 'Cf-Access-Jwt-Assertion': 'not.a.jwt' } })).status, 401);
+  });
+
+  test('Cloudflare Access is only a first factor: TOTP accounts get the challenge, local admins are not opened', async () => {
+    const { query } = await import('../../src/db.js');
+    const access = async (email: string) => {
+      const token = await new SignJWT({ email }).setProtectedHeader({ alg: 'RS256', kid: 'k1' }).setIssuer('https://acme.cloudflareaccess.com').setAudience('a'.repeat(64)).setExpirationTime('5m').sign(accessKey);
+      return fetch(`${k.base}/api/auth/access`, { method: 'POST', headers: { 'X-Kernel-Request': '1', 'Cf-Access-Jwt-Assertion': token } }).then(async (r) => ({ status: r.status, body: await r.json() as any, cookies: r.headers.getSetCookie() }));
+    };
+    await query("UPDATE users SET email = 'analyst@example.com' WHERE username = 'analyst'");
+    await query("UPDATE users SET email = 'admin@example.com' WHERE username = 'admin'");
+    const plain = await access('analyst@example.com');
+    assert.equal(plain.status, 200);
+    assert.ok(plain.cookies.some((c) => c.startsWith('kernel_session=')));
+    const adminTry = await access('admin@example.com');
+    assert.equal(adminTry.status, 403, 'the break-glass administrator is not opened by Access');
+    await query("UPDATE users SET mfa_enabled_at = now(), mfa_secret = 'x' WHERE username = 'analyst'");
+    const withTotp = await access('analyst@example.com');
+    assert.equal(withTotp.body.mfa_required, true, 'a TOTP account gets the challenge, not a session');
+    assert.ok(!withTotp.cookies.some((c) => c.startsWith('kernel_session=')));
+    await query("UPDATE users SET mfa_enabled_at = NULL, mfa_secret = NULL WHERE username = 'analyst'");
   });
 });
