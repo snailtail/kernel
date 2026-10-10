@@ -51,6 +51,9 @@ class Stream {
   close() { this.ctrl.abort(); }
 }
 
+/** Setup calls must succeed: a refused setup would make a test of absence pass for the wrong reason. */
+const ok = (r: { status: number; body: unknown }) => assert.ok(r.status >= 200 && r.status < 300, `${r.status} ${JSON.stringify(r.body)}`);
+
 describe('live updates (#70)', { skip }, () => {
   let k: Harness;
   let analyst: Client, analyst2: Client, viewer: Client, pm: Client, admin: Client;
@@ -79,7 +82,7 @@ describe('live updates (#70)', { skip }, () => {
     const b = await stream(viewer);
     assert.equal((await analyst.put(`/api/live/${a.id}`, { topics: [`problem:${p.id}`] })).status, 200);
     assert.equal((await viewer.put(`/api/live/${b.id}`, { topics: ['problem:*'] })).status, 200);
-    await pm.post(`/api/problems/${p.ref}/comments`, { body: 'Seen live' });
+    ok(await pm.post(`/api/problems/${p.ref}/comments`, { body: 'Seen live' }));
     assert.ok(await a.waitFor(() => a.changes('problem', p.id) > 0), 'the record page hears about the comment');
     assert.ok(await b.waitFor(() => b.changes('problem', p.id) > 0), 'the list hears about it too');
     const ev = a.events.find((e) => e.event === 'change')!;
@@ -91,31 +94,34 @@ describe('live updates (#70)', { skip }, () => {
   test('nobody hears about a restricted record they cannot see, not even that it changed', async () => {
     const sec = (await admin.post('/api/teams', { name: 'Live security' })).body;
     const ids = Object.fromEntries((await admin.get('/api/users')).body.map((u: any) => [u.username, u.id]));
-    await admin.put(`/api/teams/${sec.id}/members`, { members: [{ user_id: ids.analyst, role: 'lead' }] });
+    assert.equal((await admin.put(`/api/teams/${sec.id}/members`, { members: [{ user_id: ids.analyst, role: 'lead' }] })).status, 200);
     const p = (await analyst.post('/api/problems', { title: 'Secret live problem' })).body;
+    const open = (await analyst.post('/api/problems', { title: 'Ordinary live problem' })).body;
     assert.equal((await analyst.put(`/api/records/${p.ref}/visibility`, { restricted: true, teams: [sec.id], reason: 'Security investigation' })).status, 200);
     const a = await stream(analyst);
     const b = await stream(viewer);
-    await analyst.put(`/api/live/${a.id}`, { topics: ['problem:*', `problem:${p.id}`] });
+    assert.equal((await analyst.put(`/api/live/${a.id}`, { topics: ['problem:*', `problem:${p.id}`] })).status, 200);
     const sub = (await viewer.put(`/api/live/${b.id}`, { topics: ['problem:*', `problem:${p.id}`] })).body;
     assert.deepEqual(sub.topics, ['problem:*'], 'a record topic the user cannot see is dropped');
-    await analyst.post(`/api/problems/${p.ref}/comments`, { body: 'Only for the team' });
-    assert.ok(await a.waitFor(() => a.changes('problem', p.id) > 0));
-    await new Promise((r) => setTimeout(r, 600));
-    assert.equal(b.changes('problem', p.id), 0, 'the list follower never learns the record exists');
+    ok(await analyst.post(`/api/problems/${p.ref}/comments`, { body: 'Only for the team' }));
+    ok(await analyst.post(`/api/problems/${open.ref}/comments`, { body: 'For everyone' }));
+    assert.ok(await a.waitFor(() => a.changes('problem', p.id) > 0), 'the team member hears about the restricted record');
+    // Positive control: the same list stream does receive changes it may see, in the same window.
+    assert.ok(await b.waitFor(() => b.changes('problem', open.id) > 0), 'the viewer\'s stream works');
+    assert.equal(b.changes('problem', p.id), 0, 'the list follower never learns the restricted record exists');
   });
 
   test('presence: who else has the record open, only for those who can see it, and opt-out', async () => {
     const p = (await pm.post('/api/problems', { title: 'Presence problem' })).body;
     const a = await stream(analyst);
     const m = await stream(pm);
-    await analyst.put(`/api/live/${a.id}`, { topics: [`problem:${p.id}`] });
-    await pm.put(`/api/live/${m.id}`, { topics: [`problem:${p.id}`], editing: `problem:${p.id}` });
+    assert.equal((await analyst.put(`/api/live/${a.id}`, { topics: [`problem:${p.id}`] })).status, 200);
+    assert.equal((await pm.put(`/api/live/${m.id}`, { topics: [`problem:${p.id}`], editing: `problem:${p.id}` })).status, 200);
     const seen = () => a.events.filter((e) => e.event === 'presence' && e.data.topic === `problem:${p.id}`).at(-1)?.data.people ?? [];
     assert.ok(await a.waitFor(() => seen().some((x: any) => x.editing)), JSON.stringify(a.events));
     assert.equal(seen().length, 1);
     // Opting out: the problem manager disappears from others' view on the next subscription.
-    await pm.put('/api/auth/preferences', { live_presence: false });
+    assert.equal((await pm.put('/api/auth/preferences', { live_presence: false })).status, 200);
     const m2 = await stream(pm);
     m.close();
     await pm.put(`/api/live/${m2.id}`, { topics: [`problem:${p.id}`] });
@@ -142,7 +148,7 @@ describe('live updates (#70)', { skip }, () => {
     assert.equal((await admin.put(`/api/teams/${team.id}/members`, { members: [{ user_id: ids.analyst, role: 'lead' }] })).status, 200);
     assert.ok(await a.waitFor(() => seenByA().length === 0), 'the colleague no longer shows as present');
     const before = b.changes('problem', p.id);
-    await analyst.post(`/api/problems/${p.ref}/comments`, { body: 'After the colleague left' });
+    ok(await analyst.post(`/api/problems/${p.ref}/comments`, { body: 'After the colleague left' }));
     assert.ok(await a.waitFor(() => a.changes('problem', p.id) > 0));
     await new Promise((r) => setTimeout(r, 600));
     assert.equal(b.changes('problem', p.id), before, 'nothing more reaches the former member');
