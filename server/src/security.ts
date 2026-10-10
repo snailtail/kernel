@@ -58,7 +58,8 @@ export async function registerSecurity(app: FastifyInstance<any, any, any, any>)
   });
   app.addHook('onSend', async (req, reply) => {
     reply.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()');
-    if (req.url.startsWith('/api/') || req.url.startsWith('/mcp')) reply.header('Cache-Control', 'no-store');
+    // Everything is private and uncached, except the public status page (cacheable, published data only).
+    if ((req.url.startsWith('/api/') && !req.url.startsWith('/api/public/')) || req.url.startsWith('/mcp')) reply.header('Cache-Control', 'no-store');
   });
 
   // Browsers report CSP violations here; they are logged as security events.

@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { statusRoutes } from './routes/status.js';
 import { viewerFor } from './visibility.js';
 import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
@@ -78,7 +79,7 @@ export async function buildApp(options: { logLevel?: string; serveWeb?: boolean 
   app.addHook('onRequest', async (req) => {
     // Event hooks authenticate with their own source token (event-hooks.ts), never as a user.
     // Event and dev platform hooks authenticate with their own token or signature, never as a user.
-    if ((req.url.startsWith('/api/') && !req.url.startsWith('/api/event-hooks/') && !req.url.startsWith('/api/dev-hooks/')) || req.url.startsWith('/mcp')) await authenticate(req);
+    if ((req.url.startsWith('/api/') && !req.url.startsWith('/api/event-hooks/') && !req.url.startsWith('/api/dev-hooks/') && !req.url.startsWith('/api/public/')) || req.url.startsWith('/mcp')) await authenticate(req);
   });
   // Who is acting and how, for the audit trail; the rest of the request runs inside this context.
   app.addHook('onRequest', (req, _reply, done) => {
@@ -129,6 +130,7 @@ export async function buildApp(options: { logLevel?: string; serveWeb?: boolean 
   await app.register(devRoutes);
   await app.register(aiRoutes);
   await app.register(mcpRoutes);
+  await app.register(statusRoutes);
 
   app.get('/api/openapi.json', async (req) => openApiDocument(config.publicUrl ?? `${req.protocol}://${req.host}`));
 

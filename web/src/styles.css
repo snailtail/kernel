@@ -1085,3 +1085,11 @@ tr.total td { border-bottom: 2px solid var(--border-strong); }
 .ai-output { border: 1px dashed var(--accent); border-radius: var(--radius); padding: 10px 12px; background: var(--accent-soft); display: flex; flex-direction: column; gap: 8px; }
 .ai-label { font-size: 0.8rem; font-weight: 600; color: var(--accent); }
 .ai-log { display: flex; flex-direction: column; gap: 8px; }
+/* Service status (#46) */
+.status-pill { display: inline-block; font-size: 0.78rem; font-weight: 600; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
+.sp-operational { background: var(--success-soft); color: var(--success); }
+.sp-maintenance { background: var(--s-analysis-bg); color: var(--s-analysis); }
+.sp-degraded { background: var(--s-known-bg); color: var(--s-known); }
+.sp-partial_outage { background: var(--s-known-bg); color: var(--p2); }
+.sp-major_outage { background: var(--danger-soft); color: var(--danger); }
+.suggestion { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
