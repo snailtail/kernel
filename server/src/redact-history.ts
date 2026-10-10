@@ -45,9 +45,17 @@ export const redactHistorySchema = z.object({
   /** Remove everything the scanner sees as a secret. */
   secrets: z.boolean().default(false),
   /** Remove this exact text wherever it occurs (a name, an account number…). */
-  text: z.string().trim().min(4).max(500).optional(),
+  // At least 4 characters, so a stray "a" or "not" cannot rewrite a record's history.
+  text: z.string().trim().min(4, 'The text to remove must be at least 4 characters').max(500).optional(),
   reason: z.string().max(1000).optional(),
+  /** Count what would be removed, change nothing. The dialog shows this before anything is removed. */
+  dry_run: z.boolean().default(false),
 });
+
+/** Thrown to roll back a dry run after counting with the very same statements that would apply it. */
+class Preview extends Error {
+  constructor(public result: unknown) { super('preview'); }
+}
 
 /** Returns the cleaned string and how many replacements were made. */
 function cleaner(input: z.infer<typeof redactHistorySchema>) {
@@ -108,13 +116,14 @@ async function cleanPlace(db: Db, place: Place, recordId: number, clean: (s: str
 
 export async function redactHistory(user: User, ref: string, input: z.infer<typeof redactHistorySchema>) {
   authorize(user, 'record.redact');
-  const reason = requireReason(input.reason);
+  const reason = input.dry_run ? '' : requireReason(input.reason);
   if (!input.secrets && !input.text) throw badRequest('Choose what to remove: secrets, a text, or both');
   const type = typeForRef(ref).type as Kind;
   if (!TABLE[type]) throw badRequest('Only problems, incidents and changes have a history to clean');
   if (input.text && input.text.toUpperCase().includes(ref.toUpperCase())) throw badRequest('The text cannot include the record\'s own reference');
   const clean = cleaner(input);
-  return tx(async (db) => {
+  try {
+  return await tx(async (db) => {
     // The caller must see the record (row-level security).
     const { rows } = await db.query(`SELECT id, ref FROM ${TABLE[type]} WHERE ref = $1 FOR UPDATE`, [ref.toUpperCase()]);
     const record = rows[0];
@@ -138,14 +147,52 @@ export async function redactHistory(user: User, ref: string, input: z.infer<type
       await db.query('UPDATE attachments SET size = $2, sha256 = $3 WHERE id = $1', [f.attachment_id, data.length, createHash('sha256').update(data).digest('hex')]);
       places.attachments = (places.attachments ?? 0) + n;
     }
+    // Copies Kernel keeps of the record's text: in-app notifications and webhook payloads (queued ones then go out clean).
+    const { rows: notes } = await db.query('SELECT id, title, summary FROM notifications WHERE ref = $1', [record.ref]);
+    for (const n of notes) {
+      const [title, a] = clean(n.title ?? '');
+      const [summary, b] = clean(n.summary ?? '');
+      if (a + b) {
+        await db.query('UPDATE notifications SET title = $2, summary = $3 WHERE id = $1', [n.id, title, summary]);
+        places.notifications = (places.notifications ?? 0) + a + b;
+      }
+    }
+    const { rows: deliveries } = await db.query(`SELECT id, payload FROM webhook_deliveries WHERE payload->'${type}'->>'ref' = $1`, [record.ref]);
+    for (const d of deliveries) {
+      const count = { n: 0 };
+      const payload = cleanJson(d.payload, clean, count);
+      if (count.n) {
+        await db.query('UPDATE webhook_deliveries SET payload = $2 WHERE id = $1', [d.id, JSON.stringify(payload)]);
+        places.webhook_deliveries = (places.webhook_deliveries ?? 0) + count.n;
+      }
+    }
     const total = Object.values(places).reduce((a, b) => a + b, 0);
-    if (!total) return { removed: 0, places };
+    // What Kernel cannot reach: copies already sent, and records copied from this one (each cleaned on its own).
+    const { rows: sent } = await db.query(
+      `SELECT d.channel, count(*)::int AS n FROM notification_deliveries d JOIN notifications n ON n.id = d.notification_id
+       WHERE n.ref = $1 AND d.status = 'sent' GROUP BY d.channel`, [record.ref]);
+    const { rows: delivered } = await db.query(`SELECT count(*)::int AS n FROM webhook_deliveries WHERE payload->'${type}'->>'ref' = $1 AND delivered_at IS NOT NULL`, [record.ref]);
+    const { rows: articles } = await db.query(
+      `SELECT ref, title FROM articles WHERE (problem_id = $1 AND $2 = 'problem' AND NOT synced_with_problem) OR (source_incident_id = $1 AND $2 = 'incident')`, [record.id, type]);
+    const { rows: images } = await db.query("SELECT filename FROM attachments WHERE record_type = $1 AND record_ref = $2 AND kind = 'image' ORDER BY id", [type, record.ref]);
+    const outside = {
+      sent: Object.fromEntries(sent.map((r) => [r.channel, r.n])) as Record<string, number>,
+      webhooks_delivered: delivered[0].n as number,
+      articles: articles as { ref: string; title: string }[],
+      images: images.map((i) => i.filename as string),
+    };
+    if (input.dry_run) throw new Preview({ removed: total, places, outside, dry_run: true });
+    if (!total) return { removed: 0, places, outside };
     const [log, col] = LOG[type];
     await db.query(`INSERT INTO ${log} (${col}, user_id, kind, body, data, channel) VALUES ($1, $2, 'update', $3, $4, 'web')`, [
       record.id, user.id, `Removed sensitive text from the record and its history: ${reason}`, JSON.stringify({ removed: total, places }),
     ]);
     // The text itself never goes into the trail; a keyed digest proves what was removed.
     await audit(db, { entity_type: type, entity_ref: record.ref, action: 'redact_history', changes: { secrets: input.secrets, text: input.text ? digestOf(input.text) : null, removed: total, places }, reason });
-    return { removed: total, places };
+    return { removed: total, places, outside };
   });
+  } catch (err) {
+    if (err instanceof Preview) return err.result as { removed: number; places: Record<string, number>; outside: unknown; dry_run: true };
+    throw err;
+  }
 }

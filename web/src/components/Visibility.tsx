@@ -75,45 +75,91 @@ function VisibilityModal({ record: r, onClose, onDone }: { record: Restricted; o
 }
 
 /** Removes secrets or a given text from the record, its history and its text attachments (#61). */
+interface RedactResult {
+  removed: number;
+  places: Record<string, number>;
+  outside: { sent: Record<string, number>; webhooks_delivered: number; articles: { ref: string; title: string }[]; images: string[] };
+  dry_run?: boolean;
+}
+const PLACE_LABEL: Record<string, string> = {
+  problems: 'record fields', incidents: 'record fields', changes: 'record fields', problem_activity: 'comments and history', incident_activity: 'comments and history',
+  change_activity: 'comments and history', problem_actions: 'actions', problem_analyses: 'analyses', problem_links: 'links', incident_links: 'links', change_links: 'links',
+  change_votes: 'votes', attachments: 'text attachments', notifications: 'in-app notifications', webhook_deliveries: 'queued and stored webhook payloads',
+};
+
 function RedactModal({ recordRef, onClose, onDone }: { recordRef: string; onClose: () => void; onDone: () => void }) {
   const [secrets, setSecrets] = useState(true);
   const [text, setText] = useState('');
   const [reason, setReason] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<number | null>(null);
-  const run = async () => {
+  const [preview, setPreview] = useState<RedactResult | null>(null);
+  const [result, setResult] = useState<RedactResult | null>(null);
+  const body = () => ({ secrets, ...(text.trim() ? { text: text.trim() } : {}) });
+  const check = async () => {
     setError(null);
     try {
-      const r = await api.post<{ removed: number }>(`/api/records/${recordRef}/redact`, { secrets, ...(text.trim() ? { text: text.trim() } : {}), reason });
-      setResult(r.removed);
+      setPreview(await api.post<RedactResult>(`/api/records/${recordRef}/redact`, { ...body(), dry_run: true }));
     } catch (err) {
       setError((err as Error).message);
     }
   };
+  const run = async () => {
+    setError(null);
+    try {
+      setResult(await api.post<RedactResult>(`/api/records/${recordRef}/redact`, { ...body(), reason }));
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+  const summary = (r: RedactResult) => {
+    const by: Record<string, number> = {};
+    for (const [t, n] of Object.entries(r.places)) by[PLACE_LABEL[t] ?? t] = (by[PLACE_LABEL[t] ?? t] ?? 0) + n;
+    return Object.entries(by).map(([label, n]) => `${n} in ${label}`).join(', ');
+  };
+  if (result) {
+    return (
+      <Modal title={`Remove sensitive text from ${recordRef}`} onClose={onDone}>
+        <div className="form">
+          <p className="full">{result.removed ? `Removed ${result.removed} occurrence${result.removed === 1 ? '' : 's'}: ${summary(result)}.` : 'Nothing matched; the record is unchanged.'}</p>
+          <div className="actions full"><button type="button" className="btn primary" onClick={onDone}>Done</button></div>
+        </div>
+      </Modal>
+    );
+  }
+  const o = preview?.outside;
+  const sent = o ? Object.entries(o.sent).map(([channel, n]) => `${n} ${channel === 'email' ? 'email' : channel}${n === 1 ? '' : 's'}`) : [];
   return (
-    <Modal title={`Remove sensitive text from ${recordRef}`} onClose={result === null ? onClose : onDone}>
-      {result === null ? (
-        <div className="form" data-no-scan>
-          <p className="muted small full">Replaces the text with [REDACTED] in the record's fields, comments, actions, analyses, links and text attachments. The history keeps that something changed; the removal is recorded with your reason, without the text itself. This cannot be undone.</p>
-          <label className="check full"><input type="checkbox" checked={secrets} onChange={(e) => setSecrets(e.target.checked)} /> Passwords, keys, tokens and card numbers Kernel recognises</label>
-          <label className="full">Also remove this exact text <span className="muted small">(a name, an account number…; at least 4 characters)</span>
-            <input value={text} onChange={(e) => setText(e.target.value)} autoComplete="off" />
-          </label>
+    <Modal title={`Remove sensitive text from ${recordRef}`} onClose={onClose}>
+      <div className="form" data-no-scan>
+        <p className="muted small full">Replaces the text with [REDACTED] in the record's fields, comments, actions, analyses, links, text attachments, notifications and stored webhook payloads. The history keeps that something changed; the removal is recorded with your reason, without the text itself. This cannot be undone.</p>
+        <label className="check full"><input type="checkbox" checked={secrets} onChange={(e) => { setSecrets(e.target.checked); setPreview(null); }} /> Passwords, keys, tokens and card numbers Kernel recognises</label>
+        <label className="full">Also remove this exact text <span className="muted small">(a name, an account number…; at least 4 characters)</span>
+          <input value={text} onChange={(e) => { setText(e.target.value); setPreview(null); }} autoComplete="off" />
+        </label>
+        {preview && (
+          <div className="full preview-box">
+            <p><strong>{preview.removed ? `${preview.removed} occurrence${preview.removed === 1 ? '' : 's'} will be removed` : 'Nothing matches'}</strong>{preview.removed ? `: ${summary(preview)}.` : '.'}</p>
+            {(sent.length > 0 || (o && o.webhooks_delivered > 0)) && (
+              <p className="warn-box small">Already sent and out of Kernel's reach: {[...sent, ...(o!.webhooks_delivered ? [`${o!.webhooks_delivered} delivered webhook${o!.webhooks_delivered === 1 ? '' : 's'}`] : [])].join(', ')}. Ask the receivers to delete them if needed.</p>
+            )}
+            <p className="muted small">Copies in Elasticsearch (the SIEM copy holds no field values) and in backups taken before now are not changed; backups age out with their retention.</p>
+            {o && o.articles.length > 0 && <p className="small">Knowledge articles copied from this record are separate records – clean them too: {o.articles.map((a) => `${a.ref} (${a.title})`).join(', ')}.</p>}
+            {o && o.images.length > 0 && <p className="small">Images are not scanned. Check these yourself and remove any that show the text: {o.images.join(', ')}.</p>}
+          </div>
+        )}
+        {preview && preview.removed > 0 && (
           <label className="full">Reason <span className="muted small">(no personal details)</span>
             <input value={reason} onChange={(e) => setReason(e.target.value)} />
           </label>
-          {error && <div className="error full">{error}</div>}
-          <div className="actions full">
-            <button type="button" className="btn" onClick={onClose}>Cancel</button>
-            <button type="button" className="btn danger" disabled={(!secrets && text.trim().length < 4) || !reason.trim()} onClick={run}>Remove</button>
-          </div>
+        )}
+        {error && <div className="error full">{error}</div>}
+        <div className="actions full">
+          <button type="button" className="btn" onClick={onClose}>Cancel</button>
+          {!preview
+            ? <button type="button" className="btn primary" disabled={!secrets && text.trim().length < 4} onClick={check}>Check what matches</button>
+            : preview.removed > 0 && <button type="button" className="btn danger" disabled={!reason.trim()} onClick={run}>Remove {preview.removed}</button>}
         </div>
-      ) : (
-        <div className="form">
-          <p className="full">{result ? `Removed ${result} occurrence${result === 1 ? '' : 's'}.` : 'Nothing matched; the record is unchanged.'}</p>
-          <div className="actions full"><button type="button" className="btn primary" onClick={onDone}>Done</button></div>
-        </div>
-      )}
+      </div>
     </Modal>
   );
 }

@@ -1176,3 +1176,5 @@ tr.total td { border-bottom: 2px solid var(--border-strong); }
   /* The menu's "+ New" is always there; the page buttons are for phones, where the menu is a drawer. */
   .page-new { display: none; }
 }
+.preview-box { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; display: grid; gap: 6px; }
+.preview-box p { margin: 0; }
