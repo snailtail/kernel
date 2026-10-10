@@ -44,6 +44,10 @@ jobs:
                   rules = {r['id']: r for r in run['tool']['driver'].get('rules', [])}
                   for r in run.get('results', []):
                       loc = r['locations'][0]['physicalLocation']
+                      # Accepted false positives carry a justified "// codeql[rule-id]" comment in the source.
+                      if r.get('suppressions'):
+                          print(f"suppressed in source: {r['ruleId']}: {loc['artifactLocation']['uri']}:{loc.get('region', {}).get('startLine')}")
+                          continue
                       found.append(f"{r['ruleId']}: {loc['artifactLocation']['uri']}:{loc.get('region', {}).get('startLine')} {r['message']['text'][:160]}")
                       # The source and steps of a data-flow finding, so it can be fixed without the SARIF file.
                       for rel in r.get('relatedLocations', []):
