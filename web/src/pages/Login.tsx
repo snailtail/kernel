@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { api, type User } from '../api';
 import { TwoFactor } from '../components/TwoFactor';
 
@@ -9,6 +9,22 @@ export function LoginPage({ onLogin }: { onLogin: (user: User) => void }) {
   const [busy, setBusy] = useState(false);
   const [challenge, setChallenge] = useState<string | null>(null);
   const [code, setCode] = useState('');
+  const [options, setOptions] = useState<{ sso: { label: string } | null; cf_access: boolean; local_login: 'all' | 'admins' } | null>(null);
+  useEffect(() => {
+    api.get<NonNullable<typeof options>>('/api/auth/options').then(async (o) => {
+      setOptions(o);
+      // Behind Cloudflare Access, people have signed in already: start a Kernel session from its token.
+      if (o.cf_access) {
+        try {
+          await api.post('/api/auth/access', {});
+          onLogin(await api.get<User>('/api/auth/me'));
+        } catch {
+          // no Access token (or no account): the other options remain
+        }
+      }
+    }, () => setOptions({ sso: null, cf_access: false, local_login: 'all' }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -39,6 +55,12 @@ export function LoginPage({ onLogin }: { onLogin: (user: User) => void }) {
             <div className="brand-sub">Problem Management</div>
           </div>
         </div>
+        {options?.sso && !challenge && (
+          <>
+            <a className="btn primary sso-btn" href={`/api/auth/sso/start?return=${encodeURIComponent(window.location.pathname + window.location.search)}`}>{options.sso.label}</a>
+            <div className="login-divider muted small">{options.local_login === 'admins' ? 'Administrators only (break-glass)' : 'or with a Kernel account'}</div>
+          </>
+        )}
         {challenge ? (
           <>
             <p className="muted small">Enter the code from your authenticator app, or one of your recovery codes.</p>

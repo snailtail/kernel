@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { ssoRoutes } from './routes/sso.js';
 import { serviceReportRoutes } from './routes/service-report.js';
 import { statusRoutes } from './routes/status.js';
 import { viewerFor } from './visibility.js';
@@ -133,6 +134,7 @@ export async function buildApp(options: { logLevel?: string; serveWeb?: boolean 
   await app.register(mcpRoutes);
   await app.register(statusRoutes);
   await app.register(serviceReportRoutes);
+  await app.register(ssoRoutes);
 
   app.get('/api/openapi.json', async (req) => openApiDocument(config.publicUrl ?? `${req.protocol}://${req.host}`));
 

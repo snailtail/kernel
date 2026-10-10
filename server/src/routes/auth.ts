@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { ssoSettings } from '../sso.js';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { TOKEN_MAX_DAYS, TOKEN_SCOPES, createApiToken, createSession, currentSessionHash, destroySession, guardLogin, hashPassword, listSessions, loginFailed, loginSucceeded, requireUser, revokeSession, verifyLogin } from '../auth.js';
@@ -19,6 +20,12 @@ export async function authRoutes(app: FastifyInstance) {
     const device = req.cookies[mfa.DEVICE_COOKIE];
     guardLogin(req.ip, account, await mfa.isKnownDevice(device, account));
     const user = await verifyLogin(body.username, body.password);
+    // With SSO on and local sign-in kept for administrators only (break-glass), others must use SSO.
+    const sso = await ssoSettings();
+    if (user && sso.enabled && sso.local_login === 'admins' && user.role !== 'admin') {
+      loginFailed(req.ip, account);
+      throw new HttpError(403, 'Sign in with single sign-on');
+    }
     if (!user) {
       loginFailed(req.ip, account);
       throw new HttpError(401, 'Invalid username or password');
