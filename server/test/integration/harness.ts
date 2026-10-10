@@ -89,6 +89,7 @@ export async function ownerQuery(sql: string, params: unknown[] = []) {
 
 export async function startKernel(): Promise<Harness> {
   process.env.DATABASE_URL = TEST_DATABASE_URL;
+  process.env.NODE_ENV = 'test';
   process.env.LOG_LEVEL ??= 'warn';
   process.env.KERNEL_APP_DB_USER ??= 'kernel_app_test';
   process.env.KERNEL_APP_DB_PASSWORD ??= 'app role password for tests only';

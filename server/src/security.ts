@@ -211,6 +211,8 @@ export async function securityStatus(): Promise<{ checks: SecurityCheck[] }> {
 export function checkConfiguration(log: (msg: string) => void) {
   const key = process.env.KERNEL_SECRET_KEY;
   if (key && key.length < 32) throw new Error('KERNEL_SECRET_KEY must be at least 32 characters');
+  // Test-only hooks must never be active in a deployment.
+  if (process.env.NODE_ENV !== 'test' && process.env.KERNEL_TEST_CF_CERTS_URL) throw new Error('KERNEL_TEST_CF_CERTS_URL is for tests only; remove it');
   if (process.env.NODE_ENV === 'production') {
     if (!key) log('Security: KERNEL_SECRET_KEY is not set; webhooks and other secrets cannot be stored.');
     if (!config.secureCookies && !/^https:/i.test(config.publicUrl ?? '')) log('Security: KERNEL_PUBLIC_URL is not an https:// address and KERNEL_SECURE_COOKIES is not set; serve Kernel over HTTPS in production.');

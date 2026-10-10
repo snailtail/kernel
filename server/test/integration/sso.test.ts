@@ -192,3 +192,19 @@ describe('single sign-on (#41)', { skip }, () => {
     await query("UPDATE users SET mfa_enabled_at = NULL, mfa_secret = NULL WHERE username = 'analyst'");
   });
 });
+
+describe('test-only hooks', () => {
+  test('KERNEL_TEST_CF_CERTS_URL refuses to start outside tests', async () => {
+    const { checkConfiguration } = await import('../../src/security.js');
+    const [env, url] = [process.env.NODE_ENV, process.env.KERNEL_TEST_CF_CERTS_URL];
+    process.env.NODE_ENV = 'production';
+    process.env.KERNEL_TEST_CF_CERTS_URL = 'http://127.0.0.1/certs';
+    try {
+      assert.throws(() => checkConfiguration(() => {}), /tests only/);
+    } finally {
+      process.env.NODE_ENV = env;
+      if (url === undefined) delete process.env.KERNEL_TEST_CF_CERTS_URL;
+      else process.env.KERNEL_TEST_CF_CERTS_URL = url;
+    }
+  });
+});
