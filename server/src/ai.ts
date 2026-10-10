@@ -162,7 +162,6 @@ async function callModel(user: User, provider: Provider, model: string, input: P
       span.setStatus({ code: SpanStatusCode.ERROR });
       if (err instanceof HttpError) throw err;
       // Provider errors can echo the API key ("Incorrect API key provided: sk-…"), so key-like strings are cut first.
-      // codeql[js/clear-text-logging] -- the message is scrubbed of secrets; key ids in it are labels, not key material
       logger.warn({ event: { dataset: 'kernel.ai' }, provider: provider.name, model, err: scrubSecrets((err as Error).message) }, 'model call failed');
       // Never fall back to another provider: it might be allowed less.
       throw new HttpError(503, `AI is unavailable right now (${provider.name} did not answer).`);

@@ -14,15 +14,19 @@ export interface Key { id: string; raw: string }
 export function keyring(): Key[] {
   const keys: Key[] = [];
   if (process.env.KERNEL_SECRET_KEY) keys.push({ id: 'k0', raw: process.env.KERNEL_SECRET_KEY });
-  for (const pair of (process.env.KERNEL_SECRET_KEYS ?? '').split(',').map((p) => p.trim()).filter(Boolean)) {
+  // Errors name the position of an entry, never anything from it: they end up in logs, and these variables hold keys.
+  const pairs = (process.env.KERNEL_SECRET_KEYS ?? '').split(',').map((p) => p.trim()).filter(Boolean);
+  pairs.forEach((pair, n) => {
     const at = pair.indexOf(':');
     if (at < 1) throw new Error('KERNEL_SECRET_KEYS must be id:secret pairs separated by commas');
     const id = pair.slice(0, at);
-    if (!/^[a-z0-9_-]{1,20}$/i.test(id)) throw new Error(`Key id "${id}" must be 1-20 letters, digits, - or _`);
-    if (keys.some((k) => k.id === id)) throw new Error(`Key id "${id}" is configured twice`);
+    if (!/^[a-z0-9_-]{1,20}$/i.test(id)) throw new Error(`Entry ${n + 1} in KERNEL_SECRET_KEYS: the key id must be 1-20 letters, digits, - or _`);
+    if (keys.some((k) => k.id === id)) throw new Error(`Entry ${n + 1} in KERNEL_SECRET_KEYS: that key id is already configured`);
     keys.push({ id, raw: pair.slice(at + 1) });
-  }
-  for (const k of keys) if (k.raw.length < 32) throw new Error(`Key ${k.id} must be at least 32 characters`);
+  });
+  keys.forEach((k, n) => {
+    if (k.raw.length < 32) throw new Error(`${n === 0 && process.env.KERNEL_SECRET_KEY ? 'KERNEL_SECRET_KEY' : 'A key in KERNEL_SECRET_KEYS'} must be at least 32 characters`);
+  });
   return keys;
 }
 
@@ -32,7 +36,7 @@ export function activeKey(): Key | null {
   const wanted = process.env.KERNEL_SECRET_KEY_ID;
   if (wanted) {
     const k = keys.find((x) => x.id === wanted);
-    if (!k) throw new Error(`KERNEL_SECRET_KEY_ID "${wanted}" is not in the keyring`);
+    if (!k) throw new Error('KERNEL_SECRET_KEY_ID names a key that is not in KERNEL_SECRET_KEY or KERNEL_SECRET_KEYS');
     return k;
   }
   return keys[keys.length - 1];
