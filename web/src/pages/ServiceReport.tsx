@@ -7,7 +7,7 @@ import { useApi } from '../hooks';
 interface Report {
   service: { ref: string; name: string; criticality: number; sla: string | null };
   period: { from: string; to: string; minutes: number };
-  availability: { percent: number | null; target: number | null; outage_minutes: number; degraded_minutes: number; basis: string };
+  availability: { percent: number | null; target: number | null; outage_minutes: number; degraded_minutes: number; maintenance_minutes: number; basis: string };
   incidents: { total: number; by_priority: { priority: number; count: number }[]; resolution_sla: { met: number; of: number; percent: number } | null; mttr_minutes: number | null; linked_to_problems: number; major: { ref: string; title: string; created_at: string; resolved_at: string | null }[] };
   changes: { total: number; completed: number; successful: number; success_rate: number | null; failed: { ref: string; title: string; outcome: string }[] };
   problems: { ref: string; title: string; status: string; priority: number; workaround: string | null }[];
@@ -53,7 +53,7 @@ export function ServiceReportPage() {
         <div className="kpi card"><div className="kpi-value">{dur(r.incidents.mttr_minutes)}</div><div className="kpi-label">MTTR</div></div>
         <div className="kpi card"><div className="kpi-value">{r.changes.success_rate ?? '–'}{r.changes.success_rate != null ? ' %' : ''}</div><div className="kpi-label">Change success</div></div>
       </div>
-      <p className="muted small">{r.availability.basis} Degraded: {dur(r.availability.degraded_minutes)}.</p>
+      <p className="muted small">{r.availability.basis} Degraded: {dur(r.availability.degraded_minutes)}. Planned maintenance: {dur(r.availability.maintenance_minutes)}.</p>
       <div className="grid-2">
         <section className="card">
           <h2>Incidents</h2>
