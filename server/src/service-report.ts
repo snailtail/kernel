@@ -145,6 +145,9 @@ export async function serviceReport(user: User, ref: string, period: z.infer<typ
   };
 }
 
+/** A Markdown table cell: backslashes first, then pipes and line breaks. */
+const cell = (v: string) => v.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+
 const dur = (m: number | null) => (m === null ? '–' : m < 60 ? `${m} min` : m < 1440 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${Math.floor(m / 1440)} d ${Math.floor((m % 1440) / 60)} h`);
 
 /** The report as Markdown, for the service review document or an email. */
@@ -164,7 +167,7 @@ export function serviceReportMarkdown(r: Awaited<ReturnType<typeof serviceReport
     '',
     `${r.incidents.total} incidents (${r.incidents.by_priority.map((p) => `P${p.priority}: ${p.count}`).join(', ') || 'none'}) · resolution SLA ${r.incidents.resolution_sla ? `${r.incidents.resolution_sla.percent} % (${r.incidents.resolution_sla.met}/${r.incidents.resolution_sla.of})` : '–'} · MTTR ${dur(r.incidents.mttr_minutes)} · ${r.incidents.linked_to_problems} linked to problems`,
     '',
-    ...(r.incidents.major.length ? ['| Major or P1 | Title | Logged | Resolved |', '|---|---|---|---|', ...r.incidents.major.map((i) => `| ${i.ref} | ${i.title.replace(/\|/g, '\\|')} | ${String(i.created_at).slice(0, 16)} | ${i.resolved_at ? String(i.resolved_at).slice(0, 16) : 'open'} |`), ''] : []),
+    ...(r.incidents.major.length ? ['| Major or P1 | Title | Logged | Resolved |', '|---|---|---|---|', ...r.incidents.major.map((i) => `| ${i.ref} | ${cell(i.title)} | ${String(i.created_at).slice(0, 16)} | ${i.resolved_at ? String(i.resolved_at).slice(0, 16) : 'open'} |`), ''] : []),
     '## Changes',
     '',
     `${r.changes.total} changes · ${r.changes.completed} completed · success rate ${r.changes.success_rate ?? '–'} %`,
