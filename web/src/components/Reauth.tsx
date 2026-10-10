@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
+import { confirmWithPasskey } from './Passkeys';
 import { api, setReauthHandler } from '../api';
 import { Modal } from './Modal';
 
@@ -35,6 +36,7 @@ export function ReauthPrompt() {
     <Modal title="Confirm it is you" onClose={() => close(false)}>
       <form className="form" onSubmit={submit}>
         <p className="hint full">This action changes access or security settings. Confirm your identity to continue.</p>
+        <p className="full"><button type="button" className="btn" onClick={async () => { try { await confirmWithPasskey(); close(true); } catch (err) { setError((err as Error).name === 'NotAllowedError' ? 'Cancelled.' : (err as Error).message); } }}>Confirm with a passkey</button></p>
         <p className="muted small full">Signed in with single sign-on? <a href={`/api/auth/sso/start?prompt=login&return=${encodeURIComponent(window.location.pathname)}`}>Sign in again with SSO</a>, then repeat the action.</p>
         <label className="full">Password<input type="password" autoFocus autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} /></label>
         {pending.mfa && (

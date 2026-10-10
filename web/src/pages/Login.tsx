@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, type User } from '../api';
 import { TwoFactor } from '../components/TwoFactor';
+import { passkeysSupported, signInWithPasskey } from '../components/Passkeys';
 
 export function LoginPage({ onLogin }: { onLogin: (user: User) => void }) {
   const [username, setUsername] = useState('');
@@ -10,6 +11,15 @@ export function LoginPage({ onLogin }: { onLogin: (user: User) => void }) {
   // After SSO or Cloudflare Access, accounts with two-factor authentication still enter their code. After SSO the
   // challenge waits in an httpOnly cookie; the empty string means "use that cookie".
   const [challenge, setChallenge] = useState<string | null>(null);
+  const [methods, setMethods] = useState<string[]>(['totp']);
+  const passkey = async (mfaToken?: string) => {
+    setError(null);
+    try {
+      onLogin(await signInWithPasskey<User>(mfaToken));
+    } catch (err) {
+      setError((err as Error).name === 'NotAllowedError' ? 'Cancelled.' : (err as Error).message);
+    }
+  };
   const [code, setCode] = useState('');
   const [options, setOptions] = useState<{ sso: { label: string } | null; cf_access: boolean; local_login: 'all' | 'admins' } | null>(null);
   useEffect(() => {
@@ -38,8 +48,12 @@ export function LoginPage({ onLogin }: { onLogin: (user: User) => void }) {
       if (challenge !== null) {
         onLogin(await api.post<User>('/api/auth/login/mfa', { ...(challenge ? { mfa_token: challenge } : {}), code }));
       } else {
-        const res = await api.post<User & { mfa_required?: boolean; mfa_token?: string }>('/api/auth/login', { username, password });
-        if (res.mfa_required) setChallenge(res.mfa_token!);
+        const res = await api.post<User & { mfa_required?: boolean; mfa_token?: string; methods?: string[] }>('/api/auth/login', { username, password });
+        if (res.mfa_required) {
+          setChallenge(res.mfa_token!);
+          setMethods(res.methods ?? ['totp']);
+          if (res.methods?.length === 1 && res.methods[0] === 'passkey') await passkey(res.mfa_token);
+        }
         else onLogin(res);
       }
     } catch (err) {
@@ -65,13 +79,17 @@ export function LoginPage({ onLogin }: { onLogin: (user: User) => void }) {
             <div className="login-divider muted small">{options.local_login === 'admins' ? 'Administrators only (break-glass)' : 'or with a Kernel account'}</div>
           </>
         )}
+        {challenge === null && passkeysSupported() && <button type="button" className="btn passkey-btn" onClick={() => passkey()}>Sign in with a passkey</button>}
         {challenge !== null ? (
           <>
-            <p className="muted small">Enter the code from your authenticator app, or one of your recovery codes.</p>
-            <label>
-              Code
-              <input autoFocus inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)} placeholder="123456" />
-            </label>
+            {methods.includes('passkey') && <button type="button" className="btn primary" onClick={() => passkey(challenge || undefined)}>Use a passkey</button>}
+            {methods.includes('totp') && <p className="muted small">Enter the code from your authenticator app, or one of your recovery codes.</p>}
+            {methods.includes('totp') && (
+              <label>
+                Code
+                <input autoFocus inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)} placeholder="123456" />
+              </label>
+            )}
           </>
         ) : (
           <>
@@ -86,9 +104,9 @@ export function LoginPage({ onLogin }: { onLogin: (user: User) => void }) {
           </>
         )}
         {error && <div className="error">{error}</div>}
-        <button className="btn primary" disabled={busy || (challenge !== null ? !code.trim() : !username || !password)}>
+        {!(challenge !== null && !methods.includes('totp')) && <button className="btn primary" disabled={busy || (challenge !== null ? !code.trim() : !username || !password)}>
           {busy ? 'Signing in…' : challenge !== null ? 'Verify' : 'Sign in'}
-        </button>
+        </button>}
         {challenge !== null && <button type="button" className="btn-link" onClick={() => { setChallenge(null); setCode(''); }}>Start over</button>}
       </form>
     </div>

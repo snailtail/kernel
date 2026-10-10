@@ -1,8 +1,9 @@
 import { createHash, randomBytes } from 'node:crypto';
+import { notify } from './notifications.js';
 import bcrypt from 'bcryptjs';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { config } from './config.js';
-import { query } from './db.js';
+import { pool, query } from './db.js';
 import { forbidden, HttpError } from './errors.js';
 import { audit } from './audit.js';
 import { logger } from './log.js';
@@ -62,7 +63,7 @@ export async function verifyLogin(username: string, password: string): Promise<U
 }
 
 /** A new session (always a new id, so a session cannot be fixed in advance), recording how the person signed in. */
-export async function createSession(req: FastifyRequest, reply: FastifyReply, userId: number, method: 'password' | 'sso' | 'access' = 'password', idpMfa = false) {
+export async function createSession(req: FastifyRequest, reply: FastifyReply, userId: number, method: 'password' | 'sso' | 'access' | 'passkey' = 'password', idpMfa = false) {
   const token = randomBytes(32).toString('base64url');
   await query(
     `INSERT INTO sessions (token_hash, user_id, expires_at, ip, user_agent, auth_method, idp_mfa) VALUES ($1, $2, now() + $3 * interval '1 day', $4, $5, $6, $7)`,
@@ -162,6 +163,13 @@ export function loginFailed(ip: string, account: string) {
   }
   if (count(`acct:${account}`) === MAX_PER_ACCOUNT) {
     void audit(null, { entity_type: 'session', entity_ref: account, action: 'account_locked', changes: { ip } }).catch(() => {});
+    // The owner and the administrators hear about it (#75); nothing is sent for names that are not accounts.
+    void (async () => {
+      const { rows } = await query('SELECT id FROM users WHERE lower(username) = $1 AND active', [account]);
+      if (!rows[0]) return;
+      const { rows: admins } = await query("SELECT id FROM users WHERE role = 'admin' AND active");
+      await notify(pool, { users: [rows[0].id, ...admins.map((a) => a.id)], event: 'account_security', ref: '', title: 'Account locked', summary: `Sign-in to ${account} was locked for 15 minutes after repeated failed attempts.`, path: '/settings', dedupe: `locked:${account}:${Math.floor(Date.now() / 900_000)}` });
+    })().catch(() => {});
     securityLog.warn({ event: { action: 'auth.account_locked', category: ['authentication'] }, user: { name: account }, source: { ip } }, 'Account temporarily locked after failed logins');
   }
   if (failures.size > 50_000) for (const [k, v] of failures) if (v.until <= Date.now()) failures.delete(k);
