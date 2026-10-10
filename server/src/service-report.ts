@@ -3,7 +3,9 @@
 // may see (managers are told when restricted records are left out).
 import { z } from 'zod';
 import type { User } from './auth.js';
-import { query } from './db.js';
+import { businessMinutes } from './business-time.js';
+import { pool, query } from './db.js';
+import { loadCalendar } from './sla.js';
 import { notFound } from './errors.js';
 import { authorize } from './policy.js';
 import { hiddenRecordsExist } from './visibility.js';
@@ -17,6 +19,26 @@ export const serviceReportSchema = z
     return { from, to };
   })
   .refine((r) => r.from <= r.to, 'from must be before to');
+
+/** Intervals merged so that overlaps count once. */
+export function mergeIntervals(intervals: [number, number][]) {
+  const out: [number, number][] = [];
+  for (const [a, b] of intervals.filter(([x, y]) => y > x).sort((x, y) => x[0] - y[0])) {
+    const last = out[out.length - 1];
+    if (last && a <= last[1]) last[1] = Math.max(last[1], b);
+    else out.push([a, b]);
+  }
+  return out;
+}
+
+/** The parts of the intervals outside the holes (e.g. outage minus planned maintenance). */
+export function subtractIntervals(intervals: [number, number][], holes: [number, number][]) {
+  let rest = mergeIntervals(intervals);
+  for (const [h0, h1] of mergeIntervals(holes)) {
+    rest = rest.flatMap(([a, b]): [number, number][] => (h1 <= a || h0 >= b ? [[a, b]] : [...(h0 > a ? [[a, h0] as [number, number]] : []), ...(h1 < b ? [[h1, b] as [number, number]] : [])]));
+  }
+  return rest;
+}
 
 /** Minutes covered by a set of intervals, overlaps counted once. */
 export function coveredMinutes(intervals: [number, number][]) {
@@ -43,9 +65,10 @@ export async function serviceReport(user: User, ref: string, period: z.infer<typ
   const params = [s.id, period.from, period.to];
   // The service and its components (CIs that are part of it).
   const members = `(SELECT $1::int UNION SELECT r.from_ci FROM ci_relationships r WHERE r.to_ci = $1 AND r.type = 'member_of')`;
-  const [incidents, changes, problems, sla] = await Promise.all([
+  const [incidents, changes, problems, sla, maintenance] = await Promise.all([
     query(
-      `SELECT DISTINCT i.id, i.ref, i.title, i.priority, i.is_major, i.status, i.created_at, i.resolved_at, i.resolution_due_at, i.resolution_breached_at, i.problem_id
+      `SELECT DISTINCT i.id, i.ref, i.title, i.priority, i.is_major, i.status, i.created_at, i.resolved_at, i.resolution_due_at, i.resolution_breached_at, i.problem_id,
+              (SELECT min(a.first_seen) FROM alerts a WHERE a.incident_id = i.id) AS alert_first_seen
        FROM incidents i JOIN incident_cis x ON x.incident_id = i.id
        WHERE x.ci_id IN ${members} AND i.created_at < $3::date + 1 AND coalesce(i.resolved_at, now()) >= $2::date
        ORDER BY i.created_at`,
@@ -65,15 +88,25 @@ export async function serviceReport(user: User, ref: string, period: z.infer<typ
        ORDER BY p.priority, 1`,
       params,
     ),
-    query('SELECT s.name, s.availability_target FROM slas s WHERE s.id = (SELECT sla_id FROM configuration_items WHERE id = $1) OR (s.is_default AND (SELECT sla_id FROM configuration_items WHERE id = $1) IS NULL) LIMIT 1', [s.id]),
+    query('SELECT s.name, s.availability_target, s.calendar_id FROM slas s WHERE s.id = (SELECT sla_id FROM configuration_items WHERE id = $1) OR (s.is_default AND (SELECT sla_id FROM configuration_items WHERE id = $1) IS NULL) LIMIT 1', [s.id]),
+    query(`SELECT DISTINCT w.starts_at, w.ends_at, w.reason FROM maintenance_windows w WHERE w.ci_id IN ${members} AND w.starts_at < $3::date + 1 AND w.ends_at > $2::date ORDER BY 1`, params),
   ]);
+  // Availability is measured in the SLA's service hours (#43): a night outage does not count against an office-hours
+  // service, and the denominator is the service hours of the period. Without a calendar it is calendar time.
+  const calendarId = sla.rows[0]?.calendar_id as number | undefined;
+  const cal = calendarId ? await loadCalendar(pool, calendarId) : null;
+  const minutesIn = (ivs: [number, number][]) => Math.round(mergeIntervals(ivs).reduce((n, [a, b]) => n + (cal ? businessMinutes(cal, a, b) : (b - a) / 60_000), 0));
   // Availability: outage = P1/P2 or major incidents, from logged to resolved, clipped to the period (overlaps once).
-  const clip = (a: number, b: number): [number, number] => [Math.max(a, fromTs), Math.min(b, toTs)];
-  const span = (i: any) => clip(Date.parse(i.created_at), i.resolved_at ? Date.parse(i.resolved_at) : Date.now());
+  const end = Math.min(toTs, Date.now());
+  const clip = (a: number, b: number): [number, number] => [Math.max(a, fromTs), Math.min(b, end)];
+  // An outage starts when monitoring first saw it, if that was before the incident was logged.
+  const span = (i: any) => clip(Math.min(Date.parse(i.created_at), i.alert_first_seen ? Date.parse(i.alert_first_seen) : Infinity), i.resolved_at ? Date.parse(i.resolved_at) : Date.now());
+  const planned = maintenance.rows.map((w): [number, number] => clip(Date.parse(w.starts_at), Date.parse(w.ends_at)));
   const outage = incidents.rows.filter((i) => i.is_major || i.priority <= 2);
   const degraded = incidents.rows.filter((i) => !(i.is_major || i.priority <= 2));
-  const periodMinutes = Math.round((Math.min(toTs, Date.now()) - fromTs) / 60_000);
-  const outageMinutes = coveredMinutes(outage.map(span));
+  const periodMinutes = minutesIn([[fromTs, end]]);
+  // Planned maintenance is reported separately, not as unavailability.
+  const outageMinutes = minutesIn(subtractIntervals(outage.map(span), planned));
   const resolved = incidents.rows.filter((i) => i.resolved_at && Date.parse(i.resolved_at) >= fromTs);
   const withTarget = resolved.filter((i) => i.resolution_due_at);
   const met = withTarget.filter((i) => !i.resolution_breached_at && Date.parse(i.resolved_at) <= Date.parse(i.resolution_due_at));
@@ -88,8 +121,9 @@ export async function serviceReport(user: User, ref: string, period: z.infer<typ
       percent: periodMinutes > 0 ? Math.round((1 - outageMinutes / periodMinutes) * 100000) / 1000 : null,
       target: sla.rows[0]?.availability_target != null ? Number(sla.rows[0].availability_target) : null,
       outage_minutes: outageMinutes,
-      degraded_minutes: coveredMinutes(degraded.map(span)),
-      basis: 'Outage: P1/P2 or major incidents on the service or its components, from logged to resolved (calendar time).',
+      degraded_minutes: minutesIn(subtractIntervals(degraded.map(span), planned)),
+      maintenance_minutes: minutesIn(planned),
+      basis: `Outage: P1/P2 or major incidents on the service or its components, from first alert or logging to resolution, outside planned maintenance, in ${cal ? `service hours (${cal.name})` : 'calendar time (24/7)'}.`,
     },
     incidents: {
       total: incidents.rows.length,
@@ -122,7 +156,7 @@ export function serviceReportMarkdown(r: Awaited<ReturnType<typeof serviceReport
     '',
     '## Availability',
     '',
-    `**${r.availability.percent ?? '–'} %**${r.availability.target != null ? ` (target ${r.availability.target} %${r.availability.percent != null && r.availability.percent < r.availability.target ? ', missed' : ', met'})` : ''} · outage ${dur(r.availability.outage_minutes)} · degraded ${dur(r.availability.degraded_minutes)}`,
+    `**${r.availability.percent ?? '–'} %**${r.availability.target != null ? ` (target ${r.availability.target} %${r.availability.percent != null && r.availability.percent < r.availability.target ? ', missed' : ', met'})` : ''} · outage ${dur(r.availability.outage_minutes)} · degraded ${dur(r.availability.degraded_minutes)} · planned maintenance ${dur(r.availability.maintenance_minutes)}`,
     '',
     `_${r.availability.basis}_`,
     '',

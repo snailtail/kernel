@@ -23,6 +23,8 @@ describe('service reports (#54)', { skip }, () => {
     const m = 60_000;
     assert.equal(coveredMinutes([[0, 60 * m], [30 * m, 90 * m], [120 * m, 150 * m]]), 120);
     assert.equal(coveredMinutes([]), 0);
+    const { subtractIntervals } = await import('../../src/service-report.js');
+    assert.deepEqual(subtractIntervals([[0, 100]], [[20, 30], [90, 120]]), [[0, 20], [30, 90]]);
   });
 
   test('availability, incidents, SLA, changes and problems for a service and its components', async () => {
@@ -53,6 +55,22 @@ describe('service reports (#54)', { skip }, () => {
     assert.match(md.headers.get('content-disposition')!, /service-report-SVC/);
     assert.match(text, /^# Service report: Payroll/);
     assert.match(text, /outage 2 h 0 min/);
+    assert.match(r.availability.basis, /calendar time|service hours/);
+  });
+
+  test('planned maintenance is not unavailability, and an outage starts at the first alert', async () => {
+    const { query } = db;
+    const p2 = (await analyst.post('/api/incidents', { title: 'Payroll slow to a halt', impact: 1, urgency: 2, cis: [vm] })).body.ref;
+    const day = "date_trunc('day', now()) - interval '3 days'";
+    await query(`UPDATE incidents SET created_at = ${day} + interval '12 hours', resolved_at = ${day} + interval '14 hours', status = 'resolved' WHERE ref = $1`, [p2]);
+    const { rows } = await query('SELECT id FROM incidents WHERE ref = $1', [p2]);
+    const { rows: ci } = await query('SELECT id FROM configuration_items WHERE ref = $1', [vm]);
+    await query(`INSERT INTO alerts (source, dedupe_ci, check_key, severity, status, first_seen, last_seen, state_at, incident_id) VALUES ('test', 'payroll-db', 'db', 'critical', 'closed', ${day} + interval '11 hours', ${day} + interval '14 hours', ${day} + interval '14 hours', $1)`, [rows[0].id]);
+    await query(`INSERT INTO maintenance_windows (ci_id, starts_at, ends_at, reason) VALUES ($1, ${day} + interval '13 hours', ${day} + interval '14 hours', 'Patch')`, [ci[0].id]);
+    const r = (await viewer.get(`/api/services/${svc}/report`)).body;
+    assert.ok(r.availability.maintenance_minutes >= 60);
+    // Earlier P1: 120 min; this one from the first alert 11:00 to 14:00, minus the 13:00–14:00 maintenance: 120 min.
+    assert.equal(r.availability.outage_minutes, 240);
   });
 
   test('a report shows only what its reader may see', async () => {
