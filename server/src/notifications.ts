@@ -2,6 +2,7 @@
 // daily digest) and a personal chat webhook are opt-in per event with quiet defaults. Each event reaches each person
 // once (dedupe key), the actor is never notified of their own action, and content is minimal: ref, title, one line,
 // a link. Deliveries are an outbox processed after commit, with retries.
+import { activeKey, keyring } from './keys.js';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import nodemailer, { type Transporter } from 'nodemailer';
 import { z } from 'zod';
@@ -141,8 +142,10 @@ export async function saveSettings(user: User, input: z.infer<typeof settingsSch
 
 // ---- Unsubscribe -------------------------------------------------------------------------------
 
-const unsubscribeSig = (userId: number, event: string) =>
-  createHmac('sha256', `kernel-unsubscribe:${process.env.KERNEL_SECRET_KEY ?? ''}`).update(`${userId}:${event}`).digest('base64url');
+// Signed with the active key; links signed with an older key in the keyring keep working after a rotation (#63).
+const unsubscribeSigWith = (raw: string, userId: number, event: string) =>
+  createHmac('sha256', `kernel-unsubscribe:${raw}`).update(`${userId}:${event}`).digest('base64url');
+const unsubscribeSig = (userId: number, event: string) => unsubscribeSigWith(activeKey()?.raw ?? '', userId, event);
 
 export function unsubscribeUrl(userId: number, event: string) {
   const base = (config.publicUrl ?? '').replace(/\/$/, '');
@@ -151,10 +154,13 @@ export function unsubscribeUrl(userId: number, event: string) {
 
 /** Checks a signed unsubscribe link without changing anything; returns what it would unsubscribe from. */
 export function checkUnsubscribe(userId: number, event: string, token: string) {
-  if (!process.env.KERNEL_SECRET_KEY) throw badRequest('Unsubscribe links are not configured');
-  const expected = Buffer.from(unsubscribeSig(userId, event));
+  if (!activeKey()) throw badRequest('Unsubscribe links are not configured');
   const given = Buffer.from(token);
-  if (expected.length !== given.length || !timingSafeEqual(expected, given)) throw badRequest('Invalid unsubscribe link');
+  const valid = keyring().some((k) => {
+    const expected = Buffer.from(unsubscribeSigWith(k.raw, userId, event));
+    return expected.length === given.length && timingSafeEqual(expected, given);
+  });
+  if (!valid) throw badRequest('Invalid unsubscribe link');
   if (event !== 'all' && !Object.hasOwn(EVENTS, event)) throw badRequest('Unknown event');
   return event === 'all' ? 'all email from Kernel' : `email when: ${EVENTS[event as NotificationEvent].label.toLowerCase()}`;
 }

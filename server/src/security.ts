@@ -12,6 +12,8 @@ import { rateLimit } from './ratelimit.js';
 import { lastChainVerification } from './audit.js';
 import { storageUse } from './attachments.js';
 import { secretsConfigured } from './secrets.js';
+import { activeKey, keyring } from './keys.js';
+import { keyUsage } from './rotate-keys.js';
 
 const securityLog = logger.child({ event: { dataset: 'kernel.security' } });
 
@@ -141,6 +143,23 @@ export async function securityStatus(): Promise<{ checks: SecurityCheck[] }> {
     query('SELECT count(*)::int AS n FROM visibility_breakglass WHERE expires_at > now()'),
   ]);
   const usedPct = Math.round((attachmentUse.bytes / attachmentUse.quota_bytes) * 100);
+  // Key rotation (#63): which keys are in use, and whether any is missing from the keyring.
+  const usage = await keyUsage();
+  const configured = new Set(keyring().map((k) => k.id));
+  const inUse = [...new Set([...Object.keys(usage.secrets), ...Object.keys(usage.audit)])];
+  const missing = inUse.filter((id) => !configured.has(id));
+  const active = activeKey()?.id;
+  const stale = Object.keys(usage.secrets).filter((id) => id !== active);
+  const keyCheck = {
+    id: 'key_rotation',
+    label: 'Encryption keys',
+    ok: !missing.length && !stale.length,
+    detail: missing.length
+      ? `Key(s) ${missing.join(', ')} are used by stored data but not configured: add them back to KERNEL_SECRET_KEYS.`
+      : stale.length
+        ? `Active key ${active}; some secrets still use ${stale.join(', ')}. Run rotate-keys to re-encrypt them.`
+        : `Active key ${active ?? '–'}. ${inUse.length ? `In use: ${inUse.map((id) => `${id} (${usage.secrets[id] ?? 0} secrets, ${usage.audit[id] ?? 0} audit entries)`).join('; ')}. Keep keys that audit entries use.` : ''}`,
+  };
   const role = dbRole.rows[0];
   const m = mfaAdmins.rows[0];
   // A trusted proxy does not by itself mean TLS; require an https public URL or explicitly secure cookies.
@@ -176,6 +195,7 @@ export async function securityStatus(): Promise<{ checks: SecurityCheck[] }> {
         detail: breakGlass.rows[0].n ? `${breakGlass.rows[0].n} administrator session(s) can currently open restricted records (one hour each; see the audit trail).` : 'No one is using break-glass access.',
       },
       { id: 'secret_key', label: 'Secrets encryption key', ok: secretsConfigured(), detail: secretsConfigured() ? 'KERNEL_SECRET_KEY is set; stored secrets are encrypted.' : 'Set KERNEL_SECRET_KEY (≥ 32 random characters).' },
+      keyCheck,
       { id: 'initial_password', label: 'Initial passwords changed', ok: mustChange.rows[0].n === 0, detail: mustChange.rows[0].n ? `${mustChange.rows[0].n} account(s) still use a generated password.` : 'No account uses a generated password.' },
       {
         id: 'mfa',
@@ -213,6 +233,9 @@ export function checkConfiguration(log: (msg: string) => void) {
   if (key && key.length < 32) throw new Error('KERNEL_SECRET_KEY must be at least 32 characters');
   // Test-only hooks must never be active in a deployment.
   if (process.env.NODE_ENV !== 'test' && process.env.KERNEL_TEST_CF_CERTS_URL) throw new Error('KERNEL_TEST_CF_CERTS_URL is for tests only; remove it');
+  // A malformed keyring or an unknown active key id stops Kernel here, not at the first secret (#63).
+  keyring();
+  activeKey();
   if (process.env.NODE_ENV === 'production') {
     if (!key) log('Security: KERNEL_SECRET_KEY is not set; webhooks and other secrets cannot be stored.');
     if (!config.secureCookies && !/^https:/i.test(config.publicUrl ?? '')) log('Security: KERNEL_PUBLIC_URL is not an https:// address and KERNEL_SECURE_COOKIES is not set; serve Kernel over HTTPS in production.');

@@ -223,6 +223,7 @@ Open http://localhost:8080 and sign in as `admin`. Database migrations run autom
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | – | Enables OpenTelemetry traces and metrics over OTLP (standard `OTEL_*` variables apply) |
 | `KERNEL_APP_DB_PASSWORD` | – | Run the app as the least-privilege role `kernel_app` (created and granted automatically; `DATABASE_URL`'s owner only runs migrations). Strongly recommended |
 | `KERNEL_SECRET_KEY` | – | Encrypts stored secrets at rest (≥ 32 random characters); required for webhooks |
+| `KERNEL_SECRET_KEYS`, `KERNEL_SECRET_KEY_ID` | – | More keys (`id:secret,…`) and the active one, for key rotation; see [docs/key-rotation.md](docs/key-rotation.md) |
 | `KERNEL_OUTBOUND_ALLOW` | – | CIDRs/addresses on private networks that webhooks may reach (loopback, link-local and metadata addresses are always blocked) |
 | `KERNEL_WEBHOOK_RETENTION_DAYS` | `30` | Successful deliveries are deleted after this many days, failed after three times as long |
 | `KERNEL_SESSION_IDLE_HOURS` | `12` | Sessions unused for this long expire (absolute lifetime: `KERNEL_SESSION_DAYS`) |

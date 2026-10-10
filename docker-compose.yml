@@ -19,6 +19,8 @@ services:
       KERNEL_MAIL_FROM: ${KERNEL_MAIL_FROM:-Kernel <kernel@localhost>}
       KERNEL_LOG_FORMAT: ${KERNEL_LOG_FORMAT:-json}
       KERNEL_SECRET_KEY: ${KERNEL_SECRET_KEY:-}
+      KERNEL_SECRET_KEYS: ${KERNEL_SECRET_KEYS:-}
+      KERNEL_SECRET_KEY_ID: ${KERNEL_SECRET_KEY_ID:-}
       # The app connects as this least-privilege role; DATABASE_URL (the owner) only runs migrations.
       KERNEL_APP_DB_PASSWORD: ${KERNEL_APP_DB_PASSWORD:-}
       KERNEL_OUTBOUND_ALLOW: ${KERNEL_OUTBOUND_ALLOW:-}
