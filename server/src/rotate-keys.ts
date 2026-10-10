@@ -7,6 +7,7 @@
 // Steps: add the new key to KERNEL_SECRET_KEYS and make it active (KERNEL_SECRET_KEY_ID), restart, run this, then
 // remove an old key only when the security status shows that nothing (secrets or audit entries) uses it.
 import { pathToFileURL } from 'node:url';
+import { audit } from './audit.js';
 import { query } from './db.js';
 import { activeKey } from './keys.js';
 import { decryptSecret, encryptSecret, keyIdOf } from './secrets.js';
@@ -50,7 +51,18 @@ export async function rotateSecrets() {
       counts[`settings.${key}.${field}`] = 1;
     }
   }
+  if (Object.keys(counts).length) await audit(null, { entity_type: 'keys', entity_ref: active.id, action: 'secrets_reencrypted', changes: { to: active.id, counts } });
   return { active: active.id, reencrypted: counts };
+}
+
+/** At start: a change of active key since the last keyed audit entry is itself recorded in the trail (#63). */
+export async function recordActiveKey() {
+  const active = activeKey();
+  if (!active) return; // without a key no keyed entry can be written
+  const { rows } = await query("SELECT coalesce(key_id, CASE WHEN hash_version = 2 THEN 'k0' END) AS id FROM audit_log ORDER BY id DESC LIMIT 1");
+  if (!rows.length) return;
+  const from = rows[0].id as string | null;
+  if (from !== active.id) await audit(null, { entity_type: 'keys', entity_ref: active.id, action: 'active_changed', changes: { from, to: active.id } });
 }
 
 /** Which keys stored secrets and audit entries use, so an old key is removed only when nothing needs it. */

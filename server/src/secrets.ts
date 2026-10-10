@@ -27,7 +27,7 @@ const open = (key: Buffer, data: string) => {
 export function encryptSecret(plain: string): string {
   const k = activeKey();
   if (!k) throw new HttpError(503, 'KERNEL_SECRET_KEY is not set; Kernel cannot store secrets until it is configured');
-  return `v2:${k.id}:${seal(derive('kernel-secrets:', k), plain)}`;
+  return `v2:${k.id}:${seal(derive('kernel-secrets', k), plain)}`;
 }
 
 export function decryptSecret(stored: string): string {
@@ -35,7 +35,7 @@ export function decryptSecret(stored: string): string {
     const [, id, data] = stored.split(':');
     const k = keyById(id);
     if (!k) throw new Error(`Key ${id} is not configured; cannot decrypt this secret (add it back to KERNEL_SECRET_KEYS)`);
-    return open(derive('kernel-secrets:', k), data);
+    return open(derive('kernel-secrets', k), data);
   }
   if (stored.startsWith('v1:')) {
     const k = keyById('k0');

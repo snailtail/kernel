@@ -1,6 +1,6 @@
 # Encryption keys and rotation
 
-Kernel uses one secret key for several things. Each use derives its own key from it:
+Kernel uses one secret key for several things. Each use derives its own key from it with HKDF-SHA-256:
 
 - **Stored secrets**: connector, webhook, event-source and provider credentials, chat URLs, TOTP secrets and the SSO client secret. These use AES-256-GCM.
 - **The audit trail's hash chain**: HMAC-SHA-256, so someone with only database access cannot rewrite it.
@@ -38,6 +38,7 @@ Anything written before key ids existed belongs to `k0`.
    ```
 
    The command is safe to run while Kernel serves requests. Each value is replaced in its own statement, and only if nobody changed it in the meantime. You can run it again at any time.
+   Both steps leave an entry in the audit trail. A change of active key is recorded at start (`keys.active_changed`, from and to), and every re-encryption is recorded with its counts (`keys.secrets_reencrypted`).
 4. Check **Security status → Encryption keys**. It shows which keys stored secrets and audit entries use.
 
 ## Removing an old key

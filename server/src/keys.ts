@@ -7,7 +7,7 @@
 //
 // Never remove a key while the audit trail has entries made with it (see the security status), or those entries can
 // no longer be verified.
-import { createHash } from 'node:crypto';
+import { hkdfSync } from 'node:crypto';
 
 export interface Key { id: string; raw: string }
 
@@ -40,5 +40,5 @@ export function activeKey(): Key | null {
 
 export const keyById = (id: string) => keyring().find((k) => k.id === id) ?? null;
 
-/** A 256-bit key for one purpose (encryption, the audit chain, digests…), so one secret never serves two uses. */
-export const derive = (purpose: string, k: Key) => createHash('sha256').update(`${purpose}${k.raw}`).digest();
+/** A 256-bit key for one purpose (encryption, the audit chain, digests…) via HKDF, so one secret never serves two uses. */
+export const derive = (purpose: string, k: Key) => Buffer.from(hkdfSync('sha256', k.raw, 'kernel', purpose, 32));
