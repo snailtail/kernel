@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
+import { ssoSettings } from './sso.js';
 import bcrypt from 'bcryptjs';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { config } from './config.js';
@@ -61,11 +62,12 @@ export async function verifyLogin(username: string, password: string): Promise<U
   return user;
 }
 
-export async function createSession(req: FastifyRequest, reply: FastifyReply, userId: number) {
+/** A new session (always a new id, so a session cannot be fixed in advance), recording how the person signed in. */
+export async function createSession(req: FastifyRequest, reply: FastifyReply, userId: number, method: 'password' | 'sso' | 'access' = 'password') {
   const token = randomBytes(32).toString('base64url');
   await query(
-    `INSERT INTO sessions (token_hash, user_id, expires_at, ip, user_agent) VALUES ($1, $2, now() + $3 * interval '1 day', $4, $5)`,
-    [sha256(token), userId, config.sessionDays, req.ip, String(req.headers['user-agent'] ?? '').slice(0, 300)],
+    `INSERT INTO sessions (token_hash, user_id, expires_at, ip, user_agent, auth_method) VALUES ($1, $2, now() + $3 * interval '1 day', $4, $5, $6)`,
+    [sha256(token), userId, config.sessionDays, req.ip, String(req.headers['user-agent'] ?? '').slice(0, 300), method],
   );
   reply.setCookie(SESSION_COOKIE, token, {
     path: '/',
@@ -107,7 +109,7 @@ async function userFromSession(token: string): Promise<User | null> {
        WHERE token_hash = $1 AND expires_at > now() AND last_seen_at > now() - $2 * interval '1 hour'
          AND last_seen_at < now() - interval '1 minute'
        RETURNING user_id)
-     SELECT ${USER_COLUMNS} FROM sessions ss JOIN users u ON u.id = ss.user_id
+     SELECT ${USER_COLUMNS}, ss.auth_method, u.sso_subject IS NOT NULL AS sso FROM sessions ss JOIN users u ON u.id = ss.user_id
      WHERE ss.token_hash = $1 AND ss.expires_at > now() AND ss.last_seen_at > now() - $2 * interval '1 hour' AND u.active`,
     [sha256(token), config.sessionIdleHours],
   );
@@ -226,7 +228,9 @@ export async function authenticate(req: FastifyRequest) {
   if (req.user?.must_change_password && !['/api/auth/me', '/api/auth/password', '/api/auth/logout', '/api/meta'].includes(path)) {
     throw new HttpError(403, 'Change your password before continuing', { must_change_password: true });
   }
-  if (req.user && !req.user.mfa_enabled && !path.startsWith('/api/auth/') && path !== '/api/meta' && (await mfaRequiredFor(req.user.role))) {
+  // Sessions from single sign-on rely on the identity provider's second factor when it enforces one (#41).
+  const viaIdp = (req.user as any)?.auth_method && (req.user as any).auth_method !== 'password' && (await ssoSettings()).idp_enforces_mfa !== false;
+  if (req.user && !req.user.mfa_enabled && !viaIdp && !path.startsWith('/api/auth/') && path !== '/api/meta' && (await mfaRequiredFor(req.user.role))) {
     throw new HttpError(403, 'Set up two-factor authentication before continuing', { mfa_enrollment_required: true });
   }
 }

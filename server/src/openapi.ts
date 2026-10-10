@@ -20,6 +20,7 @@ import * as dv from './dev.js';
 import * as aiMod from './ai.js';
 import * as st from './status.js';
 import * as srMod from './service-report.js';
+import * as ssoMod from './sso.js';
 import * as hooks from './event-hooks.js';
 import { auditQuerySchema } from './audit.js';
 import { searchSchema } from './generic.js';
@@ -146,6 +147,13 @@ export const OPERATIONS: Op[] = [
   { method: 'delete', path: '/api/admin/ai/providers/:id', tag: 'AI', summary: 'Remove a provider (and its routes)' },
   { method: 'post', path: '/api/admin/ai/providers/:id/test', tag: 'AI', summary: 'Test connection with a fixed prompt (no data)' },
   { method: 'put', path: '/api/admin/ai/routing', tag: 'AI', summary: 'Choose the provider and model per task (with a reason)' },
+  { method: 'get', path: '/api/auth/options', tag: 'Authentication', summary: 'Sign-in options for the login page (SSO, Cloudflare Access, local)' },
+  { method: 'get', path: '/api/auth/sso/start', tag: 'Authentication', summary: 'Start OpenID Connect sign-in (authorization code with PKCE)' },
+  { method: 'get', path: '/api/auth/sso/callback', tag: 'Authentication', summary: 'OpenID Connect redirect URI' },
+  { method: 'post', path: '/api/auth/access', tag: 'Authentication', summary: 'Sign in with the Cloudflare Access token (Cf-Access-Jwt-Assertion)' },
+  { method: 'get', path: '/api/admin/sso', tag: 'Authentication', summary: 'Single sign-on and Cloudflare Access settings (secrets are never shown)' },
+  { method: 'put', path: '/api/admin/sso', tag: 'Authentication', summary: 'Configure OpenID Connect: issuer, client, group-to-role and group-to-team mapping, local sign-in (with a reason)', body: ssoMod.ssoSchema },
+  { method: 'put', path: '/api/admin/cf-access', tag: 'Authentication', summary: 'Configure Cloudflare Access sign-in (team domain, audience tag)', body: ssoMod.cfAccessSchema },
   { method: 'get', path: '/api/services/:ref/report', tag: 'Reports', summary: 'Service report for a period (?from=&to=): availability against the SLA target, incidents, SLA compliance, MTTR, changes, open problems and known errors', query: srMod.serviceReportSchema },
   { method: 'get', path: '/api/services/:ref/report.md', tag: 'Reports', summary: 'The service report as Markdown, for the service review' },
   { method: 'get', path: '/api/status', tag: 'Status', summary: 'Service status board: set and suggested status per service (from incidents, maintenance, changes), updates, planned maintenance' },

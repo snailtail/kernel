@@ -1101,3 +1101,5 @@ tr.total td { border-bottom: 2px solid var(--border-strong); }
 .kpi-bad .kpi-value { color: var(--danger); }
 .period-form { display: flex; gap: 6px; flex-wrap: wrap; }
 @media print { .no-print, .sidebar, .topbar { display: none !important; } .service-report .card { break-inside: avoid; box-shadow: none; } }
+.sso-btn { text-align: center; text-decoration: none; }
+.login-divider { text-align: center; margin: 2px 0; }

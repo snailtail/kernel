@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { SsoAdminSection } from '../components/SsoAdmin';
 import { AiAdminSection } from '../components/Ai';
 import { StatusPageAdmin } from './StatusBoard';
 import { DevSourcesSection } from '../components/DevLinks';
@@ -38,6 +39,7 @@ export function AdminPage() {
       {user.role === 'admin' && <WebhooksCard />}
       {user.role === 'admin' && meta.modules?.cmdb !== false && <ConnectorsCard />}
       {meta.modules?.change !== false && <DevSourcesSection />}
+      {user.role === 'admin' && <SsoAdminSection />}
       <AiAdminSection />
       <StatusPageAdmin />
       <SystemsCard />
