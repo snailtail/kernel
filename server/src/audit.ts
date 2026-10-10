@@ -150,12 +150,13 @@ export async function audit(db: Db | null, entry: AuditEntry) {
 
 /** For sensitive administrative actions the reason is mandatory. */
 /** Obvious personal identifiers: email addresses and Swedish personal identity numbers. */
-const PII_IN_TEXT = /[^\s@]+@[^\s@]+\.[a-z]{2,}|\b(19|20)?\d{6}[-+]?\d{4}\b/i;
+// Bounded parts (and a length cap below) keep this linear on hostile input.
+const PII_IN_TEXT = /[\w.+-]{1,64}@[\w-]{1,63}(?:\.[\w-]{1,63}){1,8}|\b(?:19|20)?\d{6}[-+]?\d{4}\b/i;
 
 export function requireReason(reason: string | undefined): string {
   if (!reason?.trim()) throw badRequest('A reason is required for this action', );
   // Reasons are kept verbatim in the append-only trail (ADR 0001), so they must not carry personal details.
-  if (PII_IN_TEXT.test(reason)) throw badRequest('The reason seems to contain an email address or a personal identity number. Refer to people by their account or a record ref instead.');
+  if (PII_IN_TEXT.test(reason.slice(0, 1000))) throw badRequest('The reason seems to contain an email address or a personal identity number. Refer to people by their account or a record ref instead.');
   return reason.trim().slice(0, 1000);
 }
 
