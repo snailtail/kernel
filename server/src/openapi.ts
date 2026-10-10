@@ -19,6 +19,7 @@ import * as tm from './teams.js';
 import * as dv from './dev.js';
 import * as aiMod from './ai.js';
 import * as st from './status.js';
+import * as srMod from './service-report.js';
 import * as hooks from './event-hooks.js';
 import { auditQuerySchema } from './audit.js';
 import { searchSchema } from './generic.js';
@@ -145,6 +146,8 @@ export const OPERATIONS: Op[] = [
   { method: 'delete', path: '/api/admin/ai/providers/:id', tag: 'AI', summary: 'Remove a provider (and its routes)' },
   { method: 'post', path: '/api/admin/ai/providers/:id/test', tag: 'AI', summary: 'Test connection with a fixed prompt (no data)' },
   { method: 'put', path: '/api/admin/ai/routing', tag: 'AI', summary: 'Choose the provider and model per task (with a reason)' },
+  { method: 'get', path: '/api/services/:ref/report', tag: 'Reports', summary: 'Service report for a period (?from=&to=): availability against the SLA target, incidents, SLA compliance, MTTR, changes, open problems and known errors', query: srMod.serviceReportSchema },
+  { method: 'get', path: '/api/services/:ref/report.md', tag: 'Reports', summary: 'The service report as Markdown, for the service review' },
   { method: 'get', path: '/api/status', tag: 'Status', summary: 'Service status board: set and suggested status per service (from incidents, maintenance, changes), updates, planned maintenance' },
   { method: 'put', path: '/api/status/:ref', tag: 'Status', summary: 'Set a service status (publish: also on the public page)', body: st.setStatusSchema },
   { method: 'put', path: '/api/status/:ref/public', tag: 'Status', summary: 'Show a service on the public page under a curated name and description', body: st.publicServiceSchema },

@@ -33,6 +33,7 @@ const ApiDocsPage = lazy(() => import('./pages/ApiDocs').then((m) => ({ default:
 const GuidePage = lazy(() => import('./pages/Guide').then((m) => ({ default: m.GuidePage })));
 const KnowledgePage = lazy(() => import('./pages/Knowledge').then((m) => ({ default: m.KnowledgePage })));
 const ArticlePage = lazy(() => import('./pages/Knowledge').then((m) => ({ default: m.ArticlePage })));
+const ServiceReportPage = lazy(() => import('./pages/ServiceReport').then((m) => ({ default: m.ServiceReportPage })));
 const StatusBoardPage = lazy(() => import('./pages/StatusBoard').then((m) => ({ default: m.StatusBoardPage })));
 const TeamsPage = lazy(() => import('./pages/Teams').then((m) => ({ default: m.TeamsPage })));
 const PeoplePage = lazy(() => import('./pages/People').then((m) => ({ default: m.PeoplePage })));
@@ -180,6 +181,7 @@ export function App() {
             <Route path="/knowledge" element={<KnowledgePage />} />
             <Route path="/knowledge/:ref" element={<ArticlePage />} />
             <Route path="/service-status" element={<StatusBoardPage />} />
+            <Route path="/services/:ref/report" element={<ServiceReportPage />} />
             <Route path="/teams" element={<TeamsPage />} />
             <Route path="/people" element={<PeoplePage />} />
             <Route path="/people/:id" element={<PersonPage />} />

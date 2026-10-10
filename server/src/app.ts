@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { serviceReportRoutes } from './routes/service-report.js';
 import { statusRoutes } from './routes/status.js';
 import { viewerFor } from './visibility.js';
 import Fastify from 'fastify';
@@ -131,6 +132,7 @@ export async function buildApp(options: { logLevel?: string; serveWeb?: boolean 
   await app.register(aiRoutes);
   await app.register(mcpRoutes);
   await app.register(statusRoutes);
+  await app.register(serviceReportRoutes);
 
   app.get('/api/openapi.json', async (req) => openApiDocument(config.publicUrl ?? `${req.protocol}://${req.host}`));
 
