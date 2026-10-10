@@ -53,7 +53,7 @@ class Stream {
 
 describe('live updates (#70)', { skip }, () => {
   let k: Harness;
-  let analyst: Client, viewer: Client, pm: Client, admin: Client;
+  let analyst: Client, analyst2: Client, viewer: Client, pm: Client, admin: Client;
   let live: typeof import('../../src/live.js');
   const open: Stream[] = [];
   const stream = async (c: Client) => {
@@ -65,7 +65,7 @@ describe('live updates (#70)', { skip }, () => {
 
   before(async () => {
     k = await startKernel();
-    [analyst, viewer, pm, admin] = await Promise.all([k.login('analyst'), k.login('viewer'), k.login('pm'), k.login('admin')]);
+    [analyst, analyst2, viewer, pm, admin] = await Promise.all([k.login('analyst'), k.login('analyst2'), k.login('viewer'), k.login('pm'), k.login('admin')]);
     live = await import('../../src/live.js');
   });
   after(async () => {
@@ -126,23 +126,23 @@ describe('live updates (#70)', { skip }, () => {
   test('restricting a record or leaving its team stops following it at once, presence included', async () => {
     const team = (await admin.post('/api/teams', { name: 'Live inner circle' })).body;
     const ids = Object.fromEntries((await admin.get('/api/users')).body.map((u: any) => [u.username, u.id]));
-    await admin.put(`/api/teams/${team.id}/members`, { members: [{ user_id: ids.analyst, role: 'lead' }, { user_id: ids.viewer, role: 'member' }] });
+    assert.equal((await admin.put(`/api/teams/${team.id}/members`, { members: [{ user_id: ids.analyst, role: 'lead' }, { user_id: ids.analyst2, role: 'member' }] })).status, 200);
     const p = (await analyst.post('/api/problems', { title: 'Soon restricted' })).body;
     const a = await stream(analyst);
-    const b = await stream(viewer);
+    const b = await stream(analyst2);
     await analyst.put(`/api/live/${a.id}`, { topics: [`problem:${p.id}`] });
-    await viewer.put(`/api/live/${b.id}`, { topics: [`problem:${p.id}`] });
+    await analyst2.put(`/api/live/${b.id}`, { topics: [`problem:${p.id}`] });
     const seenByA = () => a.events.filter((e) => e.event === 'presence' && e.data.topic === `problem:${p.id}`).at(-1)?.data.people ?? [];
-    assert.ok(await a.waitFor(() => seenByA().length === 1), 'the analyst sees the viewer');
+    assert.ok(await a.waitFor(() => seenByA().length === 1), 'the analyst sees the colleague');
 
-    // Restricted to the team (the viewer is in it): still visible to both.
+    // Restricted to the team (the colleague is in it): still visible to both.
     await analyst.put(`/api/records/${p.ref}/visibility`, { restricted: true, teams: [team.id], reason: 'Security investigation' });
     assert.ok(await b.waitFor(() => b.changes('problem', p.id) > 0), 'a team member still hears about it');
-    // The viewer leaves the team: their stream drops the record without waiting for the minute's re-check.
-    await admin.put(`/api/teams/${team.id}/members`, { members: [{ user_id: ids.analyst, role: 'lead' }] });
-    assert.ok(await a.waitFor(() => seenByA().length === 0), 'the viewer no longer shows as present');
+    // The colleague leaves the team: their stream drops the record without waiting for the minute's re-check.
+    assert.equal((await admin.put(`/api/teams/${team.id}/members`, { members: [{ user_id: ids.analyst, role: 'lead' }] })).status, 200);
+    assert.ok(await a.waitFor(() => seenByA().length === 0), 'the colleague no longer shows as present');
     const before = b.changes('problem', p.id);
-    await analyst.post(`/api/problems/${p.ref}/comments`, { body: 'After the viewer left' });
+    await analyst.post(`/api/problems/${p.ref}/comments`, { body: 'After the colleague left' });
     assert.ok(await a.waitFor(() => a.changes('problem', p.id) > 0));
     await new Promise((r) => setTimeout(r, 600));
     assert.equal(b.changes('problem', p.id), before, 'nothing more reaches the former member');
