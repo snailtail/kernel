@@ -7,11 +7,13 @@ export function LoginPage({ onLogin }: { onLogin: (user: User) => void }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  // After SSO or Cloudflare Access, accounts with two-factor authentication still enter their code (?mfa=…).
-  const [challenge, setChallenge] = useState<string | null>(() => new URLSearchParams(window.location.search).get('mfa'));
+  // After SSO or Cloudflare Access, accounts with two-factor authentication still enter their code. After SSO the
+  // challenge waits in an httpOnly cookie; the empty string means "use that cookie".
+  const [challenge, setChallenge] = useState<string | null>(null);
   const [code, setCode] = useState('');
   const [options, setOptions] = useState<{ sso: { label: string } | null; cf_access: boolean; local_login: 'all' | 'admins' } | null>(null);
   useEffect(() => {
+    api.get<{ pending: boolean }>('/api/auth/mfa-pending').then((p) => p.pending && setChallenge(''), () => {});
     api.get<NonNullable<typeof options>>('/api/auth/options').then(async (o) => {
       setOptions(o);
       // Behind Cloudflare Access, people have signed in already: start a Kernel session from its token.
@@ -33,9 +35,8 @@ export function LoginPage({ onLogin }: { onLogin: (user: User) => void }) {
     setBusy(true);
     setError(null);
     try {
-      if (challenge) {
-        onLogin(await api.post<User>('/api/auth/login/mfa', { mfa_token: challenge, code }));
-        window.history.replaceState(null, '', window.location.pathname);
+      if (challenge !== null) {
+        onLogin(await api.post<User>('/api/auth/login/mfa', { ...(challenge ? { mfa_token: challenge } : {}), code }));
       } else {
         const res = await api.post<User & { mfa_required?: boolean; mfa_token?: string }>('/api/auth/login', { username, password });
         if (res.mfa_required) setChallenge(res.mfa_token!);
@@ -64,7 +65,7 @@ export function LoginPage({ onLogin }: { onLogin: (user: User) => void }) {
             <div className="login-divider muted small">{options.local_login === 'admins' ? 'Administrators only (break-glass)' : 'or with a Kernel account'}</div>
           </>
         )}
-        {challenge ? (
+        {challenge !== null ? (
           <>
             <p className="muted small">Enter the code from your authenticator app, or one of your recovery codes.</p>
             <label>
@@ -85,10 +86,10 @@ export function LoginPage({ onLogin }: { onLogin: (user: User) => void }) {
           </>
         )}
         {error && <div className="error">{error}</div>}
-        <button className="btn primary" disabled={busy || (challenge ? !code.trim() : !username || !password)}>
-          {busy ? 'Signing in…' : challenge ? 'Verify' : 'Sign in'}
+        <button className="btn primary" disabled={busy || (challenge !== null ? !code.trim() : !username || !password)}>
+          {busy ? 'Signing in…' : challenge !== null ? 'Verify' : 'Sign in'}
         </button>
-        {challenge && <button type="button" className="btn-link" onClick={() => { setChallenge(null); setCode(''); }}>Start over</button>}
+        {challenge !== null && <button type="button" className="btn-link" onClick={() => { setChallenge(null); setCode(''); }}>Start over</button>}
       </form>
     </div>
   );

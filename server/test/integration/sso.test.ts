@@ -94,6 +94,28 @@ describe('single sign-on (#41)', { skip }, () => {
     assert.deepEqual((await fetch(`${k.base}/api/auth/options`).then((x) => x.json())).sso, { label: 'Sign in with SSO' });
   });
 
+  test('an SSO account with TOTP gets the challenge in an httpOnly cookie, never in the URL', async () => {
+    const { query } = await import('../../src/db.js');
+    const first = await signIn({ sub: 'u-700', email: 'tot@example.com', name: 'Tot P', groups: ['kernel-pm'] });
+    assert.equal(first.res.status, 302);
+    await query("UPDATE users SET mfa_enabled_at = now(), mfa_secret = 'x' WHERE sso_subject = 'u-700'");
+    const { res } = await signIn({ sub: 'u-700', email: 'tot@example.com', name: 'Tot P', groups: ['kernel-pm'] });
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.get('location'), '/');
+    const cookies = res.headers.getSetCookie();
+    assert.ok(!cookies.some((c) => c.startsWith('kernel_session=')), 'no session before the second factor');
+    const pending = cookies.find((c) => c.startsWith('kernel_mfa_pending='))!;
+    assert.match(pending, /HttpOnly/i);
+    assert.match(pending, /Path=\/api\/auth/);
+    const jar = pending.split(';')[0];
+    assert.deepEqual(await fetch(`${k.base}/api/auth/mfa-pending`, { headers: { cookie: jar } }).then((x) => x.json()), { pending: true });
+    assert.deepEqual(await fetch(`${k.base}/api/auth/mfa-pending`).then((x) => x.json()), { pending: false });
+    const wrong = await fetch(`${k.base}/api/auth/login/mfa`, { method: 'POST', headers: { cookie: jar, 'Content-Type': 'application/json' }, body: JSON.stringify({ code: '000000' }) });
+    assert.equal(wrong.status, 401);
+    assert.ok(wrong.headers.getSetCookie().some((c) => c.startsWith('kernel_mfa_pending=;')), 'the cookie is cleared after an attempt');
+    await query("UPDATE users SET mfa_enabled_at = NULL, mfa_secret = NULL WHERE sso_subject = 'u-700'");
+  });
+
   test('first sign-in creates the account with the mapped role and teams, in a new session', async () => {
     const { res } = await signIn({ sub: 'u-100', email: 'kim@example.com', name: 'Kim Lund', preferred_username: 'kim', groups: ['kernel-pm', 'servicedesk'] });
     assert.equal(res.status, 302, await res.text());
