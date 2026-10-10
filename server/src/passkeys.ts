@@ -12,6 +12,7 @@ import {
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { User } from './auth.js';
 import { createSession, currentSessionHash } from './auth.js';
+import { mfaRequiredFor } from './mfapolicy.js';
 import { audit } from './audit.js';
 import { config } from './config.js';
 import { query, tx } from './db.js';
@@ -95,6 +96,11 @@ export async function listPasskeys(user: User) {
 }
 
 export async function removePasskey(user: User, id: number) {
+  // Keep a second factor when the role requires one: the last passkey goes only if TOTP is set up.
+  const { rows: left } = await query('SELECT count(*)::int AS n FROM webauthn_credentials WHERE user_id = $1', [user.id]);
+  if (left[0].n === 1 && !user.mfa_enabled && (await mfaRequiredFor(user.role))) {
+    throw new HttpError(409, 'Your role requires a second factor. Add another passkey or set up an authenticator app before removing this one.');
+  }
   const { rowCount } = await query('DELETE FROM webauthn_credentials WHERE id = $1 AND user_id = $2', [id, user.id]);
   if (!rowCount) throw notFound('Passkey not found');
   await audit(null, { entity_type: 'user', entity_ref: `#${user.id}`, action: 'passkey_removed', changes: { id } });
@@ -131,6 +137,9 @@ export async function verifyPasskey(purpose: Exclude<Purpose, 'register'>, respo
   );
   const cred = rows[0];
   if (!cred || !cred.active) throw unauthorized('This passkey is not registered');
+  // The user handle, when the authenticator returns one, must be the account the credential belongs to.
+  const handle = (response.response as { userHandle?: string }).userHandle;
+  if (handle && Buffer.from(handle, 'base64url').toString('utf8') !== `kernel-user-${cred.user_id}`) throw unauthorized('This passkey belongs to another account');
   let v;
   try {
     v = await verifyAuthenticationResponse({
