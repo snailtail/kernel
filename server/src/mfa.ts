@@ -13,7 +13,7 @@ import { generateSecret, otpauthUrl, verifyCode } from './totp.js';
 import type { Role } from './workflow.js';
 
 // Digests of random 256-bit challenge and device ids, never of passwords (those use bcrypt): a fast hash is right here.
-// codeql[js/insufficient-password-hash]
+// codeql[js/insufficient-password-hash] -- random 256-bit server-generated challenge id, not a user password; SHA-256 lookup hash like session tokens
 const sha256 = (v: string) => createHash('sha256').update(v).digest('hex');
 const STEP_UP_MINUTES = Number(process.env.KERNEL_STEPUP_MINUTES ?? 10);
 

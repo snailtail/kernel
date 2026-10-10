@@ -44,8 +44,15 @@ jobs:
                   rules = {r['id']: r for r in run['tool']['driver'].get('rules', [])}
                   for r in run.get('results', []):
                       loc = r['locations'][0]['physicalLocation']
-                      # Accepted false positives carry a justified "// codeql[rule-id]" comment in the source.
-                      if r.get('suppressions'):
+                      # Accepted false positives carry "// codeql[rule-id] -- reason" on the line before (or on) the finding.
+                      # The CLI does not record such comments in the SARIF, so they are read from the source here.
+                      uri, line = loc['artifactLocation']['uri'], loc.get('region', {}).get('startLine') or 0
+                      try:
+                          lines = open(uri, encoding='utf-8').read().split('\n')
+                      except OSError:
+                          lines = []
+                      near = lines[max(0, line - 2):line]
+                      if r.get('suppressions') or any(f"codeql[{r['ruleId']}] -- " in l for l in near):
                           print(f"suppressed in source: {r['ruleId']}: {loc['artifactLocation']['uri']}:{loc.get('region', {}).get('startLine')}")
                           continue
                       found.append(f"{r['ruleId']}: {loc['artifactLocation']['uri']}:{loc.get('region', {}).get('startLine')} {r['message']['text'][:160]}")
