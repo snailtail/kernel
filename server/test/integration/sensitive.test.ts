@@ -91,6 +91,15 @@ describe('sensitive data in records (#61)', { skip }, () => {
     await ownerQuery(`UPDATE problem_activity SET body = $2, data = $3 WHERE problem_id = (SELECT id FROM problems WHERE ref = $1) AND kind = 'comment'`, [p.ref, `call ${NAME}, key ${OLD}`, JSON.stringify({ to: `old key ${OLD}` })]);
     const up = await fetch(`${k.base}/api/records/${p.ref}/attachments?filename=old.log`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', Cookie: pm.cookie!, 'X-Kernel-Request': '1' }, body: new TextEncoder().encode(`user ${NAME} logged in`) });
     assert.ok(up.ok);
+    // Copies Kernel keeps: an in-app notification (already emailed) and a queued webhook payload.
+    const uid = (await ownerQuery("SELECT id FROM users WHERE username = 'analyst'")).rows[0].id;
+    const note = await ownerQuery("INSERT INTO notifications (user_id, event, ref, title, summary, url, dedupe_key) VALUES ($1, 'comment', $2, $3, $4, '/', 'redact-test') RETURNING id", [uid, p.ref, `Comment on ${p.ref}`, `${NAME} wrote a comment`]);
+    await ownerQuery("INSERT INTO notification_deliveries (notification_id, user_id, channel, status, sent_at) VALUES ($1, $2, 'email', 'sent', now())", [note.rows[0].id, uid]);
+    const hook = await ownerQuery("INSERT INTO webhooks (name, url, format, events, active, secret) VALUES ('copy', 'https://hooks.example.com/c', 'json', '{}', true, 'x') RETURNING id");
+    await ownerQuery("INSERT INTO webhook_deliveries (webhook_id, event, payload) VALUES ($1, 'problem.updated', $2)", [hook.rows[0].id, JSON.stringify({ problem: { ref: p.ref }, summary: `${NAME} commented` })]);
+    const png = await (await import('sharp')).default({ create: { width: 4, height: 4, channels: 3, background: '#ffffff' } }).png().toBuffer();
+    const img = await fetch(`${k.base}/api/records/${p.ref}/attachments?filename=screen.png`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', Cookie: pm.cookie!, 'X-Kernel-Request': '1' }, body: png });
+    assert.ok(img.ok, `image upload: ${img.status} ${await img.text()}`);
     // Positive control: the old text is there before.
     assert.ok((await stored(OLD)) >= 2);
     assert.ok((await stored(NAME)) >= 2);
@@ -101,12 +110,25 @@ describe('sensitive data in records (#61)', { skip }, () => {
     assert.equal((await pm.post(`/api/records/${p.ref}/redact`, { secrets: true, reason: 'x' })).status, 403, 'step-up first');
     await pm.post('/api/auth/reauth', { password: PASSWORD });
     assert.equal((await pm.post(`/api/records/${p.ref}/redact`, { secrets: true })).status, 400, 'a reason is required');
+    assert.equal((await pm.post(`/api/records/${p.ref}/redact`, { text: 'not', reason: 'x' })).status, 400, 'a short text cannot rewrite history');
+    // The preview counts with the same statements and changes nothing.
+    const preview = await pm.post(`/api/records/${p.ref}/redact`, { secrets: true, text: NAME, dry_run: true });
+    assert.equal(preview.status, 200, JSON.stringify(preview.body));
+    assert.equal(preview.body.dry_run, true);
+    assert.ok(preview.body.places.problems >= 2 && preview.body.places.problem_activity >= 2 && preview.body.places.attachments >= 1, JSON.stringify(preview.body.places));
+    assert.equal(preview.body.places.notifications, 1);
+    assert.equal(preview.body.places.webhook_deliveries, 1);
+    assert.deepEqual(preview.body.outside.sent, { email: 1 }, 'the dialog says what was already emailed');
+    assert.deepEqual(preview.body.outside.images, ['screen.png'], 'and which screenshots were not scanned');
+    assert.ok((await stored(OLD)) >= 2, 'nothing changed');
     const r = await pm.post(`/api/records/${p.ref}/redact`, { secrets: true, text: NAME, reason: 'Key and caller name written before redaction existed' });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.ok(r.body.removed >= 4, JSON.stringify(r.body));
     assert.equal(await stored(OLD), 0);
     assert.equal(await stored(NAME), 0);
-    const blob = await ownerQuery("SELECT convert_from(data, 'UTF8') AS t FROM attachment_blobs b JOIN attachments a ON a.id = b.attachment_id WHERE a.record_ref = $1", [p.ref]);
+    assert.equal((await ownerQuery('SELECT count(*)::int AS n FROM notifications WHERE summary LIKE $1', [`%${NAME}%`])).rows[0].n, 0);
+    assert.equal((await ownerQuery('SELECT count(*)::int AS n FROM webhook_deliveries WHERE payload::text LIKE $1', [`%${NAME}%`])).rows[0].n, 0);
+    const blob = await ownerQuery("SELECT convert_from(data, 'UTF8') AS t FROM attachment_blobs b JOIN attachments a ON a.id = b.attachment_id WHERE a.record_ref = $1 AND a.kind = 'text'", [p.ref]);
     assert.equal(blob.rows[0].t, 'user [REDACTED] logged in');
     // The fact of the change stays, and the removal is recorded – without the text.
     const record = (await pm.get(`/api/problems/${p.ref}`)).body;

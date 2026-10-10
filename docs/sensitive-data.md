@@ -71,6 +71,17 @@ The text is replaced with `[REDACTED]` everywhere on the record:
 - link notes and URLs;
 - text attachments.
 
+Kernel's own copies are cleaned too: in-app notifications and stored webhook payloads. Queued webhook payloads therefore go out clean.
+
+Before anything is removed, the dialog shows a preview. The preview is a dry run of the very same statements, and changes nothing. It shows:
+
+- how many occurrences will go, per place;
+- what is already out of Kernel's reach, such as emails and chat messages sent, and webhooks delivered, with counts;
+- knowledge articles copied from the record, which are separate records to clean as well;
+- screenshots and other images, which are not scanned.
+
+Copies in Elasticsearch hold no field values. Backups taken earlier are not changed; they age out with their retention.
+
 History entries are not deleted, so the record still shows *that* something changed.
 
 The removal is itself recorded on the record and in the audit trail, with the reason and how much was removed. The removed text is never written there; the audit trail keeps only a keyed digest of it. The audit trail held only digests of free text to begin with, so its hash chain stays valid.
