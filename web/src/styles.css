@@ -1104,3 +1104,8 @@ tr.total td { border-bottom: 2px solid var(--border-strong); }
 .sso-btn { text-align: center; text-decoration: none; }
 .login-divider { text-align: center; margin: 2px 0; }
 .passkey-btn { width: 100%; }
+.presence { display: flex; align-items: center; gap: 8px; }
+.presence-avatars { display: inline-flex; }
+.presence-avatars .avatar { width: 24px; height: 24px; border-radius: 50%; display: inline-grid; place-items: center; font-size: 11px; font-weight: 600; background: var(--accent-soft); color: var(--text-2); border: 2px solid var(--bg); margin-left: -6px; }
+.presence-avatars .avatar:first-child { margin-left: 0; }
+.presence-avatars .avatar.editing { background: var(--accent); color: var(--on-accent); }

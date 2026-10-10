@@ -157,6 +157,8 @@ export const OPERATIONS: Op[] = [
   { method: 'post', path: '/api/auth/reauth/passkey/options', tag: 'Authentication', summary: 'Options for confirming a sensitive action with a passkey' },
   { method: 'post', path: '/api/auth/reauth/passkey', tag: 'Authentication', summary: 'Confirm a sensitive action (step-up) with a passkey' },
   { method: 'post', path: '/api/tokens/:id/rotate', tag: 'Authentication', summary: 'Rotate an API token: a successor with the same scopes; the old one keeps working for 24 hours' },
+  { method: 'get', path: '/api/live', tag: 'Authentication', summary: 'Live updates for the web UI (Server-Sent Events; session cookie only): change notices and presence' },
+  { method: 'put', path: '/api/live/:id', tag: 'Authentication', summary: 'Choose what a live stream follows (record and list topics) and what you are editing' },
   { method: 'get', path: '/api/auth/options', tag: 'Authentication', summary: 'Sign-in options for the login page (SSO, Cloudflare Access, local)' },
   { method: 'get', path: '/api/auth/sso/start', tag: 'Authentication', summary: 'Start OpenID Connect sign-in (authorization code with PKCE)' },
   { method: 'get', path: '/api/auth/sso/callback', tag: 'Authentication', summary: 'OpenID Connect redirect URI' },

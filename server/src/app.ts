@@ -1,4 +1,6 @@
 import { existsSync } from 'node:fs';
+import { liveRoutes } from './routes/live.js';
+import { startLive, stopLive } from './live.js';
 import { ssoRoutes } from './routes/sso.js';
 import { serviceReportRoutes } from './routes/service-report.js';
 import { statusRoutes } from './routes/status.js';
@@ -135,6 +137,9 @@ export async function buildApp(options: { logLevel?: string; serveWeb?: boolean 
   await app.register(statusRoutes);
   await app.register(serviceReportRoutes);
   await app.register(ssoRoutes);
+  await app.register(liveRoutes);
+  app.addHook('onReady', async () => startLive((msg) => app.log.warn(msg)));
+  app.addHook('onClose', async () => stopLive());
 
   app.get('/api/openapi.json', async (req) => openApiDocument(config.publicUrl ?? `${req.protocol}://${req.host}`));
 

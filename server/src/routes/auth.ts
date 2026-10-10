@@ -175,6 +175,7 @@ export async function authRoutes(app: FastifyInstance) {
         theme: z.enum(['system', 'light', 'dark']).optional(),
         guided: z.boolean().optional(),
         intro_seen: z.boolean().optional(),
+        live_presence: z.boolean().optional(),
         // Saved list views: a name and the list's query string, e.g. "status=known_error&priority=1".
         saved_views: z.array(z.object({ name: z.string().trim().min(1).max(60), page: z.enum(['problems', 'actions']), query: z.string().max(500) })).max(30).optional(),
       })

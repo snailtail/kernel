@@ -10,6 +10,8 @@ import { Modal } from '../components/Modal';
 import { PersonField } from '../components/People';
 import { Term } from '../components/Glossary';
 import { formatDate, relativeTime } from '../format';
+import { useLive } from '../live';
+import { Presence } from '../components/Presence';
 import { useApi } from '../hooks';
 import { useSession } from '../session';
 
@@ -48,7 +50,8 @@ export function CmdbListPage() {
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q]);
-  const { data, loading } = useApi<Ci[]>(`/api/cis?${params}`);
+  const { data, loading, refresh } = useApi<Ci[]>(`/api/cis?${params}`);
+  useLive(['ci:*'], refresh);
 
   return (
     <>
@@ -113,7 +116,8 @@ export function CmdbListPage() {
 export function CiPage() {
   const { ref } = useParams();
   const { user } = useSession();
-  const { data: ci, setData, error } = useApi<CiDetail>(`/api/cis/${ref}`);
+  const { data: ci, setData, error, refresh } = useApi<CiDetail>(`/api/cis/${ref}`);
+  const others = useLive([ci && `ci:${ci.id}`], refresh, { presence: true });
   const { data: types } = useApi<CiType[]>('/api/ci-types');
   const [editing, setEditing] = useState(false);
   const [note, setNote] = useState('');
@@ -135,7 +139,7 @@ export function CiPage() {
   return (
     <>
       <header className="problem-head">
-        <div className="crumbs"><Link to="/cis">Configuration items</Link> / <span className="mono">{ci.ref}</span></div>
+        <div className="crumbs"><Link to="/cis">Configuration items</Link> / <span className="mono">{ci.ref}</span> <Presence people={others} /></div>
         <h1>{ci.name}</h1>
         <div className="badges">
           <CiStatus status={ci.status} />

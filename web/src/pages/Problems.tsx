@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router';
 import type { Problem } from '../api';
 import { ProblemTable } from '../components/ProblemTable';
 import { PRIORITY_LABEL, STATUS_LABEL } from '../format';
+import { useLive } from '../live';
 import { useApi } from '../hooks';
 import { canEdit, useSession } from '../session';
 import { SavedViews } from '../components/SavedViews';
@@ -33,7 +34,8 @@ export function ProblemsPage() {
 
   const query = new URLSearchParams(params);
   if (!query.get('status')) query.set('status', 'open');
-  const { data, error, loading } = useApi<Problem[]>(`/api/problems?${query}`);
+  const { data, error, loading, refresh } = useApi<Problem[]>(`/api/problems?${query}`);
+  useLive(['problem:*'], refresh);
 
   return (
     <>

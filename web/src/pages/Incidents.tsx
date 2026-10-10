@@ -15,6 +15,8 @@ import { MajorBadge, PriorityBadge } from '../components/Badges';
 import { Markdown } from '../components/Markdown';
 import { Modal } from '../components/Modal';
 import { duration, formatDate, relativeTime } from '../format';
+import { useLive } from '../live';
+import { Presence } from '../components/Presence';
 import { useApi } from '../hooks';
 import { useSession } from '../session';
 import { Term } from '../components/Glossary';
@@ -67,7 +69,8 @@ export function IncidentsPage() {
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q]);
-  const { data, loading } = useApi<IncidentRow[]>(`/api/incidents?${params}`);
+  const { data, loading, refresh } = useApi<IncidentRow[]>(`/api/incidents?${params}`);
+  useLive(['incident:*'], refresh);
   return (
     <>
       <header className="page-head">
@@ -194,7 +197,8 @@ export function IncidentPage() {
   const { ref } = useParams();
   const { user, meta } = useSession();
   const navigate = useNavigate();
-  const { data: i, setData, error, reload } = useApi<Incident>(`/api/incidents/${ref}`);
+  const { data: i, setData, error, reload, refresh } = useApi<Incident>(`/api/incidents/${ref}`);
+  const others = useLive([i && `incident:${i.id}`], refresh, { presence: true });
   const [note, setNote] = useState('');
   const [noteKind, setNoteKind] = useState<'comment' | 'communication'>('comment');
   const [resolving, setResolving] = useState(false);
@@ -225,7 +229,7 @@ export function IncidentPage() {
   return (
     <>
       <header className="problem-head">
-        <div className="crumbs"><Link to="/incidents">Incidents</Link> / <span className="mono">{i.ref}</span></div>
+        <div className="crumbs"><Link to="/incidents">Incidents</Link> / <span className="mono">{i.ref}</span> <Presence people={others} /></div>
         <h1>{i.title}</h1>
         <div className="badges">
           <IncidentStatusBadge status={i.status} />

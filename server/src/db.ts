@@ -171,3 +171,43 @@ export async function waitForDb(log: (msg: string) => void, attempts = 30) {
     }
   }
 }
+
+/**
+ * LISTEN on one dedicated connection outside the pool (#70), reconnecting after errors. The handler gets only the
+ * notification payload; it must not trust it beyond ids, and reads anything else through query() as usual.
+ */
+export function listen(channel: string, handler: (payload: string) => void, log: (msg: string) => void = () => {}) {
+  let client: pg.Client | null = null;
+  let stopped = false;
+  let delay = 1000;
+  const connect = async () => {
+    if (stopped) return;
+    const c = new pg.Client({ connectionString: runtimeUrl() });
+    c.on('notification', (n) => {
+      if (n.channel === channel && n.payload) handler(n.payload);
+    });
+    c.on('error', (err) => {
+      c.end().catch(() => {});
+      if (client !== c) return; // a failed connect is retried below
+      client = null;
+      log(`Live updates: listener connection lost (${err.message}); reconnecting`);
+      setTimeout(connect, delay);
+      delay = Math.min(delay * 2, 30_000);
+    });
+    try {
+      await c.connect();
+      await c.query(`LISTEN ${pg.escapeIdentifier(channel)}`);
+      client = c;
+      delay = 1000;
+    } catch (err) {
+      c.end().catch(() => {});
+      if (!stopped) setTimeout(connect, delay);
+      delay = Math.min(delay * 2, 30_000);
+    }
+  };
+  void connect();
+  return async () => {
+    stopped = true;
+    await client?.end().catch(() => {});
+  };
+}
