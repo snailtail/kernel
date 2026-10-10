@@ -57,7 +57,7 @@ describe('webhooks and watching', { skip }, () => {
     assert.equal((await admin.get('/api/webhooks')).body.webhooks[0].secret, undefined, 'never listed');
     const { pool } = await import('../../src/db.js');
     const stored = (await pool.query('SELECT secret FROM webhooks WHERE id = $1', [hookId])).rows[0].secret;
-    assert.match(stored, /^v1:/);
+    assert.match(stored, /^v2:k0:/);
     assert.ok(!stored.includes(secret.slice(6, 20)));
   });
 

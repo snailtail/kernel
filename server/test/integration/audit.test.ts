@@ -72,7 +72,7 @@ describe('audit trail', { skip }, () => {
     await ownerQuery('ALTER TABLE audit_log ENABLE TRIGGER audit_log_no_truncate');
     await analyst.post('/api/problems', { title: 'Keyed' });
     const last = (await pool.query('SELECT hash, hash_version FROM audit_log ORDER BY id DESC LIMIT 1')).rows[0];
-    assert.equal(last.hash_version, 2);
+    assert.equal(last.hash_version, 3);
     assert.equal((await admin.get('/api/audit/verify')).body.ok, true);
     // An attacker with only database access appends an entry with a plain SHA-256 hash.
     const row = { at: new Date().toISOString(), actor_user_id: null, actor_name: 'forger', actor_type: 'system', channel: '', token_prefix: '', ip: '', request_id: '', entity_type: 'user', entity_ref: 'admin', action: 'update', changes: {}, reason: '' };

@@ -1,4 +1,5 @@
 // The unified audit trail: every change writes an entry in the same transaction, chained by hash.
+import { activeKey, derive, keyById } from './keys.js';
 import { createHash, createHmac } from 'node:crypto';
 import { z } from 'zod';
 import { currentContext } from './context.js';
@@ -42,14 +43,24 @@ const canonical = (r: Record<string, unknown>) =>
  * Version 2 entries use HMAC-SHA-256 keyed from KERNEL_SECRET_KEY, so someone with only database access cannot
  * append or rewrite entries with valid hashes. Version 1 (plain SHA-256) is used when no key is configured.
  */
-const hmacKey = () => (process.env.KERNEL_SECRET_KEY ? createHash('sha256').update('kernel-audit-chain:' + process.env.KERNEL_SECRET_KEY).digest() : null);
-export const currentHashVersion = () => (hmacKey() ? 2 : 1);
+/**
+ * Version 3 entries (#63) name their key (key_id) and include it in the HMAC, so a key can be rotated and an entry
+ * cannot be moved to another key. Version 2 entries used the key "k0".
+ */
+const chainKey = (id: string) => {
+  const k = keyById(id);
+  return k ? derive('kernel-audit-chain:', k) : null;
+};
+export const currentHashVersion = () => (activeKey() ? 3 : 1);
 
-export function hashOf(prev: string, row: Record<string, unknown>, version = 1) {
-  if (version === 2) {
-    const key = hmacKey();
-    if (!key) throw new Error('KERNEL_SECRET_KEY is required to verify HMAC audit entries');
-    return createHmac('sha256', key).update(prev).update(canonical(row)).digest('hex');
+export function hashOf(prev: string, row: Record<string, unknown>, version = 1, keyId?: string | null) {
+  if (version === 3 || version === 2) {
+    const id = version === 2 ? 'k0' : String(keyId ?? '');
+    const key = chainKey(id);
+    if (!key) throw new Error(`Key ${id} is needed to verify keyed audit entries`);
+    const h = createHmac('sha256', key).update(prev);
+    if (version === 3) h.update(`key:${id}:`);
+    return h.update(canonical(row)).digest('hex');
   }
   return createHash('sha256').update(prev).update(canonical(row)).digest('hex');
 }
@@ -65,11 +76,10 @@ const TOKEN = /^[A-Za-z0-9_.:\/#+-]{0,64}$/;
  * Keyed, so a digest of a short personal value (a name, an email, a personal identity number) cannot be reversed by
  * trying candidates without KERNEL_SECRET_KEY, which is not in the database. Equal texts still give equal digests.
  */
-const digestKey = () => (process.env.KERNEL_SECRET_KEY ? createHash('sha256').update('kernel-audit-digest:' + process.env.KERNEL_SECRET_KEY).digest() : null);
 export const digestOf = (v: string) => {
-  const key = digestKey();
-  return key
-    ? { digest: `hmac-sha256:${createHmac('sha256', key).update(v).digest('hex')}`, length: v.length }
+  const k = activeKey();
+  return k
+    ? { digest: `hmac-sha256:${k.id}:${createHmac('sha256', derive('kernel-audit-digest:', k)).update(v).digest('hex')}`, length: v.length }
     // Without a key a plain hash of a short value could be reversed, so only the fact and size of the change remain.
     : { changed: true, length: v.length };
 };
@@ -125,13 +135,14 @@ export async function audit(db: Db | null, entry: AuditEntry) {
       reason: entry.reason ?? '',
     };
     const version = currentHashVersion();
-    const hash = hashOf(prev, row, version);
+    const keyId = version === 3 ? activeKey()!.id : null;
+    const hash = hashOf(prev, row, version, keyId);
     const { rows: inserted } = await client.query(
       `INSERT INTO audit_log (at, actor_user_id, actor_name, actor_type, channel, token_prefix, ip, user_agent, request_id,
-         entity_type, entity_ref, action, changes, reason, prev_hash, hash, hash_version)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING id`,
+         entity_type, entity_ref, action, changes, reason, prev_hash, hash, hash_version, key_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) RETURNING id`,
       [row.at, row.actor_user_id, row.actor_name, row.actor_type, row.channel, row.token_prefix, row.ip, '', row.request_id,
-        row.entity_type, row.entity_ref, row.action, JSON.stringify(row.changes), row.reason, prev, hash, version],
+        row.entity_type, row.entity_ref, row.action, JSON.stringify(row.changes), row.reason, prev, hash, version, keyId],
     );
     if (ctx.ip || ctx.userAgent) await client.query('INSERT INTO audit_context (audit_id, ip, user_agent) VALUES ($1, $2, $3)', [inserted[0].id, ctx.ip ?? null, ctx.userAgent ?? null]);
     // A copy for the SIEM / Elasticsearch (#8): no field values, which may be long or sensitive. The id and hash
@@ -211,21 +222,22 @@ export async function verifyChain(): Promise<{ ok: boolean; checked: number; bro
   let sawKeyed = false;
   for (;;) {
     const { rows } = await query(
-      `SELECT id, at, actor_user_id, actor_name, actor_type, channel, token_prefix, ip, request_id, entity_type, entity_ref, action, changes, reason, prev_hash, hash, hash_version
+      `SELECT id, at, actor_user_id, actor_name, actor_type, channel, token_prefix, ip, request_id, entity_type, entity_ref, action, changes, reason, prev_hash, hash, hash_version, key_id
        FROM audit_log WHERE id > $1 ORDER BY id LIMIT 5000`,
       [after],
     );
     if (!rows.length) return { ok: true, checked };
     for (const r of rows) {
       const row = { ...r, at: (r.at as Date).toISOString() };
-      if (r.hash_version === 2 && !hmacKey()) return { ok: false, checked, broken_at: Number(r.id), error: 'KERNEL_SECRET_KEY is needed to verify keyed entries' };
+      const needed = r.hash_version === 2 ? 'k0' : r.hash_version === 3 ? r.key_id : null;
+      if (needed && !chainKey(needed)) return { ok: false, checked, broken_at: Number(r.id), error: `Key ${needed} is needed to verify keyed entries; add it back to the keyring` };
       // A version 1 entry after keyed ones means someone appended without the key.
-      if (r.prev_hash !== prev || hashOf(prev, row, r.hash_version) !== r.hash || (r.hash_version === 1 && sawKeyed)) {
+      if (r.prev_hash !== prev || hashOf(prev, row, r.hash_version, r.key_id) !== r.hash || (r.hash_version === 1 && sawKeyed)) {
         logger.error({ event: { dataset: 'kernel.security', action: 'audit.chain_broken' }, audit_id: r.id }, 'Audit trail hash chain mismatch');
         return { ok: false, checked, broken_at: Number(r.id) };
       }
       prev = r.hash;
-      if (r.hash_version === 2) sawKeyed = true;
+      if (r.hash_version >= 2) sawKeyed = true;
       checked++;
       after = Number(r.id);
     }
