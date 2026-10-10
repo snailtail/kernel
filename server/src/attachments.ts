@@ -4,6 +4,7 @@
 // and re-encoded (metadata such as GPS dropped), so the browser never receives the uploaded bytes. Text is stored as
 // text and never rendered as HTML: SVG and HTML files are text here. Access follows the record: whoever may see the
 // record may see its attachments, and whoever may work on it may attach.
+import { markPersonalData, redact, remainingFlags, scan, sensitivePolicy } from './sensitive.js';
 import { createHash } from 'node:crypto';
 import sharp from 'sharp';
 import type { User } from './auth.js';
@@ -74,16 +75,6 @@ export function sniff(buf: Buffer, filename: string): Sniffed {
   throw badRequest('This file type is not accepted. Attach images, PDFs, text files (logs, configuration, CSV, JSON) or Office/zip files.');
 }
 
-/** #61 (first step): obvious secrets and personal identifiers in text attachments are flagged for the reader. */
-export function scanText(text: string): string[] {
-  const flags: string[] = [];
-  if (/-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(text)) flags.push('private_key');
-  if (/\b(password|passwd|pwd|secret|api[_-]?key|token)\s*[=:]\s*\S{4,}/i.test(text)) flags.push('credential');
-  if (/\bAKIA[0-9A-Z]{16}\b|\bgh[pousr]_[A-Za-z0-9]{36,}\b|\bxox[abpr]-[A-Za-z0-9-]{10,}|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\./.test(text)) flags.push('token');
-  if (/\b(19|20)\d{6}[-+]?\d{4}\b/.test(text)) flags.push('personal_identity_number');
-  return flags;
-}
-
 async function loadRecord(db: Db, user: User, ref: string) {
   const t = typeForRef(ref);
   const record = await t.get(user, ref.toUpperCase()); // enforces read access (and later scoping, #53)
@@ -121,6 +112,7 @@ export async function addAttachment(user: User, ref: string, filename: string, d
   let height: number | null = null;
   let contentType: string;
   let flags: string[] = [];
+  let personal: string[] = [];
   if (type.kind === 'image') {
     // Decode and re-encode: metadata (EXIF, GPS, comments) is dropped and malformed payloads never reach a browser.
     const img = () => sharp(data, { limitInputPixels: MAX_PIXELS, animated: type.format === 'gif' || type.format === 'webp' }).rotate();
@@ -142,8 +134,15 @@ export async function addAttachment(user: User, ref: string, filename: string, d
     variants.push({ variant: 'original', contentType, data });
   } else if (type.kind === 'text') {
     contentType = 'text/plain; charset=utf-8';
-    flags = scanText(data.toString('utf8'));
-    variants.push({ variant: 'original', contentType, data });
+    // Secrets in logs and configuration are redacted before the file is stored (#61); personal data is flagged.
+    const text = data.toString('utf8');
+    const policy = await sensitivePolicy();
+    const hits = scan(text, { ips: policy.flag_ips });
+    const secrets = [...new Set(hits.filter((h) => h.class === 'secret').map((h) => h.type))];
+    if (secrets.length && policy.secrets === 'block') throw new HttpError(422, `${name} seems to contain secrets (${secrets.join(', ')}). Remove them and attach it again.`, { sensitive: secrets });
+    personal = policy.flag_personal ? [...new Set(hits.filter((h) => h.class === 'personal').map((h) => h.type))] : [];
+    flags = [...personal, ...secrets.map((t) => `redacted:${t}`)];
+    variants.push({ variant: 'original', contentType, data: secrets.length ? Buffer.from(redact(text, ['secret'], { ips: policy.flag_ips }).text, 'utf8') : data });
   } else {
     contentType = type.contentType;
     variants.push({ variant: 'original', contentType, data });
@@ -164,6 +163,7 @@ export async function addAttachment(user: User, ref: string, filename: string, d
       [r.type, r.ref, name, type.kind, contentType, stored.length, createHash('sha256').update(stored).digest('hex'), width, height, flags, user.id],
     );
     for (const v of variants) await db.query('INSERT INTO attachment_blobs (attachment_id, variant, content_type, data) VALUES ($1, $2, $3, $4)', [rows[0].id, v.variant, v.contentType, v.data]);
+    if (personal.length) await markPersonalData(r.ref);
     await logOn(db, r.type, r.id, user.id, `Attached ${name}`, { attachment: { id: rows[0].id, kind: type.kind } });
     await audit(db, { entity_type: 'attachment', entity_ref: `#${rows[0].id}`, action: 'create', changes: { record: r.ref, kind: type.kind, size: stored.length, filename: name } });
     return rows[0].id as number;
@@ -244,19 +244,9 @@ export async function attachmentForAgent(user: User, id: number, from: number, l
     return { image: file.data.toString('base64'), mimeType: file.contentType, filename: a.filename, width: a.width, height: a.height };
   }
   if (a.kind !== 'text') throw badRequest(`${a.filename} is a ${a.kind}; only text and images can be read`);
-  if (a.flags.length && !policy.flagged_text) throw forbidden(`${a.filename} may contain sensitive data (${a.flags.join(', ')}), so it is not sent to AI agents. A person can read it in Kernel.`);
+  // Redacted secrets are gone from the file; what remains flagged is personal data.
+  const sensitive = remainingFlags(a.flags);
+  if (sensitive.length && !policy.flagged_text) throw forbidden(`${a.filename} may contain sensitive data (${sensitive.join(', ')}), so it is not sent to AI agents. A person can read it in Kernel.`);
   return getAttachmentText(user, id, from, limit);
 }
 
-/**
- * #61 for model input: obvious secrets and personal identity numbers are replaced before text leaves Kernel for a
- * language model (the same patterns that flag attachments).
- */
-export function redactSecrets(text: string) {
-  return text
-    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, '[REDACTED PRIVATE KEY]')
-    .replace(/\b(password|passwd|pwd|secret|api[_-]?key|token)(\s*[=:]\s*)\S{4,}/gi, '$1$2[REDACTED]')
-    .replace(/\bAKIA[0-9A-Z]{16}\b|\bgh[pousr]_[A-Za-z0-9]{36,}\b|\bxox[abpr]-[A-Za-z0-9-]{10,}|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]*/g, '[REDACTED TOKEN]')
-    .replace(/\b(Bearer)\s+[A-Za-z0-9._~+/-]{16,}=*/g, '$1 [REDACTED]')
-    .replace(/\b(19|20)?\d{6}[-+]?\d{4}\b/g, '[REDACTED ID NUMBER]');
-}

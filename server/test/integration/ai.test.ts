@@ -68,7 +68,7 @@ describe('AI providers and the data gate (#68)', { skip }, () => {
     const sent = received.join('\n');
     assert.match(sent, /<<<DATA [0-9a-f]{16} problem/);
     assert.ok(!sent.includes('hunter2secret'), 'secrets are redacted before they leave Kernel');
-    assert.match(sent, /\[REDACTED\]/);
+    assert.match(sent, /\[REDACTED:password\]/);
     const { query } = await import('../../src/db.js');
     const audit = (await query("SELECT changes FROM audit_log WHERE entity_type = 'ai_call' ORDER BY id DESC LIMIT 1")).rows[0].changes;
     assert.deepEqual([audit.model, audit.refs], ['llama3', [p.ref]]);
@@ -119,8 +119,9 @@ describe('AI providers and the data gate (#68)', { skip }, () => {
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.ok(r.body.lines_sent < 20 && r.body.lines_total === 500, 'only errors and their context');
     assert.ok(!received.join('').includes('abcdefghijklmnopqrstuvwxyz123456'), 'the bearer token never reaches the model');
-    const flagged = await fetch(`${k.base}/api/records/${inc.ref}/attachments?filename=secrets.log`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', Cookie: analyst.cookie!, 'X-Kernel-Request': '1' }, body: new TextEncoder().encode('ERROR boom\npassword=hunter2secret') }).then((x) => x.json() as any);
-    assert.equal((await analyst.post('/api/ai/analyze-log', { attachment_id: flagged.id })).status, 403, 'flagged text follows the AI data policy');
+    const flagged = await fetch(`${k.base}/api/records/${inc.ref}/attachments?filename=secrets.log`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', Cookie: analyst.cookie!, 'X-Kernel-Request': '1' }, body: new TextEncoder().encode('ERROR boom for caller 19811218-9876') }).then((x) => x.json() as any);
+    assert.deepEqual(flagged.flags, ['personal-identity-number']);
+    assert.equal((await analyst.post('/api/ai/analyze-log', { attachment_id: flagged.id })).status, 403, 'text flagged for personal data follows the AI data policy');
   });
 
   test('budgets, and the outbound protections apply to the provider URL', async () => {

@@ -73,12 +73,12 @@ describe('attachments (#51, #74)', { skip }, () => {
   });
 
   test('logs are readable in place, with the first error and flags for secrets', async () => {
-    const log = ['2026-10-09 10:00:01 INFO start', '2026-10-09 10:00:02 INFO connecting', 'db password=hunter2secret', '2026-10-09 10:00:03 ERROR timeout'].join('\n');
+    const log = ['2026-10-09 10:00:01 INFO start', '2026-10-09 10:00:02 INFO connecting', 'db password=hunter2secret', '2026-10-09 10:00:03 ERROR timeout', 'caller 19811218-9876'].join('\n');
     const r = await upload(analyst, inc, 'app.log', Buffer.from(log));
-    assert.deepEqual(r.body.flags, ['credential']);
+    assert.deepEqual(r.body.flags, ['personal-identity-number', 'redacted:password']);
     const text = (await viewer.get(`/api/attachments/${r.body.id}/text?from=1&limit=2`)).body;
-    assert.deepEqual(text.lines, ['2026-10-09 10:00:02 INFO connecting', 'db password=hunter2secret']);
-    assert.equal(text.total_lines, 4);
+    assert.deepEqual(text.lines, ['2026-10-09 10:00:02 INFO connecting', 'db password=[REDACTED:password]'], 'the secret is never stored');
+    assert.equal(text.total_lines, 5);
     assert.equal(text.first_error_line, 3);
   });
 
@@ -90,7 +90,7 @@ describe('attachments (#51, #74)', { skip }, () => {
     const image = list.find((a: any) => a.kind === 'image');
     const refused = await call('read_attachment', { id: image.id });
     assert.equal(refused.isError, true, 'images are not sent to the AI provider by default');
-    const flagged = (await analyst.get(`/api/records/${inc}/attachments`)).body.find((a: any) => a.flags.length);
+    const flagged = (await analyst.get(`/api/records/${inc}/attachments`)).body.find((a: any) => a.flags.some((f: string) => !f.startsWith('redacted:')));
     assert.equal((await call('read_attachment', { id: flagged.id })).isError, true, 'flagged text is not sent either');
     assert.equal((await analyst.put('/api/admin/ai-data', { attachment_images: true, flagged_text: false, reason: 'Screenshots help triage' })).status, 403);
     assert.equal((await admin.put('/api/admin/ai-data', { attachment_images: true, flagged_text: false, reason: 'Screenshots help triage' })).status, 200);

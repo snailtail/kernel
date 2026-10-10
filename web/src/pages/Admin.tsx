@@ -532,6 +532,14 @@ function SecurityCard() {
     await api.put('/api/admin/ai-data', { ...aiData, [key]: on, reason });
     reloadAiData();
   };
+  const { data: sens, reload: reloadSens } = useApi<{ secrets: 'redact' | 'block'; flag_personal: boolean; flag_ips: boolean }>('/api/admin/sensitive-data');
+  const saveSens = async (next: Partial<NonNullable<typeof sens>>, what: string) => {
+    if (!sens) return;
+    const reason = await askReason('Sensitive data', what, { confirmLabel: 'Change setting' });
+    if (!reason) return;
+    await api.put('/api/admin/sensitive-data', { ...sens, ...next, reason });
+    reloadSens();
+  };
   if (!data) return null;
   const failing = data.checks.filter((c) => !c.ok).length;
   return (
@@ -556,6 +564,16 @@ function SecurityCard() {
             AI agents' decisions (closing, accepting or deferring risk, marking duplicates) wait for a person to approve them in the web UI
           </label>
           {!approvals.required && <p className="warn-box">Agents act directly on a quoted confirmation, which a prompt injection could fabricate.</p>}
+        </div>
+      )}
+      {sens && (
+        <div className="mfa-policy">
+          <h3>Sensitive data in records</h3>
+          <p className="muted small">Kernel scans what people and integrations write – descriptions, comments, events, text attachments – for passwords, keys, tokens and card numbers, and for personal data.</p>
+          <label className="check"><input type="radio" name="sens-secrets" checked={sens.secrets === 'redact'} onChange={() => saveSens({ secrets: 'redact' }, 'Secrets will be replaced with [REDACTED] before they are stored, and the writer is told.')} /> Replace secrets with [REDACTED] and save the rest</label>
+          <label className="check"><input type="radio" name="sens-secrets" checked={sens.secrets === 'block'} onChange={() => saveSens({ secrets: 'block' }, 'Text with secrets will be refused until the writer removes them. Monitoring and integrations are still accepted, redacted.')} /> Refuse text with secrets (monitoring and integrations are still redacted, never refused)</label>
+          <label className="check"><input type="checkbox" checked={sens.flag_personal} onChange={() => saveSens({ flag_personal: !sens.flag_personal }, `Records will ${sens.flag_personal ? 'no longer ' : ''}be marked when their text holds personal identity numbers or email addresses.`)} /> Mark records that hold personal data (personal identity numbers, email addresses)</label>
+          <label className="check"><input type="checkbox" checked={sens.flag_ips} onChange={() => saveSens({ flag_ips: !sens.flag_ips }, `IP addresses will ${sens.flag_ips ? 'no longer ' : ''}count as personal data.`)} /> Count IP addresses as personal data</label>
         </div>
       )}
       {aiData && (

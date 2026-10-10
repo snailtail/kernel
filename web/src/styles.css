@@ -1109,3 +1109,5 @@ tr.total td { border-bottom: 2px solid var(--border-strong); }
 .presence-avatars .avatar { width: 24px; height: 24px; border-radius: 50%; display: inline-grid; place-items: center; font-size: 11px; font-weight: 600; background: var(--accent-soft); color: var(--text-2); border: 2px solid var(--bg); margin-left: -6px; }
 .presence-avatars .avatar:first-child { margin-left: 0; }
 .presence-avatars .avatar.editing { background: var(--accent); color: var(--on-accent); }
+.sensitive-notice { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 60; max-width: min(640px, calc(100vw - 32px)); display: flex; gap: 12px; align-items: center; padding: 10px 14px; border-radius: var(--radius); box-shadow: var(--shadow); background: var(--surface); border: 1px solid var(--border-strong); font-size: 14px; }
+.sensitive-notice.warn { border-color: var(--danger); background: var(--danger-soft); }
