@@ -17,6 +17,9 @@ async function stored(needle: string) {
   return Number(rows[0].n);
 }
 
+/** Setup calls must succeed: a refused setup would make a test of absence pass for the wrong reason. */
+const ok = (r: { status: number; body: unknown }) => assert.ok(r.status >= 200 && r.status < 300, `${r.status} ${JSON.stringify(r.body)}`);
+
 describe('sensitive data in records (#61)', { skip }, () => {
   let k: Harness;
   let admin: Client, pm: Client, analyst: Client;
@@ -32,8 +35,11 @@ describe('sensitive data in records (#61)', { skip }, () => {
     assert.equal(r.status, 201, JSON.stringify(r.body));
     assert.equal(r.headers.get('x-kernel-redacted'), 'aws-key,password');
     assert.equal(r.body.description, 'Log shows key [REDACTED:aws-key] and db password=[REDACTED:password] in the config');
-    await pm.post(`/api/problems/${r.body.ref}/comments`, { body: `Retried with Authorization: Bearer abcdef0123456789abcdef and ${AWS}` });
-    await pm.patch(`/api/problems/${r.body.ref}`, { workaround: `use postgres://svc:${PW}@db/x for now` });
+    ok(await pm.post(`/api/problems/${r.body.ref}/comments`, { body: `Retried with Authorization: Bearer abcdef0123456789abcdef and ${AWS}` }));
+    ok(await pm.patch(`/api/problems/${r.body.ref}`, { workaround: `use postgres://svc:${PW}@db/x for now` }));
+    // Positive control: the same query finds what was stored (the redaction markers and the rest of the text).
+    assert.ok((await stored('[REDACTED:aws-key]')) >= 2, 'the record and the comment were searched (the audit trail keeps free text only as a digest)');
+    assert.ok((await stored('postgres://svc:[REDACTED:url-password]@db/x')) >= 1);
     assert.equal(await stored(AWS), 0);
     assert.equal(await stored(PW), 0);
     assert.equal(await stored('abcdef0123456789abcdef'), 0);
@@ -47,7 +53,7 @@ describe('sensitive data in records (#61)', { skip }, () => {
     const { rows } = await ownerQuery('SELECT contains_personal_data FROM incidents WHERE ref = $1', [i.body.ref]);
     assert.equal(rows[0].contains_personal_data, true);
     const p = (await pm.post('/api/problems', { title: 'Clean' })).body;
-    await pm.post(`/api/problems/${p.ref}/comments`, { body: 'Contact anna.svensson@example.com for details' });
+    ok(await pm.post(`/api/problems/${p.ref}/comments`, { body: 'Contact anna.svensson@example.com for details' }));
     assert.equal((await ownerQuery('SELECT contains_personal_data FROM problems WHERE ref = $1', [p.ref])).rows[0].contains_personal_data, true);
     assert.equal((await ownerQuery("SELECT contains_personal_data FROM problems WHERE title = 'Login failures'")).rows[0].contains_personal_data, false);
   });
@@ -63,7 +69,8 @@ describe('sensitive data in records (#61)', { skip }, () => {
     assert.equal((await ownerQuery("SELECT count(*)::int AS n FROM problems WHERE title = 'Blocked'")).rows[0].n, 0, 'nothing was created');
     const ev = await analyst.post('/api/events', { source: 'sensitive', events: [{ host: 'app-01', check: 'login', severity: 'major', message: `auth failed for key ${AWS}` }] });
     assert.ok(ev.status < 300, JSON.stringify(ev.body));
-    assert.equal(await stored(AWS), 0, 'the alert was kept, without the key');
+    assert.ok((await stored('auth failed for key [REDACTED:aws-key]')) >= 1, 'the alert was kept');
+    assert.equal(await stored(AWS), 0, 'without the key');
     await admin.put('/api/admin/sensitive-data', { secrets: 'redact', flag_personal: true, flag_ips: false, reason: 'Back to redaction' });
   });
 
