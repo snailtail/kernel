@@ -7,6 +7,7 @@ import { Markdown } from '../components/Markdown';
 import { richPaste } from '../components/RichPaste';
 import { RecordNotFound, VisibilityPanel } from '../components/Visibility';
 import { DevLinksPanel } from '../components/DevLinks';
+import { SummaryButton } from '../components/Ai';
 import { AttachmentsPanel } from '../components/Attachments';
 import { Modal } from '../components/Modal';
 import { Term } from '../components/Glossary';
@@ -382,6 +383,7 @@ export function ChangePage() {
           </section>
         </div>
         <aside className="problem-side">
+          <SummaryButton recordRef={c.ref} onAddNote={async (body) => { await api.post(`/api/changes/${c.ref}/comments`, { body }); reload(); }} />
           <VisibilityPanel record={c as any} onChange={reload} />
           <DevLinksPanel recordRef={c.ref} editable={editable} />
           <AttachmentsPanel recordRef={c.ref} editable={editable} canDelete={(a) => a.uploaded_by === user.id || user.role === 'admin' || user.role === 'problem_manager'} />

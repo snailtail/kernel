@@ -12,6 +12,7 @@ import { Markdown } from '../components/Markdown';
 import { richPaste } from '../components/RichPaste';
 import { RecordNotFound, VisibilityPanel } from '../components/Visibility';
 import { DevLinksPanel } from '../components/DevLinks';
+import { SummaryButton } from '../components/Ai';
 import { AttachmentsPanel } from '../components/Attachments';
 import { Modal } from '../components/Modal';
 import {
@@ -153,6 +154,7 @@ export function ProblemPage() {
         </div>
         <aside className="problem-side">
           <DetailsPanel problem={p} editable={editable} onSave={save} />
+          <SummaryButton recordRef={p.ref} onAddNote={async (body) => { await api.post(`/api/problems/${p.ref}/comments`, { body }); reload(); }} />
           <VisibilityPanel record={p as any} onChange={reload} />
           <DevLinksPanel recordRef={p.ref} editable={editable} />
           <AttachmentsPanel recordRef={p.ref} editable={editable} canDelete={(a) => a.uploaded_by === user.id || user.role === 'admin' || user.role === 'problem_manager'} />

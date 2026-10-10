@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { AiAdminSection } from '../components/Ai';
 import { DevSourcesSection } from '../components/DevLinks';
 import { api, type Role } from '../api';
 import { formatDate, relativeTime, ROLE_LABEL } from '../format';
@@ -36,6 +37,7 @@ export function AdminPage() {
       {user.role === 'admin' && <WebhooksCard />}
       {user.role === 'admin' && meta.modules?.cmdb !== false && <ConnectorsCard />}
       {meta.modules?.change !== false && <DevSourcesSection />}
+      <AiAdminSection />
       <SystemsCard />
       <BackupsCard />
       {user.role === 'admin' && <UsersCard />}
