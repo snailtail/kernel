@@ -12,6 +12,10 @@ import { skip, startKernel, type Client, type Harness } from './harness.js';
 const MARKER = `LEAK-${randomBytes(4).toString('hex')}`;
 // Searches use the random part only, so a tool that echoes its input is not mistaken for a leak.
 const PROBE = MARKER.slice(5);
+/** In an ordinary record, for the positive controls: what everyone may see must actually come through. */
+const OPEN_MARKER = `OPEN-${randomBytes(4).toString('hex')}`;
+/** Setup calls must succeed: a refused setup would make a test of absence pass for the wrong reason. */
+const ok = (r: { status: number; body: unknown }) => assert.ok(r.status >= 200 && r.status < 300, `${r.status} ${JSON.stringify(r.body)}`);
 
 async function peekStream(url: string, cookie: string) {
   const ctrl = new AbortController();
@@ -35,6 +39,7 @@ describe('visibility and restricted records (#53)', { skip }, () => {
   let sec: any;
   const restricted: Record<'problem' | 'incident' | 'change', string> = {} as any;
   let open: string;
+  let openWithMarker: string;
 
   before(async () => {
     process.env.KERNEL_SECRET_KEY = 'visibility-test-key-0123456789abcdefghij';
@@ -43,7 +48,7 @@ describe('visibility and restricted records (#53)', { skip }, () => {
     db = await import('../../src/db.js');
     for (const u of (await db.query('SELECT id, username FROM users')).rows) ids[u.username] = u.id;
     sec = (await admin.post('/api/teams', { name: 'Security' })).body;
-    await admin.put(`/api/teams/${sec.id}/members`, { members: [{ user_id: ids.analyst, role: 'lead' }] });
+    ok(await admin.put(`/api/teams/${sec.id}/members`, { members: [{ user_id: ids.analyst, role: 'lead' }] }));
     const ci = (await pm.post('/api/cis', { name: 'vault01', ci_type: 'virtual_machine' })).body.ref;
 
     // Restricted records, created by the analyst (in the Security team), with the marker everywhere.
@@ -56,15 +61,17 @@ describe('visibility and restricted records (#53)', { skip }, () => {
       const r = await analyst.put(`/api/records/${ref}/visibility`, { restricted: true, teams: [sec.id], reason: 'Security investigation' });
       assert.equal(r.status, 200, JSON.stringify(r.body));
     }
-    await analyst.post(`/api/problems/${p.ref}/comments`, { body: `Note ${MARKER}` });
+    ok(await analyst.post(`/api/problems/${p.ref}/comments`, { body: `Note ${MARKER}` }));
     await analyst.post(`/api/incidents/${i.ref}/problem`, {}).catch(() => {});
     // An ordinary problem that links to the restricted ones: the links must not show.
     open = (await analyst.post('/api/problems', { title: 'Ordinary problem', description: 'nothing secret' })).body.ref;
-    await analyst.post(`/api/records/${open}/links`, { to: p.ref });
-    await analyst.post(`/api/records/${open}/links`, { to: i.ref });
-    await fetch(`${k.base}/api/records/${i.ref}/attachments?filename=${MARKER}.log`, {
+    openWithMarker = (await analyst.post('/api/problems', { title: `Ordinary ${OPEN_MARKER}` })).body.ref;
+    ok(await analyst.post(`/api/records/${open}/links`, { to: p.ref }));
+    ok(await analyst.post(`/api/records/${open}/links`, { to: i.ref }));
+    const uploaded = await fetch(`${k.base}/api/records/${i.ref}/attachments?filename=${MARKER}.log`, {
       method: 'POST', headers: { 'Content-Type': 'application/octet-stream', Cookie: analyst.cookie!, 'X-Kernel-Request': '1' }, body: new TextEncoder().encode(`log ${MARKER}`),
     });
+    assert.ok(uploaded.ok, `attachment upload: ${uploaded.status}`);
   });
   after(async () => {
     delete process.env.KERNEL_SECRET_KEY;
@@ -110,6 +117,19 @@ describe('visibility and restricted records (#53)', { skip }, () => {
       }
     }
     assert.ok(calls > 200);
+    // Positive control: the same walk, as a member of the record's team, does reach the data – otherwise a route that
+    // failed for everyone would pass as "no leak".
+    const reached: string[] = [];
+    for (const path of paths) {
+      if (!path.includes('{ref}')) continue;
+      for (const ref of Object.values(restricted)) {
+        if (leaks((await analyst.get(path.replace('{ref}', ref).replace(/\{[^}]+\}/g, '1'))).body)) reached.push(path);
+      }
+    }
+    for (const must of ['/api/problems/{ref}', '/api/incidents/{ref}', '/api/changes/{ref}', '/api/records/{ref}']) {
+      assert.ok(reached.includes(must), `the team member sees the marker through ${must} (found through: ${[...new Set(reached)].join(', ')})`);
+    }
+    assert.ok(leaks((await analyst.get(`/api/search?q=${MARKER}`)).body), 'and through search');
     // Managers are told that their numbers leave something out, without a count.
     assert.equal((await pm.get('/api/meta')).body.hidden_records, true);
     assert.equal((await analyst.get('/api/meta')).body.hidden_records, false);
@@ -141,6 +161,9 @@ describe('visibility and restricted records (#53)', { skip }, () => {
       for (const r of (await mcp.listResources()).resources) {
         assert.ok(!leaks(await mcp.readResource({ uri: r.uri })), `resource ${r.uri} leaked`);
       }
+      // Positive control: the tools do return record text – an ordinary record's marker comes through.
+      const seen: any = await mcp.callTool({ name: 'get_record', arguments: { ref: openWithMarker } });
+      assert.ok(JSON.stringify(seen).includes(OPEN_MARKER), `get_record returns an ordinary record's text to ${user}`);
       await mcp.close();
     }
   });
@@ -150,9 +173,10 @@ describe('visibility and restricted records (#53)', { skip }, () => {
     // The analyst assigns the restricted problem to analyst2, who then may see it (the assignee always may).
     assert.equal((await analyst.patch(`/api/problems/${restricted.problem}`, { assignee_id: ids.analyst2 })).status, 200);
     assert.equal((await analyst2.get(`/api/problems/${restricted.problem}`)).status, 200, 'the assignee sees it');
-    await analyst.patch(`/api/problems/${restricted.problem}`, { assignee_id: ids.analyst });
+    ok(await analyst.patch(`/api/problems/${restricted.problem}`, { assignee_id: ids.analyst }));
     assert.equal((await analyst2.get(`/api/problems/${restricted.problem}`)).status, 404, 'and no longer when unassigned');
     const notes = (await db.query('SELECT user_id, title FROM notifications')).rows;
+    assert.ok(notes.some((n: any) => n.user_id === ids.analyst2), 'positive control: the assignee was notified');
     assert.ok(!notes.some((n: any) => n.user_id === ids.pm && leaks(n.title)));
     const created = await admin.post('/api/webhooks', { name: 'Leak test', url: 'https://hooks.example.com/x', events: [] });
     assert.equal(created.status, 201, JSON.stringify(created.body));
@@ -179,26 +203,28 @@ describe('visibility and restricted records (#53)', { skip }, () => {
 
   test('team scoping: when on for incidents, analysts see their teams\' work, unteamed work and their own', async () => {
     const ops = (await admin.post('/api/teams', { name: 'Ops' })).body;
-    await admin.put(`/api/teams/${ops.id}/members`, { members: [{ user_id: ids.analyst2 }] });
+    ok(await admin.put(`/api/teams/${ops.id}/members`, { members: [{ user_id: ids.analyst2 }] }));
     const theirs = (await analyst2.post('/api/incidents', { title: 'Ops disk full', team_id: ops.id })).body.ref;
     const secOnly = (await analyst.post('/api/incidents', { title: 'Security tool down', team_id: sec.id })).body.ref;
     const unteamed = (await analyst.post('/api/incidents', { title: 'Printer' })).body.ref;
+    assert.ok(theirs && secOnly && unteamed, 'the incidents were created');
     assert.equal((await admin.put('/api/admin/visibility', { team_scoped: { incident: true, problem: false, change: false }, restricted_categories: [], reason: 'Teams work separately' })).status, 200);
     const list = (await analyst2.get('/api/incidents?status=all')).body.map((i: any) => i.ref);
     assert.ok(list.includes(theirs) && list.includes(unteamed));
     assert.ok(!list.includes(secOnly), 'another team\'s incident is out of sight');
     assert.ok((await pm.get('/api/incidents?status=all')).body.some((i: any) => i.ref === secOnly), 'managers are not team-scoped');
     // Removing someone from a team takes effect on their next request.
-    await admin.put(`/api/teams/${ops.id}/members`, { members: [] });
+    ok(await admin.put(`/api/teams/${ops.id}/members`, { members: [] }));
     assert.equal((await analyst2.get(`/api/incidents/${theirs}`)).status, 200, 'still their own (created by them)');
     await admin.put('/api/admin/visibility', { team_scoped: { incident: false, problem: false, change: false }, restricted_categories: [], reason: 'Back to shared' });
   });
 
   test('security categories start restricted', async () => {
     const cat = (await pm.post('/api/categories', { name: 'Security incident' })).body;
-    await admin.put('/api/admin/visibility', { team_scoped: { incident: false, problem: false, change: false }, restricted_categories: [cat.id], reason: 'Security incidents are need-to-know' });
+    ok(await admin.put('/api/admin/visibility', { team_scoped: { incident: false, problem: false, change: false }, restricted_categories: [cat.id], reason: 'Security incidents are need-to-know' }));
     const i = (await analyst.post('/api/incidents', { title: 'Phishing wave', category_id: cat.id })).body;
     assert.equal(i.restricted, true);
+    assert.equal((await analyst.get(`/api/incidents/${i.ref}`)).status, 200, 'positive control: the creator sees it');
     assert.equal((await analyst2.get(`/api/incidents/${i.ref}`)).status, 404);
   });
 
