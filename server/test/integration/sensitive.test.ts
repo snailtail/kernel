@@ -81,6 +81,42 @@ describe('sensitive data in records (#61)', { skip }, () => {
     assert.equal(({} as any).description, undefined);
   });
 
+  test('managers remove old secrets and named text from a record and its history, with step-up and a reason', async () => {
+    const OLD = 'AKIAZZZZZZZZZZZZZZZZ';
+    const NAME = 'Anna Svensson-Lind';
+    const p = (await pm.post('/api/problems', { title: 'Older problem' })).body;
+    ok(await pm.post(`/api/problems/${p.ref}/comments`, { body: 'first look' }));
+    // Text from before the scanner existed: written straight to the database.
+    await ownerQuery(`UPDATE problems SET description = $2 WHERE ref = $1`, [p.ref, `key ${OLD}, reported by ${NAME}`]);
+    await ownerQuery(`UPDATE problem_activity SET body = $2, data = $3 WHERE problem_id = (SELECT id FROM problems WHERE ref = $1) AND kind = 'comment'`, [p.ref, `call ${NAME}, key ${OLD}`, JSON.stringify({ to: `old key ${OLD}` })]);
+    const up = await fetch(`${k.base}/api/records/${p.ref}/attachments?filename=old.log`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', Cookie: pm.cookie!, 'X-Kernel-Request': '1' }, body: new TextEncoder().encode(`user ${NAME} logged in`) });
+    assert.ok(up.ok);
+    // Positive control: the old text is there before.
+    assert.ok((await stored(OLD)) >= 2);
+    assert.ok((await stored(NAME)) >= 2);
+
+    assert.equal((await analyst.post(`/api/records/${p.ref}/redact`, { secrets: true, reason: 'Old key' })).status, 403, 'managers and administrators only');
+    // A session signed in long ago must confirm it is the user first.
+    await ownerQuery("UPDATE sessions SET reauth_at = now() - interval '1 hour' WHERE user_id = (SELECT id FROM users WHERE username = 'pm')");
+    assert.equal((await pm.post(`/api/records/${p.ref}/redact`, { secrets: true, reason: 'x' })).status, 403, 'step-up first');
+    await pm.post('/api/auth/reauth', { password: PASSWORD });
+    assert.equal((await pm.post(`/api/records/${p.ref}/redact`, { secrets: true })).status, 400, 'a reason is required');
+    const r = await pm.post(`/api/records/${p.ref}/redact`, { secrets: true, text: NAME, reason: 'Key and caller name written before redaction existed' });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.ok(r.body.removed >= 4, JSON.stringify(r.body));
+    assert.equal(await stored(OLD), 0);
+    assert.equal(await stored(NAME), 0);
+    const blob = await ownerQuery("SELECT convert_from(data, 'UTF8') AS t FROM attachment_blobs b JOIN attachments a ON a.id = b.attachment_id WHERE a.record_ref = $1", [p.ref]);
+    assert.equal(blob.rows[0].t, 'user [REDACTED] logged in');
+    // The fact of the change stays, and the removal is recorded – without the text.
+    const record = (await pm.get(`/api/problems/${p.ref}`)).body;
+    assert.match(record.description, /^key \[REDACTED:aws-key\], reported by \[REDACTED\]$/);
+    assert.ok(record.activity.some((a: any) => a.body?.startsWith('Removed sensitive text')));
+    const trail = await ownerQuery("SELECT changes::text AS c FROM audit_log WHERE action = 'redact_history'");
+    assert.equal(trail.rows.length, 1);
+    assert.ok(!trail.rows[0].c.includes(NAME));
+  });
+
   test('the typing check reports kinds only', async () => {
     const r = await analyst.post('/api/sensitive/check', { text: `password=${PW} and ${PNR}` });
     assert.deepEqual(r.body, { secrets: ['password'], personal: ['personal-identity-number'], action: 'redact' });

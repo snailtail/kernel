@@ -198,6 +198,8 @@ export const UNSCANNED = [
   /^\/api\/ai\//,
   // The check behind the typing warning scans the text itself and stores nothing.
   /^\/api\/sensitive\//,
+  // Removing text from a record's history names that text; redacting it first would hide what to remove.
+  /^\/api\/records\/[^/]+\/redact$/,
   // Attachments are scanned as files (attachments.ts).
   /^\/api\/records\/[^/]+\/attachments/,
 ];
