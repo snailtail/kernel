@@ -47,16 +47,18 @@ const canonical = (r: Record<string, unknown>) =>
  * Version 3 entries (#63) name their key (key_id) and include it in the HMAC, so a key can be rotated and an entry
  * cannot be moved to another key. Version 2 entries used the key "k0".
  */
-const chainKey = (id: string) => {
+const chainKey = (id: string, version: number) => {
   const k = keyById(id);
-  return k ? derive('kernel-audit-chain:', k) : null;
+  if (!k) return null;
+  // Version 2 used sha256 of a label and the key; version 3 derives with HKDF.
+  return version === 2 ? createHash('sha256').update('kernel-audit-chain:' + k.raw).digest() : derive('kernel-audit-chain', k);
 };
 export const currentHashVersion = () => (activeKey() ? 3 : 1);
 
 export function hashOf(prev: string, row: Record<string, unknown>, version = 1, keyId?: string | null) {
   if (version === 3 || version === 2) {
     const id = version === 2 ? 'k0' : String(keyId ?? '');
-    const key = chainKey(id);
+    const key = chainKey(id, version);
     if (!key) throw new Error(`Key ${id} is needed to verify keyed audit entries`);
     const h = createHmac('sha256', key).update(prev);
     if (version === 3) h.update(`key:${id}:`);
@@ -79,7 +81,7 @@ const TOKEN = /^[A-Za-z0-9_.:\/#+-]{0,64}$/;
 export const digestOf = (v: string) => {
   const k = activeKey();
   return k
-    ? { digest: `hmac-sha256:${k.id}:${createHmac('sha256', derive('kernel-audit-digest:', k)).update(v).digest('hex')}`, length: v.length }
+    ? { digest: `hmac-sha256:${k.id}:${createHmac('sha256', derive('kernel-audit-digest', k)).update(v).digest('hex')}`, length: v.length }
     // Without a key a plain hash of a short value could be reversed, so only the fact and size of the change remain.
     : { changed: true, length: v.length };
 };
@@ -230,7 +232,7 @@ export async function verifyChain(): Promise<{ ok: boolean; checked: number; bro
     for (const r of rows) {
       const row = { ...r, at: (r.at as Date).toISOString() };
       const needed = r.hash_version === 2 ? 'k0' : r.hash_version === 3 ? r.key_id : null;
-      if (needed && !chainKey(needed)) return { ok: false, checked, broken_at: Number(r.id), error: `Key ${needed} is needed to verify keyed entries; add it back to the keyring` };
+      if (needed && !chainKey(needed, r.hash_version)) return { ok: false, checked, broken_at: Number(r.id), error: `Key ${needed} is needed to verify keyed entries; add it back to the keyring` };
       // A version 1 entry after keyed ones means someone appended without the key.
       if (r.prev_hash !== prev || hashOf(prev, row, r.hash_version, r.key_id) !== r.hash || (r.hash_version === 1 && sawKeyed)) {
         logger.error({ event: { dataset: 'kernel.security', action: 'audit.chain_broken' }, audit_id: r.id }, 'Audit trail hash chain mismatch');

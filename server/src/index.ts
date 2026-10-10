@@ -4,6 +4,7 @@ import { startChainVerification } from './audit.js';
 import { asSystem } from './context.js';
 import { pruneIdempotencyKeys } from './idempotency.js';
 import { checkConfiguration } from './security.js';
+import { recordActiveKey } from './rotate-keys.js';
 import { bootstrapAdmin } from './auth.js';
 import { config } from './config.js';
 import { migrate, pool, query, waitForDb } from './db.js';
@@ -21,6 +22,7 @@ await waitForDb(log);
 await migrate(log);
 await bootstrapAdmin(log);
 await encryptLegacySecrets(log);
+await recordActiveKey();
 setInterval(() => query('DELETE FROM sessions WHERE expires_at < now()').catch(() => {}), 3600_000).unref();
 // IP addresses and user agents of audit entries are kept for a limited time (settings.privacy.audit_context_days).
 setInterval(() => query("DELETE FROM audit_context WHERE created_at < now() - coalesce((SELECT (value->>'audit_context_days')::int FROM settings WHERE key = 'privacy'), 365) * interval '1 day'").catch(() => {}), 86400_000).unref();

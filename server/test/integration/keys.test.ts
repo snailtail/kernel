@@ -62,6 +62,13 @@ describe('key rotation (#63)', { skip }, () => {
 
     process.env.KERNEL_SECRET_KEYS = `k1:${K1}`;
     process.env.KERNEL_SECRET_KEY_ID = 'k1';
+    // What Kernel does at start: the switch of active key is recorded, once.
+    await rot.recordActiveKey();
+    await rot.recordActiveKey();
+    const changed = (await db.query("SELECT changes, key_id FROM audit_log WHERE entity_type = 'keys' AND action = 'active_changed'")).rows;
+    assert.equal(changed.length, 1);
+    assert.deepEqual(changed[0].changes, { from: 'k0', to: 'k1' });
+    assert.equal(changed[0].key_id, 'k1');
     await pm.post('/api/problems', { title: 'Made with k1' });
     const { rows: last } = await db.query('SELECT hash_version, key_id FROM audit_log ORDER BY id DESC LIMIT 1');
     assert.deepEqual([last[0].hash_version, last[0].key_id], [3, 'k1']);
@@ -74,6 +81,9 @@ describe('key rotation (#63)', { skip }, () => {
     assert.match(sec.detail, /rotate-keys/);
 
     const r = await rot.rotateSecrets();
+    const reenc = (await db.query("SELECT changes FROM audit_log WHERE entity_type = 'keys' AND action = 'secrets_reencrypted' ORDER BY id DESC LIMIT 1")).rows[0];
+    assert.equal(reenc.changes.to, 'k1');
+    assert.ok(Object.keys(reenc.changes.counts).length >= 1);
     assert.ok(Object.values(r.reencrypted).reduce((a, b) => a + b, 0) >= 1);
     usage = await rot.keyUsage();
     assert.deepEqual(Object.keys(usage.secrets), ['k1'], 'every secret now uses k1');
