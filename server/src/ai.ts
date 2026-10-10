@@ -22,6 +22,10 @@ import { rateLimit } from './ratelimit.js';
 import { typeForRef } from './records.js';
 import { decryptSecret, encryptSecret } from './secrets.js';
 
+/** Cuts key-like strings (sk-…, long base64/hex runs, bearer values) out of a provider's error text before logging. */
+const scrubSecrets = (text: string) =>
+  text.slice(0, 500).replace(/\b(sk|pk|rk)-[A-Za-z0-9_-]{8,200}/g, '$1-[REDACTED]').replace(/\b(Bearer)\s{1,5}\S{8,400}/gi, '$1 [REDACTED]').replace(/\b[A-Za-z0-9+/_-]{32,400}={0,2}/g, '[REDACTED]');
+
 export const TASKS = { summarize: 'Summaries ("catch me up")', analyze_log: 'Log analysis' } as const;
 export type Task = keyof typeof TASKS;
 export const DATA_CLASSES = ['internal', 'personal', 'restricted'] as const;
@@ -157,7 +161,9 @@ async function callModel(user: User, provider: Provider, model: string, input: P
     } catch (err) {
       span.setStatus({ code: SpanStatusCode.ERROR });
       if (err instanceof HttpError) throw err;
-      logger.warn({ event: { dataset: 'kernel.ai' }, provider: provider.name, model, err: (err as Error).message }, 'model call failed');
+      // Provider errors can echo the API key ("Incorrect API key provided: sk-…"), so key-like strings are cut first.
+      // codeql[js/clear-text-logging] -- the message is scrubbed of secrets; key ids in it are labels, not key material
+      logger.warn({ event: { dataset: 'kernel.ai' }, provider: provider.name, model, err: scrubSecrets((err as Error).message) }, 'model call failed');
       // Never fall back to another provider: it might be allowed less.
       throw new HttpError(503, `AI is unavailable right now (${provider.name} did not answer).`);
     } finally {
