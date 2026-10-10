@@ -45,6 +45,14 @@ jobs:
                   for r in run.get('results', []):
                       loc = r['locations'][0]['physicalLocation']
                       found.append(f"{r['ruleId']}: {loc['artifactLocation']['uri']}:{loc.get('region', {}).get('startLine')} {r['message']['text'][:160]}")
+                      # The source and steps of a data-flow finding, so it can be fixed without the SARIF file.
+                      for rel in r.get('relatedLocations', []):
+                          pl = rel['physicalLocation']
+                          found.append(f"    related {rel.get('id')}: {pl['artifactLocation']['uri']}:{pl.get('region', {}).get('startLine')}")
+                      for flow in r.get('codeFlows', [])[:1]:
+                          for step in flow['threadFlows'][0]['locations']:
+                              pl = step['location']['physicalLocation']
+                              found.append(f"    step: {pl['artifactLocation']['uri']}:{pl.get('region', {}).get('startLine')}")
           print('\n'.join(found) or 'No findings')
           sys.exit(1 if found else 0)
           PY
