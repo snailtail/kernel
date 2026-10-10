@@ -1093,3 +1093,11 @@ tr.total td { border-bottom: 2px solid var(--border-strong); }
 .sp-partial_outage { background: var(--s-known-bg); color: var(--p2); }
 .sp-major_outage { background: var(--danger-soft); color: var(--danger); }
 .suggestion { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+/* Service report (#54) */
+.kpi-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; margin-bottom: 8px; }
+.kpi { padding: 14px 16px; gap: 2px; }
+.kpi-value { font-size: 1.4rem; font-weight: 700; }
+.kpi-label { color: var(--text-2); font-size: 0.85rem; }
+.kpi-bad .kpi-value { color: var(--danger); }
+.period-form { display: flex; gap: 6px; flex-wrap: wrap; }
+@media print { .no-print, .sidebar, .topbar { display: none !important; } .service-report .card { break-inside: avoid; box-shadow: none; } }

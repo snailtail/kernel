@@ -144,6 +144,7 @@ export function CiPage() {
           <span className={`crit crit-${ci.criticality}`}>{CRITICALITY[ci.criticality]}</span>
           {ci.tags.map((t) => <span key={t} className="tag">{t}</span>)}
         </div>
+        {ci.class === 'service' && <div className="ci-head-actions"><Link className="btn" to={`/services/${ci.ref}/report`}>Service report</Link></div>}
         {manage && (
           <div className="ci-head-actions">
             <button className="btn" onClick={() => setEditing(true)}>Edit</button>
