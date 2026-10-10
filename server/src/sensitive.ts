@@ -5,6 +5,10 @@
 // history or the audit trail; an administrator can choose to refuse such input instead. Personal data (personal
 // identity numbers, email addresses) is often needed, so it is flagged rather than redacted.
 //
+// Known trade-off: a key=value secret must look like one (quoted, or 6+ characters with a digit or symbol, or a
+// connection-string field ending in ";"), so prose is not mangled – and so "password=secret", all letters and not in a
+// connection string, is not caught.
+//
 // Every pattern is linear: bounded quantifiers, character classes that cannot overlap their delimiters, and private
 // keys found with indexOf rather than a regex. Text is scanned in chunks, so the cost grows with its length only.
 import { z } from 'zod';
@@ -46,9 +50,14 @@ export function validPersonnummer(raw: string) {
   return luhn(ten);
 }
 
-// A password-like value given with ":" must look like one (digits or symbols), so prose such as "password: reset by
-// the user" is left alone; with "=" (configuration, connection strings) any value counts.
-const credentialValue = (m: RegExpExecArray) => m[2].includes('=') || /^["']/.test(m[3]) || /[^A-Za-z]/.test(m[3]);
+// A value after "password=" or "secret:" must look like a secret, so prose ("password: reset done", "token=expired")
+// is left alone: quoted, or at least 6 characters with a digit or symbol, or a connection-string field ("Password=x;").
+const credentialValue = (m: RegExpExecArray) => {
+  const v = m[3];
+  if (/^["']/.test(v)) return true;
+  if (v.length >= 6 && /[^A-Za-z]/.test(v)) return true;
+  return m[2].includes('=') && m.input[m.index + m[0].length] === ';';
+};
 
 const DETECTORS: Detector[] = [
   { type: 'aws-key', class: 'secret', re: /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g },
@@ -61,7 +70,8 @@ const DETECTORS: Detector[] = [
   { type: 'slack-webhook', class: 'secret', re: /\bhooks\.slack\.com\/services\/[A-Za-z0-9/]{20,120}/g },
   { type: 'kernel-token', class: 'secret', re: /\bkernel_pat_[A-Za-z0-9_-]{20,100}/g },
   { type: 'jwt', class: 'secret', re: /\beyJ[A-Za-z0-9_-]{10,4000}\.eyJ[A-Za-z0-9_-]{10,8000}\.[A-Za-z0-9_-]{0,4000}/g },
-  { type: 'bearer-token', class: 'secret', re: /\b(Bearer)(\s{1,5})([A-Za-z0-9._~+/-]{16,4000}=*)/g, group: 3 },
+  { type: 'bearer-token', class: 'secret', re: /\b(Bearer)(\s{1,5})([A-Za-z0-9._~+/-]{16,4000}=*)/gi, group: 3 },
+  { type: 'ai-key', class: 'secret', re: /\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{20,200}/g },
   { type: 'url-password', class: 'secret', re: /\b([a-z][a-z0-9+.-]{1,20}:\/\/[^\s:@/]{1,100}:)([^\s@/]{1,200})(@)/gi, group: 2 },
   {
     type: 'password', class: 'secret',
@@ -82,8 +92,6 @@ const IP: Detector = { type: 'ip-address', class: 'personal', re: /\b(?:(?:25[0-
 
 const CHUNK = 64 * 1024;
 const OVERLAP = 4 * 1024;
-/** The most a single call scans; anything beyond is not inspected (inputs are limited well below this). */
-export const MAX_SCAN = 8 * 1024 * 1024;
 
 /** PEM private keys, found without a regex (a lazy match up to END would rescan on every BEGIN). */
 function privateKeys(text: string): Finding[] {
@@ -108,8 +116,8 @@ function privateKeys(text: string): Finding[] {
 
 export interface ScanOptions { ips?: boolean }
 
-export function scan(input: string, options: ScanOptions = {}): Finding[] {
-  const text = input.length > MAX_SCAN ? input.slice(0, MAX_SCAN) : input;
+/** Scans all of the text: the work is chunked and linear, so there is no length beyond which text goes unchecked. */
+export function scan(text: string, options: ScanOptions = {}): Finding[] {
   const found: Finding[] = privateKeys(text);
   const detectors = options.ips ? [...DETECTORS, IP] : DETECTORS;
   for (let base = 0; base < text.length; base += CHUNK) {
