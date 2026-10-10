@@ -111,18 +111,26 @@ async function flush() {
   const batch = [...pending];
   pending.clear();
   const byKind = new Map<Kind, number[]>();
+  const users = new Set<number>();
   for (const p of batch) {
     const [k, id] = p.split(':');
-    if (kindOk(k) && /^\d+$/.test(id)) byKind.set(k, [...(byKind.get(k) ?? []), Number(id)]);
+    if (k === 'user' && /^\d+$/.test(id)) users.add(Number(id));
+    else if (kindOk(k) && /^\d+$/.test(id)) byKind.set(k, [...(byKind.get(k) ?? []), Number(id)]);
   }
   for (const s of [...streams.values()]) {
     try {
+      // Someone's teams changed: their view may have shrunk, so re-check now rather than within the minute.
+      if (users.has(s.user.id)) await recheckAndAnnounce(s);
       const wanted = [...byKind].map(([k, ids]) => [k, ids.filter((id) => s.topics.has(`${k}:*`) || s.topics.has(`${k}:${id}`))] as const).filter(([, ids]) => ids.length);
       if (!wanted.length) continue;
       if (Date.now() - s.checkedAt > LIMITS.recheckBeforeSendMs && !(await recheck(s))) continue;
       for (const [k, ids] of wanted) {
         const ok = await visibleIds(s.viewer, k, ids);
-        for (const id of ids) if (ok.has(id)) send(s, 'change', { kind: k, id });
+        for (const id of ids) {
+          if (ok.has(id)) send(s, 'change', { kind: k, id });
+          // The record was just restricted away from this person: stop following it at once (presence too).
+          else if (s.topics.delete(`${k}:${id}`)) broadcastPresence(`${k}:${id}`);
+        }
       }
     } catch {
       close(s);
@@ -132,8 +140,17 @@ async function flush() {
 
 function onNotify(payload: string) {
   if (payload.length > 64) return;
+  // 'user:<id>' comes from team membership changes; everything else is 'kind:id'.
   pending.add(payload);
   flushTimer ??= setTimeout(() => void flush(), LIMITS.flushMs);
+}
+
+/** A re-check, then fresh presence for record topics that were dropped. */
+async function recheckAndAnnounce(s: Stream) {
+  const before = [...s.topics];
+  if (!(await recheck(s))) return false;
+  for (const t of before) if (!s.topics.has(t)) broadcastPresence(t);
+  return true;
 }
 
 /** Who has this record open (other than the recipient); never the people who opted out. */
@@ -207,7 +224,7 @@ export function startLive(log: (msg: string) => void) {
   stopListening = listen('kernel_live', onNotify, log);
   timers = [
     setInterval(() => { for (const s of streams.values()) write(s, ': ping\n\n'); }, LIMITS.heartbeatMs),
-    setInterval(() => { for (const s of [...streams.values()]) if (Date.now() - s.checkedAt >= LIMITS.recheckMs) recheck(s).catch(() => close(s)); }, 10_000),
+    setInterval(() => { for (const s of [...streams.values()]) if (Date.now() - s.checkedAt >= LIMITS.recheckMs) recheckAndAnnounce(s).catch(() => close(s)); }, 10_000),
   ];
   for (const t of timers) t.unref();
 }
@@ -221,5 +238,5 @@ export async function stopLive() {
 
 /** For tests and the security status. */
 export const liveStats = () => ({ streams: streams.size, users: new Set([...streams.values()].map((s) => s.user.id)).size });
-export const recheckAll = async () => { for (const s of [...streams.values()]) await recheck(s).catch(() => close(s)); };
+export const recheckAll = async () => { for (const s of [...streams.values()]) await recheckAndAnnounce(s).catch(() => close(s)); };
 export const heartbeatNow = () => { for (const s of streams.values()) write(s, ': ping\n\n'); };

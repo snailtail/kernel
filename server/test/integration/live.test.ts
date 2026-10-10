@@ -123,6 +123,31 @@ describe('live updates (#70)', { skip }, () => {
     await pm.put('/api/auth/preferences', { live_presence: true });
   });
 
+  test('restricting a record or leaving its team stops following it at once, presence included', async () => {
+    const team = (await admin.post('/api/teams', { name: 'Live inner circle' })).body;
+    const ids = Object.fromEntries((await admin.get('/api/users')).body.map((u: any) => [u.username, u.id]));
+    await admin.put(`/api/teams/${team.id}/members`, { members: [{ user_id: ids.analyst, role: 'lead' }, { user_id: ids.viewer, role: 'member' }] });
+    const p = (await analyst.post('/api/problems', { title: 'Soon restricted' })).body;
+    const a = await stream(analyst);
+    const b = await stream(viewer);
+    await analyst.put(`/api/live/${a.id}`, { topics: [`problem:${p.id}`] });
+    await viewer.put(`/api/live/${b.id}`, { topics: [`problem:${p.id}`] });
+    const seenByA = () => a.events.filter((e) => e.event === 'presence' && e.data.topic === `problem:${p.id}`).at(-1)?.data.people ?? [];
+    assert.ok(await a.waitFor(() => seenByA().length === 1), 'the analyst sees the viewer');
+
+    // Restricted to the team (the viewer is in it): still visible to both.
+    await analyst.put(`/api/records/${p.ref}/visibility`, { restricted: true, teams: [team.id], reason: 'Security investigation' });
+    assert.ok(await b.waitFor(() => b.changes('problem', p.id) > 0), 'a team member still hears about it');
+    // The viewer leaves the team: their stream drops the record without waiting for the minute's re-check.
+    await admin.put(`/api/teams/${team.id}/members`, { members: [{ user_id: ids.analyst, role: 'lead' }] });
+    assert.ok(await a.waitFor(() => seenByA().length === 0), 'the viewer no longer shows as present');
+    const before = b.changes('problem', p.id);
+    await analyst.post(`/api/problems/${p.ref}/comments`, { body: 'After the viewer left' });
+    assert.ok(await a.waitFor(() => a.changes('problem', p.id) > 0));
+    await new Promise((r) => setTimeout(r, 600));
+    assert.equal(b.changes('problem', p.id), before, 'nothing more reaches the former member');
+  });
+
   test('signing out closes the stream; tokens and too many streams are refused', async () => {
     const extra = await k.login('analyst');
     const s = await stream(extra);

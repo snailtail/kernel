@@ -35,3 +35,11 @@ BEGIN
       t.tbl || '_live', t.tbl, t.kind, t.col);
   END LOOP;
 END $$;
+
+-- Team membership decides what someone may see (#53): a change re-checks that person's streams at once.
+CREATE FUNCTION kernel_live_member() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  PERFORM pg_notify('kernel_live', 'user:' || CASE WHEN TG_OP = 'DELETE' THEN OLD.user_id ELSE NEW.user_id END);
+  RETURN NULL;
+END $$;
+CREATE TRIGGER team_members_live AFTER INSERT OR UPDATE OR DELETE ON team_members FOR EACH ROW EXECUTE FUNCTION kernel_live_member();
