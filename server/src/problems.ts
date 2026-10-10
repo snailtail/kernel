@@ -99,7 +99,7 @@ const SELECT_PROBLEM = `
          p.affected_service, p.detection, p.impact, p.urgency, p.priority, p.is_major,
          p.assignee_id, a.display_name AS assignee, p.restricted, p.restricted_teams, p.team_id, (SELECT name FROM teams WHERE id = p.team_id) AS team, p.created_by, cb.display_name AS created_by_name,
          p.root_cause, p.workaround, p.resolution, p.closure_code, p.major_review,
-         p.known_error_at, p.resolved_at, p.closed_at, p.created_at, p.updated_at,
+         p.known_error_at, p.resolved_at, p.closed_at, p.created_at, p.updated_at, p.contains_personal_data,
          p.ec_risk_level, p.ec_risk, p.ec_fix_cost, p.ec_decision, p.ec_decision_note, p.ec_decided_by,
          db.display_name AS ec_decided_by_name, p.ec_decided_at, p.ec_review_date::text AS ec_review_date,
          p.workaround_effectiveness, p.workaround_reviewed_at, p.mcp_proposed,

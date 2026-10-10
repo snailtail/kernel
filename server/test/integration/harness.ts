@@ -18,6 +18,7 @@ export const USERS = {
 export interface Response<T = any> {
   status: number;
   body: T;
+  headers: Headers;
 }
 
 export class Client {
@@ -54,7 +55,7 @@ export class Client {
     } catch {
       parsed = text; // CSV, Markdown…
     }
-    return { status: res.status, body: parsed };
+    return { status: res.status, body: parsed, headers: res.headers };
   }
 
   get = <T = any>(path: string) => this.request<T>('GET', path);

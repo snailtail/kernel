@@ -232,6 +232,7 @@ export function IncidentPage() {
         <div className="crumbs"><Link to="/incidents">Incidents</Link> / <span className="mono">{i.ref}</span> <Presence people={others} /></div>
         <h1>{i.title}</h1>
         <div className="badges">
+          {(i as any).contains_personal_data && <span className="badge" title="The text holds personal data (personal identity numbers or email addresses). It is kept, and counts for retention and AI handling.">Personal data</span>}
           <IncidentStatusBadge status={i.status} />
           <PriorityBadge priority={i.priority} />
           {i.is_major && <MajorBadge />}

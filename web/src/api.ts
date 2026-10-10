@@ -208,6 +208,9 @@ async function request<T>(method: string, path: string, body?: unknown, retried 
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   const data = res.status === 204 ? null : await res.json().catch(() => null);
+  // Sensitive data (#61): tell the user what the server removed from what they sent.
+  const redacted = res.headers.get('X-Kernel-Redacted');
+  if (redacted && res.ok) window.dispatchEvent(new CustomEvent('kernel:redacted', { detail: redacted.split(',') }));
   if (!res.ok) {
     if (res.status === 401 && !path.startsWith('/api/auth/login') && path !== '/api/auth/reauth') window.dispatchEvent(new Event('kernel:unauthorized'));
     // Sensitive action: confirm identity, then retry once.

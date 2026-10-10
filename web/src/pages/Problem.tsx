@@ -82,6 +82,7 @@ export function ProblemPage() {
         </div>
         <EditableTitle value={p.title} editable={editable} onSave={(title) => save({ title }, { title: p.title })} />
         <div className="badges">
+          {(p as any).contains_personal_data && <span className="badge" title="The text holds personal data (personal identity numbers or email addresses). It is kept, and counts for retention and AI handling.">Personal data</span>}
           <StatusBadge status={p.status} />
           <PriorityBadge priority={p.priority} />
           {p.is_major && <MajorBadge />}

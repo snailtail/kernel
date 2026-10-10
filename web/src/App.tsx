@@ -18,6 +18,7 @@ import { NewProblemPage } from './pages/NewProblem';
 import { ProblemPage } from './pages/Problem';
 import { ProblemsPage } from './pages/Problems';
 import { SessionContext, canEdit, isManager } from './session';
+import { SensitiveWatch } from './components/SensitiveWatch';
 
 // Pages people open less often load on demand, so the start page stays small.
 const ChangesPage = lazy(() => import('./pages/Changes').then((m) => ({ default: m.ChangesPage })));
@@ -157,6 +158,7 @@ export function App() {
           </div>
         </aside>
         <main className="main">
+          <SensitiveWatch />
           <Suspense fallback={<p className="muted">Loading…</p>}>
           <Routes>
             <Route path="/" element={<MyWorkPage />} />

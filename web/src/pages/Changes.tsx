@@ -311,6 +311,7 @@ export function ChangePage() {
         <div className="crumbs"><Link to="/changes">Changes</Link> / <span className="mono">{c.ref}</span> <Presence people={others} /></div>
         <h1>{c.title}</h1>
         <div className="badges">
+          {(c as any).contains_personal_data && <span className="badge" title="The text holds personal data (personal identity numbers or email addresses). It is kept, and counts for retention and AI handling.">Personal data</span>}
           <ChangeStatusBadge status={c.status} />
           <span className={`tag type-${c.change_type}`}>{c.change_type}{c.template && `: ${c.template}`}</span>
           <span className={`badge risk-${c.risk}`} title={c.risk_reason}>{c.risk} risk{c.risk_overridden && ` (assessed ${c.risk_assessed})`}</span>

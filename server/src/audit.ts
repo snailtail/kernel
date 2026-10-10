@@ -1,4 +1,5 @@
 // The unified audit trail: every change writes an entry in the same transaction, chained by hash.
+import { scan } from './sensitive.js';
 import { activeKey, derive, keyById } from './keys.js';
 import { createHash, createHmac } from 'node:crypto';
 import { z } from 'zod';
@@ -163,14 +164,11 @@ export async function audit(db: Db | null, entry: AuditEntry) {
 }
 
 /** For sensitive administrative actions the reason is mandatory. */
-/** Obvious personal identifiers: email addresses and Swedish personal identity numbers. */
-// Bounded parts (and a length cap below) keep this linear on hostile input.
-const PII_IN_TEXT = /[\w.+-]{1,64}@[\w-]{1,63}(?:\.[\w-]{1,63}){1,8}|\b(?:19|20)?\d{6}[-+]?\d{4}\b/i;
 
 export function requireReason(reason: string | undefined): string {
   if (!reason?.trim()) throw badRequest('A reason is required for this action', );
   // Reasons are kept verbatim in the append-only trail (ADR 0001), so they must not carry personal details.
-  if (PII_IN_TEXT.test(reason.slice(0, 1000))) throw badRequest('The reason seems to contain an email address or a personal identity number. Refer to people by their account or a record ref instead.');
+  if (scan(reason.slice(0, 1000)).some((f) => f.class === 'personal')) throw badRequest('The reason seems to contain an email address or a personal identity number. Refer to people by their account or a record ref instead.');
   return reason.trim().slice(0, 1000);
 }
 
