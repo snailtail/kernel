@@ -18,6 +18,7 @@ import * as kb from './knowledge.js';
 import * as tm from './teams.js';
 import * as dv from './dev.js';
 import * as aiMod from './ai.js';
+import * as st from './status.js';
 import * as hooks from './event-hooks.js';
 import { auditQuerySchema } from './audit.js';
 import { searchSchema } from './generic.js';
@@ -144,6 +145,13 @@ export const OPERATIONS: Op[] = [
   { method: 'delete', path: '/api/admin/ai/providers/:id', tag: 'AI', summary: 'Remove a provider (and its routes)' },
   { method: 'post', path: '/api/admin/ai/providers/:id/test', tag: 'AI', summary: 'Test connection with a fixed prompt (no data)' },
   { method: 'put', path: '/api/admin/ai/routing', tag: 'AI', summary: 'Choose the provider and model per task (with a reason)' },
+  { method: 'get', path: '/api/status', tag: 'Status', summary: 'Service status board: set and suggested status per service (from incidents, maintenance, changes), updates, planned maintenance' },
+  { method: 'put', path: '/api/status/:ref', tag: 'Status', summary: 'Set a service status (publish: also on the public page)', body: st.setStatusSchema },
+  { method: 'put', path: '/api/status/:ref/public', tag: 'Status', summary: 'Show a service on the public page under a curated name and description', body: st.publicServiceSchema },
+  { method: 'post', path: '/api/status/updates', tag: 'Status', summary: 'Post a status update (investigating → identified → monitoring → resolved); public updates need a problem manager', body: st.updateSchema },
+  { method: 'delete', path: '/api/status/updates/:id', tag: 'Status', summary: 'Retract a published update (?reason=)' },
+  { method: 'put', path: '/api/admin/status-page', tag: 'Status', summary: 'Turn the public status page on or off and set its title (with a reason)' },
+  { method: 'get', path: '/api/public/status', tag: 'Status', summary: 'The public status page as JSON (no authentication; published data only; cacheable)' },
   { method: 'get', path: '/api/records/:ref/dev-links', tag: 'Dev platforms', summary: 'Pull requests, issues, commits, workflow runs and releases linked to a problem, change or incident, with their status' },
   { method: 'post', path: '/api/records/:ref/dev-links', tag: 'Dev platforms', summary: 'Link a GitHub URL (pull request, issue, commit, workflow run or release)' },
   { method: 'delete', path: '/api/records/:ref/dev-links/:id', tag: 'Dev platforms', summary: 'Remove a dev link' },

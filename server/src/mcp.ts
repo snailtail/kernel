@@ -1,5 +1,6 @@
 // MCP server (Streamable HTTP, stateless) exposing Kernel to Claude and other MCP clients.
 // Each request authenticates with a personal API token and acts as that user.
+import * as statusMod from './status.js';
 import type { FastifyInstance } from 'fastify';
 import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -133,6 +134,7 @@ function buildServer(user: User, scopes?: string[]) {
     link_ci_to_problem: 'problem.link', unlink_ci_from_problem: 'problem.link',
     list_attachments: 'meta.read', read_attachment: 'meta.read', add_attachment: 'attachment.add',
     summarize_record: 'meta.read', analyze_log: 'meta.read',
+    get_service_status: 'ci.read', post_status_update: 'status.set',
     list_teams: 'team.read', link_dev_item: 'meta.read', list_dev_links: 'meta.read',
     search_knowledge: 'article.read', get_article: 'article.read', create_article: 'article.write', update_article: 'article.write', transition_article: 'article.write', use_article: 'incident.update',
     search_people: 'person.read', get_person: 'person.read', add_affected_person: 'incident.update',
@@ -530,6 +532,22 @@ function buildServer(user: User, scopes?: string[]) {
     async ({ ref, url }) => devForAgent(await dev.addDevLink(user, ref, url, 'mcp')),
   );
   tool('list_dev_links', 'Pull requests, commits, runs and releases linked to a record, with their status (open, merged, checks…).', { ref: z.string() }, true, async ({ ref }) => devForAgent(await dev.listDevLinks(user, ref)));
+
+  // ---- Service status (#46) ----
+  tool('get_service_status', 'The service status board: each service\'s set and suggested status (with the incidents behind the suggestion), recent updates and planned maintenance.', {}, true, async () => {
+    const b = await statusMod.statusBoard(user);
+    return { services: b.services.map((s: any) => ({ ref: s.ref, name: s.name, status: s.status, suggested: s.suggested, incidents: s.incidents.map((i: any) => i.ref) })), planned_maintenance: b.planned_maintenance.map((c: any) => ({ ref: c.ref, service: c.service, planned_start: c.planned_start, planned_end: c.planned_end })), updates: b.updates.slice(0, 10).map((u: any) => ({ phase: u.phase, status: u.status, public: u.public, created_at: u.created_at, untrusted_content: { message: u.message } })) };
+  });
+  tool(
+    'post_status_update',
+    'Post an internal status update for services (e.g. during a major incident). Agents cannot publish on the public status page; a person does that.',
+    { services: z.array(z.string()).min(1), phase: z.enum(statusMod.PHASES), message: z.string(), incident: z.string().optional(), status: z.enum(statusMod.STATUSES).optional() },
+    false,
+    async (input) => {
+      await statusMod.postUpdate(user, statusMod.updateSchema.parse({ ...input, public: false }));
+      return { ok: true };
+    },
+  );
 
   // ---- Teams (#42) ----
   tool('list_teams', "Teams (assignment groups): members, the services and CIs they support, and how much open and unassigned work they have. Use a team's id as team_id on incidents, problems and changes.", {}, true, async () =>
