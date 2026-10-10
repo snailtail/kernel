@@ -161,6 +161,7 @@ async function callModel(user: User, provider: Provider, model: string, input: P
       // Provider errors can echo the API key ("Incorrect API key provided: sk-…"), so only the kind of error and the
       // HTTP status are logged, never the message.
       const status = (err as { statusCode?: number; status?: number }).statusCode ?? (err as { status?: number }).status;
+      // codeql[js/clear-text-logging] -- only the error's class name and HTTP status are logged, never its message or the key
       logger.warn({ event: { dataset: 'kernel.ai' }, provider: provider.name, model, error_type: (err as Error).name, status }, 'model call failed');
       // Never fall back to another provider: it might be allowed less.
       throw new HttpError(503, `AI is unavailable right now (${provider.name} did not answer).`);
