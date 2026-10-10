@@ -81,6 +81,7 @@ const TOKEN = /^[A-Za-z0-9_.:\/#+-]{0,64}$/;
 export const digestOf = (v: string) => {
   const k = activeKey();
   return k
+    // codeql[js/insufficient-password-hash] -- a keyed HMAC that minimises personal fields in the audit trail; passwords are never audited
     ? { digest: `hmac-sha256:${k.id}:${createHmac('sha256', derive('kernel-audit-digest', k)).update(v).digest('hex')}`, length: v.length }
     // Without a key a plain hash of a short value could be reversed, so only the fact and size of the change remain.
     : { changed: true, length: v.length };
