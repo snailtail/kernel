@@ -1073,3 +1073,11 @@ tr.total td { border-bottom: 2px solid var(--border-strong); }
 .visibility-card.is-restricted { border-color: var(--warn); }
 .breakglass-banner { margin: 0 0 12px; }
 .hidden-note { margin: -6px 0 10px; }
+/* Dev platforms (#32) */
+.dev-list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; padding: 4px 0; }
+.dev-title { flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; }
+.dev-merged { background: var(--accent-soft); color: var(--accent); }
+.dev-open, .dev-ok { background: var(--success-soft); color: var(--success); }
+.dev-fail { background: var(--danger-soft); color: var(--danger); }
+.dev-draft, .dev-closed { background: var(--surface-2); color: var(--text-2); }
+.dev-source { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--border); }

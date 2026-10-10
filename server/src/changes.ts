@@ -3,6 +3,7 @@
 // what they depend on are flagged as possibly change-related.
 import { checkAssigneeInTeam, validTeam } from './teams.js';
 import { inheritRestriction } from './visibility.js';
+import { pullRequestSummary } from './dev.js';
 import { z } from 'zod';
 import type { User } from './auth.js';
 import { audit } from './audit.js';
@@ -241,6 +242,7 @@ export async function getChange(user: User, ref: string) {
     activity: activity.rows,
     links: links.rows,
     related_incidents: incidents,
+    pull_requests: await pullRequestSummary(c.ref),
   };
   return { type: 'change', ...detail, url: changeUrl(c.ref), next_steps: changeGuidance(detail) };
 }
@@ -252,7 +254,12 @@ function changeGuidance(c: any) {
     { id: 'plans', label: 'Write the implementation and backout plans', hint: 'How to do it, how to test it, and how to undo it if it goes wrong.', done: !!c.implementation_plan.trim() && !!c.backout_plan.trim() },
     { id: 'window', label: 'Plan the window', hint: 'Planned start and end; Kernel checks collisions and freezes.', done: !!c.planned_start && !!c.planned_end },
     ...(standard ? [] : [{ id: 'authorize', label: `Get it authorised (${c.approvals.required} approval${c.approvals.required === 1 ? '' : 's'})`, hint: `${c.risk} risk: ${c.risk_reason}`, done: ['scheduled', 'implementing', 'review', 'closed'].includes(c.status) || (c.status === 'authorize' && c.approvals.approved >= c.approvals.required) }]),
-    { id: 'implement', label: 'Implement and record the outcome', hint: 'Successful, failed or rolled back.', done: !!c.outcome },
+    // Dev platforms (#32): merged pull requests suggest the implementation is done; a person records the outcome.
+    { id: 'implement', label: 'Implement and record the outcome', hint: c.pull_requests?.total
+      ? c.pull_requests.merged === c.pull_requests.total
+        ? `All ${c.pull_requests.total} linked pull request${c.pull_requests.total === 1 ? ' is' : 's are'} merged${c.pull_requests.failing ? ', but checks failed' : ''}: if it is deployed, record the outcome and move it to review.`
+        : `${c.pull_requests.merged} of ${c.pull_requests.total} linked pull requests merged.`
+      : 'Successful, failed or rolled back.', done: !!c.outcome },
     { id: 'review', label: 'Review', hint: c.outcome && c.outcome !== 'successful' ? 'A failed or rolled back change needs a review.' : 'What went well, what to improve.', done: c.status === 'closed' },
   ];
   const handover = c.status === 'closed' && c.outcome === 'successful' && c.problem_ref && !['resolved', 'closed'].includes(c.problem_status)
