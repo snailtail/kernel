@@ -6,6 +6,7 @@ import { query } from '../db.js';
 import { requireStepUp } from '../mfa.js';
 import { rateLimit } from '../ratelimit.js';
 import { clearSensitivePolicyCache, policySchema, scan, sensitivePolicy } from '../sensitive.js';
+import { redactHistory, redactHistorySchema } from '../redact-history.js';
 
 export async function sensitiveRoutes(app: FastifyInstance) {
   // For the warning while typing or pasting (#61): what the scanner would do with this text. Nothing is stored or
@@ -18,6 +19,13 @@ export async function sensitiveRoutes(app: FastifyInstance) {
     const hits = scan(text, { ips: policy.flag_ips });
     const kinds = (c: string) => [...new Set(hits.filter((h) => h.class === c).map((h) => h.type))];
     return { secrets: kinds('secret'), personal: policy.flag_personal ? kinds('personal') : [], action: policy.secrets };
+  });
+
+  // Remove sensitive text from a record and its history (#61): managers and administrators, with step-up and a reason.
+  app.post<{ Params: { ref: string } }>('/api/records/:ref/redact', async (req) => {
+    const user = requireUser(req, 'record.redact');
+    await requireStepUp(req);
+    return redactHistory(user, req.params.ref, redactHistorySchema.parse(req.body));
   });
 
   app.get('/api/admin/sensitive-data', async (req) => {

@@ -53,10 +53,31 @@ Administrators set the policy under **Administration → Security status → Sen
 - **After saving.** If something was redacted, a notice says what.
 - **Marked records.** Records marked as holding personal data show a *Personal data* badge.
 
+## Removing text that is already stored
+
+Secrets written before the scanner existed, or personal details that should not have been written at all, can be removed from a record afterwards. Open the record, go to **Visibility → Remove sensitive text…**, and choose what to remove:
+
+- everything the scanner recognises as a secret;
+- an exact text, such as a name or an account number;
+- or both.
+
+Only problem managers and administrators can do this. It requires step-up and a reason.
+
+The text is replaced with `[REDACTED]` everywhere on the record:
+
+- its fields;
+- comments and history entries, including the old and new values in them;
+- actions and analyses;
+- link notes and URLs;
+- text attachments.
+
+History entries are not deleted, so the record still shows *that* something changed.
+
+The removal is itself recorded on the record and in the audit trail, with the reason and how much was removed. The removed text is never written there; the audit trail keeps only a keyed digest of it. The audit trail held only digests of free text to begin with, so its hash chain stays valid.
+
 ## Still to come
 
 These parts of #61 are not built yet:
 
-- removing secrets that are already in older history (a permissioned "redact from history" action);
-- confidential and restricted classification;
+- confidential classification;
 - masked fields that are revealed on demand.

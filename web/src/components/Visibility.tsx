@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api } from '../api';
 import { useTeams } from '../pages/Teams';
-import { canEdit, useSession } from '../session';
+import { canEdit, isManager, useSession } from '../session';
 import { askReason } from './Ask';
 import { Modal } from './Modal';
 
@@ -12,6 +12,7 @@ export function VisibilityPanel({ record: r, onChange }: { record: Restricted; o
   const { user } = useSession();
   const teams = useTeams();
   const [editing, setEditing] = useState(false);
+  const [redacting, setRedacting] = useState(false);
   const names = r.restricted_teams.map((id) => teams.find((t) => t.id === id)?.name ?? `team #${id}`);
   const viaBreakGlass = r.restricted && user.role === 'admin' && r.assignee_id !== user.id && r.created_by !== user.id
     && !teams.some((t) => t.mine && r.restricted_teams.includes(t.id));
@@ -28,8 +29,10 @@ export function VisibilityPanel({ record: r, onChange }: { record: Restricted; o
             : 'Everyone who works in Kernel can see this record.'}
         </p>
         {canEdit(user) && <button type="button" className="btn small" onClick={() => setEditing(true)}>{r.restricted ? 'Change access' : 'Restrict'}</button>}
+        {isManager(user) && <button type="button" className="btn-link small" onClick={() => setRedacting(true)}>Remove sensitive text…</button>}
       </section>
       {editing && <VisibilityModal record={r} onClose={() => setEditing(false)} onDone={() => { setEditing(false); onChange(); }} />}
+      {redacting && <RedactModal recordRef={r.ref} onClose={() => setRedacting(false)} onDone={() => { setRedacting(false); onChange(); }} />}
     </>
   );
 }
@@ -67,6 +70,50 @@ function VisibilityModal({ record: r, onClose, onDone }: { record: Restricted; o
           <button type="button" className="btn primary" onClick={() => save(restricted)}>Save</button>
         </div>
       </div>
+    </Modal>
+  );
+}
+
+/** Removes secrets or a given text from the record, its history and its text attachments (#61). */
+function RedactModal({ recordRef, onClose, onDone }: { recordRef: string; onClose: () => void; onDone: () => void }) {
+  const [secrets, setSecrets] = useState(true);
+  const [text, setText] = useState('');
+  const [reason, setReason] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<number | null>(null);
+  const run = async () => {
+    setError(null);
+    try {
+      const r = await api.post<{ removed: number }>(`/api/records/${recordRef}/redact`, { secrets, ...(text.trim() ? { text: text.trim() } : {}), reason });
+      setResult(r.removed);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+  return (
+    <Modal title={`Remove sensitive text from ${recordRef}`} onClose={result === null ? onClose : onDone}>
+      {result === null ? (
+        <div className="form" data-no-scan>
+          <p className="muted small full">Replaces the text with [REDACTED] in the record's fields, comments, actions, analyses, links and text attachments. The history keeps that something changed; the removal is recorded with your reason, without the text itself. This cannot be undone.</p>
+          <label className="check full"><input type="checkbox" checked={secrets} onChange={(e) => setSecrets(e.target.checked)} /> Passwords, keys, tokens and card numbers Kernel recognises</label>
+          <label className="full">Also remove this exact text <span className="muted small">(a name, an account number…; at least 4 characters)</span>
+            <input value={text} onChange={(e) => setText(e.target.value)} autoComplete="off" />
+          </label>
+          <label className="full">Reason <span className="muted small">(no personal details)</span>
+            <input value={reason} onChange={(e) => setReason(e.target.value)} />
+          </label>
+          {error && <div className="error full">{error}</div>}
+          <div className="actions full">
+            <button type="button" className="btn" onClick={onClose}>Cancel</button>
+            <button type="button" className="btn danger" disabled={(!secrets && text.trim().length < 4) || !reason.trim()} onClick={run}>Remove</button>
+          </div>
+        </div>
+      ) : (
+        <div className="form">
+          <p className="full">{result ? `Removed ${result} occurrence${result === 1 ? '' : 's'}.` : 'Nothing matched; the record is unchanged.'}</p>
+          <div className="actions full"><button type="button" className="btn primary" onClick={onDone}>Done</button></div>
+        </div>
+      )}
     </Modal>
   );
 }
