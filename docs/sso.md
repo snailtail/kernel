@@ -23,8 +23,11 @@ This works with Microsoft Entra ID, Google, Keycloak, Authentik, Okta and any ot
   They are never attached to an existing local account by e-mail.
 - **Sessions:**
   - Every sign-in starts a new session (no session fixation).
-  - If the provider requires a second factor, Kernel does not ask for its own.
-  - Step-up confirmation for SSO accounts is "sign in again with SSO".
+  - **Second factor.** Kernel's own TOTP still applies to accounts that have it, and to roles that require it. The
+    provider's MFA replaces it only when "Accept the provider's second factor" is on (it is off by default) **and**
+    the ID token proves it: `mfa` in `amr` (Entra ID, Okta, Keycloak) or an `acr` value you list.
+  - Step-up confirmation for SSO accounts is "sign in again with SSO" (`prompt=login`, `max_age=0`). Kernel refuses
+    it unless the token's `auth_time` is after the step-up started.
 - **Local accounts** stay as a break-glass option. Password sign-in can be limited to administrators.
 
 For Entra ID, the issuer is `https://login.microsoftonline.com/<tenant id>/v2.0`. Add the "groups" optional claim to
@@ -38,6 +41,10 @@ When Kernel runs behind Cloudflare Access, people have already signed in there. 
   published keys, the issuer `https://<team>.cloudflareaccess.com`, the application's audience (AUD) tag and its
   expiry.
 - If the header is valid, Kernel starts a session for the active account with the same e-mail.
+- Access counts as the **first factor only**, since Access policies are often an e-mail code.
+  - Accounts with two-factor authentication still enter their Kernel code.
+  - Local administrator accounts (the break-glass path) are never opened through Access, unless an administrator
+    allows it for that account (`users.allow_access_login`).
 - No account is created this way. An administrator creates it, or OIDC sign-in does.
 
 The team domain and AUD tag are on the Access application in the Cloudflare dashboard.
