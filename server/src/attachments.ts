@@ -247,3 +247,16 @@ export async function attachmentForAgent(user: User, id: number, from: number, l
   if (a.flags.length && !policy.flagged_text) throw forbidden(`${a.filename} may contain sensitive data (${a.flags.join(', ')}), so it is not sent to AI agents. A person can read it in Kernel.`);
   return getAttachmentText(user, id, from, limit);
 }
+
+/**
+ * #61 for model input: obvious secrets and personal identity numbers are replaced before text leaves Kernel for a
+ * language model (the same patterns that flag attachments).
+ */
+export function redactSecrets(text: string) {
+  return text
+    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, '[REDACTED PRIVATE KEY]')
+    .replace(/\b(password|passwd|pwd|secret|api[_-]?key|token)(\s*[=:]\s*)\S{4,}/gi, '$1$2[REDACTED]')
+    .replace(/\bAKIA[0-9A-Z]{16}\b|\bgh[pousr]_[A-Za-z0-9]{36,}\b|\bxox[abpr]-[A-Za-z0-9-]{10,}|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]*/g, '[REDACTED TOKEN]')
+    .replace(/\b(Bearer)\s+[A-Za-z0-9._~+/-]{16,}=*/g, '$1 [REDACTED]')
+    .replace(/\b(19|20)?\d{6}[-+]?\d{4}\b/g, '[REDACTED ID NUMBER]');
+}

@@ -5,6 +5,7 @@ import { GuidePanel } from '../components/Guide';
 import { richPaste } from '../components/RichPaste';
 import { RecordNotFound, VisibilityPanel } from '../components/Visibility';
 import { DevLinksPanel } from '../components/DevLinks';
+import { SummaryButton } from '../components/Ai';
 import { TeamAndAssignee, useTeams } from './Teams';
 import { ArticleSuggestions, IncidentKnowledgePanel, type ArticleRow } from './Knowledge';
 import { AttachmentsPanel } from '../components/Attachments';
@@ -361,6 +362,7 @@ export function IncidentPage() {
           </section>
           <IncidentPeoplePanel record={i} basePath={path} editable={editable} onChange={setData} />
           {meta.modules?.knowledge !== false && <IncidentKnowledgePanel incident={i} editable={editable} onChange={() => api.get<Incident>(path).then(setData)} />}
+          <SummaryButton recordRef={i.ref} onAddNote={async (body) => { await api.post(`/api/incidents/${i.ref}/comments`, { body, kind: 'comment' }); reload(); }} />
           <VisibilityPanel record={i as any} onChange={reload} />
           <DevLinksPanel recordRef={i.ref} editable={editable} />
           <AttachmentsPanel recordRef={i.ref} editable={editable} canDelete={(a) => a.uploaded_by === user.id || manager} />

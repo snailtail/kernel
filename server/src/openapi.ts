@@ -17,6 +17,7 @@ import * as ppl from './people.js';
 import * as kb from './knowledge.js';
 import * as tm from './teams.js';
 import * as dv from './dev.js';
+import * as aiMod from './ai.js';
 import * as hooks from './event-hooks.js';
 import { auditQuerySchema } from './audit.js';
 import { searchSchema } from './generic.js';
@@ -134,6 +135,15 @@ export const OPERATIONS: Op[] = [
   { method: 'get', path: '/api/templates', tag: 'Reference data', summary: 'Templates for new incidents and problems' },
   { method: 'post', path: '/api/templates', tag: 'Reference data', summary: 'Create a template (problem managers)', body: setupMod.templateSchema },
   { method: 'put', path: '/api/templates/:id', tag: 'Reference data', summary: 'Update a template', body: setupMod.templateSchema },
+  { method: 'get', path: '/api/ai/status', tag: 'AI', summary: 'Which AI tasks are set up (all off until an administrator configures a provider)' },
+  { method: 'post', path: '/api/ai/summarize', tag: 'AI', summary: 'Catch me up: a labelled AI summary of a record (state, timeline, next steps); never saved by itself' },
+  { method: 'post', path: '/api/ai/analyze-log', tag: 'AI', summary: 'AI analysis of a text attachment (errors, timeline, probable cause), pre-filtered and with secrets redacted' },
+  { method: 'get', path: '/api/admin/ai/providers', tag: 'AI', summary: 'Model providers, routing per task and usage this month' },
+  { method: 'post', path: '/api/admin/ai/providers', tag: 'AI', summary: 'Add a provider (OpenAI-compatible such as Ollama or vLLM, Anthropic, OpenAI, Google) with its location and allowed data classes', body: aiMod.providerSchema },
+  { method: 'put', path: '/api/admin/ai/providers/:id', tag: 'AI', summary: 'Update a provider (the key is write-only)', body: aiMod.providerSchema },
+  { method: 'delete', path: '/api/admin/ai/providers/:id', tag: 'AI', summary: 'Remove a provider (and its routes)' },
+  { method: 'post', path: '/api/admin/ai/providers/:id/test', tag: 'AI', summary: 'Test connection with a fixed prompt (no data)' },
+  { method: 'put', path: '/api/admin/ai/routing', tag: 'AI', summary: 'Choose the provider and model per task (with a reason)' },
   { method: 'get', path: '/api/records/:ref/dev-links', tag: 'Dev platforms', summary: 'Pull requests, issues, commits, workflow runs and releases linked to a problem, change or incident, with their status' },
   { method: 'post', path: '/api/records/:ref/dev-links', tag: 'Dev platforms', summary: 'Link a GitHub URL (pull request, issue, commit, workflow run or release)' },
   { method: 'delete', path: '/api/records/:ref/dev-links/:id', tag: 'Dev platforms', summary: 'Remove a dev link' },

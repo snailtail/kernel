@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, ApiError } from '../api';
 import { formatDate } from '../format';
+import { AnalyzeLogButton } from './Ai';
 import { Modal } from './Modal';
 
 export interface Attachment {
@@ -136,6 +137,7 @@ export function AttachmentViewer({ attachment: a, siblings, onSelect, onClose, o
         )}
         {a.kind === 'pdf' && <iframe className="att-pdf" title={a.filename} src={`/api/attachments/${a.id}?inline=1`} sandbox="allow-same-origin allow-scripts" />}
         {a.kind === 'text' && <TextViewer attachment={a} />}
+        {a.kind === 'text' && <AnalyzeLogButton attachmentId={a.id} />}
         {a.kind === 'file' && <p className="muted">This file type can only be downloaded.</p>}
         {a.flags.length > 0 && <p className="hint-box">⚠ This file {a.flags.map((f) => FLAG_TEXT[f] ?? f).join(', and ')}. Remove secrets and personal data that are not needed.</p>}
         <div className="att-meta muted small">
