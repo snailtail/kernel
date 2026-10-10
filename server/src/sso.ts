@@ -208,7 +208,7 @@ export async function accessLogin(req: FastifyRequest, reply: FastifyReply) {
   if (typeof token !== 'string' || !token) throw unauthorized('No Cloudflare Access token');
   if (!/^[a-z0-9-]+\.cloudflareaccess\.com$/.test(s.team_domain)) throw new HttpError(500, 'The Cloudflare Access team domain is not valid');
   // KERNEL_TEST_CF_CERTS_URL lets the tests serve the keys locally; it is never set in a deployment.
-  const certs = process.env.KERNEL_TEST_CF_CERTS_URL ?? `https://${s.team_domain}/cdn-cgi/access/certs`;
+  const certs = (process.env.NODE_ENV === 'test' && process.env.KERNEL_TEST_CF_CERTS_URL) || `https://${s.team_domain}/cdn-cgi/access/certs`;
   if (!jwks || jwks.domain !== certs) jwks = { domain: certs, set: createRemoteJWKSet(new URL(certs)) };
   let email: string;
   try {
