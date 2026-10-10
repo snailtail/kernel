@@ -113,6 +113,20 @@ describe('passkeys and token rotation (#75)', { skip }, () => {
     assert.equal((await c.post('/api/tokens', { name: 'ci', scopes: ['read'] })).status, 200);
   });
 
+  test('a passkey answering for another account is refused; the last second factor stays when the role needs one', async () => {
+    const o = await fetch(`${k.base}/api/auth/passkey/options`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then((x) => x.json() as any);
+    const forged: any = device.assert(o.challenge);
+    forged.response.userHandle = Buffer.from('kernel-user-1').toString('base64url');
+    assert.equal((await fetch(`${k.base}/api/auth/passkey/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ response: forged }) })).status, 401);
+    await admin.post('/api/auth/reauth', { password: PASSWORD });
+    assert.equal((await admin.put('/api/admin/mfa-policy', { required_roles: ['problem_manager'], reason: 'Managers need two factors' })).status, 200);
+    await pm.post('/api/auth/reauth', { password: PASSWORD });
+    const keys = (await pm.get('/api/auth/passkeys')).body;
+    const removed = await pm.del(`/api/auth/passkeys/${keys[0].id}`);
+    assert.equal(removed.status, 409);
+    await admin.put('/api/admin/mfa-policy', { required_roles: [], reason: 'Back' });
+  });
+
   test('a token is rotated with an overlap: both work, the old one for at most a day', async () => {
     await admin.post('/api/auth/reauth', { password: PASSWORD });
     const t = (await admin.post('/api/tokens', { name: 'deploy', scopes: ['read'], expires_in_days: 30 })).body;
