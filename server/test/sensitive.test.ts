@@ -18,6 +18,10 @@ describe('sensitive-data scanner (#61)', () => {
     ['kernel-token', 'kernel_pat_' + 'x'.repeat(43)],
     ['jwt', 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U'],
     ['bearer-token', 'Authorization: Bearer abcdef0123456789abcdef'],
+    ['bearer-token', 'authorization: bearer abcdef0123456789abcdef'],
+    ['ai-key', 'Incorrect API key provided: sk-proj-AbCdEf0123456789XyZ0123'],
+    ['ai-key', 'x-api-key: sk-ant-api03-AbCdEf0123456789XyZ0123'],
+    ['password', 'Server=db;Password=MyPassword;Database=x'],
     ['url-password', 'postgres://kernel:s3cr3t-pw@db:5432/kernel'],
     ['password', 'password=hunter2'],
     ['password', 'Server=db;User Id=sa;Password=Pa55word;'],
@@ -39,6 +43,12 @@ describe('sensitive-data scanner (#61)', () => {
 
   const negatives = [
     'password: reset by the user',
+    'password: reset done',
+    'token=expired, retrying',
+    'secret: none configured',
+    'password = changed yesterday',
+    'api_key=missing in request',
+    'skip-this-step-because-it-is-long-enough',
     'the secret is to restart it',
     'order 4111 1111 1111 1112',
     'ticket 1234567890 and 811218-9875',
@@ -69,6 +79,11 @@ describe('sensitive-data scanner (#61)', () => {
   test('IP addresses only when asked for', () => {
     assert.deepEqual(types('host 10.1.2.3'), []);
     assert.deepEqual(scan('host 10.1.2.3', { ips: true }).map((f) => f.type), ['ip-address']);
+  });
+
+  test('all of a long text is scanned', () => {
+    const text = 'x'.repeat(12 * 1024 * 1024) + ' AKIAIOSFODNN7EXAMPLE';
+    assert.equal(redact(text).text.endsWith('[REDACTED:aws-key]'), true);
   });
 
   test('a finding across a chunk boundary is found once', () => {
