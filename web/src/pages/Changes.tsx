@@ -6,6 +6,7 @@ import { GuidePanel } from '../components/Guide';
 import { Markdown } from '../components/Markdown';
 import { richPaste } from '../components/RichPaste';
 import { RecordNotFound, VisibilityPanel } from '../components/Visibility';
+import { DevLinksPanel } from '../components/DevLinks';
 import { AttachmentsPanel } from '../components/Attachments';
 import { Modal } from '../components/Modal';
 import { Term } from '../components/Glossary';
@@ -382,6 +383,7 @@ export function ChangePage() {
         </div>
         <aside className="problem-side">
           <VisibilityPanel record={c as any} onChange={reload} />
+          <DevLinksPanel recordRef={c.ref} editable={editable} />
           <AttachmentsPanel recordRef={c.ref} editable={editable} canDelete={(a) => a.uploaded_by === user.id || user.role === 'admin' || user.role === 'problem_manager'} />
           <section className="card">
             <h2>Window</h2>

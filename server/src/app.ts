@@ -31,6 +31,7 @@ import { attachmentRoutes } from './routes/attachments.js';
 import { knowledgeRoutes } from './routes/knowledge.js';
 import { teamRoutes } from './routes/teams.js';
 import { visibilityRoutes } from './routes/visibility.js';
+import { devRoutes } from './routes/dev.js';
 import { problemRoutes } from './routes/problems.js';
 
 declare module 'fastify' {
@@ -75,7 +76,8 @@ export async function buildApp(options: { logLevel?: string; serveWeb?: boolean 
 
   app.addHook('onRequest', async (req) => {
     // Event hooks authenticate with their own source token (event-hooks.ts), never as a user.
-    if ((req.url.startsWith('/api/') && !req.url.startsWith('/api/event-hooks/')) || req.url.startsWith('/mcp')) await authenticate(req);
+    // Event and dev platform hooks authenticate with their own token or signature, never as a user.
+    if ((req.url.startsWith('/api/') && !req.url.startsWith('/api/event-hooks/') && !req.url.startsWith('/api/dev-hooks/')) || req.url.startsWith('/mcp')) await authenticate(req);
   });
   // Who is acting and how, for the audit trail; the rest of the request runs inside this context.
   app.addHook('onRequest', (req, _reply, done) => {
@@ -123,6 +125,7 @@ export async function buildApp(options: { logLevel?: string; serveWeb?: boolean 
   await app.register(knowledgeRoutes);
   await app.register(teamRoutes);
   await app.register(visibilityRoutes);
+  await app.register(devRoutes);
   await app.register(mcpRoutes);
 
   app.get('/api/openapi.json', async (req) => openApiDocument(config.publicUrl ?? `${req.protocol}://${req.host}`));

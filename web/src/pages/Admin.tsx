@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { DevSourcesSection } from '../components/DevLinks';
 import { api, type Role } from '../api';
 import { formatDate, relativeTime, ROLE_LABEL } from '../format';
 import { useApi } from '../hooks';
@@ -34,6 +35,7 @@ export function AdminPage() {
       {user.role === 'admin' && <SecurityCard />}
       {user.role === 'admin' && <WebhooksCard />}
       {user.role === 'admin' && meta.modules?.cmdb !== false && <ConnectorsCard />}
+      {meta.modules?.change !== false && <DevSourcesSection />}
       <SystemsCard />
       <BackupsCard />
       {user.role === 'admin' && <UsersCard />}

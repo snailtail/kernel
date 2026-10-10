@@ -4,6 +4,7 @@ import { api, type Guidance } from '../api';
 import { GuidePanel } from '../components/Guide';
 import { richPaste } from '../components/RichPaste';
 import { RecordNotFound, VisibilityPanel } from '../components/Visibility';
+import { DevLinksPanel } from '../components/DevLinks';
 import { TeamAndAssignee, useTeams } from './Teams';
 import { ArticleSuggestions, IncidentKnowledgePanel, type ArticleRow } from './Knowledge';
 import { AttachmentsPanel } from '../components/Attachments';
@@ -361,6 +362,7 @@ export function IncidentPage() {
           <IncidentPeoplePanel record={i} basePath={path} editable={editable} onChange={setData} />
           {meta.modules?.knowledge !== false && <IncidentKnowledgePanel incident={i} editable={editable} onChange={() => api.get<Incident>(path).then(setData)} />}
           <VisibilityPanel record={i as any} onChange={reload} />
+          <DevLinksPanel recordRef={i.ref} editable={editable} />
           <AttachmentsPanel recordRef={i.ref} editable={editable} canDelete={(a) => a.uploaded_by === user.id || manager} />
           {meta.modules?.cmdb !== false && <AffectedCisPanel record={i} basePath={path} editable={editable} onChange={setData} />}
           <section className="card">

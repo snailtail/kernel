@@ -16,6 +16,7 @@ import * as setupMod from './setup.js';
 import * as ppl from './people.js';
 import * as kb from './knowledge.js';
 import * as tm from './teams.js';
+import * as dv from './dev.js';
 import * as hooks from './event-hooks.js';
 import { auditQuerySchema } from './audit.js';
 import { searchSchema } from './generic.js';
@@ -133,6 +134,15 @@ export const OPERATIONS: Op[] = [
   { method: 'get', path: '/api/templates', tag: 'Reference data', summary: 'Templates for new incidents and problems' },
   { method: 'post', path: '/api/templates', tag: 'Reference data', summary: 'Create a template (problem managers)', body: setupMod.templateSchema },
   { method: 'put', path: '/api/templates/:id', tag: 'Reference data', summary: 'Update a template', body: setupMod.templateSchema },
+  { method: 'get', path: '/api/records/:ref/dev-links', tag: 'Dev platforms', summary: 'Pull requests, issues, commits, workflow runs and releases linked to a problem, change or incident, with their status' },
+  { method: 'post', path: '/api/records/:ref/dev-links', tag: 'Dev platforms', summary: 'Link a GitHub URL (pull request, issue, commit, workflow run or release)' },
+  { method: 'delete', path: '/api/records/:ref/dev-links/:id', tag: 'Dev platforms', summary: 'Remove a dev link' },
+  { method: 'post', path: '/api/dev-hooks/:id', tag: 'Dev platforms', summary: 'GitHub webhook (signed with X-Hub-Signature-256): keeps items current and links PRs, commits and runs that mention Kernel refs' },
+  { method: 'get', path: '/api/dev-sources', tag: 'Dev platforms', summary: 'GitHub sources (webhook URL, accepted repositories, counters)' },
+  { method: 'post', path: '/api/dev-sources', tag: 'Dev platforms', summary: 'Add a GitHub source; the webhook secret is shown once', body: dv.sourceSchema },
+  { method: 'patch', path: '/api/dev-sources/:id', tag: 'Dev platforms', summary: 'Change repositories, token or enabled' },
+  { method: 'post', path: '/api/dev-sources/:id/rotate', tag: 'Dev platforms', summary: 'Rotate the webhook secret (shown once)' },
+  { method: 'delete', path: '/api/dev-sources/:id', tag: 'Dev platforms', summary: 'Remove a GitHub source' },
   { method: 'put', path: '/api/records/:ref/visibility', tag: 'Visibility', summary: 'Restrict a problem, incident or change to its assignee, creator and named teams (or open it again); reason required' },
   { method: 'post', path: '/api/records/:ref/break-glass', tag: 'Visibility', summary: 'Administrators: open a restricted record for an hour with a reason (audited; the people on it are told)' },
   { method: 'get', path: '/api/admin/visibility', tag: 'Visibility', summary: 'Team scoping per practice, categories that start restricted, and active break-glass sessions' },

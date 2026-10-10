@@ -1,4 +1,5 @@
 import { buildApp } from './app.js';
+import { pruneDeliveries } from './dev.js';
 import { startChainVerification } from './audit.js';
 import { asSystem } from './context.js';
 import { pruneIdempotencyKeys } from './idempotency.js';
@@ -31,6 +32,7 @@ asSystem(() => {
   startConnectorWorker(log);
   startChainVerification((msg) => app.log.error(msg));
   setInterval(() => pruneIdempotencyKeys().catch(() => {}), 3600_000).unref();
+  setInterval(() => pruneDeliveries().catch(() => {}), 3600_000).unref();
 });
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
