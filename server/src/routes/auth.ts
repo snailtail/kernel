@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { ssoSettings } from '../sso.js';
+import { MFA_PENDING_COOKIE, ssoSettings } from '../sso.js';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { TOKEN_MAX_DAYS, TOKEN_SCOPES, createApiToken, createSession, currentSessionHash, destroySession, guardLogin, hashPassword, listSessions, loginFailed, loginSucceeded, requireUser, revokeSession, verifyLogin } from '../auth.js';
@@ -36,8 +36,12 @@ export async function authRoutes(app: FastifyInstance) {
     return user;
   });
 
+  // After SSO, the challenge is in a cookie rather than the page (#41).
+  app.get('/api/auth/mfa-pending', async (req) => ({ pending: !!req.cookies[MFA_PENDING_COOKIE] && !!(await mfa.challengeUser(req.cookies[MFA_PENDING_COOKIE]!)) }));
   app.post('/api/auth/login/mfa', async (req, reply) => {
-    const body = z.object({ mfa_token: z.string().max(200), code: z.string().max(40) }).parse(req.body);
+    const parsed = z.object({ mfa_token: z.string().max(200).optional(), code: z.string().max(40) }).parse(req.body);
+    const body = { ...parsed, mfa_token: parsed.mfa_token ?? req.cookies[MFA_PENDING_COOKIE] ?? '' };
+    reply.clearCookie(MFA_PENDING_COOKIE, { path: '/api/auth' });
     const account = (await mfa.challengeUser(body.mfa_token))?.toLowerCase() ?? '';
     guardLogin(req.ip, account, await mfa.isKnownDevice(req.cookies[mfa.DEVICE_COOKIE], account));
     const userId = await mfa.completeChallenge(body.mfa_token, body.code);

@@ -147,6 +147,7 @@ export const OPERATIONS: Op[] = [
   { method: 'delete', path: '/api/admin/ai/providers/:id', tag: 'AI', summary: 'Remove a provider (and its routes)' },
   { method: 'post', path: '/api/admin/ai/providers/:id/test', tag: 'AI', summary: 'Test connection with a fixed prompt (no data)' },
   { method: 'put', path: '/api/admin/ai/routing', tag: 'AI', summary: 'Choose the provider and model per task (with a reason)' },
+  { method: 'get', path: '/api/auth/mfa-pending', tag: 'Authentication', summary: 'Whether a second-factor step is waiting after single sign-on' },
   { method: 'get', path: '/api/auth/options', tag: 'Authentication', summary: 'Sign-in options for the login page (SSO, Cloudflare Access, local)' },
   { method: 'get', path: '/api/auth/sso/start', tag: 'Authentication', summary: 'Start OpenID Connect sign-in (authorization code with PKCE)' },
   { method: 'get', path: '/api/auth/sso/callback', tag: 'Authentication', summary: 'OpenID Connect redirect URI' },

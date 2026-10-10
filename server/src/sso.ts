@@ -20,6 +20,9 @@ import { outboundFetch } from './outbound.js';
 import { authorize } from './policy.js';
 import { decryptSecret, encryptSecret } from './secrets.js';
 
+/** A second-factor challenge waiting after SSO (cookie, path /api/auth, five minutes). */
+export const MFA_PENDING_COOKIE = 'kernel_mfa_pending';
+
 const ROLES = ['viewer', 'analyst', 'problem_manager', 'admin'] as const;
 type Role = (typeof ROLES)[number];
 
@@ -144,8 +147,9 @@ export async function finishSso(req: FastifyRequest, reply: FastifyReply) {
   }, role, groups, s));
   // Kernel's own second factor still applies unless the provider's MFA is accepted with evidence.
   if (user.mfa_enabled && !idpMfa) {
-    const token = await createChallenge(user.id);
-    return reply.redirect(`/?mfa=${encodeURIComponent(token)}`);
+    // The pending second-factor challenge travels in a short-lived httpOnly cookie, never in the URL.
+    reply.setCookie(MFA_PENDING_COOKIE, await createChallenge(user.id), { path: '/api/auth', httpOnly: true, sameSite: 'lax', secure: config.secureCookies || req.protocol === 'https', maxAge: 300 });
+    return reply.redirect('/');
   }
   await createSession(req, reply, user.id, 'sso', idpMfa);
   await audit(null, { entity_type: 'session', entity_ref: `#${user.id}`, action: 'login', changes: { method: 'sso', role, idp_mfa: idpMfa }, actor: { id: user.id, name: user.username } });
