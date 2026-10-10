@@ -24,5 +24,15 @@ export function useApi<T>(path: string | null) {
     reload();
   }, [reload]);
 
-  return { data, setData, error, loading, reload };
+  /** Refetch without the loading state, for live updates (#70): the page stays as it is until new data arrives. */
+  const refresh = useCallback(async () => {
+    if (!path) return;
+    try {
+      setData(await api.get<T>(path));
+    } catch {
+      // keep what is shown; the next change or the fallback poll tries again
+    }
+  }, [path]);
+
+  return { data, setData, error, loading, reload, refresh };
 }

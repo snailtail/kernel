@@ -12,6 +12,8 @@ import { AttachmentsPanel } from '../components/Attachments';
 import { Modal } from '../components/Modal';
 import { Term } from '../components/Glossary';
 import { formatDate, relativeTime } from '../format';
+import { useLive } from '../live';
+import { Presence } from '../components/Presence';
 import { useApi } from '../hooks';
 import { useSession } from '../session';
 
@@ -72,7 +74,8 @@ export function ChangesPage() {
 
 function ChangeList({ params, set }: { params: URLSearchParams; set: (k: string, v: string) => void }) {
   const query = new URLSearchParams([...params].filter(([k]) => k !== 'tab'));
-  const { data, loading } = useApi<Row[]>(`/api/changes?${query}`);
+  const { data, loading, refresh } = useApi<Row[]>(`/api/changes?${query}`);
+  useLive(['change:*'], refresh);
   const { user } = useSession();
   return (
     <>
@@ -270,7 +273,8 @@ function NewChange({ onClose, onDone }: { onClose: () => void; onDone: (ref: str
 export function ChangePage() {
   const { ref } = useParams();
   const { user } = useSession();
-  const { data: c, setData, error, reload } = useApi<Change>(`/api/changes/${ref}`);
+  const { data: c, setData, error, reload, refresh } = useApi<Change>(`/api/changes/${ref}`);
+  const others = useLive([c && `change:${c.id}`], refresh, { presence: true });
   const [actionError, setActionError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [finishing, setFinishing] = useState<null | 'review' | 'closed'>(null);
@@ -304,7 +308,7 @@ export function ChangePage() {
   return (
     <>
       <header className="problem-head">
-        <div className="crumbs"><Link to="/changes">Changes</Link> / <span className="mono">{c.ref}</span></div>
+        <div className="crumbs"><Link to="/changes">Changes</Link> / <span className="mono">{c.ref}</span> <Presence people={others} /></div>
         <h1>{c.title}</h1>
         <div className="badges">
           <ChangeStatusBadge status={c.status} />

@@ -13,6 +13,20 @@ const MARKER = `LEAK-${randomBytes(4).toString('hex')}`;
 // Searches use the random part only, so a tool that echoes its input is not mistaken for a leak.
 const PROBE = MARKER.slice(5);
 
+async function peekStream(url: string, cookie: string) {
+  const ctrl = new AbortController();
+  const res = await fetch(url, { headers: { Cookie: cookie }, signal: ctrl.signal });
+  let text = '';
+  const timer = setTimeout(() => ctrl.abort(), 300);
+  try {
+    for await (const chunk of res.body as any) text += Buffer.from(chunk).toString('utf8');
+  } catch {
+    // aborted after the timeout
+  }
+  clearTimeout(timer);
+  return text;
+}
+
 describe('visibility and restricted records (#53)', { skip }, () => {
   let k: Harness;
   let admin: Client, pm: Client, analyst: Client, analyst2: Client, viewer: Client;
@@ -87,7 +101,8 @@ describe('visibility and restricted records (#53)', { skip }, () => {
         const variants = path.includes('{ref}') ? Object.values(restricted).map((r) => path.replace('{ref}', r)) : [path.replace(/\{[^}]+\}/g, '1')];
         for (const url of variants) {
           for (const q of ['', `?q=${MARKER}`]) {
-            const r = await who.get(url.replace(/\{[^}]+\}/g, '1') + q);
+            // The live event stream never ends: read what it sends in a moment, then hang up (#70).
+            const r = url === '/api/live' ? { body: await peekStream(`${k.base}${url}${q}`, who.cookie!) } : await who.get(url.replace(/\{[^}]+\}/g, '1') + q);
             calls++;
             assert.ok(!leaks(r.body), `${url}${q} leaked to a ${who === admin ? 'admin' : who === pm ? 'problem manager' : who === viewer ? 'viewer' : 'analyst'}: …${around(r.body)}`);
           }

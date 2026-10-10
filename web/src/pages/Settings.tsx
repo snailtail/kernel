@@ -48,6 +48,7 @@ function PreferencesCard() {
   const { user, setPreferences } = useSession();
   const theme = user.preferences.theme ?? 'system';
   const guided = user.preferences.guided ?? true;
+  const presence = user.preferences.live_presence ?? true;
   return (
     <section className="card">
       <h2>Preferences</h2>
@@ -72,6 +73,16 @@ function PreferencesCard() {
         <label className="switch">
           <input type="checkbox" checked={guided} onChange={(e) => setPreferences({ guided: e.target.checked })} />
           <span>{guided ? 'On' : 'Off'}</span>
+        </label>
+      </div>
+      <div className="pref-row">
+        <div>
+          <strong>Show that I have a record open</strong>
+          <p className="muted small">Colleagues who can see the record see your name while you view or edit it, so you don't work on the same thing unknowingly. Nothing is stored.</p>
+        </div>
+        <label className="switch">
+          <input type="checkbox" checked={presence} onChange={(e) => setPreferences({ live_presence: e.target.checked })} />
+          <span>{presence ? 'On' : 'Off'}</span>
         </label>
       </div>
     </section>

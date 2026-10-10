@@ -17,6 +17,7 @@ export interface User {
 export interface Preferences {
   theme?: 'system' | 'light' | 'dark';
   guided?: boolean;
+  live_presence?: boolean;
   intro_seen?: boolean;
   saved_views?: { name: string; page: 'problems' | 'actions'; query: string }[];
 }

@@ -5,6 +5,7 @@ import { ApprovalDetails } from '../components/ApprovalDetails';
 import { PriorityBadge, StatusBadge } from '../components/Badges';
 import { isGuided } from '../components/Guide';
 import { relativeTime } from '../format';
+import { useLive } from '../live';
 import { useApi } from '../hooks';
 import { useSession } from '../session';
 
@@ -24,7 +25,8 @@ interface MyWork {
 /** One calm place for everything that needs me, most urgent first. */
 export function MyWorkPage() {
   const { user, meta, setPreferences } = useSession();
-  const { data, reload } = useApi<MyWork>('/api/my-work');
+  const { data, reload, refresh } = useApi<MyWork>('/api/my-work');
+  useLive(['problem:*', 'incident:*', 'change:*'], refresh);
   if (!data) return null;
   const decide = async (id: number, approve: boolean) => {
     await api.post<ProblemDetail>(`/api/approvals/${id}/${approve ? 'approve' : 'reject'}`, {});

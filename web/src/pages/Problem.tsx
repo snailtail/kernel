@@ -19,6 +19,8 @@ import {
   CLOSURE_LABEL, DECISION_LABEL, EFFECTIVENESS_LABEL, FIELD_LABEL, formatDate, formatDay, LEVEL_LABEL, LINK_LABEL, PRIORITY_LABEL, relativeTime, RISK_LABEL,
   NEXT_STATUS, STATUS_LABEL, STATUS_PHASE, TRANSITION_LABEL,
 } from '../format';
+import { useLive } from '../live';
+import { Presence } from '../components/Presence';
 import { useApi } from '../hooks';
 import { canEdit, isManager, useSession } from '../session';
 
@@ -28,7 +30,8 @@ export function ProblemPage() {
   const navigate = useNavigate();
   const { ref } = useParams();
   const { user, meta } = useSession();
-  const { data: p, setData, error, reload } = useApi<ProblemDetail>(`/api/problems/${ref}`);
+  const { data: p, setData, error, reload, refresh } = useApi<ProblemDetail>(`/api/problems/${ref}`);
+  const others = useLive([p && `problem:${p.id}`], refresh, { presence: true });
   const [transition, setTransition] = useState<Status | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -69,6 +72,7 @@ export function ProblemPage() {
       <header className="problem-head">
         <div className="crumbs">
           <Link to="/problems">Problems</Link> / <span className="mono">{p.ref}</span>
+          <Presence people={others} />
           <span className="crumb-actions no-print">
             <WatchButton problem={p} onChange={setData} />
             <Link to={`/problems/${p.ref}/print`}>Print / PDF</Link>
