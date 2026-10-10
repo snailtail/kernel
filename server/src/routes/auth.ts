@@ -1,4 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { notify } from '../notifications.js';
+import * as passkeys from '../passkeys.js';
 import { MFA_PENDING_COOKIE, ssoSettings } from '../sso.js';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
@@ -9,7 +11,7 @@ import * as mfa from '../mfa.js';
 import { mfaRequiredFor } from '../mfapolicy.js';
 import { checkPassword } from '../passwords.js';
 import { rateLimit } from '../ratelimit.js';
-import { query } from '../db.js';
+import { pool, query } from '../db.js';
 import { badRequest, forbidden, HttpError, notFound } from '../errors.js';
 
 export async function authRoutes(app: FastifyInstance) {
@@ -30,7 +32,9 @@ export async function authRoutes(app: FastifyInstance) {
       loginFailed(req.ip, account);
       throw new HttpError(401, 'Invalid username or password');
     }
-    if (user.mfa_enabled) return { mfa_required: true, mfa_token: await mfa.createChallenge(user.id) };
+    // A second factor: the authenticator code and/or a passkey (#75).
+    const passkey = await passkeys.hasPasskey(user.id);
+    if (user.mfa_enabled || passkey) return { mfa_required: true, mfa_token: await mfa.createChallenge(user.id), methods: [...(user.mfa_enabled ? ['totp'] : []), ...(passkey ? ['passkey'] : [])] };
     loginSucceeded(account);
     await finishLogin(req, reply, user.id, user.username);
     return user;
@@ -51,16 +55,76 @@ export async function authRoutes(app: FastifyInstance) {
       throw new HttpError(401, 'That code is not valid');
     }
     loginSucceeded(account);
-    await finishLogin(req, reply, userId, account);
+    await finishLogin(req, reply, userId, account, true);
     return (await query(`SELECT id, username, display_name, email, role, preferences, must_change_password, true AS mfa_enabled FROM users WHERE id = $1`, [userId])).rows[0];
   });
 
-  async function finishLogin(req: FastifyRequest, reply: FastifyReply, userId: number, username: string) {
-    await createSession(req, reply, userId);
+  async function finishLogin(req: FastifyRequest, reply: FastifyReply, userId: number, username: string, secondFactor = false) {
+    await createSession(req, reply, userId, 'password', secondFactor);
     await audit(null, { entity_type: 'session', entity_ref: username, action: 'login', actor: { id: userId, name: username } });
-    const device = await mfa.rememberDevice(userId, req.cookies[mfa.DEVICE_COOKIE]);
+    const known = req.cookies[mfa.DEVICE_COOKIE];
+    const device = await mfa.rememberDevice(userId, known);
+    // A sign-in from a device this account has not used before is worth knowing about (#75).
+    const { rows: devices } = device !== known ? await query('SELECT count(*)::int AS n FROM known_devices WHERE user_id = $1', [userId]) : { rows: [{ n: 0 }] };
+    if (device !== known && devices[0].n > 1) {
+      await notify(pool, { users: [userId], event: 'account_security', ref: '', title: 'New sign-in', summary: `Your account was signed in to from a new device (${String(req.headers['user-agent'] ?? 'unknown browser').slice(0, 80)}). If it was not you, change your password.`, path: '/settings', dedupe: `device:${userId}:${device.slice(0, 12)}` });
+    }
     reply.setCookie(mfa.DEVICE_COOKIE, device, { path: '/api/auth', httpOnly: true, sameSite: 'strict', secure: config.secureCookies || req.protocol === 'https', maxAge: 180 * 86400 });
   }
+
+  // ---- Passkeys (#75) ----
+  app.post('/api/auth/passkey/options', async (req) => {
+    rateLimit(`passkey-options:${req.ip}`, 30, 60_000);
+    const body = z.object({ mfa_token: z.string().max(200).optional() }).parse(req.body ?? {});
+    if (body.mfa_token) {
+      const userId = await mfa.challengeUserId(body.mfa_token);
+      if (!userId) throw new HttpError(401, 'The sign-in has expired; start again');
+      return passkeys.authenticationOptions('second_factor', userId);
+    }
+    return passkeys.authenticationOptions('login', null);
+  });
+  app.post('/api/auth/passkey/login', async (req, reply) => {
+    rateLimit(`passkey-login:${req.ip}`, 20, 60_000);
+    const body = z.object({ response: z.any(), mfa_token: z.string().max(200).optional() }).parse(req.body);
+    let userId: number;
+    if (body.mfa_token) {
+      // The password was right; the passkey is the second factor.
+      const pending = await mfa.challengeUserId(body.mfa_token);
+      if (!pending) throw new HttpError(401, 'The sign-in has expired; start again');
+      userId = await passkeys.verifyPasskey('second_factor', body.response, pending);
+      await mfa.consumeChallenge(body.mfa_token);
+      const { rows } = await query('SELECT username FROM users WHERE id = $1', [userId]);
+      loginSucceeded(rows[0].username.toLowerCase());
+      await finishLogin(req, reply, userId, rows[0].username, true);
+    } else {
+      userId = await passkeys.passkeyLogin(req, reply, body.response);
+    }
+    return (await query(`SELECT id, username, display_name, email, role, preferences, must_change_password, mfa_enabled_at IS NOT NULL AS mfa_enabled FROM users WHERE id = $1`, [userId])).rows[0];
+  });
+  app.get('/api/auth/passkeys', async (req) => passkeys.listPasskeys(requireUser(req)));
+  app.post('/api/auth/passkeys/options', async (req) => {
+    const user = requireUser(req);
+    await mfa.requireStepUp(req);
+    return passkeys.registrationOptions(user);
+  });
+  app.post('/api/auth/passkeys', async (req) => {
+    const user = requireUser(req);
+    await mfa.requireStepUp(req);
+    const body = z.object({ response: z.any(), name: z.string().trim().max(100).default('Passkey') }).parse(req.body);
+    return passkeys.register(user, body.response, body.name);
+  });
+  app.delete<{ Params: { id: string } }>('/api/auth/passkeys/:id', async (req) => {
+    const user = requireUser(req);
+    await mfa.requireStepUp(req);
+    return passkeys.removePasskey(user, Number(req.params.id));
+  });
+  app.post('/api/auth/reauth/passkey/options', async (req) => passkeys.authenticationOptions('step_up', requireUser(req).id));
+  app.post('/api/auth/reauth/passkey', async (req) => {
+    const user = requireUser(req);
+    rateLimit(`reauth:${user.id}`, 10, 15 * 60_000);
+    await passkeys.passkeyStepUp(req, user, z.object({ response: z.any() }).parse(req.body).response);
+    return { ok: true };
+  });
 
   app.post('/api/auth/reauth', async (req) => {
     const user = requireUser(req);
@@ -179,6 +243,26 @@ export async function authRoutes(app: FastifyInstance) {
     const created = await createApiToken(user.id, body.name, body.expires_in_days, [...new Set(scopes)]);
     await audit(null, { entity_type: 'api_token', entity_ref: created.prefix, action: 'create', changes: { name: body.name, scopes: created.scopes, expires_at: created.expires_at } });
     return created;
+  });
+
+  /**
+   * Rotation without downtime (#75): a successor with the same name, scopes and lifetime; the old token keeps working
+   * for 24 hours (or until it expires, if sooner) so integrations can switch over.
+   */
+  app.post<{ Params: { id: string } }>('/api/tokens/:id/rotate', async (req) => {
+    const user = requireUser(req);
+    rateLimit(`tokens:${user.id}`, 20, 3600_000);
+    await mfa.requireStepUp(req);
+    const { rows } = await query(
+      `SELECT id, name, scopes, prefix, greatest(1, ceil(extract(epoch FROM (expires_at - created_at)) / 86400))::int AS days
+       FROM api_tokens WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL AND rotated_to IS NULL AND (expires_at IS NULL OR expires_at > now())`,
+      [Number(req.params.id), user.id],
+    );
+    if (!rows[0]) throw notFound('No active token with that id');
+    const successor = await createApiToken(user.id, rows[0].name, Math.min(rows[0].days ?? 90, TOKEN_MAX_DAYS), rows[0].scopes);
+    await query("UPDATE api_tokens SET rotated_to = $2, expires_at = least(coalesce(expires_at, now() + interval '1 day'), now() + interval '1 day') WHERE id = $1", [rows[0].id, successor.id]);
+    await audit(null, { entity_type: 'api_token', entity_ref: rows[0].prefix, action: 'rotate', changes: { successor: successor.prefix, overlap_hours: 24 } });
+    return { ...successor, previous_expires_in_hours: 24 };
   });
 
   app.delete<{ Params: { id: string } }>('/api/tokens/:id', async (req) => {

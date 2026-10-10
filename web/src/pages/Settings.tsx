@@ -1,4 +1,5 @@
 import { NotificationSettingsCard } from '../components/Notifications';
+import { PasskeysCard } from '../components/Passkeys';
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
 import { api } from '../api';
@@ -35,6 +36,7 @@ export function SettingsPage() {
         <h2>Two-factor authentication</h2>
         <TwoFactor />
       </section>
+      <PasskeysCard />
       <TokensCard />
       <SessionsCard />
       <PasswordCard />
@@ -133,6 +135,16 @@ function TokensCard() {
       setError((err as Error).message);
     }
   };
+  // A successor with the same scopes; the old token keeps working for a day so clients can switch over.
+  const rotate = async (t: Token) => {
+    if (!confirm(`Rotate "${t.name}"? You get a new token; the old one keeps working for 24 hours.`)) return;
+    try {
+      setCreated(await api.post<Token>(`/api/tokens/${t.id}/rotate`, {}));
+      reload();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
   const revoke = async (t: Token) => {
     if (!confirm(`Revoke token "${t.name}"? Clients using it stop working immediately.`)) return;
     await api.del(`/api/tokens/${t.id}`);
@@ -205,7 +217,7 @@ function TokensCard() {
                 <td>{formatDate(t.created_at)}</td>
                 <td>{t.last_used_at ? `${relativeTime(t.last_used_at)}${t.last_used_ip ? ` from ${t.last_used_ip}` : ''}` : 'Never'}</td>
                 <td>{t.expires_at ? formatDate(t.expires_at) : 'Never'}</td>
-                <td><button className="btn-link danger" onClick={() => revoke(t)}>Revoke</button></td>
+                <td className="nowrap"><button className="btn-link" onClick={() => rotate(t)}>Rotate</button> <button className="btn-link danger" onClick={() => revoke(t)}>Revoke</button></td>
               </tr>
             ))}
           </tbody>

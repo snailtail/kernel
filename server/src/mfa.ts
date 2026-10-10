@@ -99,6 +99,15 @@ export async function completeChallenge(token: string, code: string): Promise<nu
   return rows[0].user_id;
 }
 
+/** The account a pending sign-in challenge belongs to (for a passkey as the second factor). */
+export const challengeUserId = async (token: string) =>
+  (await query('SELECT user_id FROM mfa_challenges WHERE token_hash = $1 AND expires_at > now() AND attempts < 5', [sha256(token)])).rows[0]?.user_id as number | undefined;
+
+/** Ends a pending sign-in challenge once its second factor (here: a passkey) was verified elsewhere. */
+export async function consumeChallenge(token: string) {
+  await query('DELETE FROM mfa_challenges WHERE token_hash = $1', [sha256(token)]);
+}
+
 export const challengeUser = async (token: string) =>
   (await query('SELECT u.username FROM mfa_challenges c JOIN users u ON u.id = c.user_id WHERE c.token_hash = $1', [sha256(token)])).rows[0]?.username as string | undefined;
 
