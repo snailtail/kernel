@@ -828,8 +828,8 @@ function buildServer(user: User, scopes?: string[]) {
   );
   tool(
     'sync_ci_batch',
-    'Report CIs and relationships from one source in one call – e.g. an inventory an agent gathered from a tool Kernel has no connector for. Matched to existing CIs by source id, explicit ci ref, resource id, FQDN or name+IP. full_sync: this is the complete snapshot, so CIs no longer reported count as missed (a sharply shrunk snapshot is refused).',
-    { source_system: z.string(), cis: connectors.ciBatchSchema.shape.cis, relationships: connectors.ciBatchSchema.shape.relationships.optional(), full_sync: z.boolean().optional() },
+    'Report CIs and relationships from one source in one call – e.g. an inventory an agent gathered from a tool Kernel has no connector for. Matched to existing CIs by source id, explicit ci ref, resource id, FQDN or name+IP. full_sync: this is the complete snapshot, so CIs no longer reported count as missed (a sharply shrunk snapshot is refused). incomplete_prefixes: source-id prefixes you could not read fully this time; their CIs and relationships are left alone.',
+    { source_system: z.string(), cis: connectors.ciBatchSchema.shape.cis, relationships: connectors.ciBatchSchema.shape.relationships.optional(), full_sync: z.boolean().optional(), incomplete_prefixes: connectors.ciBatchSchema.shape.incomplete_prefixes.optional() },
     false,
     async (args) => connectors.ciBatch(user, connectors.ciBatchSchema.parse(args)),
   );

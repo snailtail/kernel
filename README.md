@@ -94,13 +94,16 @@ typed attributes per CI type, source links, linked records and history. Source s
 only update the source records it created.
 
 **Connectors and the push contract**: administrators add pull connectors under Administration → Connectors (OP5
-Monitor first: hosts become CIs, current service problems become alerts that clear when fixed). Credentials are
-encrypted and never shown again, runs never overlap, and every run is logged. A connector reaches only the private
-addresses it lists (e.g. the OP5 server on the LAN). Anything else pushes with `POST /api/cmdb/ci-batch` or the MCP
-tool `sync_ci_batch`: CIs and relationships from one source, matched to existing CIs by source id, an explicit CI
-ref, resource id, FQDN or name and IP. With `full_sync`, CIs a source stops reporting count as missed and become
-`missing` after three syncs; a snapshot that shrank by more than half is refused for that step. Per-attribute source
-precedence decides which source's value wins (settings `cmdb_reconciliation`).
+Monitor: hosts become CIs, current service problems become alerts that clear when fixed; Kubernetes: cluster, nodes,
+namespaces and workloads with a read-only ServiceAccount, see
+[docs/connectors/kubernetes.md](docs/connectors/kubernetes.md)). Credentials are encrypted and never shown again, runs
+never overlap, and every run is logged. A connector reaches only the private addresses it lists (e.g. the OP5 server
+on the LAN). Anything else pushes with `POST /api/cmdb/ci-batch` or the MCP tool `sync_ci_batch`: CIs and
+relationships from one source, matched to existing CIs by source id, an explicit CI ref, resource id, FQDN or name and
+IP. With `full_sync`, CIs a source stops reporting count as missed and become `missing` after three syncs;
+`incomplete_prefixes` leaves the source ids under a prefix alone (a kind that could not be read this time); a snapshot
+that shrank by more than half is refused for that step. Per-attribute source precedence decides which source's value
+wins (settings `cmdb_reconciliation`).
 
 **Relationships and impact**: CIs and services are connected by typed relationships (runs on, depends on, uses
 database, connects to, contains, part of service). The CI page shows what is affected if it is down, up to the

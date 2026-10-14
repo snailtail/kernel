@@ -67,6 +67,24 @@ const gib = (q: string | undefined) => {
   return Math.round(n * 10) / 10;
 };
 
+/**
+ * The workload a pod belongs to, from the pod's name: <deployment>-<pod-template-hash>-<5>, <statefulset>-<n>,
+ * <daemonset>-<5>, <cronjob>-<schedule minute>-<5>. A name that has a workload's name as prefix but not its form
+ * (a standalone Job "web-migrate-x7k2p" next to Deployment "web") belongs to none: better no alert than a wrong one.
+ */
+export function podOwner(workloads: { id: string; kind: string; namespace: string; name: string }[], namespace: string, pod: string): string | undefined {
+  // Generated parts use Kubernetes' alphabet without vowels (rand.String, the pod-template-hash), so "migrate" is not one.
+  const suffix: Record<string, RegExp> = {
+    Deployment: /^[bcdfghjklmnpqrstvwxz2-9]{6,10}-[bcdfghjklmnpqrstvwxz2-9]{5}$/,
+    StatefulSet: /^\d+$/,
+    DaemonSet: /^[bcdfghjklmnpqrstvwxz2-9]{5}$/,
+    CronJob: /^\d{8,10}-[bcdfghjklmnpqrstvwxz2-9]{5}$/,
+  };
+  return workloads
+    .filter((w) => w.namespace === namespace && pod.startsWith(`${w.name}-`) && suffix[w.kind]?.test(pod.slice(w.name.length + 1)))
+    .sort((a, b) => b.name.length - a.name.length)[0]?.id;
+}
+
 const WORKLOADS = [
   { kind: 'Deployment', path: '/apis/apps/v1/deployments' },
   { kind: 'StatefulSet', path: '/apis/apps/v1/statefulsets' },
@@ -97,6 +115,8 @@ export const KUBERNETES: ConnectorType = {
     console_url: z.string().max(500).refine((u) => !u || /^https?:\/\//.test(u), 'http(s) only').default(''),
     /** Warning events (crash loops, out of memory, scheduling failures) become alerts on their workload. */
     sync_events: z.boolean().default(false),
+    /** Namespaces left out entirely (no CI, no workloads, no alerts): the cluster's own plumbing by default. */
+    exclude_namespaces: z.array(z.string().regex(/^[a-z0-9-]{1,63}$/, 'A namespace name')).max(100).default(['kube-system', 'kube-public', 'kube-node-lease']),
   }),
   secret: z.object({ token: z.string().min(20).max(10_000) }),
 
@@ -119,12 +139,14 @@ export const KUBERNETES: ConnectorType = {
     const version = await ctx.fetchJson('/version');
     const cis: Awaited<ReturnType<ConnectorType['fetch']>>['cis'] = [];
     const relationships: { from_id: string; type: string; to_id: string }[] = [];
-    const partial: string[] = [];
+    const partial: { message: string; prefix?: string }[] = [];
+    const warnings: string[] = [];
+    const excluded = new Set<string>(cfg.exclude_namespaces);
     cis.push({ source_id: 'cluster', name: cfg.cluster_name, ci_type: 'cluster', environment: cfg.environment, source_url: link('cluster', '', cfg.cluster_name), attributes: { platform: 'Kubernetes', version: clean(version.gitVersion, 50) } });
 
     const counts: Record<string, number> = {};
     const nodes = await listKind(ctx, '/api/v1/nodes');
-    if ('skipped' in nodes) partial.push(`nodes: ${nodes.skipped}`);
+    if ('skipped' in nodes) partial.push({ message: `nodes: ${nodes.skipped}`, prefix: 'node/' });
     else {
       counts.node = nodes.items.length;
       for (const n of nodes.items) {
@@ -146,24 +168,27 @@ export const KUBERNETES: ConnectorType = {
     }
 
     const namespaces = await listKind(ctx, '/api/v1/namespaces');
-    if ('skipped' in namespaces) partial.push(`namespaces: ${namespaces.skipped}`);
+    if ('skipped' in namespaces) partial.push({ message: `namespaces: ${namespaces.skipped}`, prefix: 'ns/' });
     else {
       counts.namespace = namespaces.items.length;
       for (const ns of namespaces.items) {
         const name = String(ns.metadata?.name);
+        if (excluded.has(name)) continue;
         cis.push({ source_id: `ns/${name}`, name: `${cfg.cluster_name}/${clean(name)}`.slice(0, 200), ci_type: 'kubernetes_namespace', environment: cfg.environment, source_url: link('namespace', '', name), tags: keep(ns.metadata?.labels), attributes: {} });
         relationships.push({ from_id: 'cluster', type: 'contains', to_id: `ns/${name}` });
       }
     }
 
-    const workloadIds: { id: string; namespace: string; name: string }[] = [];
+    const workloadIds: { id: string; kind: string; namespace: string; name: string }[] = [];
     for (const w of WORKLOADS) {
       const list = await listKind(ctx, w.path);
-      if ('skipped' in list) { partial.push(`${w.kind}s: ${list.skipped}`); continue; }
+      if ('skipped' in list) { partial.push({ message: `${w.kind}s: ${list.skipped}`, prefix: `${w.kind}/` }); continue; }
+      // Counted before the exclusions: the check below is about the API returning nothing, not about our filter.
       counts[w.kind] = list.items.length;
       for (const o of list.items) {
         const namespace = String(o.metadata?.namespace);
         const name = String(o.metadata?.name);
+        if (excluded.has(namespace)) continue;
         const id = `${w.kind}/${namespace}/${name}`;
         const pod = w.kind === 'CronJob' ? o.spec?.jobTemplate?.spec?.template?.spec : o.spec?.template?.spec;
         // Image names and tags only: never env, args or command, which often carry credentials.
@@ -179,7 +204,7 @@ export const KUBERNETES: ConnectorType = {
           tags: keep(o.metadata?.labels),
         });
         relationships.push({ from_id: `ns/${namespace}`, type: 'contains', to_id: id });
-        workloadIds.push({ id, namespace, name });
+        workloadIds.push({ id, kind: w.kind, namespace, name });
       }
     }
 
@@ -189,35 +214,40 @@ export const KUBERNETES: ConnectorType = {
     for (const [kind, prefix] of Object.entries(prefixes)) {
       if (counts[kind] !== 0) continue;
       const { rows } = await query('SELECT count(*)::int AS n FROM ci_sources WHERE source_system = $1 AND source_id LIKE $2 AND missed_syncs = 0', [ctx.sourceSystem, `${prefix}%`]);
-      if (rows[0].n > 0) partial.push(`${kind}: the list came back empty where ${rows[0].n} were reported before`);
+      if (rows[0].n > 0) partial.push({ message: `${kind}: the list came back empty where ${rows[0].n} were reported before`, prefix });
     }
 
     let events: NormalisedEvent[] | undefined;
     if (cfg.sync_events) {
       const list = await listKind(ctx, '/api/v1/events?fieldSelector=type%3DWarning');
-      if ('skipped' in list) partial.push(`events: ${list.skipped}`);
+      // Events cannot say anything about which CIs exist: a forbidden list only means no alerts this run.
+      if ('skipped' in list) warnings.push(`events: ${list.skipped}`);
       else {
-        // Deployment pods are named <deployment>-<hash>-<hash>, StatefulSet pods <name>-<n>: the longest workload
-        // name in the namespace that prefixes the pod's name is its owner.
-        const owner = (namespace: string, pod: string) =>
-          workloadIds.filter((w) => w.namespace === namespace && pod.startsWith(`${w.name}-`)).sort((a, b) => b.name.length - a.name.length)[0]?.id;
-        const seen = new Map<string, NormalisedEvent>();
+        // Core events linger until their TTL (an hour by default) after the problem is gone: only those seen within
+        // two sync intervals count as current, so a fixed crash loop clears on the next run.
+        const since = Date.now() - Math.max(2 * ctx.scheduleMinutes, 10) * 60_000;
+        const latest = new Map<string, { at: number; event: NormalisedEvent }>();
         for (const e of list.items) {
           const severity = REASONS[e.reason];
           if (!severity) continue;
-          const obj = e.involvedObject ?? {};
-          const target = obj.kind === 'Pod' ? owner(String(obj.namespace), String(obj.name)) : obj.kind === 'Node' ? `node/${obj.name}` : undefined;
-          if (!target) continue;
-          // One alert per workload and reason; the message is untrusted text from the cluster.
-          seen.set(`${target}|${e.reason}`, {
-            ci_source_id: target, check: `Kubernetes ${e.reason}`, severity,
-            message: clean(`${obj.kind} ${obj.name}: ${e.message ?? ''}`, 2000),
-            occurred_at: e.lastTimestamp ?? e.eventTime ?? undefined,
+          // Newer clusters leave lastTimestamp null on recurring events and keep the latest in series.
+          const seenAt = e.series?.lastObservedTime ?? e.lastTimestamp ?? e.eventTime ?? e.metadata?.creationTimestamp;
+          const at = seenAt ? Date.parse(seenAt) : NaN;
+          if (!(at >= since)) continue;
+          const obj = e.involvedObject ?? e.regarding ?? {};
+          const target = obj.kind === 'Pod' ? podOwner(workloadIds, String(obj.namespace), String(obj.name)) : obj.kind === 'Node' ? `node/${obj.name}` : undefined;
+          if (!target || (obj.namespace && excluded.has(String(obj.namespace)))) continue;
+          // One alert per workload and reason, from its latest occurrence; the message is untrusted text from the cluster.
+          const key = `${target}|${e.reason}`;
+          if ((latest.get(key)?.at ?? -1) >= at) continue;
+          latest.set(key, {
+            at,
+            event: { ci_source_id: target, check: `Kubernetes ${e.reason}`, severity, message: clean(`${obj.kind} ${obj.name}: ${e.message ?? e.note ?? ''}`, 2000), occurred_at: new Date(at).toISOString() },
           });
         }
-        events = [...seen.values()];
+        events = [...latest.values()].map((l) => l.event);
       }
     }
-    return { cis, relationships, events, partial };
+    return { cis, relationships, events, partial, warnings };
   },
 };

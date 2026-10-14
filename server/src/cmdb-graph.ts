@@ -84,12 +84,17 @@ export async function removeRelationship(user: User, ref: string, id: number) {
   return getCi(user, ref);
 }
 
+/** LIKE patterns for source-id prefixes, with the LIKE metacharacters escaped. */
+export const prefixPatterns = (prefixes: string[]) => prefixes.map((p) => `${p.replace(/[\\%_]/g, '\\$&')}%`);
+
 /** Relationships reported by a source system, identified by that system's ids. */
 export const syncSchema = z.object({
   source_system: z.string().trim().min(1).max(100),
   relationships: z.array(z.object({ from_id: z.string().min(1).max(300), type: z.string().min(1).max(50), to_id: z.string().min(1).max(300) })).max(5000),
   /** Full sync: relationships this source reported before but not now are removed. Manual ones are never touched. */
   full: z.boolean().default(false),
+  /** With full: relationships touching a CI whose source id starts with one of these are kept (that part was not read). */
+  keep_prefixes: z.array(z.string().min(1).max(100)).max(50).default([]),
 });
 
 export async function syncRelationships(user: User, input: z.infer<typeof syncSchema>) {
@@ -138,8 +143,9 @@ export async function syncRelationships(user: User, input: z.infer<typeof syncSc
       const { rows } = await db.query(
         `DELETE FROM ci_relationships r USING configuration_items f, configuration_items t
          WHERE r.source_system = $1 AND NOT (r.id = ANY($2)) AND f.id = r.from_ci AND t.id = r.to_ci
+           AND NOT EXISTS (SELECT 1 FROM ci_sources s WHERE s.source_system = $1 AND s.ci_id IN (r.from_ci, r.to_ci) AND s.source_id LIKE ANY($3))
          RETURNING r.from_ci AS ci, f.ref AS from, r.type, t.ref AS to`,
-        [input.source_system, written.map((w) => w.id)],
+        [input.source_system, written.map((w) => w.id), prefixPatterns(input.keep_prefixes)],
       );
       gone = rows;
       removed = gone.length;
