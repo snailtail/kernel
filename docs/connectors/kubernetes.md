@@ -108,7 +108,8 @@ and never shown again. If the API server has a private address, add it to the co
 | `kubernetes_workload` | `<Kind>/<namespace>/<name>` | kind, namespace, image names, desired/ready replicas, CronJob schedule, allowlisted labels |
 
 `kube-system`, `kube-public` and `kube-node-lease` are left out by default (no CIs, workloads or alerts); change the
-list under **Leave out namespaces**.
+list under **Leave out namespaces**. A namespace added to the list after it was synced is no longer reported, so it
+and its workloads count as missed and become `missing` after three runs (they are never deleted).
 
 Labels kept as tags: `app.kubernetes.io/*` and the optional owner label. Nodes on Azure, AWS, GCE or vSphere carry
 the VM's id, so the CMDB joins them to the VM another connector reports. Relationships: the cluster contains its

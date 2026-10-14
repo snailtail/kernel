@@ -73,12 +73,13 @@ const gib = (q: string | undefined) => {
  * (a standalone Job "web-migrate-x7k2p" next to Deployment "web") belongs to none: better no alert than a wrong one.
  */
 export function podOwner(workloads: { id: string; kind: string; namespace: string; name: string }[], namespace: string, pod: string): string | undefined {
-  // Generated parts use Kubernetes' alphabet without vowels (rand.String, the pod-template-hash), so "migrate" is not one.
+  // Generated parts use Kubernetes' alphabet without vowels, 0, 1 and 3 (rand.String, the pod-template-hash), so
+  // "migrate" is not one.
   const suffix: Record<string, RegExp> = {
-    Deployment: /^[bcdfghjklmnpqrstvwxz2-9]{6,10}-[bcdfghjklmnpqrstvwxz2-9]{5}$/,
+    Deployment: /^[bcdfghjklmnpqrstvwxz24-9]{6,10}-[bcdfghjklmnpqrstvwxz24-9]{5}$/,
     StatefulSet: /^\d+$/,
-    DaemonSet: /^[bcdfghjklmnpqrstvwxz2-9]{5}$/,
-    CronJob: /^\d{8,10}-[bcdfghjklmnpqrstvwxz2-9]{5}$/,
+    DaemonSet: /^[bcdfghjklmnpqrstvwxz24-9]{5}$/,
+    CronJob: /^\d{8,10}-[bcdfghjklmnpqrstvwxz24-9]{5}$/,
   };
   return workloads
     .filter((w) => w.namespace === namespace && pod.startsWith(`${w.name}-`) && suffix[w.kind]?.test(pod.slice(w.name.length + 1)))
