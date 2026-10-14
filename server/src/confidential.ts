@@ -28,6 +28,15 @@ export const MASKED_FIELDS = new Set([
 
 const kindOfRef = (ref: string) => PREFIX[ref.toUpperCase().match(/^[A-Z]+/)?.[0] ?? ''] as Kind | undefined;
 
+/**
+ * The one read rule for confidential text, as SQL: the user (`u`, null for agents) is the assignee, the creator, in
+ * the record's team, or has an active reveal of record `a` of kind `k`. maskedRefs and textFilterSql both use it.
+ */
+const mayReadSql = (a: string, u: string, k: string) =>
+  `(${u}::int IS NOT NULL AND (${a}.assignee_id = ${u}::int OR ${a}.created_by = ${u}::int
+     OR EXISTS (SELECT 1 FROM team_members m WHERE m.user_id = ${u}::int AND m.team_id = ${a}.team_id)
+     OR EXISTS (SELECT 1 FROM record_reveals v WHERE v.user_id = ${u}::int AND v.record_type = ${k}::text AND v.record_id = ${a}.id AND v.expires_at > now())))`;
+
 let anyConfidential: { at: number; value: boolean } | null = null;
 /** Most installations have none, and then nothing is parsed or looked up. */
 async function confidentialExists() {
@@ -49,10 +58,7 @@ export async function maskedRefs(user: { id: number } | null, refs: string[]): P
     const mine = [...new Set(refs.filter((r) => kindOfRef(r) === kind).map((r) => r.toUpperCase()))];
     if (!mine.length) continue;
     const { rows } = await query(
-      `SELECT r.ref,
-              ($2::int IS NOT NULL AND (r.assignee_id = $2 OR r.created_by = $2
-                OR EXISTS (SELECT 1 FROM team_members m WHERE m.user_id = $2 AND m.team_id = r.team_id)
-                OR EXISTS (SELECT 1 FROM record_reveals v WHERE v.user_id = $2 AND v.record_type = $3 AND v.record_id = r.id AND v.expires_at > now()))) AS may_read
+      `SELECT r.ref, ${mayReadSql('r', '$2', '$3')} AS may_read
        FROM ${TABLE[kind]} r WHERE r.ref = ANY($1) AND r.classification = 'confidential'`,
       [mine, user?.id ?? null, kind],
     );
@@ -88,9 +94,7 @@ export function textFilterSql(a: string, kind: Kind, tsquery: string, params: un
   const [q, u, k] = [params.length - 2, params.length - 1, params.length].map((n) => `$${n}`);
   return `(${a}.search @@ to_tsquery('simple', ${q}) AND (${a}.classification IS DISTINCT FROM 'confidential'
     OR to_tsvector('simple', ${a}.ref || ' ' || ${a}.title) @@ to_tsquery('simple', ${q})
-    OR (${u}::int IS NOT NULL AND (${a}.assignee_id = ${u}::int OR ${a}.created_by = ${u}::int
-      OR EXISTS (SELECT 1 FROM team_members m WHERE m.user_id = ${u}::int AND m.team_id = ${a}.team_id)
-      OR EXISTS (SELECT 1 FROM record_reveals v WHERE v.user_id = ${u}::int AND v.record_type = ${k}::text AND v.record_id = ${a}.id AND v.expires_at > now())))))`;
+    OR ${mayReadSql(a, u, k)}))`;
 }
 
 /** Masks free text in place: in objects that carry a masked ref, and – for a page about one record – everywhere. */
