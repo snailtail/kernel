@@ -14,7 +14,7 @@ describe('re-basing legacy audit entries (ADR 0001)', { skip }, () => {
   let audit: typeof import('../../src/audit.js');
   let rebase: typeof import('../../src/rebase-audit.js');
   const leftovers = async () =>
-    Number((await ownerQuery('SELECT count(*) AS n FROM audit_log l WHERE l::text ~* $1', [[NAME, EMAIL, IP, AWS].map((s) => s.replace(/[.]/g, '\\.')).join('|')])).rows[0].n);
+    Number((await ownerQuery('SELECT count(*) AS n FROM audit_log l WHERE l::text ~* $1', [[NAME, EMAIL, IP, AWS].map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')])).rows[0].n);
 
   before(async () => {
     process.env.KERNEL_SECRET_KEY = KEY;
