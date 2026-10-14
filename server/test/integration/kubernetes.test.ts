@@ -13,7 +13,7 @@ const ok = (r: { status: number; body: unknown }) => assert.ok(r.status >= 200 &
 
 /** A fake Kubernetes API server: TLS with its own CA, bearer auth, paginated lists, a forbidden and a missing kind. */
 function fakeCluster(cert: string, key: string) {
-  const state = { deployments: true, requests: [] as string[] };
+  const state = { deployments: true, daemonsets: false, gone: new Set<string>(), requests: [] as string[] };
   const deployment = (name: string) => ({
     metadata: { name, namespace: 'shop', labels: { 'app.kubernetes.io/part-of': 'webshop', team: 'payments', 'internal-note': 'not kept' }, annotations: { secret: 'never read' } },
     spec: { replicas: 3, template: { spec: { containers: [{ name: 'app', image: `registry.example.com/${name}:1.4.2`, env: [{ name: 'DB_PASSWORD', value: ENV_SECRET }], args: [`--password=${ENV_SECRET}`] }] } } },
@@ -35,15 +35,22 @@ function fakeCluster(cert: string, key: string) {
         if (!state.deployments) return json({ items: [] });
         // Two pages: the connector must follow `continue`.
         return url.searchParams.get('continue') === 'page2'
-          ? json({ items: [deployment('checkout')], metadata: {} })
-          : json({ items: [deployment('web'), deployment('cart')], metadata: { continue: 'page2' } });
+          ? json({ items: [deployment('checkout')].filter((d) => !state.gone.has(d.metadata.name)), metadata: {} })
+          : json({ items: [deployment('web'), deployment('cart'), { ...deployment('coredns'), metadata: { name: 'coredns', namespace: 'kube-system' } }].filter((d) => !state.gone.has(d.metadata.name)), metadata: { continue: 'page2' } });
       case '/apis/apps/v1/statefulsets': return json({ items: [{ metadata: { name: 'db', namespace: 'shop' }, spec: { replicas: 1, template: { spec: { containers: [{ image: 'postgres:18' }] } } }, status: { readyReplicas: 1 } }] });
-      case '/apis/apps/v1/daemonsets': return json({ kind: 'Status', code: 403, message: 'forbidden' }, 403);
+      case '/apis/apps/v1/daemonsets':
+        return state.daemonsets ? json({ items: [{ metadata: { name: 'log-agent', namespace: 'shop' }, spec: { template: { spec: { containers: [{ image: 'fluent-bit:3' }] } } }, status: { desiredNumberScheduled: 2, numberReady: 2 } }] }) : json({ kind: 'Status', code: 403, message: 'forbidden' }, 403);
       case '/apis/batch/v1/cronjobs': return json({ kind: 'Status', code: 404 }, 404);
       case '/api/v1/events': return json({ items: [
-        { type: 'Warning', reason: 'BackOff', message: `Back-off restarting failed container app (token=${ENV_SECRET})`, involvedObject: { kind: 'Pod', name: 'web-7d9f8c-abcde', namespace: 'shop' }, lastTimestamp: new Date().toISOString() },
-        { type: 'Warning', reason: 'BackOff', message: 'again', involvedObject: { kind: 'Pod', name: 'web-7d9f8c-fghij', namespace: 'shop' }, lastTimestamp: new Date().toISOString() },
+        { type: 'Warning', reason: 'BackOff', message: `Back-off restarting failed container app (token=${ENV_SECRET})`, involvedObject: { kind: 'Pod', name: 'web-7d9f8c-bcdfg', namespace: 'shop' }, lastTimestamp: new Date().toISOString() },
+        { type: 'Warning', reason: 'BackOff', message: 'again', involvedObject: { kind: 'Pod', name: 'web-7d9f8c-fghjk', namespace: 'shop' }, lastTimestamp: new Date().toISOString() },
         { type: 'Warning', reason: 'Something', message: 'ignored', involvedObject: { kind: 'Pod', name: 'cart-1', namespace: 'shop' } },
+        // Resolved long ago, but still listed until the event's TTL runs out: not current.
+        { type: 'Warning', reason: 'OOMKilling', message: 'old', involvedObject: { kind: 'Pod', name: 'web-7d9f8c-bcdfg', namespace: 'shop' }, lastTimestamp: new Date(Date.now() - 3 * 3600_000).toISOString() },
+        // A recurring event on a newer cluster: lastTimestamp null, the latest occurrence in series.
+        { type: 'Warning', reason: 'FailedScheduling', message: 'no nodes', involvedObject: { kind: 'Pod', name: 'db-0', namespace: 'shop' }, lastTimestamp: null, eventTime: new Date(Date.now() - 5 * 3600_000).toISOString(), series: { lastObservedTime: new Date().toISOString() } },
+        // A standalone Job's pod whose name starts with a Deployment's name: not that Deployment's.
+        { type: 'Warning', reason: 'FailedMount', message: 'no volume', involvedObject: { kind: 'Pod', name: 'web-migrate-x7k2p', namespace: 'shop' }, lastTimestamp: new Date().toISOString() },
       ] });
       default: return json({ kind: 'Status', code: 404 }, 404);
     }
@@ -104,6 +111,7 @@ describe('Kubernetes connector (#24)', { skip }, () => {
     const all = (await analyst.get('/api/cis?status=all&q=')).body.map((c: any) => c.name);
     for (const name of ['aks-prod', 'aks-node-2', 'aks-prod/shop', 'web', 'cart', 'checkout', 'db']) assert.ok(all.includes(name), `${name} is a CI`);
     assert.ok(!all.some((n: string) => n.startsWith('web-7d9f')), 'pods are not CIs');
+    assert.ok(!all.includes('aks-prod/kube-system') && !all.includes('coredns'), 'system namespaces and their workloads are left out');
     const web = (await analyst.get('/api/cis?status=all&q=web')).body.find((c: any) => c.name === 'web');
     const page = (await analyst.get(`/api/cis/${web.ref}`)).body;
     assert.equal(page.attributes.images, 'registry.example.com/web:1.4.2', 'positive control: the image is kept');
@@ -124,9 +132,9 @@ describe('Kubernetes connector (#24)', { skip }, () => {
     assert.ok(rels.some((x: any) => x.f === 'aks-prod' && x.t === 'aks-prod/shop'));
   });
 
-  test('a forbidden or unserved kind makes the run incomplete: reported, and nothing marked missing', async () => {
+  test('a forbidden or unserved kind is reported, and only its own CIs are left alone', async () => {
     const run = (await admin.get(`/api/connectors/${id}/runs`)).body[0];
-    assert.match(run.message, /incomplete/);
+    assert.match(run.message, /not marked missing where the list was incomplete/);
     assert.match(run.message, /DaemonSets: forbidden/);
     assert.match(run.message, /CronJobs: not served/);
     assert.equal(Number((await db.query("SELECT coalesce(max(missed_syncs), 0)::int AS m FROM ci_sources WHERE source_system = 'aks-prod'")).rows[0].m), 0);
@@ -142,11 +150,34 @@ describe('Kubernetes connector (#24)', { skip }, () => {
     cluster.state.deployments = true;
   });
 
+  test('a kind the role forbids does not stop other kinds from going missing (completeness per kind)', async () => {
+    const missed = async (sourceId: string) => Number((await db.query("SELECT missed_syncs FROM ci_sources WHERE source_system = 'aks-prod' AND source_id = $1", [sourceId])).rows[0]?.missed_syncs);
+    const rel = async (to: string) => (await db.query("SELECT count(*)::int AS n FROM ci_relationships r JOIN ci_sources s ON s.ci_id = r.to_ci AND s.source_system = 'aks-prod' WHERE r.source_system = 'aks-prod' AND s.source_id = $1", [to])).rows[0].n;
+    cluster.state.daemonsets = true;
+    assert.equal((await admin.post(`/api/connectors/${id}/run`, {})).body.status, 'succeeded');
+    assert.equal(await missed('DaemonSet/shop/log-agent'), 0);
+    assert.equal(await rel('DaemonSet/shop/log-agent'), 1);
+    // Now the role loses daemonsets and a Deployment is deleted.
+    cluster.state.daemonsets = false;
+    cluster.state.gone.add('cart');
+    assert.equal((await admin.post(`/api/connectors/${id}/run`, {})).body.status, 'succeeded');
+    assert.equal(await missed('Deployment/shop/cart'), 1, 'the deleted Deployment counts as missed');
+    assert.equal(await rel('Deployment/shop/cart'), 0, 'and its relationship is gone');
+    assert.equal(await missed('Deployment/shop/web'), 0, 'positive control: a Deployment still there is not missed');
+    assert.equal(await missed('DaemonSet/shop/log-agent'), 0, 'the unreadable kind is left alone');
+    assert.equal(await rel('DaemonSet/shop/log-agent'), 1, 'with its relationships');
+    cluster.state.gone.clear();
+  });
+
   test('warning events become one alert per workload and reason, without secrets', async () => {
     const alerts = (await analyst.get('/api/alerts?status=all&q=BackOff')).body;
     const mine = alerts.filter((a: any) => a.check_key === 'Kubernetes BackOff');
     assert.equal(mine.length, 1, JSON.stringify(alerts));
     assert.equal(JSON.stringify(mine).includes(ENV_SECRET), false);
     assert.equal((await db.query("SELECT count(*)::int AS n FROM alerts WHERE check_key = 'Kubernetes Something'")).rows[0].n, 0, 'only known reasons');
+    assert.equal((await db.query("SELECT count(*)::int AS n FROM alerts WHERE check_key = 'Kubernetes OOMKilling'")).rows[0].n, 0, 'an event last seen hours ago is not current');
+    const scheduling = (await db.query("SELECT c.name FROM alerts a JOIN configuration_items c ON c.id = a.ci_id WHERE a.check_key = 'Kubernetes FailedScheduling'")).rows;
+    assert.deepEqual(scheduling.map((r: any) => r.name), ['db'], 'series.lastObservedTime counts, and db-0 belongs to StatefulSet db');
+    assert.equal((await db.query("SELECT count(*)::int AS n FROM alerts WHERE check_key = 'Kubernetes FailedMount'")).rows[0].n, 0, 'a Job pod named web-migrate-… is not Deployment web\'s');
   });
 });

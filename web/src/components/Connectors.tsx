@@ -34,7 +34,7 @@ export function ConnectorsCard() {
   };
   return (
     <section className="card">
-      <div className="section-head"><h2>Connectors</h2><button className="btn-link" onClick={() => setEditing({ type: 'op5', config: { default_ci_type: 'virtual_machine', environment: 'prod', sync_events: true }, private_allow: [], schedule_minutes: 60, enabled: true })}>+ Connector</button></div>
+      <div className="section-head"><h2>Connectors</h2><button className="btn-link" onClick={() => setEditing({ type: 'op5', private_allow: [], schedule_minutes: 60, enabled: true })}>+ Connector</button></div>
       <p className="muted small">Kernel fetches CIs (and current problems as alerts) from your tools on a schedule. Anything else can push with <span className="mono">POST /api/cmdb/ci-batch</span> or the MCP tool <span className="mono">sync_ci_batch</span>.</p>
       {data.connectors.length === 0 && <p className="placeholder">No connectors yet.</p>}
       <ul className="work-list">
@@ -79,20 +79,32 @@ export function ConnectorsCard() {
   );
 }
 
+/** Defaults for a new connector of each type. */
+const NEW: Record<string, { source_system: string; config: Record<string, any> }> = {
+  op5: { source_system: 'OP5', config: { default_ci_type: 'virtual_machine', environment: 'prod', sync_events: true } },
+  kubernetes: { source_system: 'Kubernetes', config: { node_ci_type: 'virtual_machine', environment: 'prod', sync_events: false } },
+};
+
 function ConnectorEditor({ connector: c, types, onClose, onDone }: { connector: Partial<Connector>; types: Record<string, string>; onClose: () => void; onDone: () => void }) {
-  const [form, setForm] = useState({
-    type: c.type ?? 'op5', name: c.name ?? '', source_system: c.source_system ?? 'OP5', base_url: c.config?.base_url ?? '', default_ci_type: c.config?.default_ci_type ?? 'virtual_machine',
-    environment: c.config?.environment ?? 'prod', sync_events: c.config?.sync_events ?? true, username: '', password: '', private_allow: (c.private_allow ?? []).join(', '),
-    schedule_minutes: c.schedule_minutes ?? 60, enabled: c.enabled ?? true, insecure_http: c.config?.insecure_http ?? false, ca_pem: c.config?.ca_pem ?? '',
+  const initial = (type: string, cfg: Record<string, any>) => ({
+    type, name: c.name ?? '', source_system: c.source_system ?? NEW[type]?.source_system ?? '', base_url: cfg.base_url ?? '', default_ci_type: cfg.default_ci_type ?? 'virtual_machine',
+    environment: cfg.environment ?? 'prod', sync_events: cfg.sync_events ?? type === 'op5', username: '', password: '', token: '', private_allow: (c.private_allow ?? []).join(', '),
+    schedule_minutes: c.schedule_minutes ?? 60, enabled: c.enabled ?? true, insecure_http: cfg.insecure_http ?? false, ca_pem: cfg.ca_pem ?? '',
+    exclude_namespaces: (cfg.exclude_namespaces ?? ['kube-system', 'kube-public', 'kube-node-lease']).join(', '), cluster_name: cfg.cluster_name ?? '', node_ci_type: cfg.node_ci_type ?? 'virtual_machine', owner_label: cfg.owner_label ?? '', console_url: cfg.console_url ?? '',
   });
+  const [form, setForm] = useState(() => initial(c.type ?? 'op5', c.config ?? NEW[c.type ?? 'op5']?.config ?? {}));
   const [error, setError] = useState<string | null>(null);
+  const k8s = form.type === 'kubernetes';
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    const shared = { base_url: form.base_url, environment: form.environment, sync_events: form.sync_events, ca_pem: form.ca_pem.trim() };
+    const config = k8s
+      ? { ...shared, cluster_name: form.cluster_name, node_ci_type: form.node_ci_type, owner_label: form.owner_label.trim(), console_url: form.console_url.trim(), exclude_namespaces: form.exclude_namespaces.split(/[\s,]+/).filter(Boolean) }
+      : { ...shared, default_ci_type: form.default_ci_type, insecure_http: form.insecure_http };
+    const secret = k8s ? (form.token ? { token: form.token.trim() } : null) : form.username || form.password ? { username: form.username, password: form.password } : null;
     const body = {
       type: form.type, name: form.name, source_system: form.source_system, schedule_minutes: Number(form.schedule_minutes), enabled: form.enabled,
-      config: { base_url: form.base_url, default_ci_type: form.default_ci_type, environment: form.environment, sync_events: form.sync_events, insecure_http: form.insecure_http, ca_pem: form.ca_pem.trim() },
-      private_allow: form.private_allow.split(/[\s,]+/).filter(Boolean),
-      ...(form.username || form.password ? { secret: { username: form.username, password: form.password } } : {}),
+      config, private_allow: form.private_allow.split(/[\s,]+/).filter(Boolean), ...(secret ? { secret } : {}),
     };
     try {
       if (c.id) await api.put(`/api/connectors/${c.id}`, body);
@@ -102,24 +114,44 @@ function ConnectorEditor({ connector: c, types, onClose, onDone }: { connector: 
       setError((err as Error).message);
     }
   };
+  const unchanged = c.has_secret ? 'unchanged' : '';
   return (
     <Modal title={c.id ? `Edit ${c.name}` : 'New connector'} onClose={onClose}>
       <form className="form" onSubmit={submit}>
-        <label>Type<select value={form.type} disabled={!!c.id} onChange={(e) => setForm({ ...form, type: e.target.value })}>{Object.entries(types).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
+        <label>Type<select value={form.type} disabled={!!c.id} onChange={(e) => setForm({ ...initial(e.target.value, NEW[e.target.value]?.config ?? {}), name: form.name })}>{Object.entries(types).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
         <label>Name<input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
-        <label className="full">URL<input required type="url" placeholder="https://op5.example.com" value={form.base_url} onChange={(e) => setForm({ ...form, base_url: e.target.value })} /></label>
-        <label>Username<input autoComplete="off" placeholder={c.has_secret ? 'unchanged' : ''} required={!c.id} value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} /></label>
-        <label>Password<input type="password" autoComplete="new-password" placeholder={c.has_secret ? 'unchanged' : ''} required={!c.id} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></label>
+        {k8s ? (
+          <>
+            <p className="hint-box full">Kernel reads the cluster with a read-only ServiceAccount (get and list on nodes, namespaces and workloads; never Secrets or ConfigMaps). The ClusterRole and how to get a token are in <span className="mono">docs/connectors/kubernetes.md</span>.</p>
+            <label className="full">API server<input required type="url" placeholder="https://k8s.example.com:6443" value={form.base_url} onChange={(e) => setForm({ ...form, base_url: e.target.value })} /></label>
+            <label className="full">ServiceAccount token<input type="password" autoComplete="new-password" placeholder={unchanged} required={!c.id} value={form.token} onChange={(e) => setForm({ ...form, token: e.target.value })} /></label>
+            <label>Cluster name<input required maxLength={100} placeholder="prod-aks-1" value={form.cluster_name} onChange={(e) => setForm({ ...form, cluster_name: e.target.value })} /></label>
+            <label>Nodes as<input value={form.node_ci_type} onChange={(e) => setForm({ ...form, node_ci_type: e.target.value })} /></label>
+          </>
+        ) : (
+          <>
+            <label className="full">URL<input required type="url" placeholder="https://op5.example.com" value={form.base_url} onChange={(e) => setForm({ ...form, base_url: e.target.value })} /></label>
+            <label>Username<input autoComplete="off" placeholder={unchanged} required={!c.id} value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} /></label>
+            <label>Password<input type="password" autoComplete="new-password" placeholder={unchanged} required={!c.id} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></label>
+            <label>New CIs as<input value={form.default_ci_type} onChange={(e) => setForm({ ...form, default_ci_type: e.target.value })} /></label>
+          </>
+        )}
         <label>Source system <span className="muted small">(owned by this connector)</span><input required value={form.source_system} onChange={(e) => setForm({ ...form, source_system: e.target.value })} /></label>
-        <label>New CIs as<input value={form.default_ci_type} onChange={(e) => setForm({ ...form, default_ci_type: e.target.value })} /></label>
         <label>Environment<select value={form.environment} onChange={(e) => setForm({ ...form, environment: e.target.value })}>{['prod', 'test', 'dev', 'other'].map((x) => <option key={x}>{x}</option>)}</select></label>
         <label>Every (minutes)<input type="number" min={5} max={10080} value={form.schedule_minutes} onChange={(e) => setForm({ ...form, schedule_minutes: Number(e.target.value) })} /></label>
         <label className="full">Private network access <span className="muted small">(addresses or ranges on your LAN this connector may reach, e.g. 192.168.1.20 or 10.0.0.0/8)</span><input value={form.private_allow} onChange={(e) => setForm({ ...form, private_allow: e.target.value })} /></label>
-        {form.base_url.startsWith('http://') && (
+        {!k8s && form.base_url.startsWith('http://') && (
           <label className="check full warn-box"><input type="checkbox" checked={form.insecure_http} onChange={(e) => setForm({ ...form, insecure_http: e.target.checked })} /> Plain HTTP (lab only): the password is sent in clear text</label>
         )}
-        <label className="full">CA certificate <span className="muted small">(optional PEM, for a server behind your own CA; verification is always on)</span><textarea rows={3} placeholder="-----BEGIN CERTIFICATE-----" value={form.ca_pem} onChange={(e) => setForm({ ...form, ca_pem: e.target.value })} /></label>
-        <label className="check"><input type="checkbox" checked={form.sync_events} onChange={(e) => setForm({ ...form, sync_events: e.target.checked })} /> Also fetch current problems as alerts</label>
+        <label className="full">CA certificate <span className="muted small">{k8s ? '(PEM: most clusters use their own CA; verification is always on)' : '(optional PEM, for a server behind your own CA; verification is always on)'}</span><textarea rows={3} placeholder="-----BEGIN CERTIFICATE-----" value={form.ca_pem} onChange={(e) => setForm({ ...form, ca_pem: e.target.value })} /></label>
+        {k8s && (
+          <>
+            <label>Owner label <span className="muted small">(optional, kept as a tag)</span><input placeholder="team" value={form.owner_label} onChange={(e) => setForm({ ...form, owner_label: e.target.value })} /></label>
+            <label className="full">Leave out namespaces <span className="muted small">(no CIs, workloads or alerts from these)</span><input value={form.exclude_namespaces} onChange={(e) => setForm({ ...form, exclude_namespaces: e.target.value })} /></label>
+            <label className="full">Dashboard link <span className="muted small">(optional, with {'{cluster}'}, {'{kind}'}, {'{namespace}'} and {'{name}'})</span><input placeholder="https://rancher.example.com/c/{cluster}/explorer/{kind}/{namespace}/{name}" value={form.console_url} onChange={(e) => setForm({ ...form, console_url: e.target.value })} /></label>
+          </>
+        )}
+        <label className="check"><input type="checkbox" checked={form.sync_events} onChange={(e) => setForm({ ...form, sync_events: e.target.checked })} /> {k8s ? 'Warning events (crash loops, out of memory, scheduling) as alerts' : 'Also fetch current problems as alerts'}</label>
         <label className="check"><input type="checkbox" checked={form.enabled} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} /> Enabled</label>
         {error && <div className="error full">{error}</div>}
         <div className="actions full">

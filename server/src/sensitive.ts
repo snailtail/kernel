@@ -76,7 +76,7 @@ const DETECTORS: Detector[] = [
   { type: 'url-password', class: 'secret', re: /\b([a-z][a-z0-9+.-]{1,20}:\/\/[^\s:@/]{1,100}:)([^\s@/]{1,200})(@)/gi, group: 2 },
   {
     type: 'password', class: 'secret',
-    re: /\b(password|passwd|pwd|secret|api[_-]?key|access[_-]?token|client[_-]?secret)(\s{0,5}[=:]\s{0,5})("[^"\r\n]{1,200}"|'[^'\r\n]{1,200}'|[^\s;,&"'<>]{4,200})/gi,
+    re: /\b(password|passwd|pwd|secret|api[_-]?key|(?:access|auth|refresh)?[_-]?token|client[_-]?secret)(\s{0,5}[=:]\s{0,5})("[^"\r\n]{1,200}"|'[^'\r\n]{1,200}'|[^\s;,&"'<>]{4,200})/gi,
     group: 3, valid: credentialValue,
   },
   {

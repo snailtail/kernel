@@ -7,7 +7,7 @@ import { KUBERNETES } from './connector-kubernetes.js';
 import { z } from 'zod';
 import type { User } from './auth.js';
 import { audit } from './audit.js';
-import { syncRelationships } from './cmdb-graph.js';
+import { prefixPatterns, syncRelationships } from './cmdb-graph.js';
 import { logCi, upsertCis, upsertSchema } from './cmdb.js';
 import { query, tx } from './db.js';
 import { badRequest, conflict, forbidden, notFound } from './errors.js';
@@ -27,6 +27,11 @@ export const ciBatchSchema = z.object({
   relationships: z.array(z.object({ from_id: z.string().min(1).max(300), type: z.string().min(1).max(50), to_id: z.string().min(1).max(300) })).max(20_000).default([]),
   /** The batch is the source's complete snapshot: CIs it no longer reports count as missed. */
   full_sync: z.boolean().default(false),
+  /**
+   * With full_sync: source-id prefixes the snapshot could not read completely this time (e.g. "CronJob/" when the
+   * source may not list cron jobs). CIs and relationships under them are left as they are; everything else is synced.
+   */
+  incomplete_prefixes: z.array(z.string().min(1).max(100)).max(50).default([]),
 });
 
 interface Reconciliation { missing_after: number; max_drop_percent: number }
@@ -51,25 +56,27 @@ export async function ciBatch(user: User, input: z.infer<typeof ciBatchSchema>) 
   }
   // Relationships are only reconciled when the snapshot includes them; a CI-only source never wipes its relationships.
   const rels = input.relationships.length
-    ? await syncRelationships(user, { source_system: input.source_system, relationships: input.relationships, full: input.full_sync })
+    ? await syncRelationships(user, { source_system: input.source_system, relationships: input.relationships, full: input.full_sync, keep_prefixes: input.incomplete_prefixes })
     : { created: 0, seen: 0, removed: 0, errors: [] };
   let missing: { missed: number; marked_missing: number; refused?: string } = { missed: 0, marked_missing: 0 };
-  if (input.full_sync) missing = await markMissed(user, input.source_system, input.cis.map((c) => c.source_id));
+  if (input.full_sync) missing = await markMissed(user, input.source_system, input.cis.map((c) => c.source_id), input.incomplete_prefixes);
   return { cis, relationships: rels, missing };
 }
 
-async function markMissed(user: User, source: string, seenIds: string[]) {
+async function markMissed(user: User, source: string, seenIds: string[], skipPrefixes: string[]) {
   const settings = await reconciliation();
-  const { rows } = await query('SELECT count(*)::int AS n FROM ci_sources WHERE source_system = $1 AND missed_syncs = 0', [source]);
+  const skip = prefixPatterns(skipPrefixes);
+  const inScope = (id: string) => !skipPrefixes.some((p) => id.startsWith(p));
+  const { rows } = await query('SELECT count(*)::int AS n FROM ci_sources WHERE source_system = $1 AND missed_syncs = 0 AND NOT (source_id LIKE ANY($2))', [source, skip]);
   const before = rows[0].n;
-  const seen = new Set(seenIds).size;
+  const seen = new Set(seenIds.filter(inScope)).size;
   if (before >= 10 && seen < before * (1 - settings.max_drop_percent / 100)) {
     const refused = `The snapshot has ${seen} CIs where ${before} were present (more than ${settings.max_drop_percent} % fewer): nothing was marked missing`;
     await audit(null, { entity_type: 'ci_upsert', entity_ref: source, action: 'full_sync_refused', changes: { before, seen } });
     return { missed: 0, marked_missing: 0, refused };
   }
   return tx(async (db) => {
-    const { rowCount } = await db.query('UPDATE ci_sources SET missed_syncs = missed_syncs + 1 WHERE source_system = $1 AND NOT (source_id = ANY($2))', [source, seenIds]);
+    const { rowCount } = await db.query('UPDATE ci_sources SET missed_syncs = missed_syncs + 1 WHERE source_system = $1 AND NOT (source_id = ANY($2)) AND NOT (source_id LIKE ANY($3))', [source, seenIds, skip]);
     // A CI goes missing only when every source that reports it has missed it enough times; never deleted.
     const { rows: gone } = await db.query(
       `UPDATE configuration_items c SET status = 'missing', updated_at = now()
@@ -93,6 +100,8 @@ export interface RunContext {
   fetchJson: (path: string) => Promise<any>;
   /** The connector's source system, for types that compare with what they reported before. */
   sourceSystem: string;
+  /** How often the connector runs, for types that judge whether an event is still current. */
+  scheduleMinutes: number;
 }
 export interface ConnectorType {
   label: string;
@@ -106,10 +115,12 @@ export interface ConnectorType {
     relationships?: { from_id: string; type: string; to_id: string }[];
     events?: NormalisedEvent[];
     /**
-     * Something could not be read (a kind RBAC forbids, a list that came back suspiciously empty): the snapshot is
-     * incomplete, so nothing is marked missing this run. Each entry says what and why.
+     * Something could not be read (a kind RBAC forbids, a list that came back suspiciously empty). With a `prefix`,
+     * only the CIs whose source id starts with it are left alone this run; without one, nothing is marked missing.
      */
-    partial?: string[];
+    partial?: { message: string; prefix?: string }[];
+    /** Problems that do not touch the CI snapshot (e.g. events that could not be read): reported on the run only. */
+    warnings?: string[];
   }>;
 }
 
@@ -243,6 +254,7 @@ function contextFor(c: any): RunContext {
     config,
     secret,
     sourceSystem: c.source_system,
+    scheduleMinutes: c.schedule_minutes,
     fetchJson: async (path) => {
       const res = await outboundFetch(config.base_url.replace(/\/$/, '') + path, {
         headers: { Accept: 'application/json', ...(auth ? { Authorization: auth } : {}) },
@@ -294,8 +306,13 @@ export async function runConnector(id: number, trigger: 'schedule' | 'manual', a
     if (!owner[0]) throw new Error('The connector has no owner; save it again as an administrator');
     const user = owner[0] as User;
     const fetched = await CONNECTOR_TYPES[c.type].fetch(contextFor(c));
-    // An incomplete snapshot (a forbidden kind, a list that came back empty) never marks anything missing.
-    const result = await ciBatch(user, { source_system: c.source_system, cis: fetched.cis, relationships: fetched.relationships ?? [], full_sync: !fetched.partial?.length });
+    // What could not be read completely is never marked missing: only its prefix, or the whole snapshot when the
+    // type cannot say which part is affected.
+    const partial = fetched.partial ?? [];
+    const result = await ciBatch(user, {
+      source_system: c.source_system, cis: fetched.cis, relationships: fetched.relationships ?? [],
+      full_sync: partial.every((p) => p.prefix), incomplete_prefixes: partial.map((p) => p.prefix!).filter(Boolean),
+    });
     let events: { reported: number; cleared: number } | undefined;
     if (fetched.events && moduleEnabled('event')) {
       // Current problems open or refresh alerts; alerts from this connector that are no longer a problem clear.
@@ -310,9 +327,13 @@ export async function runConnector(id: number, trigger: 'schedule' | 'manual', a
       }
       events = { reported: results.length, cleared: toClear.length };
     }
-    const errors = [...(fetched.partial ?? []).map((p) => ({ skipped: p })), ...result.cis.errors, ...result.relationships.errors];
+    const errors = [...partial.map((p) => ({ skipped: p.message })), ...(fetched.warnings ?? []).map((w) => ({ skipped: w })), ...result.cis.errors, ...result.relationships.errors];
     const status = result.missing.refused ? 'refused' : 'succeeded';
-    const message = result.missing.refused ?? (fetched.partial?.length ? `${fetched.cis.length} CIs synced; incomplete, so nothing was marked missing: ${fetched.partial.join('; ')}` : `${fetched.cis.length} CIs synced`);
+    const incomplete = partial.map((p) => p.message).join('; ');
+    const message = result.missing.refused
+      ?? (!partial.length ? `${fetched.cis.length} CIs synced`
+        : partial.every((p) => p.prefix) ? `${fetched.cis.length} CIs synced; not marked missing where the list was incomplete: ${incomplete}`
+        : `${fetched.cis.length} CIs synced; incomplete, so nothing was marked missing: ${incomplete}`);
     await finish(status, { ...result.cis, errors: undefined, ...result.missing, refused: undefined, ...(events ? { events } : {}) }, errors, message);
     return { status, ...result, events };
   } catch (err) {
