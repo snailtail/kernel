@@ -74,6 +74,13 @@ describe('sensitive data in records (#61)', { skip }, () => {
     await admin.put('/api/admin/sensitive-data', { secrets: 'redact', flag_personal: true, flag_ips: false, reason: 'Back to redaction' });
   });
 
+  test('a body cannot reach an object\'s prototype through the scan', async () => {
+    const raw = '{"title":"Proto","description":"x","__proto__":{"description":"AKIAIOSFODNN7EXAMPLE"}}';
+    const r = await fetch(`${k.base}/api/problems`, { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: pm.cookie!, 'X-Kernel-Request': '1' }, body: raw });
+    assert.equal(r.status, 400, 'the JSON parser refuses __proto__ before any handler or the scan sees it');
+    assert.equal(({} as any).description, undefined);
+  });
+
   test('the typing check reports kinds only', async () => {
     const r = await analyst.post('/api/sensitive/check', { text: `password=${PW} and ${PNR}` });
     assert.deepEqual(r.body, { secrets: ['password'], personal: ['personal-identity-number'], action: 'redact' });

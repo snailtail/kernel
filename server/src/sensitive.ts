@@ -67,6 +67,7 @@ const DETECTORS: Detector[] = [
   { type: 'gcp-key', class: 'secret', re: /\bAIza[0-9A-Za-z_-]{35}\b/g },
   { type: 'github-token', class: 'secret', re: /\b(?:gh[pousr]_[A-Za-z0-9]{36,255}|github_pat_[A-Za-z0-9_]{22,255})\b/g },
   { type: 'slack-token', class: 'secret', re: /\bxox[abprs]-[A-Za-z0-9-]{10,200}/g },
+  // codeql[js/regex/missing-regexp-anchor] -- a detector for webhook URLs anywhere in text, not a check of which host a URL points to
   { type: 'slack-webhook', class: 'secret', re: /\bhooks\.slack\.com\/services\/[A-Za-z0-9/]{20,120}/g },
   { type: 'kernel-token', class: 'secret', re: /\bkernel_pat_[A-Za-z0-9_-]{20,100}/g },
   { type: 'jwt', class: 'secret', re: /\beyJ[A-Za-z0-9_-]{10,4000}\.eyJ[A-Za-z0-9_-]{10,8000}\.[A-Za-z0-9_-]{0,4000}/g },
@@ -203,6 +204,8 @@ export const UNSCANNED = [
 /** Machine ingestion: never refused (an alert must not be lost), always redacted. */
 const MACHINE = [/^\/mcp/, /^\/api\/events$/, /^\/api\/event-hooks\//, /^\/api\/integrations\//, /^\/api\/cis\/upsert/, /^\/api\/cmdb\/ci-batch/, /^\/api\/changes\/register/, /^\/api\/ci-relationships\/sync/];
 
+const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
 /** Redacts secrets in every string of a JSON value, in place where possible; collects what was found. */
 function walk(value: unknown, policy: SensitivePolicy, seen: { secrets: Set<string>; personal: Set<string> }, depth = 0): unknown {
   if (depth > 32) return value;
@@ -218,7 +221,13 @@ function walk(value: unknown, policy: SensitivePolicy, seen: { secrets: Set<stri
     return value;
   }
   if (value && typeof value === 'object') {
-    for (const k of Object.keys(value)) (value as Record<string, unknown>)[k] = walk((value as Record<string, unknown>)[k], policy, seen, depth + 1);
+    const o = value as Record<string, unknown>;
+    for (const k of Object.keys(o)) {
+      // Only plain data keys are written back: never __proto__, constructor or prototype from a request body.
+      if (UNSAFE_KEYS.has(k)) continue;
+      const next = walk(o[k], policy, seen, depth + 1);
+      if (next !== o[k]) Object.defineProperty(o, k, { value: next, writable: true, enumerable: true, configurable: true });
+    }
   }
   return value;
 }
