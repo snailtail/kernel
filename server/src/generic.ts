@@ -116,7 +116,8 @@ export async function myWork(user: User) {
       : Promise.resolve({ rows: [] as any[] }),
     can(user.role, 'incident.read')
       ? query(
-          `SELECT ref, title, status, priority, is_major, created_at FROM incidents
+          `SELECT ref, title, status, priority, is_major, created_at,
+                  (is_major AND major_next_update_at < now()) AS update_overdue FROM incidents
            WHERE assignee_id = $1 AND status NOT IN ('resolved', 'closed') ORDER BY priority, created_at LIMIT 50`,
           [user.id],
         )
@@ -136,6 +137,16 @@ export async function myWork(user: User) {
         )
       : Promise.resolve({ rows: [] as any[] }),
   ]);
+  // Major incidents I lead or communicate for (#108): the next stakeholder update, overdue first.
+  const majorUpdates = can(user.role, 'incident.read')
+    ? (await query(
+        `SELECT ref, title, priority, major_next_update_at AS next_update_at, major_next_update_at < now() AS update_overdue,
+                CASE WHEN major_comms_id = $1 THEN 'communications lead' ELSE 'incident lead' END AS role
+         FROM incidents WHERE is_major AND status NOT IN ('resolved', 'closed') AND (major_lead_id = $1 OR major_comms_id = $1)
+         ORDER BY major_next_update_at NULLS LAST LIMIT 20`,
+        [user.id],
+      )).rows
+    : [];
   const problemType = recordTypes().find((t) => t.type === 'problem')!;
   const teams = can(user.role, 'team.read') ? await myTeams(user.id) : [];
   const teamQueue = can(user.role, 'incident.read') && teams.length
@@ -150,6 +161,7 @@ export async function myWork(user: User) {
     team_queue: teamQueue,
     problems: problems.rows.map((p) => ({ type: 'problem', ...p, url: recordUrl(problemType, p.ref) })),
     incidents: incidents.rows,
+    major_updates: majorUpdates,
     change_votes: changeVotes.rows,
     changes: myChanges.rows,
     actions: actions.rows,

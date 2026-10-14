@@ -20,6 +20,7 @@ import { inheritRestriction, restrictedByCategory } from './visibility.js';
 import { checkAssigneeInTeam, defaultTeamFor, nameTeams, notifyTeamQueue, pickAssignee, validTeam } from './teams.js';
 import { managers, notify } from './notifications.js';
 import { pool } from './db.js';
+import { declareInTx, majorDetail, resolveChildren, undeclareInTx } from './major-incidents.js';
 
 export { logIncident };
 
@@ -59,6 +60,9 @@ export const transitionIncidentSchema = z.object({
   resolution: z.string().max(20000).optional(),
   hold_reason: z.string().trim().max(1000).optional(),
   comment: z.string().max(20000).optional(),
+  /** Resolving a major incident (#108): who runs the post-incident review, and by when. */
+  pir_owner_id: z.number().int().nullable().optional(),
+  pir_due: z.iso.date().nullable().optional(),
 });
 export const listIncidentsSchema = z.object({
   q: z.string().trim().max(200).optional(),
@@ -143,6 +147,10 @@ export async function listIncidents(user: User, f: z.infer<typeof listIncidentsS
   const { rows } = await query(
     `SELECT i.id, i.ref, i.title, i.status, i.priority, i.impact, i.urgency, i.is_major, i.assignment_group, i.team_id, a.display_name AS assignee,
             i.source, i.created_at, i.updated_at, i.resolved_at, p.ref AS problem_ref, i.resolution_due_at,
+            CASE WHEN i.is_major AND i.status NOT IN ('resolved', 'closed') THEN i.major_next_update_at END AS next_update_at,
+            (i.is_major AND i.status NOT IN ('resolved', 'closed') AND i.major_next_update_at < now()) AS update_overdue,
+            (SELECT pp.ref FROM incidents pp WHERE pp.id = i.parent_id) AS parent_ref,
+            (SELECT count(*)::int FROM incidents cc WHERE cc.parent_id = i.id) AS child_count,
             CASE WHEN i.sla_id IS NULL OR i.resolution_due_at IS NULL THEN NULL
                  WHEN i.resolution_breached_at IS NOT NULL THEN 'breached'
                  WHEN i.status IN ('resolved', 'closed') THEN 'met'
@@ -172,7 +180,7 @@ export async function getIncident(user: User, ref: string) {
       [i.id],
     ),
     query(
-      `SELECT a.id, a.kind, a.body, a.data, a.channel, a.created_at, u.display_name AS user_name
+      `SELECT a.id, a.kind, a.body, a.data, a.channel, a.key_moment, a.created_at, u.display_name AS user_name
        FROM incident_activity a LEFT JOIN users u ON u.id = a.user_id WHERE a.incident_id = $1 ORDER BY a.created_at DESC, a.id DESC`,
       [i.id],
     ),
@@ -206,7 +214,8 @@ export async function getIncident(user: User, ref: string) {
   // Affected users are only asked for when a service involved has end users (#39: keep it optional).
   const refs = [...cis.rows.map((c) => c.ref), ...affected.affected_services.map((s) => s.ref)];
   const { rows: endUsers } = await query('SELECT 1 FROM configuration_items WHERE ref = ANY($1) AND has_end_users LIMIT 1', [refs]);
-  const detail = { ...i, ...affected, activity: await nameTeams(await namePeople(activity.rows)), links: links.rows, known_errors: knownErrors.rows, alerts: alerts.rows, possible_change_causes: possibleChanges, sla, ...people, asks_affected_users: !!endUsers[0] || people.affected_people.length > 0, articles_used: articlesUsed, suggested_articles: suggested };
+  const major = await majorDetail(user, i, affected.affected_services);
+  const detail = { ...i, ...affected, ...major, activity: await nameTeams(await namePeople(activity.rows)), links: links.rows, known_errors: knownErrors.rows, alerts: alerts.rows, possible_change_causes: possibleChanges, sla, ...people, asks_affected_users: !!endUsers[0] || people.affected_people.length > 0, articles_used: articlesUsed, suggested_articles: suggested };
   return { type: 'incident', ...detail, url: incidentUrl(i.ref), next_steps: incidentGuidance(detail) };
 }
 
@@ -220,8 +229,10 @@ function incidentGuidance(i: any) {
     { id: 'assign', label: 'Assign it', hint: 'An assignee or assignment group responds and owns restoring service.', done: !!i.assignee_id || !!i.assignment_group },
     ...(i.possible_change_causes.length ? [{ id: 'change', label: 'Check the recent change', hint: `${i.possible_change_causes[0].ref} on ${i.possible_change_causes[0].ci_name} started shortly before: a backout may restore service.`, done: null as unknown as boolean }] : []),
     ...(i.known_errors.length ? [{ id: 'known_error', label: 'Try the known error workaround', hint: `${i.known_errors[0].ref}: ${String(i.known_errors[0].title)}`, done: !!i.problem_id }] : []),
-    ...(i.is_major ? [{ id: 'communicate', label: 'Keep stakeholders informed', hint: 'Post communication updates while the major incident is open.', done: i.activity.some((a: any) => a.kind === 'communication') }] : []),
+    ...(i.is_major && open ? [{ id: 'communicate', label: i.major?.update_overdue ? 'A stakeholder update is overdue' : 'Keep stakeholders informed', hint: i.major?.next_update_at ? `Post an update every ${i.major.update_minutes} minutes; the next is due ${new Date(i.major.next_update_at).toISOString().slice(11, 16)} UTC.` : 'Post communication updates while the major incident is open.', done: i.activity.some((a: any) => a.kind === 'communication') && !i.major?.update_overdue }] : []),
+    ...(i.suggested_parent ? [{ id: 'parent', label: `Same outage as ${i.suggested_parent.ref}?`, hint: `${i.suggested_parent.ref} is an open major incident on the same CI or service: relate this one to it, and it is resolved together with it.`, done: null as unknown as boolean }] : []),
     { id: 'resolve', label: 'Restore service and resolve', hint: 'Record how service was restored and a resolution code.', done: !open },
+    ...(i.is_major && !open ? [{ id: 'review', label: 'Plan the post-incident review', hint: 'Name who runs the review and by when; it starts from the timeline.', done: !!i.pir_owner_id }] : []),
     ...(i.is_major || i.reopen_count > 0 ? [{ id: 'problem', label: 'Hand over to problem management', hint: i.is_major ? 'A major incident needs a problem record to find the root cause.' : 'It came back: a problem record finds out why.', done: !!i.problem_id }] : []),
   ];
   const knownError = i.known_errors[0];
@@ -299,7 +310,10 @@ export async function insertIncident(
   }
   else if (values.team_id) await notifyTeamQueue(db, values.team_id as number, { ref: rows[0].ref, title: fields.title, path }, actorId);
   if (fields.is_major) {
-    await notify(db, { users: await managers(db), event: 'major_incident', ref: rows[0].ref, title: fields.title, summary: 'A major incident was declared.', path, dedupe: `major:${rows[0].ref}`, actorId });
+    // Declared at creation: the same roles, cadence and notices as declaring it later.
+    const { rows: created } = await db.query('SELECT * FROM incidents WHERE id = $1', [rows[0].id]);
+    const { rows: actor } = actorId ? await db.query('SELECT display_name FROM users WHERE id = $1', [actorId]) : { rows: [] as any[] };
+    await declareInTx(db, { id: actorId, name: actor[0]?.display_name ?? 'Monitoring' }, created[0], {});
   }
   return rows[0] as { id: number; ref: string };
 }
@@ -332,6 +346,11 @@ export async function updateIncident(user: User, ref: string, { base, caller, ..
       if (input.team_id && !member[0]) input = { ...input, assignee_id: null };
     }
     await checkAssigneeInTeam(db, teamAfter, input.assignee_id !== undefined ? input.assignee_id : current.assignee_id);
+    // Declaring and standing down have their own steps (#108): roles, cadence, timeline.
+    const { is_major: major, ...plain } = input;
+    if (major === true && !current.is_major) await declareInTx(db, { id: user.id, name: user.display_name }, current, {});
+    if (major === false && current.is_major) await undeclareInTx(db, user.id, current);
+    input = plain;
     const changed = Object.entries(input).filter(([k, v]) => v !== undefined && current[k] !== v);
     if (!changed.length) return;
     await db.query(`UPDATE incidents SET ${changed.map(([k], n) => `${k} = $${n + 2}`).join(', ')} WHERE id = $1`, [current.id, ...changed.map(([, v]) => v)]);
@@ -339,9 +358,6 @@ export async function updateIncident(user: User, ref: string, { base, caller, ..
     const path = `/incidents/${current.ref}`;
     if (input.assignee_id && input.assignee_id !== current.assignee_id) {
       await notify(db, { users: [input.assignee_id], event: 'assigned', ref: current.ref, title: input.title ?? current.title, summary: `${user.display_name} assigned an incident to you.`, path, dedupe: `assigned:${current.ref}:${Date.now()}`, actorId: user.id });
-    }
-    if (input.is_major === true && !current.is_major) {
-      await notify(db, { users: await managers(db), event: 'major_incident', ref: current.ref, title: input.title ?? current.title, summary: `${user.display_name} declared a major incident.`, path, dedupe: `major:${current.ref}`, actorId: user.id });
     }
     if ((input.impact !== undefined && input.impact !== current.impact) || (input.urgency !== undefined && input.urgency !== current.urgency)) {
       await recomputeSla(db, current.id, { reason: 'Priority changed' });
@@ -389,9 +405,22 @@ export async function transitionIncident(user: User, ref: string, input: z.infer
       [current.id, input.to, code, resolution, input.hold_reason ?? '', reopening],
     );
     await slaOnTransition(db, current.id, input.to);
+    let pir: { pir_owner_id?: number | null; pir_due?: string | null } = {};
+    if (current.is_major && (input.pir_owner_id !== undefined || input.pir_due !== undefined)) {
+      if (input.pir_owner_id) {
+        const { rows: owner } = await db.query("SELECT 1 FROM users WHERE id = $1 AND active AND role NOT IN ('viewer', 'integration')", [input.pir_owner_id]);
+        if (!owner[0]) throw badRequest('The review owner must be an active user who can work on incidents');
+      }
+      pir = { pir_owner_id: input.pir_owner_id ?? current.pir_owner_id, pir_due: input.pir_due ?? current.pir_due };
+      await db.query('UPDATE incidents SET pir_owner_id = $2, pir_due = $3 WHERE id = $1', [current.id, pir.pir_owner_id, pir.pir_due]);
+    }
+    // A major incident's countdown stops when it is resolved and starts again if it is reopened (#108).
+    if (current.is_major && input.to === 'resolved') await db.query('UPDATE incidents SET major_next_update_at = NULL WHERE id = $1', [current.id]);
+    if (current.is_major && reopening) await db.query("UPDATE incidents SET major_next_update_at = now() + coalesce(major_update_minutes, 60) * interval '1 minute', major_overdue_notified_for = NULL WHERE id = $1", [current.id]);
     await logIncident(db, current.id, user.id, 'status', input.comment ?? '', {
-      from, to: input.to, ...(input.to === 'resolved' ? { resolution_code: code, resolution } : {}), ...(input.to === 'on_hold' ? { hold_reason: input.hold_reason } : {}),
+      from, to: input.to, ...(input.to === 'resolved' ? { resolution_code: code, resolution } : {}), ...(input.to === 'on_hold' ? { hold_reason: input.hold_reason } : {}), ...pir,
     });
+    if (input.to === 'resolved') await resolveChildren(db, user.id, current, code, resolution);
   });
   return getIncident(user, ref);
 }

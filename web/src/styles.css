@@ -1178,3 +1178,20 @@ tr.total td { border-bottom: 2px solid var(--border-strong); }
 }
 .preview-box { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; display: grid; gap: 6px; }
 .preview-box p { margin: 0; }
+
+/* Major incidents (#108): the response header, overdue updates, the timeline and key moments. */
+.major-head { border-left: 4px solid var(--danger); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.major-head.overdue { background: var(--danger-soft); }
+.major-grid { display: flex; flex-wrap: wrap; gap: 8px 28px; margin: 0; }
+.major-grid dt { font-size: 11.5px; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.04em; }
+.major-grid dd { margin: 2px 0 0; font-weight: 550; }
+.badge.overdue { background: var(--danger); color: var(--surface); margin-left: 6px; }
+ol.timeline { list-style: none; padding: 0; margin: 8px 0 0; gap: 0; }
+ol.timeline li { display: grid; grid-template-columns: 9.5rem 1fr; gap: 12px; padding: 8px 0; border-top: 1px solid var(--border); }
+ol.timeline li.communication > div { border-left: 3px solid var(--accent); padding-left: 10px; }
+ol.timeline time { color: var(--text-2); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.key-moment { margin-left: 6px; text-decoration: none; color: var(--text-2); }
+.key-moment[aria-pressed="true"] { color: var(--warn); }
+@media (max-width: 640px) {
+  ol.timeline li { grid-template-columns: 1fr; gap: 2px; }
+}

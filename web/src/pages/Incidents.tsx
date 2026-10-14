@@ -13,6 +13,7 @@ import { IncidentPeoplePanel, PersonPicker, type PersonLite, type PersonRef } fr
 import { AffectedCisPanel, type AffectedCi, type AffectedService, type ImpactHint } from '../components/AffectedCis';
 import { MajorBadge, PriorityBadge } from '../components/Badges';
 import { Markdown } from '../components/Markdown';
+import { DeclareMajorModal, IncidentTimeline, KeyMomentToggle, MajorHeader, RelatedIncidentsPanel, StatusProposalCard, type MajorInfo, type RelatedRow, type StatusProposal } from '../components/MajorIncident';
 import { Modal } from '../components/Modal';
 import { duration, formatDate, relativeTime } from '../format';
 import { useLive } from '../live';
@@ -27,6 +28,7 @@ interface IncidentRow {
   id: number; ref: string; title: string; status: IncidentStatus; priority: number; is_major: boolean; assignee: string | null;
   assignment_group: string; source: string; created_at: string; resolved_at: string | null; problem_ref: string | null; cis: string[] | null;
   sla_state?: string | null; resolution_due_at?: string | null;
+  next_update_at?: string | null; update_overdue?: boolean; parent_ref?: string | null; child_count?: number;
 }
 interface Incident extends IncidentRow {
   description: string; impact: number; urgency: number; category_id: number | null; category: string | null; assignee_id: number | null; team_id: number | null; team_hops: number;
@@ -40,7 +42,8 @@ interface Incident extends IncidentRow {
   known_errors: { ref: string; title: string; workaround: string; workaround_effectiveness: string | null; ci_ref: string; ci_name: string }[];
   links: { id: number; kind: string; reference: string; system: string; url: string }[];
   alerts: { id: number; source: string; check_key: string; severity: string; status: string; count: number; flap_count: number; last_seen: string; ci_hint: string; ci_ref: string | null; ci_name: string | null; source_url: string }[];
-  activity: { id: number; kind: string; body: string; data: any; channel: string; created_at: string; user_name: string | null }[];
+  activity: { id: number; kind: string; body: string; data: any; channel: string; key_moment: boolean; created_at: string; user_name: string | null }[];
+  major: MajorInfo | null; parent: RelatedRow | null; children: RelatedRow[]; suggested_parent: RelatedRow | null; status_proposal: StatusProposal | null;
   next_steps: { phase: string; purpose: string; next: string; steps: { id: string; label: string; hint: string; done: boolean }[] };
 }
 
@@ -108,7 +111,12 @@ export function IncidentsPage() {
                 {data?.map((i) => (
                   <tr key={i.id}>
                     <td className="mono nowrap"><Link to={`/incidents/${i.ref}`}>{i.ref}</Link></td>
-                    <td className="title-cell"><Link to={`/incidents/${i.ref}`}>{i.title}</Link> {i.is_major && <MajorBadge />}</td>
+                    <td className="title-cell">
+                      <Link to={`/incidents/${i.ref}`}>{i.title}</Link> {i.is_major && <MajorBadge />}
+                      {i.update_overdue && <span className="badge overdue" title="A stakeholder update is overdue">Update overdue</span>}
+                      {i.parent_ref && <div className="muted small">part of <Link to={`/incidents/${i.parent_ref}`} className="mono">{i.parent_ref}</Link></div>}
+                      {!!i.child_count && <div className="muted small">{i.child_count} related</div>}
+                    </td>
                     <td><IncidentStatusBadge status={i.status} /></td>
                     <td><PriorityBadge priority={i.priority} /></td>
                     <td className="nowrap"><SlaBadge state={i.sla_state} />{i.resolution_due_at && ['on_track', 'at_risk'].includes(i.sla_state ?? '') && <div className="muted small">due {relativeTime(i.resolution_due_at)}</div>}</td>
@@ -203,6 +211,8 @@ export function IncidentPage() {
   const [note, setNote] = useState('');
   const [noteKind, setNoteKind] = useState<'comment' | 'communication'>('comment');
   const [resolving, setResolving] = useState(false);
+  const [declaring, setDeclaring] = useState(false);
+  const [view, setView] = useState<'all' | 'timeline'>('all');
   const [problemRef, setProblemRef] = useState('');
   const [actionError, setActionError] = useState<string | null>(null);
   if (error) return <RecordNotFound refId={ref ?? ''} error={error} onOpened={reload} />;
@@ -247,11 +257,14 @@ export function IncidentPage() {
             {['new', 'in_progress', 'on_hold'].includes(i.status) && <button className="btn primary" onClick={() => setResolving(true)}>Resolve</button>}
             {i.status === 'resolved' && <button className="btn primary" onClick={() => go({ to: 'closed' })}>Close</button>}
             {i.status === 'resolved' && <button className="btn" onClick={() => go({ to: 'in_progress', comment: 'Reopened: the issue came back' })}>Reopen</button>}
-            {manager && <button className="btn" onClick={() => save({ is_major: !i.is_major })}>{i.is_major ? 'Stand down major incident' : 'Declare major incident'}</button>}
+            {manager && !i.is_major && !i.parent && ['new', 'in_progress', 'on_hold'].includes(i.status) && <button className="btn" onClick={() => setDeclaring(true)}>Declare major incident</button>}
+            {manager && i.is_major && ['new', 'in_progress', 'on_hold'].includes(i.status) && <button className="btn" onClick={() => window.confirm('Not a major incident after all? The update countdown stops; resolve it instead when service is restored.') && save({ is_major: false })}>Not a major incident</button>}
           </div>
         )}
         {actionError && <div className="error">{actionError}</div>}
       </header>
+
+      {i.major && <MajorHeader incidentRef={i.ref} major={i.major} open={!['resolved', 'closed'].includes(i.status)} canEdit={editable} onChange={setData} />}
 
       {i.possible_change_causes.length > 0 && !['resolved', 'closed'].includes(i.status) && (
         <section className="card change-cause">
@@ -300,6 +313,11 @@ export function IncidentPage() {
           {i.status === 'on_hold' && <p className="warn-box">On hold: {i.hold_reason}</p>}
           <section className="card">
             <h2>Work notes &amp; history</h2>
+            <div className="tabs" role="group" aria-label="View">
+              <button type="button" className={view === 'all' ? 'on' : ''} aria-pressed={view === 'all'} onClick={() => setView('all')}>Everything</button>
+              <button type="button" className={view === 'timeline' ? 'on' : ''} aria-pressed={view === 'timeline'} onClick={() => setView('timeline')}>Timeline</button>
+            </div>
+            {view === 'timeline' ? <IncidentTimeline incidentRef={i.ref} version={i.activity.length + i.activity.filter((a) => a.key_moment).length} /> : <>
             {editable && (
               <form className="comment-form" onSubmit={async (e) => { e.preventDefault(); if (await run(() => api.post(`${path}/comments`, { body: note, kind: noteKind }))) setNote(''); }}>
                 <textarea rows={2} placeholder={noteKind === 'communication' ? 'Stakeholder update: what is affected, what we are doing, next update at…' : 'Add a work note – paste screenshots and logs here'} value={note} onChange={(e) => setNote(e.target.value)} {...richPaste(i.ref, setNote, setActionError)} />
@@ -321,11 +339,13 @@ export function IncidentPage() {
                     {a.kind === 'comment' ? 'added a note' : a.kind === 'communication' ? 'posted a communication update' : a.kind === 'status' ? `moved it from ${INCIDENT_STATUS[a.data.from as IncidentStatus]} to ${INCIDENT_STATUS[a.data.to as IncidentStatus]}` : a.body}
                     {(a.channel === 'mcp' || a.channel === 'api') && <span className="tag channel">via {a.channel.toUpperCase()}</span>}
                     <time title={formatDate(a.created_at)}>{relativeTime(a.created_at)}</time>
+                    {user.role !== 'viewer' && <KeyMomentToggle incidentRef={i.ref} activityId={a.id} marked={a.key_moment} onChange={refresh} />}
                   </div>
                   {(a.kind === 'comment' || a.kind === 'communication' || (a.kind === 'status' && a.body)) && <Markdown text={a.body} className="activity-body" />}
                 </li>
               ))}
             </ul>
+            </>}
           </section>
         </div>
         <aside className="problem-side">
@@ -372,6 +392,8 @@ export function IncidentPage() {
           <VisibilityPanel record={i as any} onChange={reload} />
           <DevLinksPanel recordRef={i.ref} editable={editable} />
           <AttachmentsPanel recordRef={i.ref} editable={editable} canDelete={(a) => a.uploaded_by === user.id || manager} />
+          {i.status_proposal && editable && <StatusProposalCard incidentRef={i.ref} proposal={i.status_proposal} onPosted={reload} />}
+          <RelatedIncidentsPanel incidentRef={i.ref} isMajor={i.is_major} parent={i.parent} children={i.children} suggested={i.suggested_parent} editable={editable} onChange={setData} />
           {meta.modules?.cmdb !== false && <AffectedCisPanel record={i} basePath={path} editable={editable} onChange={setData} />}
           <section className="card">
             <h2>Problem</h2>
@@ -408,6 +430,7 @@ export function IncidentPage() {
           )}
         </aside>
       </div>
+      {declaring && <DeclareMajorModal incidentRef={i.ref} onClose={() => setDeclaring(false)} onDone={(n) => { setData(n); setDeclaring(false); }} />}
       {resolving && <ResolveModal incident={i} onClose={() => setResolving(false)} onDone={(n) => { setData(n); setResolving(false); }} />}
     </>
   );
@@ -417,14 +440,27 @@ function ResolveModal({ incident: i, onClose, onDone }: { incident: Incident; on
   const [code, setCode] = useState(i.known_errors.length ? 'workaround' : 'fixed');
   const [resolution, setResolution] = useState(i.known_errors[0]?.workaround && code === 'workaround' ? `Applied the workaround from ${i.known_errors[0].ref}.` : '');
   const [error, setError] = useState<string | null>(null);
+  const { meta, user } = useSession();
+  const [pirOwner, setPirOwner] = useState(String(i.major?.lead_id ?? user.id));
+  const [pirDue, setPirDue] = useState(new Date(Date.now() + 5 * 86400_000).toISOString().slice(0, 10));
+  const open = i.children.filter((c) => c.resolve_with_parent && !['resolved', 'closed'].includes(c.status));
   return (
     <Modal title={`Resolve ${i.ref}`} onClose={onClose}>
       <form className="form" onSubmit={async (e) => {
         e.preventDefault();
-        try { onDone(await api.post<Incident>(`/api/incidents/${i.ref}/transition`, { to: 'resolved', resolution_code: code, resolution })); } catch (err) { setError((err as Error).message); }
+        const review = i.is_major ? { pir_owner_id: pirOwner ? Number(pirOwner) : null, pir_due: pirDue || null } : {};
+        try { onDone(await api.post<Incident>(`/api/incidents/${i.ref}/transition`, { to: 'resolved', resolution_code: code, resolution, ...review })); } catch (err) { setError((err as Error).message); }
       }}>
         <label className="full">Resolution code<select value={code} onChange={(e) => setCode(e.target.value)}>{Object.entries(RESOLUTION).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
         <label className="full">How was service restored?<textarea rows={4} required={!['duplicate', 'cancelled'].includes(code)} value={resolution} onChange={(e) => setResolution(e.target.value)} /></label>
+        {open.length > 0 && <p className="hint-box full">{open.length} related incident{open.length === 1 ? '' : 's'} ({open.map((c) => c.ref).join(', ')}) will be resolved with this resolution.</p>}
+        {i.is_major && (
+          <>
+            <p className="muted small full">Standing down: who runs the post-incident review, and by when? It starts from the timeline.</p>
+            <label>Review owner<select value={pirOwner} onChange={(e) => setPirOwner(e.target.value)}><option value="">Decide later</option>{meta.assignees.filter((a) => a.role !== 'viewer').map((a) => <option key={a.id} value={a.id}>{a.display_name}</option>)}</select></label>
+            <label>Review by<input type="date" value={pirDue} onChange={(e) => setPirDue(e.target.value)} /></label>
+          </>
+        )}
         {error && <div className="error full">{error}</div>}
         <div className="actions full"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary">Resolve</button></div>
       </form>

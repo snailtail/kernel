@@ -123,6 +123,18 @@ workarounds at the top. Incidents move new → in progress → on hold → resol
 code, a major incident has stakeholder communication updates and needs a problem before it closes. Create a problem
 from an incident in one click; when the problem is resolved, its open incidents can be resolved together. Unlinked
 incidents feed the problem candidates per CI, and reports show MTTA, MTTR, reopen rate and incidents per CI.
+
+**Major incidents**: declaring one is a single action that names the incident lead (you by default), an optional
+communications lead and the bridge (meeting link or phone). The incident then shows who leads, where to talk, how long
+it has run and when the next stakeholder update is due (every 30 minutes for P1 by default; the lead can change it).
+Posting an update restarts the countdown, and an overdue update shows in the list and on My work and notifies the
+communications lead. The same outage reported again is suggested as a related incident and linked in one click;
+related incidents are resolved with the major incident unless someone unticks them, each with its own history entry.
+A timeline view lists the key moments (anyone can mark a note) and exports as Markdown for the post-incident review.
+With affected services, the status page gets a draft that a person posts. Resolving asks who runs the review, and by
+when. API: `POST/PATCH /api/incidents/:ref/major`, `/communications`, `/children`, `/timeline`; MCP: `declare_major`,
+`set_major_roles`, `post_communication`, `link_child_incident`, `get_incident_timeline`, `mark_key_moment` and the
+prompt `lead_major_incident`.
 Viewers stay strictly read-only (auditors, stakeholders): end users report incidents through the service desk or,
 later, the self-service portal (#45), not with a viewer account.
 
@@ -331,7 +343,7 @@ claude mcp add --transport http kernel http://dockerhost:8080/mcp \
 
 Prompts (slash commands in Claude Code, e.g. `/mcp__kernel__five_whys PRB000012`): `five_whys`, `ishikawa`,
 `kepner_tregoe`, `timeline`, `triage_problem`, `assess_known_error`, `major_problem_review`, `verify_resolution`,
-`review_candidates`, `problem_review_board`. Resources: `kernel://guides/<id>` and `kernel://problems/{ref}`. They let Claude facilitate the analysis or review with you and record the
+`review_candidates`, `problem_review_board`, `triage_incident`, `lead_major_incident`. Resources: `kernel://guides/<id>` and `kernel://problems/{ref}`. They let Claude facilitate the analysis or review with you and record the
 result in Kernel.
 
 Tools: `whoami`, `list_reference_data`, `search_problems`, `get_problem`, `search_known_errors`, `get_dashboard`,

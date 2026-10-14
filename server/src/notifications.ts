@@ -26,6 +26,7 @@ export const EVENTS = {
   sla_breach: { label: 'An SLA is breached on my incident', email: true, chat: true },
   sla_warning: { label: 'An SLA is at risk on my incident', email: false, chat: true },
   major_incident: { label: 'A major incident is declared', email: true, chat: true },
+  major_update_due: { label: 'A stakeholder update I am responsible for is overdue', email: false, chat: true },
   watched_update: { label: 'An update on something I watch', email: false, chat: false },
 } as const;
 export type NotificationEvent = keyof typeof EVENTS;

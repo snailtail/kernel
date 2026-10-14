@@ -8,6 +8,7 @@ import * as graph from './cmdb-graph.js';
 import * as conn from './connectors.js';
 import * as problemCis from './problem-cis.js';
 import * as inc from './incidents.js';
+import * as majorInc from './major-incidents.js';
 import * as events from './events.js';
 import * as ch from './changes.js';
 import * as slaMod from './sla.js';
@@ -290,6 +291,13 @@ export const OPERATIONS: Op[] = [
   { method: 'patch', path: '/api/incidents/:ref', tag: 'Incidents', summary: 'Update fields; send base to detect conflicting edits', body: inc.updateIncidentSchema },
   { method: 'post', path: '/api/incidents/:ref/transition', tag: 'Incidents', summary: 'Change status: new, in_progress, on_hold (with reason), resolved (with code and resolution), closed', body: inc.transitionIncidentSchema },
   { method: 'post', path: '/api/incidents/:ref/comments', tag: 'Incidents', summary: 'Add a work note, or a communication update on a major incident', body: inc.incidentCommentSchema },
+  { method: 'post', path: '/api/incidents/:ref/major', tag: 'Incidents', summary: 'Declare a major incident: lead (default: you), communications lead, bridge and update cadence (problem managers)', body: majorInc.declareMajorSchema },
+  { method: 'patch', path: '/api/incidents/:ref/major', tag: 'Incidents', summary: 'Change the major incident team, bridge or update cadence (the lead or a manager)', body: majorInc.majorRolesSchema },
+  { method: 'post', path: '/api/incidents/:ref/communications', tag: 'Incidents', summary: 'Post a stakeholder update on a major incident; restarts the update countdown', body: majorInc.communicationSchema },
+  { method: 'post', path: '/api/incidents/:ref/children', tag: 'Incidents', summary: 'Relate an incident (the same outage reported again) to this one; it is resolved with it unless resolve_with_parent is false', body: majorInc.childSchema },
+  { method: 'delete', path: '/api/incidents/:ref/children/:child', tag: 'Incidents', summary: 'Unrelate an incident' },
+  { method: 'get', path: '/api/incidents/:ref/timeline', tag: 'Incidents', summary: 'Key moments, oldest first (?format=md for Markdown): declared, first response, updates, status, linked changes and events, marked entries' },
+  { method: 'put', path: '/api/incidents/:ref/activity/:id/key-moment', tag: 'Incidents', summary: 'Mark or unmark an activity entry as a key moment for the timeline', body: majorInc.keyMomentSchema },
   { method: 'post', path: '/api/incidents/:ref/links', tag: 'Incidents', summary: 'Link an external incident, event, change or document', body: inc.incidentLinkSchema },
   { method: 'delete', path: '/api/incidents/:ref/links/:id', tag: 'Incidents', summary: 'Remove a link' },
   { method: 'post', path: '/api/incidents/:ref/cis', tag: 'Incidents', summary: 'Link an affected CI or service', body: problemCis.linkCiSchema },
