@@ -8,10 +8,11 @@ import type { User } from './auth.js';
 import { query, tx } from './db.js';
 import { badRequest, conflict, forbidden, notFound } from './errors.js';
 import { logIncident } from './incident-log.js';
-import { getIncident } from './incidents.js';
+import { attachToProblem, getIncident } from './incidents.js';
 import { managers, notify } from './notifications.js';
 import { authorize, can } from './policy.js';
 import type { Db } from './problems.js';
+import { affectedFrom } from './problem-cis.js';
 import { slaOnTransition } from './sla.js';
 
 /** Minutes between stakeholder updates by priority, until the lead changes it (settings `major_incident`). */
@@ -176,6 +177,11 @@ export async function linkChild(user: User, parentRef: string, input: z.infer<ty
     }
     await logIncident(db, child.id, user.id, 'link', `Related to ${parent.ref}`, { kind: 'incident', relation: 'parent', reference: parent.ref, action: 'add' });
     await logIncident(db, parent.id, user.id, 'link', `Related incident ${child.ref}`, { kind: 'incident', relation: 'child', reference: child.ref, action: 'add', resolve_with_parent: input.resolve_with_parent });
+    // It counts for the parent's problem too, so the problem's impact is not understated.
+    if (parent.problem_id && !child.problem_id) {
+      const { rows: problem } = await db.query('SELECT id, ref FROM problems WHERE id = $1 FOR UPDATE', [parent.problem_id]);
+      if (problem[0]) await attachToProblem(db, user.id, child, problem[0]);
+    }
   });
   return getIncident(user, parentRef);
 }
@@ -200,13 +206,16 @@ export async function unlinkChild(user: User, parentRef: string, childRef: strin
  * When a parent is resolved, its related incidents that resolve with it get its resolution, each with its own
  * history and audit entry. Ones someone unticked stay open.
  */
-export async function resolveChildren(db: Db, actorId: number, parent: { id: number; ref: string }, code: string, resolution: string) {
+export async function resolveChildren(db: Db, actorId: number, parent: { id: number; ref: string; restricted?: boolean; problem_id?: number | null }, code: string, resolution: string) {
   const { rows: children } = await db.query(
-    "SELECT id, ref, status FROM incidents WHERE parent_id = $1 AND resolve_with_parent AND status NOT IN ('resolved', 'closed') ORDER BY id FOR UPDATE",
+    "SELECT id, ref, title, status, restricted, problem_id FROM incidents WHERE parent_id = $1 AND resolve_with_parent AND status NOT IN ('resolved', 'closed') ORDER BY id FOR UPDATE",
     [parent.id],
   );
+  const { rows: problem } = parent.problem_id ? await db.query('SELECT id, ref FROM problems WHERE id = $1', [parent.problem_id]) : { rows: [] as any[] };
   for (const c of children) {
-    const text = `Resolved with ${parent.ref}: ${resolution}`.slice(0, 20000);
+    // A restricted parent's resolution never reaches a child more people can read: only the reference does.
+    const text = (parent.restricted && !c.restricted ? `Resolved with ${parent.ref}.` : `Resolved with ${parent.ref}: ${resolution}`).slice(0, 20000);
+    if (problem[0] && !c.problem_id) await attachToProblem(db, actorId, c, problem[0]);
     await db.query(
       `UPDATE incidents SET status = 'resolved', resolution_code = $2, resolution = $3, resolved_at = now(),
          responded_at = coalesce(responded_at, now()) WHERE id = $1`,
@@ -223,6 +232,29 @@ export async function resolveChildren(db: Db, actorId: number, parent: { id: num
 
 // ---- What the incident page shows ----------------------------------------------------------------
 
+/**
+ * The same outage reported again: an open major incident that shares a CI or an affected service with this one, the
+ * services worked out through the impact graph for both (a major on a server and a report on the shop it serves).
+ */
+async function suggestParent(incidentId: number, affectedServices: { ref: string }[]) {
+  const { rows: majors } = await query(
+    `SELECT m.id, m.ref, m.title, m.impact FROM incidents m WHERE m.is_major AND m.status NOT IN ('resolved', 'closed') AND m.id <> $1 AND m.parent_id IS NULL
+     ORDER BY m.priority, m.major_declared_at DESC LIMIT 10`,
+    [incidentId],
+  );
+  if (!majors.length) return { rows: [] };
+  const { rows: mine } = await query('SELECT c.ref FROM incident_cis x JOIN configuration_items c ON c.id = x.ci_id WHERE x.incident_id = $1', [incidentId]);
+  const here = new Set([...mine.map((c) => c.ref as string), ...affectedServices.map((s) => s.ref)]);
+  if (!here.size) return { rows: [] };
+  for (const m of majors) {
+    const { rows: cis } = await query('SELECT c.id, c.ref, c.name, c.class, c.criticality FROM incident_cis x JOIN configuration_items c ON c.id = x.ci_id WHERE x.incident_id = $1', [m.id]);
+    if (cis.some((c) => here.has(c.ref))) return { rows: [{ ref: m.ref, title: m.title }] };
+    const { affected_services } = await affectedFrom(cis, m.impact);
+    if (affected_services.some((sv: { ref: string }) => here.has(sv.ref))) return { rows: [{ ref: m.ref, title: m.title }] };
+  }
+  return { rows: [] };
+}
+
 /** The major incident header, related incidents, a suggested parent and a status page proposal. */
 export async function majorDetail(user: User, i: any, affectedServices: { ref: string; name: string }[]) {
   const [children, parent, people, lastUpdate, suggested, statusPosted] = await Promise.all([
@@ -230,16 +262,7 @@ export async function majorDetail(user: User, i: any, affectedServices: { ref: s
     i.parent_id ? query('SELECT ref, title, status, is_major FROM incidents WHERE id = $1', [i.parent_id]) : Promise.resolve({ rows: [] as any[] }),
     query('SELECT id, display_name FROM users WHERE id = ANY($1)', [[i.major_lead_id, i.major_comms_id, i.pir_owner_id].filter(Boolean)]),
     i.is_major ? query("SELECT body, created_at FROM incident_activity WHERE incident_id = $1 AND kind = 'communication' ORDER BY created_at DESC, id DESC LIMIT 1", [i.id]) : Promise.resolve({ rows: [] as any[] }),
-    // The same outage reported again: an open major incident on the same CI or service.
-    !i.is_major && !i.parent_id && isOpen(i)
-      ? query(
-          `SELECT DISTINCT m.ref, m.title FROM incidents m JOIN incident_cis mx ON mx.incident_id = m.id JOIN configuration_items c ON c.id = mx.ci_id
-           WHERE m.is_major AND m.status NOT IN ('resolved', 'closed') AND m.id <> $1 AND m.parent_id IS NULL
-             AND (mx.ci_id IN (SELECT ci_id FROM incident_cis WHERE incident_id = $1) OR c.ref = ANY($2))
-           LIMIT 3`,
-          [i.id, affectedServices.map((s) => s.ref)],
-        )
-      : Promise.resolve({ rows: [] as any[] }),
+    !i.is_major && !i.parent_id && isOpen(i) ? suggestParent(i.id, affectedServices) : Promise.resolve({ rows: [] as any[] }),
     i.is_major ? query('SELECT 1 FROM status_updates WHERE incident_id = $1 LIMIT 1', [i.id]) : Promise.resolve({ rows: [] as any[] }),
   ]);
   const name = (id: number | null) => people.rows.find((p) => p.id === id)?.display_name ?? null;
@@ -339,13 +362,16 @@ export async function checkOverdueUpdates() {
         `UPDATE incidents SET major_overdue_notified_for = major_next_update_at
          WHERE id = $1 AND is_major AND status NOT IN ('resolved', 'closed') AND major_next_update_at < now()
            AND major_overdue_notified_for IS DISTINCT FROM major_next_update_at
-         RETURNING ref, title, major_next_update_at, coalesce(major_comms_id, major_lead_id) AS who`,
+         RETURNING ref, title, major_next_update_at,
+           -- The comms lead, else the lead, else the assignee, if still active; nobody named reaches the managers.
+           (SELECT u.id FROM users u WHERE u.active AND u.id = ANY(ARRAY[major_comms_id, major_lead_id, assignee_id])
+            ORDER BY array_position(ARRAY[major_comms_id, major_lead_id, assignee_id], u.id) LIMIT 1) AS who`,
         [id],
       );
       const r = claimed[0];
       if (!r) return;
       sent++;
-      await notify(db, { users: [r.who], event: 'major_update_due', ref: r.ref, title: r.title, summary: 'A stakeholder update is overdue on the major incident.', path: `/incidents/${r.ref}`, dedupe: `major_due:${r.ref}:${new Date(r.major_next_update_at).toISOString()}`, actorId: null });
+      await notify(db, { users: r.who ? [r.who] : await managers(db), event: 'major_update_due', ref: r.ref, title: r.title, summary: 'A stakeholder update is overdue on the major incident.', path: `/incidents/${r.ref}`, dedupe: `major_due:${r.ref}:${new Date(r.major_next_update_at).toISOString()}`, actorId: null });
     });
   }
   return sent;

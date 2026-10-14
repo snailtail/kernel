@@ -232,6 +232,9 @@ function incidentGuidance(i: any) {
     ...(i.is_major && open ? [{ id: 'communicate', label: i.major?.update_overdue ? 'A stakeholder update is overdue' : 'Keep stakeholders informed', hint: i.major?.next_update_at ? `Post an update every ${i.major.update_minutes} minutes; the next is due ${new Date(i.major.next_update_at).toISOString().slice(11, 16)} UTC.` : 'Post communication updates while the major incident is open.', done: i.activity.some((a: any) => a.kind === 'communication') && !i.major?.update_overdue }] : []),
     ...(i.suggested_parent ? [{ id: 'parent', label: `Same outage as ${i.suggested_parent.ref}?`, hint: `${i.suggested_parent.ref} is an open major incident on the same CI or service: relate this one to it, and it is resolved together with it.`, done: null as unknown as boolean }] : []),
     { id: 'resolve', label: 'Restore service and resolve', hint: 'Record how service was restored and a resolution code.', done: !open },
+    ...(open && i.reopen_count > 0 && (i.children ?? []).some((c: any) => c.status === 'resolved')
+      ? [{ id: 'children_reopen', label: `${i.children.filter((c: any) => c.status === 'resolved').length} related incident(s) were resolved with this one`, hint: 'It came back: reopen any related incident whose users are still affected.', done: null as unknown as boolean }]
+      : []),
     ...(i.is_major && !open ? [{ id: 'review', label: 'Plan the post-incident review', hint: 'Name who runs the review and by when; it starts from the timeline.', done: !!i.pir_owner_id }] : []),
     ...(i.is_major || i.reopen_count > 0 ? [{ id: 'problem', label: 'Hand over to problem management', hint: i.is_major ? 'A major incident needs a problem record to find the root cause.' : 'It came back: a problem record finds out why.', done: !!i.problem_id }] : []),
   ];
@@ -491,23 +494,31 @@ export async function linkIncidentToProblem(user: User, ref: string, problemRef:
       await db.query("DELETE FROM problem_links WHERE problem_id = $1 AND kind = 'incident' AND reference = $2 AND system = 'Kernel'", [inc.problem_id, inc.ref]);
       if (old[0]) await logActivity(db, old[0].id, user.id, 'link', `Unlinked incident ${inc.ref}`, { kind: 'incident', reference: inc.ref, system: 'Kernel', action: 'remove' });
     }
-    let problem: { id: number; ref: string } | null = null;
-    if (problemRef) {
-      const target: { id: number; ref: string } = await loadForUpdate(db, problemRef);
-      problem = target;
-      await db.query(
-        `INSERT INTO problem_links (problem_id, kind, reference, system, note, created_by) VALUES ($1, 'incident', $2, 'Kernel', $3, $4) ON CONFLICT DO NOTHING`,
-        [target.id, inc.ref, inc.title.slice(0, 2000), user.id],
-      );
-      await logActivity(db, target.id, user.id, 'link', `Linked incident ${inc.ref}`, { kind: 'incident', reference: inc.ref, system: 'Kernel', action: 'add' });
-      // The incident's CIs are affected by the problem too.
-      await db.query('INSERT INTO problem_cis (problem_id, ci_id, added_by) SELECT $1, ci_id, $2 FROM incident_cis WHERE incident_id = $3 ON CONFLICT DO NOTHING', [target.id, user.id, inc.id]);
-      await db.query('UPDATE problems SET updated_at = now() WHERE id = $1', [target.id]);
+    if (!problemRef) {
+      await db.query('UPDATE incidents SET problem_id = NULL WHERE id = $1', [inc.id]);
+      await logIncident(db, inc.id, user.id, 'link', 'Unlinked from its problem', { kind: 'problem', reference: null, action: 'remove' });
+      return;
     }
-    await db.query('UPDATE incidents SET problem_id = $2 WHERE id = $1', [inc.id, problem?.id ?? null]);
-    await logIncident(db, inc.id, user.id, 'link', problem ? `Linked to problem ${problem.ref}` : 'Unlinked from its problem', { kind: 'problem', reference: problem?.ref ?? null, action: problem ? 'add' : 'remove' });
+    const problem: { id: number; ref: string } = await loadForUpdate(db, problemRef);
+    await attachToProblem(db, user.id, inc, problem);
+    // Related incidents of a major incident count for its problem too (#108), unless they already have their own.
+    const { rows: children } = await db.query('SELECT id, ref, title FROM incidents WHERE parent_id = $1 AND problem_id IS NULL ORDER BY id FOR UPDATE', [inc.id]);
+    for (const c of children) await attachToProblem(db, user.id, c, problem);
   });
   return getIncident(user, ref);
+}
+
+/** Links one incident (locked by the caller) to a problem, both ways; its CIs become the problem's affected CIs. */
+export async function attachToProblem(db: Db, actorId: number, inc: { id: number; ref: string; title: string }, problem: { id: number; ref: string }) {
+  await db.query(
+    `INSERT INTO problem_links (problem_id, kind, reference, system, note, created_by) VALUES ($1, 'incident', $2, 'Kernel', $3, $4) ON CONFLICT DO NOTHING`,
+    [problem.id, inc.ref, inc.title.slice(0, 2000), actorId],
+  );
+  await logActivity(db, problem.id, actorId, 'link', `Linked incident ${inc.ref}`, { kind: 'incident', reference: inc.ref, system: 'Kernel', action: 'add' });
+  await db.query('INSERT INTO problem_cis (problem_id, ci_id, added_by) SELECT $1, ci_id, $2 FROM incident_cis WHERE incident_id = $3 ON CONFLICT DO NOTHING', [problem.id, actorId, inc.id]);
+  await db.query('UPDATE problems SET updated_at = now() WHERE id = $1', [problem.id]);
+  await db.query('UPDATE incidents SET problem_id = $2 WHERE id = $1', [inc.id, problem.id]);
+  await logIncident(db, inc.id, actorId, 'link', `Linked to problem ${problem.ref}`, { kind: 'problem', reference: problem.ref, action: 'add' });
 }
 
 export const problemFromIncidentSchema = createProblemSchema.partial();

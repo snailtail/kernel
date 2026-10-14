@@ -138,6 +138,45 @@ describe('major incidents (#108)', { skip }, () => {
     assert.deepEqual((await analyst.get('/api/my-work')).body.major_updates, [], 'a resolved incident needs no more updates');
   });
 
+  test('review of #114: restricted text stays put, problems are inherited, services match, nobody is forgotten', async () => {
+    // (5) A major on a server, a new report on the service it serves: suggested through the impact graph.
+    const server = (await pm.post('/api/incidents', { title: 'shop-vm01 disk full', impact: 1, urgency: 1, cis: [vm] })).body.ref;
+    ok(await pm.post(`/api/incidents/${server}/major`, {}));
+    const report = (await analyst.post('/api/incidents', { title: 'Webshop is slow', cis: [svc] })).body;
+    assert.equal(report.suggested_parent?.ref, server, 'matched on the affected service, not only the CI');
+
+    // (3) The parent's problem: a child linked later inherits it, and so do children of a parent linked later.
+    const prb = (await pm.post(`/api/incidents/${server}/problem`, {})).body.ref;
+    ok(await analyst.post(`/api/incidents/${server}/children`, { child: report.ref }));
+    assert.equal((await analyst.get(`/api/incidents/${report.ref}`)).body.problem_ref, prb, 'a child linked to a parent with a problem gets it');
+    const late = (await analyst.post('/api/incidents', { title: 'Late report' })).body.ref;
+    const other = (await pm.post('/api/incidents', { title: 'Other outage', impact: 1, urgency: 1 })).body.ref;
+    ok(await pm.post(`/api/incidents/${other}/major`, {}));
+    ok(await analyst.post(`/api/incidents/${other}/children`, { child: late }));
+    const prb2 = (await pm.post(`/api/incidents/${other}/problem`, {})).body.ref;
+    assert.equal((await analyst.get(`/api/incidents/${late}`)).body.problem_ref, prb2, 'and children follow a parent linked afterwards');
+    assert.ok((await pm.get(`/api/problems/${prb2}`)).body.incidents.some((x: any) => x.ref === late), 'the problem counts it');
+
+    // (1) A restricted parent's resolution is not copied into a child more people can read.
+    ok(await pm.put(`/api/records/${server}/visibility`, { restricted: true, reason: 'Security investigation' }));
+    ok(await pm.post(`/api/incidents/${server}/transition`, { to: 'resolved', resolution_code: 'fixed', resolution: 'Secret detail: attacker filled the disk' }));
+    const child = (await analyst.get(`/api/incidents/${report.ref}`)).body;
+    assert.equal(child.status, 'resolved', 'positive control: the child was resolved with it');
+    assert.equal(child.resolution, `Resolved with ${server}.`);
+
+    // (4) The parent comes back: a guide step about the children resolved with it.
+    ok(await pm.post(`/api/incidents/${server}/transition`, { to: 'in_progress', comment: 'It came back' }));
+    const reopened = (await pm.get(`/api/incidents/${server}`)).body;
+    assert.ok(reopened.next_steps.steps.some((x: any) => x.id === 'children_reopen'));
+
+    // (2) No lead, comms lead or assignee: the managers hear about an overdue update.
+    await ownerQuery("UPDATE incidents SET major_lead_id = NULL, major_comms_id = NULL, assignee_id = NULL, major_next_update_at = now() - interval '1 minute' WHERE ref = $1", [other]);
+    const { checkOverdueUpdates } = await import('../../src/major-incidents.js');
+    await checkOverdueUpdates();
+    const due = (await ownerQuery("SELECT u.username FROM notifications n JOIN users u ON u.id = n.user_id WHERE n.event = 'major_update_due' AND n.ref = $1 ORDER BY 1", [other])).rows;
+    assert.ok(due.some((d: any) => d.username === 'pm'), JSON.stringify(due));
+  });
+
   test('agents have the same contract (MCP)', async () => {
     const mcp = new McpClient({ name: 'major', version: '1' });
     await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('pm')}` } } }));
