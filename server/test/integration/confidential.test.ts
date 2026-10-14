@@ -79,6 +79,37 @@ describe('confidential records (#61)', { skip }, () => {
     assert.equal((await analyst2.get('/api/problems/similar?text=forwarding rule compromised')).body.some((h: any) => h.ref === ref), false);
   });
 
+  test('list filters are not an oracle either: problems, the KEDB, incidents and changes (MCP too)', async () => {
+    const inc = await analyst.post('/api/incidents', { title: 'VIP mailbox alert', description: SECRET_TEXT });
+    ok(inc);
+    const chg = await analyst.post('/api/changes', { title: 'Remove mailbox rule', description: SECRET_TEXT });
+    ok(chg);
+    for (const r of [inc.body.ref, chg.body.ref]) ok(await analyst.put(`/api/records/${r}/classification`, { classification: 'confidential', reason: 'Concerns a board member' }));
+    const before = (await ownerQuery('SELECT status, known_error_at FROM problems WHERE ref = $1', [ref])).rows[0];
+    await ownerQuery("UPDATE problems SET status = 'known_error', known_error_at = now() WHERE ref = $1", [ref]);
+    const lists: [string, string][] = [
+      [`/api/problems?status=all&q=`, ref],
+      [`/api/kedb?q=`, ref],
+      [`/api/incidents?status=all&q=`, inc.body.ref],
+      [`/api/changes?status=all&q=`, chg.body.ref],
+    ];
+    const found = async (c: Client, url: string, r: string) => (await c.get(url)).body.some((h: any) => h.ref === r);
+    for (const [url, r] of lists) {
+      assert.ok(await found(analyst, `${url}forwarding`, r), `${url}: the creator finds it by a word from its text (positive control)`);
+      assert.equal(await found(analyst2, `${url}forwarding`, r), false, `${url}: an outsider does not`);
+      assert.ok(await found(analyst2, `${url}mailbox`, r), `${url}: an outsider finds it by its title`);
+    }
+    // Agents never read confidential text, so they cannot search it either, even as the record's creator.
+    const mcp = new McpClient({ name: 'conf-lists', version: '1' });
+    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
+    const call = async (name: string, args: Record<string, unknown>) => ((await mcp.callTool({ name, arguments: args })) as any).content[0].text as string;
+    assert.ok((await call('list_incidents', { q: 'mailbox', status: 'all' })).includes(inc.body.ref), 'positive control: by title');
+    assert.equal((await call('list_incidents', { q: 'forwarding', status: 'all' })).includes(inc.body.ref), false);
+    assert.equal((await call('search_known_errors', { q: 'forwarding' })).includes(ref), false);
+    await mcp.close();
+    await ownerQuery('UPDATE problems SET status = $2, known_error_at = $3 WHERE ref = $1', [ref, before.status, before.known_error_at]);
+  });
+
   test('a confidential record is not copied into a knowledge article', async () => {
     const p = (await pm.post('/api/problems', { title: 'Known issue with VPN', description: 'secret detail', workaround: 'reconnect' })).body;
     await ownerQuery("UPDATE problems SET status = 'known_error', known_error_at = now() WHERE ref = $1", [p.ref]);

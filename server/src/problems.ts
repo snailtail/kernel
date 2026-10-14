@@ -1,6 +1,6 @@
 // Problem record service. Shared by the REST API and the MCP server so both
 // enforce the same rules, permissions and audit trail.
-import { onlyTitleMatches } from './confidential.js';
+import { onlyTitleMatches, textFilterSql } from './confidential.js';
 import { z } from 'zod';
 import type pg from 'pg';
 import type { User } from './auth.js';
@@ -227,7 +227,7 @@ export async function listProblems(filter: z.infer<typeof listSchema>) {
   if (filter.q) {
     // Prefix match on every word, so "data cor" finds "database corruption".
     const terms = filter.q.split(/\s+/).map((t) => t.replace(/[^\p{L}\p{N}_-]/gu, '')).filter(Boolean);
-    if (terms.length) add("p.search @@ to_tsquery('simple', ?)", terms.map((t) => `${t}:*`).join(' & '));
+    if (terms.length) where.push(textFilterSql('p', 'problem', terms.map((t) => `${t}:*`).join(' & '), params));
   }
   const order = {
     priority: 'p.priority, p.updated_at DESC',
@@ -475,8 +475,7 @@ export async function searchKnownErrors(q?: string, includeResolved = false) {
   const where = [includeResolved ? "p.status IN ('known_error', 'resolved', 'closed') AND p.known_error_at IS NOT NULL" : "p.status = 'known_error'"];
   const terms = (q ?? '').split(/\s+/).map((t) => t.replace(/[^\p{L}\p{N}_-]/gu, '')).filter(Boolean);
   if (terms.length) {
-    params.push(terms.map((t) => `${t}:*`).join(' & '));
-    where.push(`p.search @@ to_tsquery('simple', $1)`);
+    where.push(textFilterSql('p', 'problem', terms.map((t) => `${t}:*`).join(' & '), params));
   }
   const { rows } = await query(`${SELECT_PROBLEM} WHERE ${where.join(' AND ')} ORDER BY p.priority, p.known_error_at DESC LIMIT 200`, params);
   return rows;

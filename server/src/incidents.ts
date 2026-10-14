@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import type { User } from './auth.js';
 import { loadCi, logCi, registerCiExtra } from './cmdb.js';
+import { textFilterSql } from './confidential.js';
 import { currentContext } from './context.js';
 import { query, tx } from './db.js';
 import { badRequest, conflict, notFound } from './errors.js';
@@ -136,7 +137,7 @@ export async function listIncidents(user: User, f: z.infer<typeof listIncidentsS
   if (f.ci) add('EXISTS (SELECT 1 FROM incident_cis x JOIN configuration_items c ON c.id = x.ci_id WHERE x.incident_id = i.id AND c.ref = ?)', f.ci.toUpperCase());
   if (f.q) {
     const terms = f.q.split(/\s+/).map((t) => t.replace(/[^\p{L}\p{N}_.-]/gu, '')).filter(Boolean);
-    if (terms.length) add("i.search @@ to_tsquery('simple', ?)", terms.map((t) => `${t}:*`).join(' & '));
+    if (terms.length) where.push(textFilterSql('i', 'incident', terms.map((t) => `${t}:*`).join(' & '), params));
   }
   params.push(f.limit);
   const { rows } = await query(

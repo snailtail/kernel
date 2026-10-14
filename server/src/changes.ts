@@ -9,6 +9,7 @@ import type { User } from './auth.js';
 import { audit } from './audit.js';
 import { computeImpact, impactSchema } from './cmdb-graph.js';
 import { loadCi, logCi, registerCiExtra } from './cmdb.js';
+import { textFilterSql } from './confidential.js';
 import { currentContext } from './context.js';
 import { query, tx } from './db.js';
 import { badRequest, conflict, forbidden, notFound } from './errors.js';
@@ -188,7 +189,7 @@ export async function listChanges(user: User, f: z.infer<typeof listChangesSchem
   }
   if (f.q) {
     const terms = f.q.split(/\s+/).map((t) => t.replace(/[^\p{L}\p{N}_.-]/gu, '')).filter(Boolean);
-    if (terms.length) add("c.search @@ to_tsquery('simple', ?)", terms.map((t) => `${t}:*`).join(' & '));
+    if (terms.length) where.push(textFilterSql('c', 'change', terms.map((t) => `${t}:*`).join(' & '), params));
   }
   params.push(f.limit);
   const { rows } = await query(
