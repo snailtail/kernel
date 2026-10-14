@@ -2,14 +2,14 @@
 // or freezes, and reviewing. Problems raise changes for their permanent fix; incidents on CIs shortly after a change on
 // what they depend on are flagged as possibly change-related.
 import { checkAssigneeInTeam, validTeam } from './teams.js';
-import { inheritRestriction } from './visibility.js';
 import { pullRequestSummary } from './dev.js';
 import { z } from 'zod';
+import { audienceOf, startNarrow } from './audience.js';
 import type { User } from './auth.js';
 import { audit } from './audit.js';
 import { computeImpact, impactSchema } from './cmdb-graph.js';
 import { loadCi, logCi, registerCiExtra } from './cmdb.js';
-import { textFilterSql } from './confidential.js';
+import { forgetExists, textFilterSql } from './confidential.js';
 import { currentContext } from './context.js';
 import { query, tx } from './db.js';
 import { badRequest, conflict, forbidden, notFound } from './errors.js';
@@ -331,7 +331,7 @@ async function validateAssignee(db: Db, id: number | null | undefined) {
   if (!rows[0]) throw badRequest('Assignee must be an active user who can work on changes');
 }
 
-export async function createChange(user: User, input: z.infer<typeof createChangeSchema>, source?: 'pipeline') {
+export async function createChange(user: User, input: z.infer<typeof createChangeSchema>, source?: 'pipeline', narrow?: ReturnType<typeof startNarrow>) {
   authorize(user, 'change.create');
   const { cis, problem, template_id, ...fields } = input;
   const ref = await tx(async (db) => {
@@ -357,8 +357,15 @@ export async function createChange(user: User, input: z.infer<typeof createChang
     }
     values.source = source ?? sourceOf();
     values.created_by = user.id;
+    // A change made from a narrower record starts as narrow (#117), before anything about it goes out.
+    if (narrow?.restricted) Object.assign(values, { restricted: true, restricted_teams: narrow.restricted_teams });
+    if (narrow?.classification === 'confidential') {
+      values.classification = 'confidential';
+      forgetExists();
+    }
     const cols = Object.keys(values).filter((k) => values[k] !== undefined);
     const { rows } = await db.query(`INSERT INTO changes (${cols.join(', ')}) VALUES (${cols.map((_, n) => `$${n + 1}`).join(', ')}) RETURNING id, ref`, cols.map((k) => values[k]));
+    if (values.classification === 'confidential') await db.query("SELECT pg_notify('kernel_live', 'classification:' || $1)", [rows[0].id]);
     await attachCis(db, rows[0].id, cis ?? [], user.id);
     if (problemRow) await linkToProblem(db, user, rows[0], problemRow);
     await logChange(db, rows[0].id, user.id, 'created', `Change ${rows[0].ref} requested`, { title: fields.title, type: values.change_type, cis: cis ?? [], problem: problemRow?.ref ?? null });
@@ -548,6 +555,7 @@ export async function addChangeLink(user: User, ref: string, input: z.infer<type
 /** Problem → "Raise change for fix": prefilled from the known error, CIs carried over, linked both ways. */
 export async function raiseChangeForProblem(user: User, problemRef: string, overrides: Partial<z.infer<typeof createChangeSchema>> = {}) {
   const p: any = await getProblem(problemRef);
+  const from = await audienceOf(null, p.ref);
   const change = await createChange(user, createChangeSchema.parse({
     title: `Fix: ${p.title}`.slice(0, 300),
     description: [p.root_cause && `Root cause:\n${p.root_cause}`, p.resolution && `Proposed fix:\n${p.resolution}`, `Raised from problem ${p.ref}.`].filter(Boolean).join('\n\n'),
@@ -555,8 +563,7 @@ export async function raiseChangeForProblem(user: User, problemRef: string, over
     cis: p.affected_cis.map((c: any) => c.ref),
     problem: p.ref,
     ...overrides,
-  }));
-  await inheritRestriction(p.ref, change.ref); // the change carries the problem's root cause
+  }), undefined, startNarrow(from)); // the change carries the problem's root cause, so it is as narrow as the problem
   return getChange(user, change.ref);
 }
 

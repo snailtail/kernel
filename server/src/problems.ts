@@ -1,6 +1,6 @@
 // Problem record service. Shared by the REST API and the MCP server so both
 // enforce the same rules, permissions and audit trail.
-import { onlyTitleMatches, textFilterSql } from './confidential.js';
+import { forgetExists, onlyTitleMatches, textFilterSql } from './confidential.js';
 import { z } from 'zod';
 import type pg from 'pg';
 import type { User } from './auth.js';
@@ -308,11 +308,13 @@ export async function createProblemInTx(db: Db, user: User, input: z.infer<typeo
   if (narrow?.restricted) Object.assign(values, { restricted: true, restricted_teams: narrow.restricted_teams });
   if (narrow?.classification === 'confidential') values.classification = 'confidential';
   const cols = Object.keys(values);
+  if (values.classification === 'confidential') forgetExists(); // and every instance, below
   const { rows } = await db.query(
     `INSERT INTO problems (${[...cols, 'created_by'].join(', ')})
      VALUES (${[...cols, 'created_by'].map((_, i) => `$${i + 1}`).join(', ')}) RETURNING id, ref`,
     [...Object.values(values), user.id],
   );
+  if (values.classification === 'confidential') await db.query("SELECT pg_notify('kernel_live', 'classification:' || $1)", [rows[0].id]);
   await watch(db, rows[0].id, user.id);
   await watch(db, rows[0].id, input.assignee_id);
   const inherited = narrow && (narrow.restricted || narrow.classification === 'confidential')

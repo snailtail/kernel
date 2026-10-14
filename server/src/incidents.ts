@@ -1,6 +1,7 @@
 // Incident management (#28): restore service as quickly as possible, record what is affected, and hand recurring or
 // major incidents to problem management. Shared by REST, MCP and the web UI like every other practice.
 import { z } from 'zod';
+import { audienceOf, copyText, startNarrow, titleAudience } from './audience.js';
 import type { User } from './auth.js';
 import { loadCi, logCi, registerCiExtra } from './cmdb.js';
 import { textFilterSql } from './confidential.js';
@@ -10,13 +11,13 @@ import { badRequest, conflict, notFound } from './errors.js';
 import { authorize, can } from './policy.js';
 import { affectedFrom } from './problem-cis.js';
 import { possibleCausesForIncident } from './changes.js';
-import { createProblem, createProblemSchema, getProblem, loadForUpdate, logActivity, registerProblemExtra, type Db } from './problems.js';
+import { createProblemInTx, createProblemSchema, getProblem, problemFields, loadForUpdate, logActivity, registerProblemExtra, type Db } from './problems.js';
 import { recordUrl, registerRecordType, type RecordType } from './records.js';
 import { logIncident } from './incident-log.js';
 import { recomputeSla, slaClock, slaOnTransition } from './sla.js';
 import { incidentPeople, namePeople, personRefSchema, resolvePerson } from './people.js';
 import { incidentArticles, suggestArticles } from './knowledge.js';
-import { inheritRestriction, restrictedByCategory } from './visibility.js';
+import { restrictedByCategory } from './visibility.js';
 import { checkAssigneeInTeam, defaultTeamFor, nameTeams, notifyTeamQueue, pickAssignee, validTeam } from './teams.js';
 import { managers, notify } from './notifications.js';
 import { pool } from './db.js';
@@ -520,9 +521,11 @@ export async function linkIncidentToProblem(user: User, ref: string, problemRef:
 
 /** Links one incident (locked by the caller) to a problem, both ways; its CIs become the problem's affected CIs. */
 export async function attachToProblem(db: Db, actorId: number, inc: { id: number; ref: string; title: string }, problem: { id: number; ref: string }) {
+  // The link note shows the incident's title on the problem: not when the problem is read by more people (#117).
+  const note = await copyText(db, await audienceOf(db, inc.ref), titleAudience(await audienceOf(db, problem.ref)), inc.title.slice(0, 2000), '', 'incident → problem link note', 'title');
   await db.query(
     `INSERT INTO problem_links (problem_id, kind, reference, system, note, created_by) VALUES ($1, 'incident', $2, 'Kernel', $3, $4) ON CONFLICT DO NOTHING`,
-    [problem.id, inc.ref, inc.title.slice(0, 2000), actorId],
+    [problem.id, inc.ref, note, actorId],
   );
   await logActivity(db, problem.id, actorId, 'link', `Linked incident ${inc.ref}`, { kind: 'incident', reference: inc.ref, system: 'Kernel', action: 'add' });
   await db.query('INSERT INTO problem_cis (problem_id, ci_id, added_by) SELECT $1, ci_id, $2 FROM incident_cis WHERE incident_id = $3 ON CONFLICT DO NOTHING', [problem.id, actorId, inc.id]);
@@ -531,7 +534,8 @@ export async function attachToProblem(db: Db, actorId: number, inc: { id: number
   await logIncident(db, inc.id, actorId, 'link', `Linked to problem ${problem.ref}`, { kind: 'problem', reference: problem.ref, action: 'add' });
 }
 
-export const problemFromIncidentSchema = createProblemSchema.partial();
+// No defaults here: an override the caller did not send must not blank the prefill (description used to arrive empty).
+export const problemFromIncidentSchema = z.object({ ...problemFields }).partial();
 
 /** Logs a problem prefilled from the incident (and links it); the usual route for major or recurring incidents. */
 export async function createProblemFromIncident(user: User, ref: string, overrides: z.infer<typeof problemFromIncidentSchema>) {
@@ -547,11 +551,12 @@ export async function createProblemFromIncident(user: User, ref: string, overrid
     is_major: (inc.is_major && can(user.role, 'problem.flag_major')) || undefined,
     ...overrides,
   };
-  // Leave out unset fields so the database defaults apply.
-  const created = await createProblem(user, createProblemSchema.parse(Object.fromEntries(Object.entries(prefill).filter(([, v]) => v !== undefined))));
-  await inheritRestriction(inc.ref, created.ref); // a restricted incident's problem carries its text, so it is restricted too
-  await linkIncidentToProblem(user, ref, created.ref);
-  return getProblem(created.ref);
+  // Leave out unset fields so the database defaults apply. The problem carries the incident's text, so it starts as
+  // narrow as the incident (#117).
+  const created = await tx(async (db) =>
+    createProblemInTx(db, user, createProblemSchema.parse(Object.fromEntries(Object.entries(prefill).filter(([, v]) => v !== undefined))), startNarrow(await audienceOf(db, inc.ref))));
+  await linkIncidentToProblem(user, ref, created);
+  return getProblem(created);
 }
 
 export const resolveLinkedSchema = z.object({ incidents: z.array(z.string()).min(1).max(200), resolution: z.string().trim().min(1).max(20000) });

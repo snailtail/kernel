@@ -3,6 +3,7 @@
 // and related incidents (the same outage reported again) that are resolved together with the major one.
 // Shared by REST, MCP and the web UI like every other practice.
 import { z } from 'zod';
+import { audienceOf, copyText } from './audience.js';
 import { audit } from './audit.js';
 import { maskedRefs } from './confidential.js';
 import { currentContext } from './context.js';
@@ -216,8 +217,7 @@ export async function resolveChildren(db: Db, actorId: number, parent: { id: num
   const { rows: problem } = parent.problem_id ? await db.query('SELECT id, ref FROM problems WHERE id = $1', [parent.problem_id]) : { rows: [] as any[] };
   for (const c of children) {
     // A restricted or confidential parent's resolution never reaches a child more people can read: only the reference.
-    const narrower = (parent.restricted && !c.restricted) || (parent.classification === 'confidential' && c.classification !== 'confidential');
-    const text = (narrower ? `Resolved with ${parent.ref}.` : `Resolved with ${parent.ref}: ${resolution}`).slice(0, 20000);
+    const text = (await copyText(db, await audienceOf(db, parent.ref), await audienceOf(db, c.ref), `Resolved with ${parent.ref}: ${resolution}`, `Resolved with ${parent.ref}.`, 'parent → child resolution')).slice(0, 20000);
     if (problem[0] && !c.problem_id) await attachToProblem(db, actorId, c, problem[0]);
     await db.query(
       `UPDATE incidents SET status = 'resolved', resolution_code = $2, resolution = $3, resolved_at = now(),

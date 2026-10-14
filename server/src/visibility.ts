@@ -136,12 +136,6 @@ export async function saveVisibilitySettings(actor: User, value: { team_scoped: 
 }
 
 /** A record derived from a restricted one (a problem from an incident, a change from a problem) is restricted too. */
-export async function inheritRestriction(fromRef: string, toRef: string) {
-  const table = (ref: string) => TABLES[typeForRef(ref).type];
-  const { rows } = await query(`SELECT restricted, restricted_teams FROM ${table(fromRef)} WHERE ref = $1`, [fromRef.toUpperCase()]);
-  if (!rows[0]?.restricted) return;
-  await query(`UPDATE ${table(toRef)} SET restricted = true, restricted_teams = $2 WHERE ref = $1`, [toRef.toUpperCase(), rows[0].restricted_teams]);
-}
 
 /** A Kernel ref the caller may not see answers exactly like one that does not exist (no existence oracle). */
 export async function assertVisibleRef(ref: string) {
