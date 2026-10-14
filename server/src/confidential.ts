@@ -35,7 +35,7 @@ async function confidentialExists() {
   anyConfidential = { at: Date.now(), value: rows[0].any };
   return anyConfidential.value;
 }
-const forgetExists = () => { anyConfidential = null; };
+export const forgetExists = () => { anyConfidential = null; };
 
 /**
  * Of these refs, the confidential ones this user may not read in full right now. Agents (and exports) pass null:
@@ -58,6 +58,21 @@ export async function maskedRefs(user: { id: number } | null, refs: string[]): P
     for (const r of rows) if (!r.may_read) out.add(r.ref);
   }
   return out;
+}
+
+/**
+ * Search must not be an oracle for masked text: a confidential record the viewer may not read is only found by its
+ * title or ref, never because its description or comments matched (#61). Agents pass null.
+ */
+export async function onlyTitleMatches<T extends { ref: string; title?: string | null }>(user: { id: number } | null, hits: T[], q: string): Promise<T[]> {
+  const masked = await maskedRefs(user, hits.map((h) => h.ref));
+  if (!masked.size) return hits;
+  const terms = q.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 2);
+  return hits.filter((h) => {
+    if (!masked.has(h.ref.toUpperCase())) return true;
+    const title = (h.title ?? '').toLowerCase();
+    return h.ref.toUpperCase() === q.trim().toUpperCase() || (terms.length > 0 && terms.every((t) => title.includes(t)));
+  });
 }
 
 /** Masks free text in place: in objects that carry a masked ref, and – for a page about one record – everywhere. */
@@ -128,7 +143,17 @@ export async function setClassification(user: User, ref: string, input: z.infer<
     await db.query(`INSERT INTO ${log} (${col}, user_id, kind, body, data, channel) VALUES ($1, $2, 'update', $3, $4, 'web')`, [
       r.id, user.id, input.classification === 'confidential' ? `Marked confidential: ${reason}` : `No longer confidential: ${reason}`, JSON.stringify({ classification: { from: r.classification, to: input.classification } }),
     ]);
-    await audit(db, { entity_type: kind, entity_ref: r.ref, action: 'classification', changes: { classification: { from: r.classification, to: input.classification } }, reason });
+    let retired: string[] = [];
+    if (kind === 'problem' && input.classification === 'confidential') {
+      // A known-error article synced from the problem copies its text, so it is retired (not deleted).
+      const { rows: a } = await db.query(
+        `UPDATE articles SET status = 'retired', retired_at = now(), updated_at = now() WHERE problem_id = $1 AND synced_with_problem AND status <> 'retired' RETURNING id, ref`, [r.id]);
+      for (const x of a) await db.query("INSERT INTO article_activity (article_id, kind, body, data) VALUES ($1, 'status', $2, $3)", [x.id, `Retired: ${r.ref} is confidential`, JSON.stringify({ to: 'retired', problem: r.ref })]);
+      retired = a.map((x) => x.ref as string);
+    }
+    // Every instance drops its "nothing is confidential" shortcut at once.
+    await db.query("SELECT pg_notify('kernel_live', 'classification:' || $1)", [r.id]);
+    await audit(db, { entity_type: kind, entity_ref: r.ref, action: 'classification', changes: { classification: { from: r.classification, to: input.classification }, retired_articles: retired }, reason });
     return { ref: r.ref, classification: input.classification };
   });
   forgetExists();

@@ -1,4 +1,5 @@
 // Everything an analyst (or agent) needs to investigate a problem, in one size-limited call (#76).
+import { currentContext } from './context.js';
 import type { User } from './auth.js';
 import { query } from './db.js';
 import { checkAnalysis } from './analysis-checks.js';
@@ -12,7 +13,7 @@ export async function problemContext(user: User, ref: string) {
   const p: any = await getProblem(ref);
   const ciIds: string[] = (p.affected_cis ?? []).map((c: any) => c.ref);
   const [similar, sameService, ciRecords, ciKnownErrors] = await Promise.all([
-    findSimilar(`${p.title} ${p.description}`, p.ref, 5),
+    findSimilar(currentContext().channel === 'mcp' ? null : user, `${p.title} ${p.description}`, p.ref, 5),
     p.affected_service
       ? query(
           `SELECT system, kind, reference, summary, occurred_at, problem_id IS NOT NULL AS linked

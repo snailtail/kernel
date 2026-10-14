@@ -1,5 +1,7 @@
 // Cross-practice operations over the record type registry: one predictable surface for agents and scripts.
 import { moduleEnabled } from './modules.js';
+import { onlyTitleMatches } from './confidential.js';
+import { currentContext } from './context.js';
 import { z } from 'zod';
 import { linkArticleCi } from './knowledge.js';
 import { myTeams } from './teams.js';
@@ -29,7 +31,7 @@ export async function search(user: User, input: z.infer<typeof searchSchema>): P
   const wanted = input.types?.split(',').map((t) => t.trim());
   const types = recordTypes().filter((t) => can(user.role, t.readAction) && (!wanted || wanted.includes(t.type)));
   const results = await Promise.all(types.map((t) => t.search(user, input.q, input.limit)));
-  return results.flat().slice(0, input.limit);
+  return (await onlyTitleMatches(currentContext().channel === 'mcp' ? null : user, results.flat(), input.q)).slice(0, input.limit);
 }
 
 /** Any record by its ref (the prefix selects the type). */

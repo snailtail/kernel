@@ -1,5 +1,6 @@
 // Problem record service. Shared by the REST API and the MCP server so both
 // enforce the same rules, permissions and audit trail.
+import { onlyTitleMatches } from './confidential.js';
 import { z } from 'zod';
 import type pg from 'pg';
 import type { User } from './auth.js';
@@ -583,7 +584,8 @@ const STOPWORDS = new Set(
 );
 
 /** Problems similar to a free text (e.g. a draft title and description), best matches first. */
-export async function findSimilar(text: string, excludeRef?: string, limit = 5) {
+/** Problems like this text; a confidential problem the viewer may not read matches on its title only (#61). */
+export async function findSimilar(viewer: { id: number } | null, text: string, excludeRef?: string, limit = 5) {
   const words = [...new Set(text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 3 && !STOPWORDS.has(w)))].slice(0, 16);
   if (!words.length) return [];
   const { rows } = await query(
@@ -597,7 +599,7 @@ export async function findSimilar(text: string, excludeRef?: string, limit = 5) 
     [words.map((w) => `${w}:*`).join(' | '), excludeRef?.toUpperCase() ?? null, limit],
   );
   // Require a reasonable overlap so a single shared word does not count as similar.
-  return rows.filter((r) => r.score >= 0.03 || words.length <= 2);
+  return onlyTitleMatches(viewer, rows.filter((r) => r.score >= 0.03 || words.length <= 2), text);
 }
 
 /**

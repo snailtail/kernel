@@ -284,7 +284,7 @@ function buildServer(user: User, scopes?: string[]) {
     'Find existing problems and known errors similar to a text, e.g. an incident description or a draft problem. Use before create_problem, or while handling an incident to find a known workaround.',
     { text: z.string().describe('Symptoms, title or description'), exclude_ref: z.string().optional(), limit: z.number().int().min(1).max(20).optional() },
     true,
-    async ({ text, exclude_ref, limit }) => problems.findSimilar(text, exclude_ref, limit ?? 5),
+    async ({ text, exclude_ref, limit }) => problems.findSimilar(null, text, exclude_ref, limit ?? 5),
   );
 
   tool(
