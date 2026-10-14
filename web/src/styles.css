@@ -951,7 +951,7 @@ tr.total td { border-bottom: 2px solid var(--border-strong); }
 
 /* Notifications (#48) */
 .bell { position: relative; }
-.bell-count { margin-left: auto; min-width: 20px; padding: 0 6px; border-radius: 999px; background: var(--danger); color: #fff; font-size: 11.5px; font-weight: 700; text-align: center; line-height: 18px; }
+.bell-count { margin-left: auto; min-width: 20px; padding: 0 6px; border-radius: 999px; background: var(--surface-2); color: var(--text-2); font-size: 11.5px; font-weight: 700; text-align: center; line-height: 18px; }
 .notification-list { list-style: none; margin: 0; padding: 0; }
 .notification-list li { display: grid; grid-template-columns: 120px 1fr auto; gap: 12px; align-items: start; padding: 12px 20px; border-bottom: 1px solid var(--border); }
 .notification-list li:last-child { border-bottom: none; }
@@ -1126,11 +1126,12 @@ tr.total td { border-bottom: 2px solid var(--border-strong); }
 .sidebar nav .search-trigger { margin: 2px 0 6px; }
 .nav-group { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
 .nav-group.register { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
-.nav-group-head { display: flex; align-items: baseline; gap: 6px; background: none; border: 0; padding: 4px 10px; cursor: pointer; color: var(--text-3); font: inherit; text-align: left; border-radius: 6px; }
+.nav-group-head { display: flex; align-items: center; gap: 6px; background: none; border: 0; padding: 4px 10px; cursor: pointer; color: var(--text-3); font: inherit; text-align: left; border-radius: 6px; }
 .nav-group-head:hover { color: var(--text-2); }
 .nav-group-head:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .nav-group-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; }
-.nav-group-purpose { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nav-group-text { display: flex; flex-direction: column; line-height: 1.25; }
+.nav-group-purpose { font-size: 11px; }
 .nav-chevron { margin-left: auto; display: inline-flex; transition: transform .12s; align-self: center; }
 .nav-chevron .icon { width: 12px; height: 12px; }
 .nav-chevron.open { transform: rotate(90deg); }
@@ -1158,3 +1159,20 @@ tr.total td { border-bottom: 2px solid var(--border-strong); }
   .sidebar nav .search-trigger kbd { display: none; }
 }
 @media print { .sidebar { display: none !important; } }
+
+/* Compact rows, so the whole menu fits a 1440×900 screen (#102). */
+@media (min-width: 821px) {
+  .sidebar { padding: 14px 10px; }
+  .sidebar .brand { padding-bottom: 12px; }
+  .sidebar-body { gap: 8px; }
+  .sidebar nav { gap: 0; }
+  .sidebar nav a, .sidebar-foot a { padding: 5px 10px; }
+  .nav-group { gap: 0; margin-top: 4px; }
+  .nav-group.register { margin-top: 8px; padding-top: 6px; }
+  .nav-group-head { padding: 3px 10px; }
+  .sidebar nav .search-trigger { margin: 4px 0 2px; padding: 5px 10px; }
+  .sidebar-foot { gap: 0; }
+  .sidebar-foot .user-chip { margin-top: 4px; }
+  /* The menu's "+ New" is always there; the page buttons are for phones, where the menu is a drawer. */
+  .page-new { display: none; }
+}

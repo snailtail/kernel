@@ -57,7 +57,7 @@ export function ChangesPage() {
           <h1>Changes</h1>
           <p className="muted">Assess the risk, authorise, schedule without collisions or freezes, and review.</p>
         </div>
-        {user.role !== 'viewer' && <button className="btn primary" onClick={() => setCreating(true)}>Request change</button>}
+        {user.role !== 'viewer' && <button className="btn primary page-new" onClick={() => setCreating(true)}>New change</button>}
       </header>
       <div className="seg-toggle tabs" role="tablist">
         {[['list', 'Changes'], ['schedule', 'Schedule'], ['templates', 'Standard changes'], ['freezes', 'Freezes']].map(([id, label]) => (

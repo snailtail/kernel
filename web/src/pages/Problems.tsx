@@ -42,7 +42,7 @@ export function ProblemsPage() {
       <header className="page-head">
         <h1>Problems</h1>
         <SavedViews page="problems" />
-        {canEdit(user) && <Link className="btn primary" to="/problems/new">Log problem</Link>}
+        {canEdit(user) && <Link className="btn primary page-new" to="/problems/new">New problem</Link>}
       </header>
       <div className="filters">
         <input className="search" placeholder="Search ref, title, root cause, workaround…" value={q} onChange={(e) => setQ(e.target.value)} />

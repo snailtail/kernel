@@ -38,4 +38,8 @@ test('"+ New" offers what the role may create', () => {
   assert.equal(newItems(user('problem_manager'), meta({}))[0].label, 'Problem');
   assert.equal(newItems(user('analyst'), meta({}))[0].label, 'Incident');
   assert.deepEqual(newItems(user('analyst'), meta({ incident: false, change: false, knowledge: false })).map((i) => i.label), ['Problem']);
+  // On a practice's pages its own record comes first.
+  assert.equal(newItems(user('problem_manager'), meta({}), '/incidents/INC000004')[0].label, 'Incident');
+  assert.equal(newItems(user('analyst'), meta({}), '/changes')[0].label, 'Change');
+  assert.equal(newItems(user('analyst'), meta({}), '/kedb')[0].label, 'Problem');
 });

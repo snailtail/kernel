@@ -79,7 +79,7 @@ export function IncidentsPage() {
           <h1>Incidents</h1>
           <p className="muted">Restore service first; hand recurring and major incidents to problem management.</p>
         </div>
-        {user.role !== 'viewer' && <button className="btn primary" onClick={() => setCreating(true)}>Log incident</button>}
+        {user.role !== 'viewer' && <button className="btn primary page-new" onClick={() => setCreating(true)}>New incident</button>}
       </header>
       <div className="filters">
         <input className="search" placeholder="Search incidents…" value={q} onChange={(e) => setQ(e.target.value)} />

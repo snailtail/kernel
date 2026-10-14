@@ -84,7 +84,7 @@ export const PALETTE_ONLY: NavItem[] = [
 
 /** "+ New": what this user may create, the most common first for their role. */
 export interface NewItem { to: string; label: string; module?: Module }
-export function newItems(user: User, meta: Meta): NewItem[] {
+export function newItems(user: User, meta: Meta, path = '/'): NewItem[] {
   if (!canEdit(user)) return [];
   const on = (m?: Module) => !m || meta.modules?.[m] !== false;
   const candidates: NewItem[] = [
@@ -94,8 +94,15 @@ export function newItems(user: User, meta: Meta): NewItem[] {
     { to: '/knowledge?new=1', label: 'Article', module: 'knowledge' },
   ];
   const all = candidates.filter((i) => on(i.module));
-  // Managers log problems most; analysts and service desk incidents.
-  return isManager(user) ? [...all.filter((i) => i.label === 'Problem'), ...all.filter((i) => i.label !== 'Problem')] : all;
+  // On a practice's pages, its own record comes first; elsewhere what the role logs most (managers problems, others
+  // incidents).
+  const here = path.startsWith('/incidents') || path.startsWith('/events') ? 'Incident'
+    : path.startsWith('/changes') ? 'Change'
+    : path.startsWith('/knowledge') ? 'Article'
+    : /^\/(problems|kedb|candidates|actions|review)/.test(path) ? 'Problem'
+    : isManager(user) ? 'Problem' : 'Incident';
+  const first = all.find((i) => i.label === here) ?? all[0];
+  return first ? [first, ...all.filter((i) => i !== first)] : [];
 }
 
 export const visible = (item: NavItem, user: User, meta: Meta) => (!item.module || meta.modules?.[item.module] !== false) && (!item.show || item.show(user));
