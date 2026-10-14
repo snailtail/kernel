@@ -50,7 +50,7 @@ export function KnowledgePage() {
           <h1>Knowledge</h1>
           <p className="muted">Workarounds and solutions people can find when they need them. Known errors publish here in one step.</p>
         </div>
-        <div className="head-actions">{writer && <button className="btn primary" onClick={() => setCreating(true)}>Write an article</button>}</div>
+        <div className="head-actions">{writer && <button className="btn primary page-new" onClick={() => setCreating(true)}>New article</button>}</div>
       </header>
       <div className="filters">
         <input className="search" placeholder="Search articles…" value={q} onChange={(e) => setQ(e.target.value)} />

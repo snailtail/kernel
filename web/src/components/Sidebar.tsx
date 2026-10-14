@@ -43,9 +43,10 @@ function Entry({ item, counts, path, onGo }: { item: NavItem; counts: Counts; pa
 function NewButton() {
   const { user, meta } = useSession();
   const navigate = useNavigate();
+  const location = useLocation();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const items = newItems(user, meta);
+  const items = newItems(user, meta, location.pathname);
   useEffect(() => {
     if (!open) return;
     const close = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
@@ -104,9 +105,11 @@ export function Sidebar({ onSearch }: { onSearch: () => void }) {
             const open = !folded.has(g.id) || g.items.some((i) => isActive(i, location.pathname));
             return (
               <div key={g.id} className={`nav-group${g.register ? ' register' : ''}`}>
-                <button type="button" className="nav-group-head" aria-expanded={open} onClick={() => toggle(g.id)}>
-                  <span className="nav-group-label">{g.label}</span>
-                  {g.purpose && <span className="nav-group-purpose">{g.purpose}</span>}
+                <button type="button" className="nav-group-head" aria-expanded={open} onClick={() => toggle(g.id)} title={g.purpose}>
+                  <span className="nav-group-text">
+                    <span className="nav-group-label">{g.label}</span>
+                    {g.purpose && <span className="nav-group-purpose">{g.purpose}</span>}
+                  </span>
                   <span className={`nav-chevron${open ? ' open' : ''}`}>{icons.chevron}</span>
                 </button>
                 {open && g.items.map((i) => <Entry key={i.to} item={i} counts={counts} path={location.pathname} onGo={go} />)}
