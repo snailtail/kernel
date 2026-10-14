@@ -98,6 +98,8 @@ export interface RunContext {
   secret: Record<string, string>;
   /** GET base_url + path as JSON. Errors carry the HTTP status (err.status), e.g. 403 for a kind RBAC forbids. */
   fetchJson: (path: string) => Promise<any>;
+  /** POST JSON to base_url + path, for read-only questions an API asks as a POST (a Kubernetes access review). */
+  postJson: (path: string, body: unknown) => Promise<any>;
   /** The connector's source system, for types that compare with what they reported before. */
   sourceSystem: string;
   /** How often the connector runs, for types that judge whether an event is still current. */
@@ -109,6 +111,8 @@ export interface ConnectorType {
   config: z.ZodType<Record<string, any>>;
   secret: z.ZodType<Record<string, string>>;
   test: (ctx: RunContext) => Promise<string>;
+  /** Setup text for the source system (e.g. a least-privilege manifest), from the form's current settings. */
+  setup?: (config: Record<string, unknown>) => string;
   /** Fetch and map: CIs (complete snapshot) and the current problems as events. */
   fetch: (ctx: RunContext) => Promise<{
     cis: z.infer<typeof batchCi>[];
@@ -240,6 +244,14 @@ export async function deleteConnector(user: User, id: number) {
   await audit(null, { entity_type: 'connector', entity_ref: rows[0].name, action: 'delete', changes: {} });
 }
 
+/** A type's setup text (administrators), e.g. the Kubernetes manifest for the settings in the form. */
+export function connectorSetup(user: User, type: string, config: Record<string, unknown>) {
+  authorize(user, 'user.manage');
+  const t = Object.hasOwn(CONNECTOR_TYPES, type) ? CONNECTOR_TYPES[type] : undefined;
+  if (!t?.setup) throw notFound('This connector type has no setup text');
+  return { text: t.setup(config) };
+}
+
 export async function connectorRuns(user: User, id: number) {
   authorize(user, 'user.manage');
   return (await query('SELECT id, trigger, status, counts, errors, message, started_at, finished_at FROM connector_runs WHERE connector_id = $1 ORDER BY id DESC LIMIT 50', [id])).rows;
@@ -250,26 +262,30 @@ function contextFor(c: any): RunContext {
   const secret = c.secret ? JSON.parse(decryptSecret(c.secret)) : {};
   const config = type.config.parse(c.config);
   const auth = secret.token ? `Bearer ${secret.token}` : secret.username ? `Basic ${Buffer.from(`${secret.username}:${secret.password}`).toString('base64')}` : undefined;
+  const call = async (path: string, body?: unknown) => {
+    const res = await outboundFetch(config.base_url.replace(/\/$/, '') + path, {
+      method: body === undefined ? 'GET' : 'POST',
+      headers: { Accept: 'application/json', ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(auth ? { Authorization: auth } : {}) },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      privateAllow: c.private_allow,
+      ca: config.ca_pem || undefined,
+      timeoutMs: 30_000,
+      maxBytes: 50_000_000,
+    });
+    if (!res.ok) throw Object.assign(new Error(`${c.name}: HTTP ${res.status}`), { status: res.status });
+    try {
+      return JSON.parse(res.body);
+    } catch {
+      throw new Error(`${c.name}: the response is not JSON`);
+    }
+  };
   return {
     config,
     secret,
     sourceSystem: c.source_system,
     scheduleMinutes: c.schedule_minutes,
-    fetchJson: async (path) => {
-      const res = await outboundFetch(config.base_url.replace(/\/$/, '') + path, {
-        headers: { Accept: 'application/json', ...(auth ? { Authorization: auth } : {}) },
-        privateAllow: c.private_allow,
-        ca: config.ca_pem || undefined,
-        timeoutMs: 30_000,
-        maxBytes: 50_000_000,
-      });
-      if (!res.ok) throw Object.assign(new Error(`${c.name}: HTTP ${res.status}`), { status: res.status });
-      try {
-        return JSON.parse(res.body);
-      } catch {
-        throw new Error(`${c.name}: the response is not JSON`);
-      }
-    },
+    fetchJson: (path) => call(path),
+    postJson: (path, body) => call(path, body),
   };
 }
 

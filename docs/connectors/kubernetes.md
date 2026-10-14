@@ -9,10 +9,13 @@ allow it to.
 
 ## 1. A read-only ServiceAccount
 
-Apply this in the cluster (`kubectl apply -f kernel-reader.yaml`). It grants `get` and `list` on exactly the kinds the
-connector reads, and nothing else: no `watch`, no pods, no Secrets.
+The connector form shows this manifest with your cluster name filled in, and leaves out `events` unless **Warning
+events as alerts** is on (`GET /api/connectors/types/kubernetes/setup?cluster_name=…&sync_events=true` returns the
+same). It grants `get` and `list` on exactly the kinds the connector reads and nothing else: no `watch`, no pods, no
+Secrets or ConfigMaps. Save it as `kernel-reader.yaml` and apply it with `kubectl apply -f kernel-reader.yaml`.
 
 ```yaml
+# Kernel: read-only access to your cluster. Apply with: kubectl apply -f kernel-reader.yaml
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -31,7 +34,7 @@ metadata:
   name: kernel-reader
 rules:
   - apiGroups: [""]
-    resources: ["nodes", "namespaces"]
+    resources: ["nodes", "namespaces", "events"]
     verbs: ["get", "list"]
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets", "daemonsets"]
@@ -39,10 +42,6 @@ rules:
   - apiGroups: ["batch"]
     resources: ["cronjobs"]
     verbs: ["get", "list"]
-  # Only if "Warning events as alerts" is switched on:
-  - apiGroups: [""]
-    resources: ["events"]
-    verbs: ["list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -56,17 +55,8 @@ subjects:
   - kind: ServiceAccount
     name: kernel-reader
     namespace: kernel
-```
-
-Leave out the `events` rule when you do not sync events. A kind the role forbids is reported on the run ("forbidden by
-the ServiceAccount's role"); its CIs and relationships are left as they are, while every kind that was read completely
-is synced as usual (deleted objects count as missed).
-
-## 2. A token
-
-Either a long-lived token stored as a Secret (rotate it by deleting and re-creating the Secret):
-
-```yaml
+---
+# The token Kernel uses: kubectl -n kernel get secret kernel-reader-token -o jsonpath='{.data.token}' | base64 -d
 apiVersion: v1
 kind: Secret
 metadata:
@@ -77,15 +67,30 @@ metadata:
 type: kubernetes.io/service-account-token
 ```
 
+Check that the role is as narrow as intended:
+
+```sh
+kubectl auth can-i list deployments --as=system:serviceaccount:kernel:kernel-reader   # yes
+kubectl auth can-i list secrets --as=system:serviceaccount:kernel:kernel-reader       # no
+```
+
+## 2. The token
+
+The Secret above gets a long-lived token:
+
 ```sh
 kubectl -n kernel get secret kernel-reader-token -o jsonpath='{.data.token}' | base64 -d
 ```
 
-or a time-bound token, which you then have to replace in Kernel before it expires:
+Or skip the Secret and use a time-bound token, which you then have to replace in Kernel before it expires:
 
 ```sh
 kubectl -n kernel create token kernel-reader --duration=2160h
 ```
+
+**Rotation**: the token is write-only in Kernel. Paste a new one into the connector and save; the old one is gone
+from Kernel at once, and runs continue with the new one. To rotate the long-lived token, delete the Secret, apply the
+manifest again, and paste the new token.
 
 ## 3. The API server and its CA
 
@@ -94,9 +99,18 @@ kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}'
 kubectl config view --minify --raw -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' | base64 -d
 ```
 
-Paste the server URL (https only), the PEM certificate and the token into the connector form. The token is encrypted
-and never shown again. If the API server has a private address, add it to the connector's allowed private addresses.
-**Test connection** reports the Kubernetes version and the node count.
+The CA is also in the token Secret: `kubectl -n kernel get secret kernel-reader-token -o jsonpath='{.data.ca\.crt}' | base64 -d`.
+
+Paste the server URL (https only), the PEM certificate and the token into the connector form. If the API server has a
+private address (e.g. `https://10.0.0.10:6443`), add that address under **Private network access**; Kernel reaches no
+private address that is not listed there.
+
+**Test** reports the Kubernetes version, the node count, and for every kind the connector reads whether the token
+may list it (a `SelfSubjectAccessReview`, so before the first run). It warns when the token can also read Secrets or
+ConfigMaps or exec into pods: Kernel never uses that, so bind the token to the read-only role instead.
+
+A kind the role forbids is reported on each run ("forbidden by the ServiceAccount's role"); its CIs and relationships
+are left as they are, while every kind that was read completely is synced as usual (deleted objects count as missed).
 
 ## What ends up in the CMDB
 

@@ -5,6 +5,7 @@ import { Link } from 'react-router';
 import { api } from '../api';
 import { formatDate, relativeTime, ROLE_LABEL } from '../format';
 import { useApi } from '../hooks';
+import { CopyBlock } from '../components/CopyBlock';
 import { TwoFactor } from '../components/TwoFactor';
 import { useSession } from '../session';
 
@@ -238,17 +239,6 @@ function TokensCard() {
   );
 }
 
-function CopyBlock({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <div className="copy-block">
-      <pre>{text}</pre>
-      <button className="btn small" onClick={() => navigator.clipboard?.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); })}>
-        {copied ? 'Copied' : 'Copy'}
-      </button>
-    </div>
-  );
-}
 
 interface Session { id: string; created_at: string; last_seen_at: string; ip: string; user_agent: string; current: boolean }
 

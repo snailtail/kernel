@@ -1,7 +1,8 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { formatDate, relativeTime } from '../format';
 import { useApi } from '../hooks';
+import { CopyBlock } from './CopyBlock';
 import { Modal } from './Modal';
 
 interface Run { id?: number; trigger?: string; status: string; counts: Record<string, any>; errors?: { source_id?: string; error: string }[]; message: string; started_at: string; finished_at: string | null }
@@ -122,7 +123,8 @@ function ConnectorEditor({ connector: c, types, onClose, onDone }: { connector: 
         <label>Name<input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
         {k8s ? (
           <>
-            <p className="hint-box full">Kernel reads the cluster with a read-only ServiceAccount (get and list on nodes, namespaces and workloads; never Secrets or ConfigMaps). The ClusterRole and how to get a token are in <span className="mono">docs/connectors/kubernetes.md</span>.</p>
+            <p className="hint-box full">Kernel reads the cluster with a read-only ServiceAccount: get and list on nodes, namespaces and workloads, never Secrets, ConfigMaps or pods. Apply the manifest below, then paste the API server, its CA and the token. <strong>Test</strong> then shows per kind whether the token may read it.</p>
+            <RbacManifest clusterName={form.cluster_name} events={form.sync_events} />
             <label className="full">API server<input required type="url" placeholder="https://k8s.example.com:6443" value={form.base_url} onChange={(e) => setForm({ ...form, base_url: e.target.value })} /></label>
             <label className="full">ServiceAccount token<input type="password" autoComplete="new-password" placeholder={unchanged} required={!c.id} value={form.token} onChange={(e) => setForm({ ...form, token: e.target.value })} /></label>
             <label>Cluster name<input required maxLength={100} placeholder="prod-aks-1" value={form.cluster_name} onChange={(e) => setForm({ ...form, cluster_name: e.target.value })} /></label>
@@ -160,5 +162,24 @@ function ConnectorEditor({ connector: c, types, onClose, onDone }: { connector: 
         </div>
       </form>
     </Modal>
+  );
+}
+
+/** The least-privilege manifest for the settings in the form, ready to copy (#112). */
+function RbacManifest({ clusterName, events }: { clusterName: string; events: boolean }) {
+  const [text, setText] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => {
+      api.get<{ text: string }>(`/api/connectors/types/kubernetes/setup?${new URLSearchParams({ cluster_name: clusterName, sync_events: String(events) })}`).then((r) => setText(r.text)).catch(() => setText(''));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [clusterName, events]);
+  if (!text) return null;
+  return (
+    <details className="full">
+      <summary>Read-only access for the cluster (kubectl apply -f kernel-reader.yaml)</summary>
+      <CopyBlock text={text} />
+      <p className="muted small">Token: <span className="mono">kubectl -n kernel get secret kernel-reader-token -o jsonpath='{'{.data.token}'}' | base64 -d</span>. CA: the same with <span className="mono">{'{.data.ca\\.crt}'}</span>.</p>
+    </details>
   );
 }

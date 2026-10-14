@@ -28,6 +28,9 @@ export async function connectorRoutes(app: FastifyInstance) {
     await conn.deleteConnector(user, Number(req.params.id));
     return { ok: true };
   });
+  // Setup text for the settings in the form (e.g. the Kubernetes RBAC manifest); the type reads what it needs.
+  app.get<{ Params: { type: string }; Querystring: Record<string, string> }>('/api/connectors/types/:type/setup', async (req) =>
+    conn.connectorSetup(requireUser(req), req.params.type, req.query));
   app.post<Id>('/api/connectors/:id/test', async (req) => conn.testConnector(requireUser(req), Number(req.params.id)));
   app.post<Id>('/api/connectors/:id/run', async (req) => conn.runConnector(Number(req.params.id), 'manual', requireUser(req)));
   app.get<Id>('/api/connectors/:id/runs', async (req) => conn.connectorRuns(requireUser(req), Number(req.params.id)));
