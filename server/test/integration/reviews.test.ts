@@ -131,6 +131,8 @@ describe('post-incident reviews (#109)', { skip }, () => {
 
   test('text from a narrower incident never lands in something more people read (review of #116)', async () => {
     const SECRET = 'Admin password reused on the payroll server';
+    // A webhook receiver: whatever is queued for it leaves Kernel.
+    await ownerQuery("INSERT INTO webhooks (name, url, secret, events) VALUES ('Leak probe', 'https://hooks.example.com/x', 'unused', '{problem.created,problem.updated,problem.linked}')");
     for (const narrow of ['restricted', 'confidential'] as const) {
       const ref = (await pm.post('/api/incidents', { title: `Payroll ${narrow}` })).body.ref;
       ok(await pm.post(`/api/incidents/${ref}/review`, {}));
@@ -145,6 +147,9 @@ describe('post-incident reviews (#109)', { skip }, () => {
       if (narrow === 'restricted') assert.equal(created.restricted, true, 'restricted like the incident');
       else assert.equal(created.classification, 'confidential', 'confidential like the incident');
       assert.ok(created.description.includes(SECRET), 'positive control: the narrow problem carries the factor');
+      const queued = JSON.stringify((await ownerQuery("SELECT payload FROM webhook_deliveries WHERE payload::text LIKE $1", [`%${r.items[0].problem_ref}%`])).rows);
+      assert.ok(queued.includes(r.items[0].problem_ref), 'positive control: the new problem was announced');
+      assert.equal(queued.includes(SECRET), false, `${narrow}: no webhook ever carried the factor text`);
       // (2) An existing, broader problem gets the link, not the words.
       const open = (await pm.post('/api/problems', { title: `Shared problem ${narrow}` })).body.ref;
       r = (await pm.post(`/api/incidents/${ref}/review/items`, { kind: 'factor', body: `${SECRET} (again)` })).body;

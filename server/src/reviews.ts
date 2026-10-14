@@ -15,7 +15,7 @@ import { getIncident } from './incidents.js';
 import { createArticle } from './knowledge.js';
 import { timeline } from './major-incidents.js';
 import { authorize, can } from './policy.js';
-import { createProblem, loadForUpdate, logActivity, registerProblemExtra, type Db } from './problems.js';
+import { createProblemInTx, loadForUpdate, logActivity, registerProblemExtra, type Db } from './problems.js';
 import { loadCalendar } from './sla.js';
 
 export const REVIEW_STATUSES = ['scheduled', 'draft', 'published', 'waived'] as const;
@@ -116,7 +116,7 @@ async function prefill(user: User, ref: string) {
 async function loadReview(db: Db, incidentRef: string, lock = false) {
   const { rows } = await db.query(
     `SELECT r.*, r.due::text AS due, i.ref, i.title AS incident_title, i.is_major, i.major_lead_id, i.problem_id, i.impact, i.urgency, i.category_id, i.status AS incident_status,
-            i.restricted, i.classification
+            i.restricted, i.restricted_teams, i.classification
      FROM incident_reviews r JOIN incidents i ON i.id = r.incident_id WHERE i.ref = $1 ${lock ? 'FOR UPDATE OF r' : ''}`,
     [incidentRef.toUpperCase()],
   );
@@ -295,15 +295,20 @@ export async function itemToProblem(user: User, ref: string, itemId: number, inp
     let problemRef = input.problem?.toUpperCase();
     const created = !problemRef;
     if (!problemRef) {
-      const p: any = await createProblem(user, {
-        title: item.body.split('\n')[0].slice(0, 300),
+      // In this transaction and as narrow as the incident from the start, so no notice, webhook or event about the
+      // new problem ever goes out while it is broader than its source.
+      // A confidential record's title stays readable to everyone (#61), so the factor's words do not become one.
+      problemRef = await createProblemInTx(db, user, {
+        title: r.classification === 'confidential' ? `Contributing factor from the post-incident review of ${r.ref}` : item.body.split('\n')[0].slice(0, 300),
         description: `Contributing factor from the post-incident review of ${r.ref} (${r.incident_title}):\n\n${item.body}`,
         impact: r.impact, urgency: r.urgency, ...(r.category_id ? { category_id: r.category_id } : {}),
-      });
-      problemRef = p.ref as string;
+      }, { restricted: r.restricted, restricted_teams: r.restricted_teams ?? [], classification: r.classification, from: r.ref });
+      if (r.classification === 'confidential') {
+        await db.query("SELECT pg_notify('kernel_live', 'classification:' || (SELECT id FROM problems WHERE ref = $1))", [problemRef]);
+        forgetExists();
+      }
     }
     const problem = await loadForUpdate(db, problemRef!);
-    if (created) await inheritNarrowness(db, user, r, problem);
     const wide = !created && broader(r, problem);
     await db.query('UPDATE incident_review_items SET problem_id = $2 WHERE id = $1', [item.id, problem.id]);
     await db.query(
@@ -311,26 +316,13 @@ export async function itemToProblem(user: User, ref: string, itemId: number, inp
       [problem.id, r.ref, `From the post-incident review of ${r.ref}`, user.id],
     );
     // An existing problem more people can read gets the reference, never the factor's words.
-    await logActivity(db, problem.id, user.id, 'link', wide ? `Linked from the post-incident review of ${r.ref}` : `From the post-incident review of ${r.ref}: ${item.body}`.slice(0, 2000), { kind: 'incident', reference: r.ref, system: 'Kernel', action: 'add', review_item: item.id });
+    // The history (and every webhook summary made from it) names the review, never the factor's words.
+    await logActivity(db, problem.id, user.id, 'link', `${wide ? 'Linked from' : 'A contributing factor from'} the post-incident review of ${r.ref}`, { kind: 'incident', reference: r.ref, system: 'Kernel', action: 'add', review_item: item.id });
     await logIncident(db, r.incident_id, user.id, 'link', `Contributing factor → problem ${problem.ref}`, { kind: 'problem', reference: problem.ref, action: 'add', review_item: item.id });
     // The incident needs a problem before it closes: the first factor's problem is it, unless it has one.
     if (!r.problem_id) await db.query('UPDATE incidents SET problem_id = $2 WHERE id = $1 AND problem_id IS NULL', [r.incident_id, problem.id]);
   });
   return getReview(user, ref);
-}
-
-/** A problem made from a restricted or confidential incident's review is just as narrow. */
-async function inheritNarrowness(db: Db, user: User, incident: { ref: string; restricted: boolean; restricted_teams?: number[]; classification: string }, problem: { id: number; ref: string }) {
-  if (incident.restricted) {
-    await db.query('UPDATE problems SET restricted = true, restricted_teams = (SELECT restricted_teams FROM incidents WHERE ref = $2) WHERE id = $1', [problem.id, incident.ref]);
-    await logActivity(db, problem.id, user.id, 'update', `Restricted like ${incident.ref}`, { restricted: { from: false, to: true } });
-  }
-  if (incident.classification === 'confidential') {
-    await db.query("UPDATE problems SET classification = 'confidential' WHERE id = $1", [problem.id]);
-    await logActivity(db, problem.id, user.id, 'update', `Confidential like ${incident.ref}`, { classification: { from: 'normal', to: 'confidential' } });
-    await db.query("SELECT pg_notify('kernel_live', 'classification:' || $1)", [problem.id]);
-    forgetExists();
-  }
 }
 
 /** Follow-up → action on a problem: the one named, the factor's, or the incident's. */
