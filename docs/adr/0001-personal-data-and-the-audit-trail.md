@@ -51,6 +51,17 @@ Entries written before migration 114 still contain names, IPs and texts. Rewriti
 **not** done automatically; the administrator decides whether and when to run it. Until then the security status
 shows how many such entries remain, and the erase dialog says that they may still name the user.
 
+**Decision (2026-10-14):** the administrator decided to re-base. The tool is `server/src/rebase-audit.ts`, and the procedure is in [docs/audit-rebase.md](../audit-rebase.md). The re-base rewrites every legacy entry with the rules new entries follow:
+
+- no actor name;
+- the user's id in place of a username;
+- digests in place of personal values and free text;
+- the sensitive-data scanner run on short values and reasons.
+
+IP addresses and user agents move into `audit_context`, where they are subject to its retention. The tool then recomputes the whole chain with the active key. It writes an `audit.chain_rebase_intent` entry (the old head) before the rewrite and an `audit.chain_rebased` entry (old head, new head, rows rewritten, key id) after it. Both entries also go to the SIEM anchor stream.
+
+Executed: *(date filled in when run)*.
+
 ## Consequences
 
 - The audit page shows "text changed (digest, length)" for free text; the record's history shows the text itself.
