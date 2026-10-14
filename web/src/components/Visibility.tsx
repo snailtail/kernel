@@ -5,7 +5,7 @@ import { canEdit, isManager, useSession } from '../session';
 import { askReason } from './Ask';
 import { Modal } from './Modal';
 
-interface Restricted { ref: string; restricted: boolean; restricted_teams: number[]; assignee_id: number | null; created_by?: number | null }
+interface Restricted { ref: string; restricted: boolean; restricted_teams: number[]; assignee_id: number | null; created_by?: number | null; classification?: 'normal' | 'confidential'; confidential_masked?: boolean }
 
 /** Who can see this record: everyone, or (restricted) its assignee, creator and named teams (#53). */
 export function VisibilityPanel({ record: r, onChange }: { record: Restricted; onChange: () => void }) {
@@ -16,8 +16,34 @@ export function VisibilityPanel({ record: r, onChange }: { record: Restricted; o
   const names = r.restricted_teams.map((id) => teams.find((t) => t.id === id)?.name ?? `team #${id}`);
   const viaBreakGlass = r.restricted && user.role === 'admin' && r.assignee_id !== user.id && r.created_by !== user.id
     && !teams.some((t) => t.mine && r.restricted_teams.includes(t.id));
+  const confidential = r.classification === 'confidential';
+  const setConfidential = async (next: boolean) => {
+    const reason = await askReason(next ? `Mark ${r.ref} confidential` : `${r.ref} is no longer confidential`, next
+      ? 'Its free text (description, comments, attachments…) will be hidden from everyone except its assignee, creator and team, unless they reveal it with a reason. The title stays visible.'
+      : 'Everyone who can see the record will read its text again.');
+    if (!reason) return;
+    try {
+      await api.put(`/api/records/${r.ref}/classification`, { classification: next ? 'confidential' : 'normal', reason });
+      onChange();
+    } catch (err) {
+      alert((err as Error).message);
+    }
+  };
+  const revealText = async () => {
+    const reason = await askReason(`Read ${r.ref}`, 'The text is shown to you for 15 minutes. Your reason is recorded on the record, where its people can see it, and in the audit trail.', { confirmLabel: 'Show the text' });
+    if (!reason) return;
+    try {
+      await api.post(`/api/records/${r.ref}/reveal`, { reason });
+      onChange();
+    } catch (err) {
+      alert((err as Error).message);
+    }
+  };
   return (
     <>
+      {r.confidential_masked && (
+        <p className="warn-box confidential-banner">🔏 Confidential: the text is hidden from people not working on this record. {canEdit(user) && <button type="button" className="btn small" onClick={revealText}>Show the text…</button>}</p>
+      )}
       {viaBreakGlass && (
         <p className="warn-box breakglass-banner">🔓 You are viewing a restricted record with break-glass access. It is logged, the people on the record have been told, and access ends within an hour.</p>
       )}
@@ -28,7 +54,9 @@ export function VisibilityPanel({ record: r, onChange }: { record: Restricted; o
             ? `Only the assignee, the creator${names.length ? ` and ${names.join(', ')}` : ''} can see this record. It is left out of others' lists, searches, reports and AI tools.`
             : 'Everyone who works in Kernel can see this record.'}
         </p>
+        {confidential && <p className="muted small">🔏 Confidential: the text is masked for people outside the record, in exports and for AI agents.</p>}
         {canEdit(user) && <button type="button" className="btn small" onClick={() => setEditing(true)}>{r.restricted ? 'Change access' : 'Restrict'}</button>}
+        {canEdit(user) && !r.confidential_masked && <button type="button" className="btn-link small" onClick={() => setConfidential(!confidential)}>{confidential ? 'Not confidential' : 'Mark confidential'}</button>}
         {isManager(user) && <button type="button" className="btn-link small" onClick={() => setRedacting(true)}>Remove sensitive text…</button>}
       </section>
       {editing && <VisibilityModal record={r} onClose={() => setEditing(false)} onDone={() => { setEditing(false); onChange(); }} />}

@@ -109,6 +109,20 @@ describe('AI providers and the data gate (#68)', { skip }, () => {
     await admin.put('/api/admin/ai/routing', { routing: { summarize: { provider_id: providers[0].id, model: 'llama3' }, analyze_log: { provider_id: providers[0].id, model: 'llama3' } }, reason: 'Back' });
   });
 
+  test('a confidential record goes only to a provider allowed confidential data', async () => {
+    const p = (await analyst.post('/api/problems', { title: 'Board mailbox', description: 'details' })).body;
+    assert.equal((await analyst.post('/api/ai/summarize', { ref: p.ref })).status, 200, 'positive control: summaries work');
+    assert.equal((await analyst.put(`/api/records/${p.ref}/classification`, { classification: 'confidential', reason: 'Board matter' })).status, 200);
+    const refused = await analyst.post('/api/ai/summarize', { ref: p.ref });
+    assert.equal(refused.status, 403);
+    assert.match(refused.body.error, /confidential/);
+    const local = (await admin.get('/api/admin/ai/providers')).body.providers.find((x: any) => x.name === 'Local Ollama');
+    const allow = await admin.put(`/api/admin/ai/providers/${local.id}`, provider({ data_classes: ['internal', 'confidential'] }));
+    assert.equal(allow.status, 200, JSON.stringify(allow.body));
+    assert.equal((await analyst.post('/api/ai/summarize', { ref: p.ref })).status, 200, 'an allowed provider gets it');
+    assert.equal((await admin.put(`/api/admin/ai/providers/${local.id}`, provider({ data_classes: ['internal'] }))).status, 200);
+  });
+
   test('log analysis pre-filters, redacts and refuses flagged logs unless the policy allows them', async () => {
     const inc = (await analyst.post('/api/incidents', { title: 'Payments fail' })).body;
     const lines = Array.from({ length: 500 }, (_, n) => `2026-10-10 10:${String(n % 60).padStart(2, '0')} INFO request ok id=${n}`);

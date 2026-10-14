@@ -7,6 +7,7 @@ import { requireStepUp } from '../mfa.js';
 import { rateLimit } from '../ratelimit.js';
 import { clearSensitivePolicyCache, policySchema, scan, sensitivePolicy } from '../sensitive.js';
 import { redactHistory, redactHistorySchema } from '../redact-history.js';
+import { classifySchema, reveal, setClassification } from '../confidential.js';
 
 export async function sensitiveRoutes(app: FastifyInstance) {
   // For the warning while typing or pasting (#61): what the scanner would do with this text. Nothing is stored or
@@ -26,6 +27,15 @@ export async function sensitiveRoutes(app: FastifyInstance) {
     const user = requireUser(req, 'record.redact');
     await requireStepUp(req);
     return redactHistory(user, req.params.ref, redactHistorySchema.parse(req.body));
+  });
+
+  // Confidential records (#61): mark or unmark (with a reason), and reveal the text for 15 minutes (step-up, audited).
+  app.put<{ Params: { ref: string } }>('/api/records/:ref/classification', async (req) =>
+    setClassification(requireUser(req, 'record.restrict'), req.params.ref, classifySchema.parse(req.body)));
+  app.post<{ Params: { ref: string } }>('/api/records/:ref/reveal', async (req) => {
+    const user = requireUser(req, 'record.restrict');
+    await requireStepUp(req);
+    return reveal(user, req.params.ref, z.object({ reason: z.string().max(1000).optional() }).parse(req.body ?? {}).reason);
   });
 
   app.get('/api/admin/sensitive-data', async (req) => {

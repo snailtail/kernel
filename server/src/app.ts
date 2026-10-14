@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { assertMayWriteText, maskForViewer } from './confidential.js';
 import { sensitiveRoutes } from './routes/sensitive.js';
 import { markPersonalData, scanInbound } from './sensitive.js';
 import { liveRoutes } from './routes/live.js';
@@ -163,6 +164,23 @@ export async function buildApp(options: { logLevel?: string; serveWeb?: boolean 
     }
     if (ref) await markPersonalData(ref).catch(() => {});
     return payload;
+  });
+  // Confidential records (#61): the server masks their free text for anyone not working on them, unless revealed.
+  app.addHook('onSend', async (req, reply, payload) => {
+    if (!req.user || reply.statusCode >= 300 || typeof payload !== 'string' || !payload.includes('"ref"')) return payload;
+    if (!String(reply.getHeader('content-type') ?? '').includes('application/json')) return payload;
+    const pageRef = /^\/api\/(problems|incidents|changes|records)\/[^/]+/.test(req.url) ? (req.params as { ref?: string } | undefined)?.ref : undefined;
+    let parsed: unknown;
+    try { parsed = JSON.parse(payload); } catch { return payload; }
+    const before = payload.length;
+    const out = JSON.stringify(await maskForViewer(req.user, parsed, pageRef));
+    return out.length === before && out === payload ? payload : out;
+  });
+  app.addHook('preHandler', async (req) => {
+    // No blind overwrites: changing a masked field needs the right to read it.
+    if (!['PATCH', 'PUT'].includes(req.method) || !/^\/api\/(problems|incidents|changes)\/[^/]+$/.test(req.url.split('?')[0])) return;
+    const ref = (req.params as { ref?: string } | undefined)?.ref;
+    if (ref) await assertMayWriteText(req, ref, req.body);
   });
   app.addHook('onReady', async () => startLive((msg) => app.log.warn(msg)));
   app.addHook('onClose', async () => stopLive());

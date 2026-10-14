@@ -1,5 +1,6 @@
 // MCP server (Streamable HTTP, stateless) exposing Kernel to Claude and other MCP clients.
 // Each request authenticates with a personal API token and acts as that user.
+import { maskForViewer } from './confidential.js';
 import * as serviceReports from './service-report.js';
 import * as statusMod from './status.js';
 import type { FastifyInstance } from 'fastify';
@@ -182,7 +183,8 @@ function buildServer(user: User, scopes?: string[]) {
       { description, inputSchema, annotations: { readOnlyHint: readOnly, destructiveHint: !!options.destructive, idempotentHint: readOnly } },
       (async (args: any) => {
         try {
-          return json(await traceTool(name, () => run(args)));
+          // Agents never read a confidential record's free text (#61).
+          return json(await maskForViewer(null, await traceTool(name, () => run(args))));
         } catch (err) {
           const message =
             err instanceof z.ZodError ? err.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ') : (err as Error).message;

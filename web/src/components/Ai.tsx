@@ -94,7 +94,7 @@ interface Provider {
 export function AiAdminSection() {
   const { user } = useSession();
   const [data, setData] = useState<{ providers: Provider[]; routing: Record<string, { provider_id: number; model: string }>; tasks: Record<string, string> } | null>(null);
-  const [form, setForm] = useState({ name: '', kind: 'openai_compatible', base_url: '', api_key: '', models: '', location: 'on_prem', personal: false, restricted: false, private_allow: '', monthly_token_budget: 1000000 });
+  const [form, setForm] = useState({ name: '', kind: 'openai_compatible', base_url: '', api_key: '', models: '', location: 'on_prem', personal: false, confidential: false, restricted: false, private_allow: '', monthly_token_budget: 1000000 });
   const [message, setMessage] = useState<string | null>(null);
   const load = () => api.get<typeof data>('/api/admin/ai/providers').then(setData, () => setData(null));
   useEffect(() => { load(); }, []);
@@ -105,7 +105,7 @@ export function AiAdminSection() {
       await api.post('/api/admin/ai/providers', {
         name: form.name, kind: form.kind, base_url: form.base_url, ...(form.api_key ? { api_key: form.api_key } : {}),
         models: form.models.split(/[\s,]+/).filter(Boolean), location: form.location,
-        data_classes: ['internal', ...(form.personal ? ['personal'] : []), ...(form.restricted ? ['restricted'] : [])],
+        data_classes: ['internal', ...(form.personal ? ['personal'] : []), ...(form.confidential ? ['confidential'] : []), ...(form.restricted ? ['restricted'] : [])],
         private_allow: form.private_allow.split(/[\s,]+/).filter(Boolean), monthly_token_budget: Number(form.monthly_token_budget),
       });
       setForm({ ...form, name: '', api_key: '', models: '' });
@@ -161,6 +161,7 @@ export function AiAdminSection() {
         <label>Runs<select value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value, restricted: e.target.value === 'on_prem' && form.restricted })}><option value="on_prem">In our own environment</option><option value="cloud">In a provider's cloud</option></select></label>
         <label>Private addresses allowed<input value={form.private_allow} onChange={(e) => setForm({ ...form, private_allow: e.target.value })} placeholder="10.0.4.0/24" /></label>
         <label className="check"><input type="checkbox" checked={form.personal} onChange={(e) => setForm({ ...form, personal: e.target.checked })} /> May receive names of people</label>
+        <label className="check"><input type="checkbox" checked={form.confidential} onChange={(e) => setForm({ ...form, confidential: e.target.checked })} /> May receive the text of confidential records</label>
         <label className="check"><input type="checkbox" disabled={form.location !== 'on_prem'} checked={form.restricted} onChange={(e) => setForm({ ...form, restricted: e.target.checked })} /> May receive restricted records</label>
         <label>Monthly token budget<input type="number" min={0} value={form.monthly_token_budget} onChange={(e) => setForm({ ...form, monthly_token_budget: Number(e.target.value) })} /></label>
         <div className="actions full"><button type="button" className="btn primary" onClick={add} disabled={!form.name || !form.models}>Add provider</button></div>

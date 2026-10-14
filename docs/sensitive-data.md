@@ -86,9 +86,23 @@ History entries are not deleted, so the record still shows *that* something chan
 
 The removal is itself recorded on the record and in the audit trail, with the reason and how much was removed. The removed text is never written there; the audit trail keeps only a keyed digest of it. The audit trail held only digests of free text to begin with, so its hash chain stays valid.
 
-## Still to come
+## Confidential records
 
-These parts of #61 are not built yet:
+A record can be marked **confidential** under **Visibility → Mark confidential**. Marking it, or unmarking it, takes a reason. The change is audited and noted on the record.
 
-- confidential classification;
-- masked fields that are revealed on demand.
+A confidential record stays visible: it shows up in lists and searches, and its title, status and other fields can be read. Restricted records (#53) are different: they are hidden altogether.
+
+**Who reads the text.** The free text is masked by the server: description, root cause, workaround, resolution and plans; comments and the values in history entries; link notes; and attachments. It is readable without masking only for:
+
+- the assignee;
+- the creator;
+- members of the record's team.
+
+**Reveal on demand.** Everyone else who works in Kernel can reveal the text for 15 minutes. That takes step-up and a reason. The reveal is noted on the record, where its people can see who looked, and in the audit trail. Problem managers reveal like anyone else, because overseeing a record is not the same as working on it.
+
+**Writing.** A field you cannot read cannot be overwritten.
+
+**Always masked.** AI agents (MCP) and exports always get the masked text, even for the record's own people, because both leave Kernel's access control. Live updates carry only kind and id, and each browser refetches through the normal API, so a reveal is never shared.
+
+**AI models.** A confidential record's text goes only to an AI provider that is explicitly allowed confidential data, under **Administration → AI**.
+

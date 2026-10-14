@@ -1,4 +1,5 @@
 // Problem record as a Markdown document: for major problem reviews, known error articles and archiving.
+import { maskForViewer } from './confidential.js';
 import { getProblem } from './problems.js';
 
 const STATUS: Record<string, string> = { new: 'New', analysis: 'Under Analysis', known_error: 'Known Error', resolved: 'Resolved', closed: 'Closed' };
@@ -9,11 +10,13 @@ const day = (v: string | Date | null) => (v ? new Date(v).toISOString().slice(0,
 const cell = (v: unknown) => String(v ?? '').replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\n/g, ' ');
 
 export async function problemMarkdown(ref: string) {
-  const p: any = await getProblem(ref);
+  // Exports leave Kernel's access control, so a confidential problem's free text is always masked in them (#61).
+  const p: any = await maskForViewer(null, await getProblem(ref), ref);
   const out: string[] = [];
-  const section = (title: string, body: string) => {
-    if (body.trim()) out.push(`## ${title}`, '', body.trim(), '');
+  const section = (title: string, body: string | null | undefined) => {
+    if ((body ?? '').trim()) out.push(`## ${title}`, '', (body ?? '').trim(), '');
   };
+  if (p.confidential_masked) out.push('> Confidential: the free text is not included in exports.', '');
 
   out.push(`# ${p.ref}: ${p.title}`, '');
   out.push(
@@ -88,7 +91,7 @@ function analysisBody(a: any) {
         ...(d.possible_causes?.length ? ['', ...d.possible_causes.map((c: any) => `- ${c.cause} — ${c.result.replace(/_/g, ' ')}`)] : []),
       ].join('\n');
     case 'timeline':
-      return (d.events ?? []).slice().sort((x: any, y: any) => x.at.localeCompare(y.at)).map((e: any) => `- ${e.at.replace('T', ' ')} [${e.kind}] ${e.description}${e.reference ? ` (${e.reference})` : ''}`).join('\n');
+      return (d.events ?? []).slice().sort((x: any, y: any) => x.at.localeCompare(y.at)).map((e: any) => `- ${e.at.replace('T', ' ')} [${e.kind}] ${e.description ?? "…"}${e.reference ? ` (${e.reference})` : ''}`).join('\n');
     default:
       return '';
   }
