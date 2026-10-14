@@ -206,7 +206,7 @@ const MACHINE = [/^\/mcp/, /^\/api\/events$/, /^\/api\/event-hooks\//, /^\/api\/
 
 const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
-/** Redacts secrets in every string of a JSON value, in place where possible; collects what was found. */
+/** Redacts secrets in every string of a JSON value (objects are rebuilt, never written to by key); collects what was found. */
 function walk(value: unknown, policy: SensitivePolicy, seen: { secrets: Set<string>; personal: Set<string> }, depth = 0): unknown {
   if (depth > 32) return value;
   if (typeof value === 'string') {
@@ -221,13 +221,9 @@ function walk(value: unknown, policy: SensitivePolicy, seen: { secrets: Set<stri
     return value;
   }
   if (value && typeof value === 'object') {
-    const o = value as Record<string, unknown>;
-    for (const k of Object.keys(o)) {
-      // Only plain data keys are written back: never __proto__, constructor or prototype from a request body.
-      if (UNSAFE_KEYS.has(k)) continue;
-      const next = walk(o[k], policy, seen, depth + 1);
-      if (next !== o[k]) Object.defineProperty(o, k, { value: next, writable: true, enumerable: true, configurable: true });
-    }
+    // A new object from entries: keys from a request body become own data properties and can never reach a prototype;
+    // __proto__, constructor and prototype are dropped altogether.
+    return Object.fromEntries(Object.entries(value).filter(([k]) => !UNSAFE_KEYS.has(k)).map(([k, v]) => [k, walk(v, policy, seen, depth + 1)]));
   }
   return value;
 }
