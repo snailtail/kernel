@@ -1,4 +1,5 @@
 import { buildApp } from './app.js';
+import { logger } from './log.js';
 import { pruneDeliveries } from './dev.js';
 import { startChainVerification } from './audit.js';
 import { asSystem } from './context.js';
@@ -14,12 +15,14 @@ import { startSlaWorker } from './sla.js';
 import { startNotificationWorker } from './notifications.js';
 import { startConnectorWorker } from './connectors.js';
 
+// The schema comes first: building the app already reads settings (modules), which a new database does not have yet.
+const early = (msg: string) => logger.info(msg);
+checkConfiguration((msg) => logger.warn(msg));
+await waitForDb(early);
+await migrate(early);
+
 const app = await buildApp();
 const log = (msg: string) => app.log.info(msg);
-checkConfiguration((msg) => app.log.warn(msg));
-
-await waitForDb(log);
-await migrate(log);
 await bootstrapAdmin(log);
 await encryptLegacySecrets(log);
 await recordActiveKey();
