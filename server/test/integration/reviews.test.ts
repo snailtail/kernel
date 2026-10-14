@@ -129,6 +129,52 @@ describe('post-incident reviews (#109)', { skip }, () => {
     assert.equal(md.includes(SECRET), false);
   });
 
+  test('text from a narrower incident never lands in something more people read (review of #116)', async () => {
+    const SECRET = 'Admin password reused on the payroll server';
+    for (const narrow of ['restricted', 'confidential'] as const) {
+      const ref = (await pm.post('/api/incidents', { title: `Payroll ${narrow}` })).body.ref;
+      ok(await pm.post(`/api/incidents/${ref}/review`, {}));
+      if (narrow === 'restricted') ok(await pm.put(`/api/records/${ref}/visibility`, { restricted: true, reason: 'Security investigation' }));
+      else ok(await pm.put(`/api/records/${ref}/classification`, { classification: 'confidential', reason: 'Personal data' }));
+      // (1) No article.
+      assert.equal((await pm.post(`/api/incidents/${ref}/review/article`, {})).status, 400, `${narrow}: no article`);
+      // (2) A new problem from a factor is just as narrow.
+      let r = (await pm.post(`/api/incidents/${ref}/review/items`, { kind: 'factor', body: SECRET })).body;
+      r = (await pm.post(`/api/incidents/${ref}/review/items/${r.items[0].id}/problem`, {})).body;
+      const created = (await ownerQuery('SELECT restricted, classification, description FROM problems WHERE ref = $1', [r.items[0].problem_ref])).rows[0];
+      if (narrow === 'restricted') assert.equal(created.restricted, true, 'restricted like the incident');
+      else assert.equal(created.classification, 'confidential', 'confidential like the incident');
+      assert.ok(created.description.includes(SECRET), 'positive control: the narrow problem carries the factor');
+      // (2) An existing, broader problem gets the link, not the words.
+      const open = (await pm.post('/api/problems', { title: `Shared problem ${narrow}` })).body.ref;
+      r = (await pm.post(`/api/incidents/${ref}/review/items`, { kind: 'factor', body: `${SECRET} (again)` })).body;
+      const second = r.items.find((x: any) => !x.problem_ref);
+      ok(await pm.post(`/api/incidents/${ref}/review/items/${second.id}/problem`, { problem: open }));
+      const dump = JSON.stringify((await ownerQuery("SELECT p.*, (SELECT json_agg(a) FROM problem_activity a WHERE a.problem_id = p.id) AS act FROM problems p WHERE p.ref = $1", [open])).rows[0]);
+      assert.equal(dump.includes(SECRET), false, `${narrow}: no factor text in the broader problem`);
+      assert.ok(dump.includes(`post-incident review of ${ref}`), 'but the reference is there');
+      // (3) A follow-up on that broader problem needs its own title, and its description carries no text.
+      r = (await pm.post(`/api/incidents/${ref}/review/items`, { kind: 'follow_up', body: `Rotate: ${SECRET}` })).body;
+      const fu = r.items.find((x: any) => x.kind === 'follow_up');
+      assert.equal((await pm.post(`/api/incidents/${ref}/review/items/${fu.id}/action`, { problem: open })).status, 400);
+      ok(await pm.post(`/api/incidents/${ref}/review/items/${fu.id}/action`, { problem: open, title: 'Rotate shared admin credentials' }));
+      const actions = JSON.stringify((await ownerQuery('SELECT a.* FROM problem_actions a JOIN problems p ON p.id = a.problem_id WHERE p.ref = $1', [open])).rows);
+      assert.equal(actions.includes(SECRET), false, `${narrow}: no follow-up text in the broader problem's action`);
+    }
+    // Positive control: an ordinary incident's review becomes an article, and its factor text goes into the problem.
+    const plain = (await pm.post('/api/incidents', { title: 'Printer queue stuck' })).body.ref;
+    ok(await pm.post(`/api/incidents/${plain}/review`, {}));
+    assert.equal((await pm.post(`/api/incidents/${plain}/review/article`, {})).status, 201);
+  });
+
+  test('working days follow the SLA calendar, holidays included', async () => {
+    const { addWorkingDays } = await import('../../src/reviews.js');
+    const cal = { always: false, hours: { 1: [[480, 1020]], 2: [[480, 1020]], 3: [[480, 1020]], 4: [[480, 1020]], 5: [[480, 1020]] } as Record<string, [number, number][]>, holidays: new Set(['2026-12-24', '2026-12-25', '2026-12-28']) };
+    // Wed 23 Dec 2026 + 5 working days: 24, 25 (holidays), 26-27 (weekend), 28 (holiday) → 29, 30, 31 Dec, 1 Jan, 4 Jan.
+    assert.equal(addWorkingDays(new Date('2026-12-23T10:00:00Z'), 5, cal), '2027-01-04');
+    assert.equal(addWorkingDays(new Date('2026-12-23T10:00:00Z'), 5), '2026-12-30', 'without a calendar: weekdays only');
+  });
+
   test('agents draft and contribute over MCP', async () => {
     const mcp = new McpClient({ name: 'reviews', version: '1' });
     await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));

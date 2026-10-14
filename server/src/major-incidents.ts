@@ -303,14 +303,14 @@ const STATUS_LABEL: Record<string, string> = { new: 'New', in_progress: 'In prog
  * The key moments only: declared, first response, communications, status changes, linked changes, events and
  * problems, related incidents, the workaround and resolution, and anything someone marked. Oldest first.
  */
-export async function timeline(user: User, ref: string) {
+export async function timeline(user: User, ref: string, options: { full?: boolean } = {}) {
   authorize(user, 'incident.read');
   const { rows: inc } = await query('SELECT id, ref, title, created_at, responded_at, is_major, major_declared_at FROM incidents WHERE ref = $1', [ref.toUpperCase()]);
   if (!inc[0]) throw notFound(`Incident ${ref} not found`);
   const i = inc[0];
   // A confidential incident's notes, updates and resolution stay masked for those who may not read them (#61), also in
   // the Markdown export, which the response masking cannot reach. Agents never read them.
-  const masked = (await maskedRefs(currentContext().channel === 'mcp' ? null : user, [i.ref])).has(i.ref);
+  const masked = !options.full && (await maskedRefs(currentContext().channel === 'mcp' ? null : user, [i.ref])).has(i.ref);
   const { rows } = await query(
     `SELECT a.id, a.kind, a.body, a.data, a.key_moment, a.created_at, u.display_name AS by
      FROM incident_activity a LEFT JOIN users u ON u.id = a.user_id

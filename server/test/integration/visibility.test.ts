@@ -7,7 +7,7 @@ import { randomBytes } from 'node:crypto';
 import { after, before, describe, test } from 'node:test';
 import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { skip, startKernel, type Client, type Harness } from './harness.js';
+import { ownerQuery, skip, startKernel, type Client, type Harness } from './harness.js';
 
 const MARKER = `LEAK-${randomBytes(4).toString('hex')}`;
 // Searches use the random part only, so a tool that echoes its input is not mistaken for a leak.
@@ -80,6 +80,15 @@ describe('visibility and restricted records (#53)', { skip }, () => {
 
   const leaks = (body: unknown) => JSON.stringify(body ?? '').includes(MARKER);
   const around = (body: unknown) => { const t = JSON.stringify(body ?? ''); const i = t.indexOf(MARKER); return t.slice(Math.max(0, i - 200), i + 40); };
+
+  test('every table attached to a problem, incident or change has row-level security, or is a reviewed exception', async () => {
+    const { rows } = await ownerQuery(
+      `SELECT DISTINCT c.table_name FROM information_schema.columns c JOIN pg_class t ON t.relname = c.table_name AND t.relkind = 'r'
+       WHERE c.table_schema = 'public' AND c.column_name IN ('incident_id', 'problem_id', 'change_id', 'review_id') AND NOT t.relrowsecurity ORDER BY 1`,
+    );
+    // Monitoring alerts are operational data shared by everyone on call; external records are references to other tools.
+    assert.deepEqual(rows.map((r: any) => r.table_name), ['alerts', 'external_records'], 'a new table that belongs to a record gets an RLS policy like 119_visibility.sql');
+  });
 
   test('the people on a restricted record see it; others get the same 404 as for a record that does not exist', async () => {
     for (const ref of Object.values(restricted)) {
