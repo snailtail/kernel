@@ -29,7 +29,7 @@ describe('confidential records (#61)', { skip }, () => {
     assert.equal((await analyst.put(`/api/records/${ref}/classification`, { classification: 'confidential' })).status, 400, 'a reason is required');
     ok(await analyst.put(`/api/records/${ref}/classification`, { classification: 'confidential', reason: 'Concerns a board member' }));
     const trail = await ownerQuery("SELECT changes FROM audit_log WHERE action = 'classification' AND entity_ref = $1", [ref]);
-    assert.deepEqual(trail.rows[0].changes, { classification: { from: 'normal', to: 'confidential' } });
+    assert.deepEqual(trail.rows[0].changes, { classification: { from: 'normal', to: 'confidential' }, retired_articles: [] });
   });
 
   test('the people on the record read it; others see the record, not its text', async () => {
@@ -68,6 +68,25 @@ describe('confidential records (#61)', { skip }, () => {
     assert.ok(md.includes('Mailbox incident follow-up'));
     assert.equal(md.includes(SECRET_TEXT), false);
     assert.match(md, /Confidential/);
+  });
+
+  test('masked text is not searchable: outsiders find a confidential record by its title only', async () => {
+    // Positive controls: the creator finds it by a word from the masked text; an outsider finds it by title.
+    assert.ok((await analyst.get('/api/search?q=forwarding')).body.some((h: any) => h.ref === ref), 'the creator finds it by its text');
+    assert.ok((await analyst2.get('/api/search?q=Mailbox')).body.some((h: any) => h.ref === ref), 'an outsider finds it by its title');
+    assert.equal((await analyst2.get('/api/search?q=forwarding')).body.some((h: any) => h.ref === ref), false, 'but not by a word only in the masked text');
+    assert.ok((await analyst.get('/api/problems/similar?text=forwarding rule compromised')).body.some((h: any) => h.ref === ref), 'similar problems: positive control');
+    assert.equal((await analyst2.get('/api/problems/similar?text=forwarding rule compromised')).body.some((h: any) => h.ref === ref), false);
+  });
+
+  test('a confidential record is not copied into a knowledge article', async () => {
+    const p = (await pm.post('/api/problems', { title: 'Known issue with VPN', description: 'secret detail', workaround: 'reconnect' })).body;
+    await ownerQuery("UPDATE problems SET status = 'known_error', known_error_at = now() WHERE ref = $1", [p.ref]);
+    const article = await pm.post(`/api/problems/${p.ref}/article`, {});
+    assert.equal(article.status, 201, 'positive control: a known error is published');
+    ok(await pm.put(`/api/records/${p.ref}/classification`, { classification: 'confidential', reason: 'Contains customer details' }));
+    assert.equal((await pm.get(`/api/articles/${article.body.ref}`)).body.status, 'retired', 'the synced article is retired');
+    assert.equal((await pm.post(`/api/problems/${p.ref}/article`, {})).status, 400, 'and not published again');
   });
 
   test('revealing takes step-up and a reason, lasts 15 minutes and is audited', async () => {

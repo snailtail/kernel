@@ -196,6 +196,7 @@ export async function publishKnownError(user: User, problemRef: string) {
     const p = rows[0];
     if (!p) throw notFound(`Problem ${problemRef} not found`);
     if (p.status !== 'known_error') throw badRequest('Only a known error (with its workaround) can be published as an article');
+    if (p.classification === 'confidential') throw badRequest(`${p.ref} is confidential, so its text is not published as an article. Write a separate article without the confidential details.`);
     const existing = await db.query('SELECT ref FROM articles WHERE problem_id = $1 AND synced_with_problem AND status <> $2', [p.id, 'retired']);
     if (existing.rows[0]) return existing.rows[0].ref as string;
     const ref = await nextRef(db);
@@ -217,10 +218,11 @@ export async function publishKnownError(user: User, problemRef: string) {
 /** "This resolution is reusable": a draft troubleshooting article from a resolved incident. */
 export async function draftFromIncident(user: User, incidentRef: string) {
   authorize(user, 'article.write');
-  const { rows } = await query('SELECT id, ref, title, description, resolution, restricted FROM incidents WHERE ref = $1', [incidentRef.toUpperCase()]);
+  const { rows } = await query('SELECT id, ref, title, description, resolution, restricted, classification FROM incidents WHERE ref = $1', [incidentRef.toUpperCase()]);
   const i = rows[0];
   if (!i) throw notFound(`Incident ${incidentRef} not found`);
   if (i.restricted) throw badRequest('A restricted incident cannot become a knowledge article: articles are read by everyone');
+  if (i.classification === 'confidential') throw badRequest('A confidential incident\'s text is not copied into an article: articles are read by everyone. Write a separate article without the confidential details.');
   if (!i.resolution?.trim()) throw badRequest('The incident has no resolution to reuse yet');
   const { rows: cis } = await query('SELECT c.ref FROM incident_cis x JOIN configuration_items c ON c.id = x.ci_id WHERE x.incident_id = $1', [i.id]);
   const body = [i.description && `## Symptoms\n\n${i.description}`, `## Resolution\n\n${i.resolution}`].filter(Boolean).join('\n\n');

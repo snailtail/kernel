@@ -8,6 +8,7 @@
 //   than 15 s: a revoked session or a disabled account closes the stream; changed teams refilter it.
 // - Presence ("who else has this open") lives in memory only, goes only to people who can see the record, and is
 //   off for anyone who opts out (preference live_presence = false).
+import { forgetExists } from './confidential.js';
 import { randomUUID } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
@@ -140,6 +141,8 @@ async function flush() {
 
 function onNotify(payload: string) {
   if (payload.length > 64) return;
+  // A record's classification changed somewhere (#61): no instance may keep assuming nothing is confidential.
+  if (payload.startsWith('classification:')) return forgetExists();
   // 'user:<id>' comes from team membership changes; everything else is 'kind:id'.
   pending.add(payload);
   flushTimer ??= setTimeout(() => void flush(), LIMITS.flushMs);
