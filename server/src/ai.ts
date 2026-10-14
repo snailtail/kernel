@@ -26,7 +26,7 @@ import { decryptSecret, encryptSecret } from './secrets.js';
 
 export const TASKS = { summarize: 'Summaries ("catch me up")', analyze_log: 'Log analysis' } as const;
 export type Task = keyof typeof TASKS;
-export const DATA_CLASSES = ['internal', 'personal', 'restricted'] as const;
+export const DATA_CLASSES = ['internal', 'personal', 'confidential', 'restricted'] as const;
 type DataClass = (typeof DATA_CLASSES)[number];
 
 interface Provider {
@@ -45,6 +45,8 @@ export interface InputPart {
   text: string;
   /** From a restricted record (or its attachment). */
   restricted?: boolean;
+  /** From a confidential record (#61). */
+  confidential?: boolean;
   /** Names people involved (callers, affected users, staff in a history). */
   personal?: boolean;
   ref?: string;
@@ -59,10 +61,14 @@ export function prepareForModel(task: Task, provider: Provider, instructions: st
   const classes = new Set<DataClass>(['internal']);
   for (const p of parts) {
     if (p.restricted) classes.add('restricted');
+    if (p.confidential) classes.add('confidential');
     if (p.personal) classes.add('personal');
   }
   if (classes.has('restricted') && !(provider.location === 'on_prem' && provider.data_classes.includes('restricted'))) {
     throw forbidden(`This includes a restricted record. ${provider.name} may not receive restricted data (only a model in your own environment that is allowed to can).`);
+  }
+  if (classes.has('confidential') && !provider.data_classes.includes('confidential')) {
+    throw forbidden(`This record is confidential. ${provider.name} is not allowed confidential data; an administrator can allow it for a provider.`);
   }
   if (classes.has('personal') && !provider.data_classes.includes('personal')) {
     throw forbidden(`This includes names of people. ${provider.name} may not receive personal data.`);
@@ -184,9 +190,9 @@ export async function summarize(user: User, ref: string) {
     .filter((k) => record[k] !== undefined && record[k] !== null && String(record[k]).trim())
     .map((k) => `${k}: ${record[k]}`).join('\n');
   const input = prepareForModel('summarize', provider, `You help an IT service management team. Summarise ${t.type} ${record.ref} for someone taking over: current state, what has happened (short timeline), and the next sensible steps.`, [
-    { label: `${t.type} ${record.ref}`, text: fields, restricted: !!record.restricted, ref: record.ref },
+    { label: `${t.type} ${record.ref}`, text: fields, restricted: !!record.restricted, confidential: record.classification === 'confidential', ref: record.ref },
     // The history without who did what; callers, affected people and contact details are never included.
-    { label: 'history', text: history, restricted: !!record.restricted, ref: record.ref },
+    { label: 'history', text: history, restricted: !!record.restricted, confidential: record.classification === 'confidential', ref: record.ref },
   ]);
   return callModel(user, provider, model, input);
 }
@@ -218,12 +224,12 @@ export async function analyzeLog(user: User, attachmentId: number) {
   const policy = await aiDataPolicy();
   const page = await getAttachmentText(user, attachmentId, 0, 20_000); // the record's visibility applies
   if (remainingFlags(page.flags).length && !policy.flagged_text) throw forbidden(`${page.filename} may contain sensitive data (${remainingFlags(page.flags).join(', ')}); it is not sent to AI models on this installation.`);
-  const { rows } = await query('SELECT a.record_ref, coalesce(p.restricted, i.restricted, c.restricted, false) AS restricted FROM attachments a LEFT JOIN problems p ON p.ref = a.record_ref LEFT JOIN incidents i ON i.ref = a.record_ref LEFT JOIN changes c ON c.ref = a.record_ref WHERE a.id = $1', [attachmentId]);
+  const { rows } = await query("SELECT a.record_ref, coalesce(p.restricted, i.restricted, c.restricted, false) AS restricted, coalesce(p.classification, i.classification, c.classification) = 'confidential' AS confidential FROM attachments a LEFT JOIN problems p ON p.ref = a.record_ref LEFT JOIN incidents i ON i.ref = a.record_ref LEFT JOIN changes c ON c.ref = a.record_ref WHERE a.id = $1", [attachmentId]);
   if (!rows[0]) throw notFound('Attachment not found');
   const { provider, model } = await route('analyze_log');
   const f = prefilterLog(page.lines);
   const input = prepareForModel('analyze_log', provider, 'You analyse a log for an IT operations team. Give: the main error signatures (with line numbers), a short timeline, the affected components, and the most probable cause with your confidence. Quote line numbers so people can check.', [
-    { label: `log ${page.filename} (${f.kept} of ${f.total} lines kept; repeated lines collapsed)`, text: `${f.text}${f.repeated.length ? `\n\nMost repeated:\n${f.repeated.join('\n')}` : ''}`, restricted: rows[0].restricted, ref: rows[0].record_ref },
+    { label: `log ${page.filename} (${f.kept} of ${f.total} lines kept; repeated lines collapsed)`, text: `${f.text}${f.repeated.length ? `\n\nMost repeated:\n${f.repeated.join('\n')}` : ''}`, restricted: rows[0].restricted, confidential: !!rows[0].confidential, ref: rows[0].record_ref },
   ]);
   return { ...(await callModel(user, provider, model, input, 1500)), lines_sent: f.kept, lines_total: f.total };
 }

@@ -4,6 +4,8 @@
 // and re-encoded (metadata such as GPS dropped), so the browser never receives the uploaded bytes. Text is stored as
 // text and never rendered as HTML: SVG and HTML files are text here. Access follows the record: whoever may see the
 // record may see its attachments, and whoever may work on it may attach.
+import { maskedRefs } from './confidential.js';
+import { currentContext } from './context.js';
 import { markPersonalData, redact, remainingFlags, scan, sensitivePolicy } from './sensitive.js';
 import { createHash } from 'node:crypto';
 import sharp from 'sharp';
@@ -176,6 +178,9 @@ async function loadAttachment(user: User, id: number) {
   const a = rows[0];
   if (!a) throw notFound('Attachment not found');
   await loadRecord(pool, user, a.record_ref); // the record's read access decides
+  // A confidential record's attachments are part of its text (#61): its people, a reveal – and never agents.
+  const agent = currentContext().channel === 'mcp';
+  if ((await maskedRefs(agent ? null : user, [a.record_ref])).has(a.record_ref)) throw forbidden(`${a.record_ref} is confidential. ${agent ? 'Its attachments are not available to agents.' : 'Reveal its text to open its attachments.'}`);
   return a;
 }
 

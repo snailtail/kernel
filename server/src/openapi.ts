@@ -160,6 +160,8 @@ export const OPERATIONS: Op[] = [
   { method: 'get', path: '/api/live', tag: 'Authentication', summary: 'Live updates for the web UI (Server-Sent Events; session cookie only): change notices and presence' },
   { method: 'put', path: '/api/live/:id', tag: 'Authentication', summary: 'Choose what a live stream follows (record and list topics) and what you are editing' },
   { method: 'post', path: '/api/records/:ref/redact', tag: 'Records', summary: 'Remove secrets or a given text from a record and its history (managers; step-up and a reason; audited without the text)' },
+  { method: 'put', path: '/api/records/:ref/classification', tag: 'Records', summary: 'Mark a record confidential (free text masked except for its people) or normal again; a reason is required' },
+  { method: 'post', path: '/api/records/:ref/reveal', tag: 'Records', summary: 'Show a confidential record\'s text to yourself for 15 minutes (step-up and a reason; audited)' },
   { method: 'post', path: '/api/sensitive/check', tag: 'Records', summary: 'What the sensitive-data scanner finds in a text (kinds only; nothing stored)' },
   { method: 'get', path: '/api/admin/sensitive-data', tag: 'Administration', summary: 'Sensitive-data policy: redact or refuse secrets, flag personal data' },
   { method: 'put', path: '/api/admin/sensitive-data', tag: 'Administration', summary: 'Change the sensitive-data policy (step-up and a reason)' },
