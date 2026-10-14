@@ -1,9 +1,10 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
+import { Sidebar } from './components/Sidebar';
 import { CommandPalette, ShortcutHelp, useShortcuts } from './components/CommandPalette';
 import { MyWorkPage } from './pages/MyWork';
-import { NotificationBell, NotificationsPage } from './components/Notifications';
+import { NotificationsPage } from './components/Notifications';
 import { IncidentPage, IncidentsPage } from './pages/Incidents';
-import { Navigate, NavLink, Route, Routes } from 'react-router';
+import { Navigate, Route, Routes } from 'react-router';
 import { api, type Meta, type Preferences, type User } from './api';
 import { icons } from './components/Icons';
 import { ROLE_LABEL } from './format';
@@ -17,7 +18,7 @@ import { AskHost } from './components/Ask';
 import { NewProblemPage } from './pages/NewProblem';
 import { ProblemPage } from './pages/Problem';
 import { ProblemsPage } from './pages/Problems';
-import { SessionContext, canEdit, isManager } from './session';
+import { SessionContext } from './session';
 import { SensitiveWatch } from './components/SensitiveWatch';
 
 // Pages people open less often load on demand, so the start page stays small.
@@ -103,8 +104,6 @@ export function App() {
     );
   }
 
-  /** Switched-off modules disappear from the navigation (#36). */
-  const on = (m: keyof Meta['modules']) => meta?.modules?.[m] !== false;
   return (
     <SessionContext.Provider value={{ user, meta, reloadMeta, logout, setPreferences }}>
       <ReauthPrompt />
@@ -113,50 +112,7 @@ export function App() {
       {overlay === 'palette' && <CommandPalette onClose={() => setOverlay(null)} />}
       {overlay === 'help' && <ShortcutHelp onClose={() => setOverlay(null)} />}
       <div className="shell">
-        <aside className="sidebar">
-          <div className="brand">
-            <img src="/favicon.svg" alt="" width={28} height={28} />
-            <div>
-              <div className="brand-name">Kernel</div>
-              <div className="brand-sub">Problem Management</div>
-            </div>
-          </div>
-          <button className="search-trigger" onClick={() => setOverlay('palette')}>
-            {icons.search}<span>Search</span><kbd>Ctrl K</kbd>
-          </button>
-          <nav>
-            <NavLink to="/" end>{icons.actions}My work</NavLink>
-            <NavLink to="/dashboard">{icons.dashboard}Dashboard</NavLink>
-            {on('event') && <NavLink to="/events">{icons.events}Events</NavLink>}
-            {on('incident') && <NavLink to="/incidents">{icons.incidents}Incidents</NavLink>}
-            {on('change') && <NavLink to="/changes">{icons.changes}Changes</NavLink>}
-            <NavLink to="/problems" end>{icons.problems}Problems</NavLink>
-            <NavLink to="/candidates">{icons.candidates}Candidates</NavLink>
-            <NavLink to="/kedb">{icons.kedb}Known Errors</NavLink>
-            {on('knowledge') && <NavLink to="/knowledge">{icons.knowledge}Knowledge</NavLink>}
-            <NavLink to="/actions">{icons.actions}Actions</NavLink>
-            {on('cmdb') && <NavLink to="/cis">{icons.cmdb}CMDB</NavLink>}
-            {on('cmdb') && <NavLink to="/service-status">{icons.status}Service status</NavLink>}
-            {on('incident') && <NavLink to="/teams">{icons.teams}Teams</NavLink>}
-            {on('incident') && <NavLink to="/people">{icons.people}People</NavLink>}
-            <NavLink to="/review">{icons.review}Review</NavLink>
-            <NavLink to="/reports">{icons.reports}Reports</NavLink>
-            {canEdit(user) && <NavLink to="/problems/new" className="nav-cta">{icons.plus}Log problem</NavLink>}
-            {isManager(user) && <NavLink to="/admin">{icons.admin}Administration</NavLink>}
-          </nav>
-          <div className="sidebar-foot">
-            <NotificationBell />
-            <NavLink to="/guide" className="help-link">{icons.help}How it works</NavLink>
-            <NavLink to="/settings" className="user-chip">
-              <span className="avatar">{user.display_name.slice(0, 1).toUpperCase()}</span>
-              <span>
-                <span className="user-name">{user.display_name}</span>
-                <span className="user-role">{ROLE_LABEL[user.role]}</span>
-              </span>
-            </NavLink>
-            <button className="btn-link signout" onClick={logout}>{icons.signout}Sign out</button>
-          </div>
-        </aside>
+        <Sidebar onSearch={() => setOverlay('palette')} />
         <main className="main">
           <SensitiveWatch />
           <Suspense fallback={<p className="muted">Loading…</p>}>

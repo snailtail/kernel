@@ -14,7 +14,7 @@ import { Term } from '../components/Glossary';
 import { formatDate, relativeTime } from '../format';
 import { useLive } from '../live';
 import { Presence } from '../components/Presence';
-import { useApi } from '../hooks';
+import { useApi, useOpenOnNew } from '../hooks';
 import { useSession } from '../session';
 
 type Status = 'draft' | 'assess' | 'authorize' | 'scheduled' | 'implementing' | 'review' | 'closed' | 'rejected' | 'cancelled';
@@ -47,6 +47,7 @@ export function ChangesPage() {
   const tab = params.get('tab') ?? 'list';
   const set = (k: string, v: string) => setParams((prev) => { const n = new URLSearchParams(prev); if (v) n.set(k, v); else n.delete(k); return n; }, { replace: true });
   const [creating, setCreating] = useState(false);
+  useOpenOnNew(() => setCreating(true));
   const navigate = useNavigate();
   const manager = user.role === 'admin' || user.role === 'problem_manager';
   return (

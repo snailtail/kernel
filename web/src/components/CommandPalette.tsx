@@ -3,29 +3,11 @@ import { useNavigate } from 'react-router';
 import { api } from '../api';
 import { useSession } from '../session';
 import { Modal } from './Modal';
+import { FOOTER, HOME, NAV, PALETTE_ONLY, SHORTCUTS as GO_KEYS, visible } from '../nav';
 
 interface Hit { type: string; ref: string; title: string; status: string; url: string; summary?: string }
 interface Item { id: string; label: string; hint?: string; go: () => void }
 
-const PAGES: [string, string, string, string?][] = [
-  ['My work', '/', 'g m'],
-  ['Dashboard', '/dashboard', 'g d'],
-  ['Events', '/events', 'g e', 'event'],
-  ['Incidents', '/incidents', 'g t', 'incident'],
-  ['Changes', '/changes', 'g h', 'change'],
-  ['Change schedule', '/changes?tab=schedule', '', 'change'],
-  ['Service catalogue', '/services', '', 'sla'],
-  ['Service levels (SLAs)', '/services?tab=slas', '', 'sla'],
-  ['Problems', '/problems', 'g p'],
-  ['Candidates', '/candidates', 'g c'],
-  ['Known errors', '/kedb', 'g k'],
-  ['Actions', '/actions', 'g a'],
-  ['Configuration items', '/cis', 'g i', 'cmdb'],
-  ['Review', '/review', 'g v'],
-  ['Reports', '/reports', 'g r'],
-  ['Settings', '/settings', 'g s'],
-  ['How problem management works', '/guide', ''],
-];
 
 /** Ctrl+K / "/": jump to a record by ref, search everything, or go anywhere. */
 export function CommandPalette({ onClose }: { onClose: () => void }) {
@@ -51,7 +33,8 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     const needle = q.trim().toLowerCase();
     const commands: Item[] = [
       ...(user.role !== 'viewer' ? [{ id: 'new', label: 'Log a problem', hint: 'n', go: go('/problems/new') }] : []),
-      ...PAGES.filter(([, , , mod]) => !mod || meta.modules?.[mod as 'incident'] !== false).map(([label, path, key]) => ({ id: path, label: `Go to ${label}`, hint: key, go: go(path) })),
+      // Every destination comes from nav.ts, like the menu and the shortcuts (#102).
+      ...[HOME, ...NAV.flatMap((g) => g.items), ...FOOTER, ...PALETTE_ONLY].filter((i) => visible(i, user, meta)).map((i) => ({ id: i.to, label: `Go to ${i.label}`, hint: i.key ? `g ${i.key}` : undefined, go: go(i.to) })),
     ];
     out.push(...commands.filter((c) => !needle || c.label.toLowerCase().includes(needle)));
     return out;
@@ -84,11 +67,12 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   );
 }
 
+// The g-shortcuts come from nav.ts, so the help can never list one that does not exist (#102).
+const LABELS = Object.fromEntries([HOME, ...NAV.flatMap((g) => g.items), ...FOOTER, ...PALETTE_ONLY].map((i) => [i.to, i.label]));
 const SHORTCUTS: [string, string][] = [
   ['Ctrl+K or /', 'Search and go to…'],
   ['n', 'Log a problem'],
-  ['g m', 'My work'], ['g d', 'Dashboard'], ['g e', 'Events'], ['g t', 'Incidents'], ['g h', 'Changes'], ['g p', 'Problems'], ['g c', 'Candidates'], ['g k', 'Known errors'],
-  ['g a', 'Actions'], ['g i', 'CMDB'], ['g v', 'Review'], ['g r', 'Reports'], ['g s', 'Settings'],
+  ...Object.entries(GO_KEYS).map(([k, to]) => [`g ${k}`, LABELS[to]] as [string, string]),
   ['?', 'This help'],
 ];
 
@@ -102,7 +86,7 @@ export function ShortcutHelp({ onClose }: { onClose: () => void }) {
   );
 }
 
-const GOTO: Record<string, string> = { m: '/', d: '/dashboard', p: '/problems', t: '/incidents', h: '/changes', e: '/events', c: '/candidates', k: '/kedb', a: '/actions', i: '/cis', v: '/review', r: '/reports', s: '/settings' };
+const GOTO = GO_KEYS;
 
 /** Global keyboard shortcuts; ignored while typing in a field. */
 export function useShortcuts(open: (what: 'palette' | 'help') => void) {

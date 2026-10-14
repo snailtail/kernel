@@ -162,6 +162,7 @@ export const OPERATIONS: Op[] = [
   { method: 'post', path: '/api/sensitive/check', tag: 'Records', summary: 'What the sensitive-data scanner finds in a text (kinds only; nothing stored)' },
   { method: 'get', path: '/api/admin/sensitive-data', tag: 'Administration', summary: 'Sensitive-data policy: redact or refuse secrets, flag personal data' },
   { method: 'put', path: '/api/admin/sensitive-data', tag: 'Administration', summary: 'Change the sensitive-data policy (step-up and a reason)' },
+  { method: 'get', path: '/api/nav/counts', tag: 'Records', summary: 'Counts for the menu badges: my open work, open alerts without an incident, my teams\' unassigned incidents, known errors awaiting a decision, overdue actions' },
   { method: 'get', path: '/api/auth/options', tag: 'Authentication', summary: 'Sign-in options for the login page (SSO, Cloudflare Access, local)' },
   { method: 'get', path: '/api/auth/sso/start', tag: 'Authentication', summary: 'Start OpenID Connect sign-in (authorization code with PKCE)' },
   { method: 'get', path: '/api/auth/sso/callback', tag: 'Authentication', summary: 'OpenID Connect redirect URI' },

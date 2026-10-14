@@ -33,6 +33,7 @@ export interface Preferences {
   saved_views?: { name: string; page: 'problems' | 'actions'; query: string }[];
   /** Show others when I have a record open (#70); on unless turned off. */
   live_presence?: boolean;
+  nav_collapsed?: string[];
 }
 
 declare module 'fastify' {

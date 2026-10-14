@@ -180,6 +180,7 @@ export async function problemRoutes(app: FastifyInstance) {
   app.get('/api/flow', async (req) => flow.processMap(requireUser(req, 'meta.read')));
   app.get('/api/health-tips', async (req) => flow.healthTips(requireUser(req, 'meta.read')));
   app.get('/api/my-work', async (req) => generic.myWork(requireUser(req, 'problem.read')));
+  app.get('/api/nav/counts', async (req) => generic.navCounts(requireUser(req, 'meta.read')));
 
   app.get('/api/guides', async (req) => {
     requireUser(req, 'meta.read');
