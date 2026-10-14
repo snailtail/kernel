@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { requireUser } from '../auth.js';
 import * as inc from '../incidents.js';
+import * as major from '../major-incidents.js';
 
 type RefParams = { Params: { ref: string } };
 
@@ -29,6 +30,23 @@ export async function incidentRoutes(app: FastifyInstance) {
     reply.code(201);
     return created;
   });
+  // Major incidents (#108): declare, the team and cadence, updates, related incidents and the timeline.
+  app.post<RefParams>('/api/incidents/:ref/major', async (req) => major.declareMajor(requireUser(req), req.params.ref, major.declareMajorSchema.parse(req.body ?? {})));
+  app.patch<RefParams>('/api/incidents/:ref/major', async (req) => major.setMajorRoles(requireUser(req), req.params.ref, major.majorRolesSchema.parse(req.body ?? {})));
+  app.post<RefParams>('/api/incidents/:ref/communications', { config: { idempotent: 'incident.update' } }, async (req) =>
+    major.postCommunication(requireUser(req), req.params.ref, major.communicationSchema.parse(req.body)),
+  );
+  app.post<RefParams>('/api/incidents/:ref/children', async (req) => major.linkChild(requireUser(req), req.params.ref, major.childSchema.parse(req.body)));
+  app.delete<{ Params: { ref: string; child: string } }>('/api/incidents/:ref/children/:child', async (req) => major.unlinkChild(requireUser(req), req.params.ref, req.params.child));
+  app.get<RefParams & { Querystring: { format?: string } }>('/api/incidents/:ref/timeline', async (req, reply) => {
+    const t = await major.timeline(requireUser(req), req.params.ref);
+    if (req.query.format !== 'md') return t;
+    reply.header('Content-Type', 'text/markdown; charset=utf-8').header('Content-Disposition', `attachment; filename="${t.ref}-timeline.md"`);
+    return major.timelineMarkdown(t);
+  });
+  app.put<{ Params: { ref: string; id: string } }>('/api/incidents/:ref/activity/:id/key-moment', async (req) =>
+    major.setKeyMoment(requireUser(req), req.params.ref, Number(req.params.id), major.keyMomentSchema.parse(req.body).key_moment),
+  );
   app.post<RefParams>('/api/problems/:ref/resolve-incidents', async (req) =>
     inc.resolveLinkedIncidents(requireUser(req), req.params.ref, inc.resolveLinkedSchema.parse(req.body)),
   );

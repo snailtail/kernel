@@ -11,7 +11,8 @@ import { useSession } from '../session';
 
 interface MyWork {
   problems: { ref: string; title: string; status: Status; priority: number; updated_at: string; url: string }[];
-  incidents: { ref: string; title: string; status: string; priority: number; is_major: boolean; created_at: string }[];
+  incidents: { ref: string; title: string; status: string; priority: number; is_major: boolean; created_at: string; update_overdue?: boolean }[];
+  major_updates?: { ref: string; title: string; priority: number; next_update_at: string | null; update_overdue: boolean; role: string }[];
   teams?: { id: number; name: string; role: string; unassigned: number }[];
   team_queue?: { ref: string; title: string; status: string; priority: number; is_major: boolean; created_at: string; team: string }[];
   change_votes: { ref: string; title: string; change_type: string; planned_start: string | null }[];
@@ -32,7 +33,7 @@ export function MyWorkPage() {
     await api.post<ProblemDetail>(`/api/approvals/${id}/${approve ? 'approve' : 'reject'}`, {});
     reload();
   };
-  const nothing = !data.problems.length && !data.incidents.length && !data.team_queue?.length && !data.change_votes.length && !data.changes.length && !data.actions.length && !data.decisions.length && !data.approvals.length;
+  const nothing = !data.major_updates?.length && !data.problems.length && !data.incidents.length && !data.team_queue?.length && !data.change_votes.length && !data.changes.length && !data.actions.length && !data.decisions.length && !data.approvals.length;
   return (
     <>
       <header className="page-head">
@@ -107,6 +108,20 @@ export function MyWorkPage() {
         </section>
       )}
 
+      {!!data.major_updates?.length && (
+        <section className="card">
+          <h2>Stakeholder updates <span className="count">{data.major_updates.length}</span></h2>
+          <ul className="work-list">
+            {data.major_updates.map((m) => (
+              <li key={m.ref}>
+                <div><Link to={`/incidents/${m.ref}`} className="mono">{m.ref}</Link> <Link to={`/incidents/${m.ref}`} className="work-title">{m.title}</Link> <span className="muted small">you are the {m.role}</span></div>
+                <span className="work-meta">{m.update_overdue ? <span className="badge overdue">Update overdue</span> : m.next_update_at && <span className="muted small">next update {relativeTime(m.next_update_at)}</span>}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {data.incidents.length > 0 && (
         <section className="card">
           <h2>My incidents <span className="count">{data.incidents.length}</span></h2>
@@ -114,7 +129,7 @@ export function MyWorkPage() {
             {data.incidents.map((i) => (
               <li key={i.ref}>
                 <div><Link to={`/incidents/${i.ref}`} className="mono">{i.ref}</Link> <Link to={`/incidents/${i.ref}`} className="work-title">{i.title}</Link></div>
-                <span className="work-meta">{i.is_major && <span className="badge major">Major</span>}<PriorityBadge priority={i.priority} /><span className="muted small">{i.status.replace('_', ' ')}</span></span>
+                <span className="work-meta">{i.update_overdue && <span className="badge overdue">Update overdue</span>}{i.is_major && <span className="badge major">Major</span>}<PriorityBadge priority={i.priority} /><span className="muted small">{i.status.replace('_', ' ')}</span></span>
               </li>
             ))}
           </ul>

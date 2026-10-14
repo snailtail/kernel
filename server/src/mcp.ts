@@ -18,6 +18,7 @@ import * as graph from './cmdb-graph.js';
 import * as connectors from './connectors.js';
 import * as problemCis from './problem-cis.js';
 import * as incidents from './incidents.js';
+import * as major from './major-incidents.js';
 import * as events from './events.js';
 import * as changes from './changes.js';
 import * as sla from './sla.js';
@@ -144,6 +145,7 @@ function buildServer(user: User, scopes?: string[]) {
     list_slas: 'meta.read', get_service_catalogue: 'ci.read', get_my_notifications: 'meta.read',
     list_incidents: 'incident.read', get_incident: 'incident.read', create_incident: 'incident.create', update_incident: 'incident.update',
     transition_incident: 'incident.update', resolve_incident: 'incident.update', link_incident_to_problem: 'incident.update',
+    declare_major: 'incident.flag_major', set_major_roles: 'incident.update', post_communication: 'incident.update', link_child_incident: 'incident.update', get_incident_timeline: 'incident.read', mark_key_moment: 'incident.update',
     create_problem_from_incident: 'problem.create', link_ci_to_incident: 'incident.update',
     list_changes: 'change.read', get_change: 'change.read', create_change: 'change.create', update_change: 'change.update',
     transition_change: 'change.update', get_change_schedule: 'change.read', raise_change_for_problem: 'change.create',
@@ -443,6 +445,11 @@ function buildServer(user: User, scopes?: string[]) {
     possible_change_causes: (i.possible_change_causes ?? []).map((c: any) => ({ ref: c.ref, ci: c.ci, started_at: c.started_at, outcome: c.outcome })),
     links: i.links.map((l: any) => ({ kind: l.kind, reference: l.reference, system: l.system, url: l.url })),
     alerts: (i.alerts ?? []).map((a: any) => ({ id: a.id, source: a.source, severity: a.severity, status: a.status, count: a.count, flap_count: a.flap_count, ci: a.ci_ref, last_seen: a.last_seen })),
+    major: i.major ? { declared_at: i.major.declared_at, lead: i.major.lead, comms_lead: i.major.comms, update_minutes: i.major.update_minutes, next_update_at: i.major.next_update_at, update_overdue: i.major.update_overdue, last_update_at: i.major.last_update?.created_at ?? null, review_owner: i.major.pir_owner, review_due: i.major.pir_due } : null,
+    related_incidents: (i.children ?? []).map((c: any) => ({ ref: c.ref, status: c.status, priority: c.priority, resolve_with_parent: c.resolve_with_parent })),
+    parent: i.parent ? { ref: i.parent.ref, status: i.parent.status } : null,
+    suggested_parent: i.suggested_parent?.ref ?? null,
+    status_proposal: i.status_proposal ? { services: i.status_proposal.services, status: i.status_proposal.status, phase: i.status_proposal.phase } : null,
     next_steps: i.next_steps,
     untrusted_content: {
       title: i.title,
@@ -453,6 +460,10 @@ function buildServer(user: User, scopes?: string[]) {
       ci_names: Object.fromEntries([...i.affected_cis, ...i.affected_services].map((c: any) => [c.ref, c.name])),
       known_error_workarounds: i.known_errors.map((k: any) => ({ ref: k.ref, title: k.title, workaround: k.workaround })),
       alert_texts: (i.alerts ?? []).map((a: any) => ({ id: a.id, check: a.check_key, host: a.ci_hint, message: a.message })),
+      bridge: i.major?.bridge || undefined,
+      last_update: i.major?.last_update?.body,
+      related_titles: Object.fromEntries([...(i.children ?? []), ...(i.parent ? [i.parent] : []), ...(i.suggested_parent ? [i.suggested_parent] : [])].map((c: any) => [c.ref, c.title])),
+      status_proposal_message: i.status_proposal?.message,
       notes: i.activity.filter((a: any) => a.kind === 'comment' || a.kind === 'communication').slice(0, 20).map((a: any) => ({ at: a.created_at, by: a.user_name, kind: a.kind, via: a.channel, note: a.body })),
     },
   });
@@ -463,7 +474,8 @@ function buildServer(user: User, scopes?: string[]) {
     true,
     async (args) =>
       (await incidents.listIncidents(user, incidents.listIncidentsSchema.parse({ ...args, limit: args.limit ?? 50 }))).map((i) => ({
-        ref: i.ref, status: i.status, priority: i.priority, is_major: i.is_major, assignee: i.assignee, problem: i.problem_ref, created_at: i.created_at, sla_state: i.sla_state, resolution_due_at: i.resolution_due_at, url: i.url, title_untrusted: i.title,
+        ref: i.ref, status: i.status, priority: i.priority, is_major: i.is_major, assignee: i.assignee, problem: i.problem_ref, created_at: i.created_at, sla_state: i.sla_state, resolution_due_at: i.resolution_due_at,
+        ...(i.is_major ? { next_update_at: i.next_update_at, update_overdue: i.update_overdue } : {}), ...(i.parent_ref ? { parent: i.parent_ref } : {}), ...(i.child_count ? { related_incidents: i.child_count } : {}), url: i.url, title_untrusted: i.title,
       })),
   );
   tool('get_incident', `Get an incident: status, priority, affected CIs and services, known errors with workarounds on those CIs, links and next steps. ${incidentNotice}`, { ref: z.string() }, true, async ({ ref }) =>
@@ -489,11 +501,52 @@ function buildServer(user: User, scopes?: string[]) {
   );
   tool(
     'resolve_incident',
-    'Resolve an incident: how service was restored and a resolution code (fixed, workaround, problem_fixed, no_fault_found, duplicate, cancelled).',
-    { ref: z.string(), resolution_code: z.enum(incidents.RESOLUTION_CODES), resolution: z.string() },
+    'Resolve an incident: how service was restored and a resolution code (fixed, workaround, problem_fixed, no_fault_found, duplicate, cancelled). Related incidents that resolve with it get the same resolution. For a major incident, name the post-incident review owner (username) and due date.',
+    { ref: z.string(), resolution_code: z.enum(incidents.RESOLUTION_CODES), resolution: z.string(), review_owner: z.string().optional(), review_due: z.string().optional().describe('YYYY-MM-DD') },
     false,
-    async ({ ref, ...args }) => incidentForAgent(await incidents.transitionIncident(user, ref, { to: 'resolved', ...args })),
+    async ({ ref, review_owner, review_due, ...args }) =>
+      incidentForAgent(await incidents.transitionIncident(user, ref, incidents.transitionIncidentSchema.parse({ to: 'resolved', ...args, pir_owner_id: await resolveAssignee(review_owner), pir_due: review_due }))),
   );
+  // ---- Major incidents (#108) ----
+  tool(
+    'declare_major',
+    'Declare a major incident (problem managers): sets the incident lead (username, default you), an optional communications lead, the bridge (meeting link or phone) and the minutes between stakeholder updates (default by priority).',
+    { ref: z.string(), lead: z.string().optional(), comms_lead: z.string().optional(), bridge: z.string().optional(), update_minutes: z.number().int().min(5).max(1440).optional() },
+    false,
+    async ({ ref, lead, comms_lead, ...args }) =>
+      incidentForAgent(await major.declareMajor(user, ref, major.declareMajorSchema.parse({ ...args, lead_id: await resolveAssignee(lead), comms_id: await resolveAssignee(comms_lead) }))),
+  );
+  tool(
+    'set_major_roles',
+    'Change the major incident team (the lead or a manager): lead, comms_lead (empty to remove), bridge, update_minutes. A shorter cadence counts from the last update.',
+    { ref: z.string(), lead: z.string().optional(), comms_lead: z.string().optional(), bridge: z.string().optional(), update_minutes: z.number().int().min(5).max(1440).optional() },
+    false,
+    async ({ ref, lead, comms_lead, ...args }) =>
+      incidentForAgent(await major.setMajorRoles(user, ref, major.majorRolesSchema.parse({ ...args, lead_id: (await resolveAssignee(lead)) ?? undefined, comms_id: await resolveAssignee(comms_lead) }))),
+  );
+  tool(
+    'post_communication',
+    'Post a stakeholder update on a major incident: what is affected, what is being done, when the next update comes. Restarts the update countdown. Draft it for a person to confirm.',
+    { ref: z.string(), body: z.string() },
+    false,
+    async ({ ref, body }) => incidentForAgent(await major.postCommunication(user, ref, { body })),
+  );
+  tool(
+    'link_child_incident',
+    'Relate an incident (the same outage reported again) to a major incident: it is resolved together with it unless resolve_with_parent is false. unlink: true removes the relation.',
+    { ref: z.string().describe('The major (parent) incident'), child: z.string(), resolve_with_parent: z.boolean().optional(), unlink: z.boolean().optional() },
+    false,
+    async ({ ref, child, resolve_with_parent, unlink }) =>
+      incidentForAgent(unlink ? await major.unlinkChild(user, ref, child) : await major.linkChild(user, ref, major.childSchema.parse({ child, resolve_with_parent }))),
+  );
+  tool('get_incident_timeline', 'The key moments of an incident, oldest first: declared, first response, updates, status changes, linked changes and events, related incidents and marked entries. The start of a post-incident review.', { ref: z.string() }, true, async ({ ref }) => {
+    const t = await major.timeline(user, ref);
+    return { ref: t.ref, is_major: t.is_major, declared_at: t.declared_at, entries: t.entries.map((e) => ({ activity_id: e.activity_id || undefined, at: e.at, kind: e.kind, key_moment: e.key_moment, by: e.by, label_untrusted: e.label, body_untrusted: e.body || undefined })) };
+  });
+  tool('mark_key_moment', 'Mark (or unmark) an activity entry as a key moment, so it appears on the timeline.', { ref: z.string(), activity_id: z.number().int(), key_moment: z.boolean().optional() }, false, async ({ ref, activity_id, key_moment }) => {
+    const t = await major.setKeyMoment(user, ref, activity_id, key_moment ?? true);
+    return { ref: t.ref, entries: t.entries.length };
+  });
   tool('link_incident_to_problem', 'Link an incident to a problem (problem empty to unlink). Its CIs become affected CIs of the problem.', { ref: z.string(), problem: z.string() }, false, async ({ ref, problem }) =>
     incidentForAgent(await incidents.linkIncidentToProblem(user, ref, problem || null)),
   );
@@ -1238,6 +1291,23 @@ ${RULES}` } }],
 Do only what I confirm.
 
 Method guide: kernel://guides/incident_triage
+${RULES}` } }],
+    }),
+  );
+
+  if (moduleEnabled('incident')) server.registerPrompt(
+    'lead_major_incident',
+    { title: 'Lead a major incident', description: 'Support the incident lead: team and bridge, stakeholder updates on time, related incidents, the status page and standing down.', argsSchema: { ref: z.string().describe('Incident reference, e.g. INC000012') } },
+    ({ ref }) => ({
+      messages: [{ role: 'user', content: { type: 'text', text: `Help me lead major incident ${ref.toUpperCase()} in Kernel.
+1. Read it with get_incident. If it is not declared yet, propose declare_major with a lead, a communications lead and the bridge.
+2. Check major.next_update_at. If an update is due or overdue, draft a stakeholder update: what is affected (affected_services), what we know and are doing, any workaround, and when the next update comes. Plain language for people outside IT; no internal names, hostnames or credentials. Post it with post_communication only after I confirm.
+3. If status_proposal is set, propose the status page update (services, status and message) for me to post on the status board; nothing goes public without me.
+4. Look for the same outage reported again (list_incidents on the same CIs or services, suggested_parent on new incidents) and propose link_child_incident for each.
+5. Propose key moments for the timeline (mark_key_moment) when something important happens: cause found, workaround applied, change backed out.
+6. When service is restored, propose resolve_incident with the resolution, a post-incident review owner and date, and create_problem_from_incident if there is no problem yet.
+Do only what I confirm.
+
 ${RULES}` } }],
     }),
   );
