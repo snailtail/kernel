@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { insertAction } from './actions.js';
 import { audit } from './audit.js';
 import type { User } from './auth.js';
-import { maskedRefs } from './confidential.js';
+import { forgetExists, maskedRefs } from './confidential.js';
 import { currentContext } from './context.js';
 import { query, tx } from './db.js';
 import { badRequest, conflict, forbidden, notFound } from './errors.js';
@@ -16,6 +16,7 @@ import { createArticle } from './knowledge.js';
 import { timeline } from './major-incidents.js';
 import { authorize, can } from './policy.js';
 import { createProblem, loadForUpdate, logActivity, registerProblemExtra, type Db } from './problems.js';
+import { loadCalendar } from './sla.js';
 
 export const REVIEW_STATUSES = ['scheduled', 'draft', 'published', 'waived'] as const;
 export const ITEM_KINDS = ['factor', 'follow_up', 'gap'] as const;
@@ -51,14 +52,30 @@ export const REVIEW_GUIDE = {
   },
 };
 
-/** N working days after a date (weekends skipped; holidays are the owner's call). */
-export function addWorkingDays(from: Date, days: number) {
+/**
+ * N working days after a date, by a business calendar: a day counts when it has opening hours and is not a holiday
+ * (Swedish holidays and eves included where the calendar says so). Without a calendar, Monday to Friday.
+ */
+export function addWorkingDays(from: Date, days: number, cal?: { always: boolean; hours: Record<string, [number, number][]>; holidays: Set<string> }) {
   const d = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate()));
-  for (let n = 0; n < days;) {
+  for (let n = 0, guard = 0; n < days && guard < 400; guard++) {
     d.setUTCDate(d.getUTCDate() + 1);
-    if (d.getUTCDay() !== 0 && d.getUTCDay() !== 6) n++;
+    const day = d.toISOString().slice(0, 10);
+    const iso = String(((d.getUTCDay() + 6) % 7) + 1);
+    const open = cal ? (cal.always || (cal.hours[iso] ?? []).length > 0) && !cal.holidays.has(day) : d.getUTCDay() !== 0 && d.getUTCDay() !== 6;
+    if (open) n++;
   }
   return d.toISOString().slice(0, 10);
+}
+
+/** The incident's SLA calendar, else the default SLA's, for counting working days. */
+async function calendarForIncident(db: Db, incidentId: number) {
+  const { rows } = await db.query(
+    `SELECT coalesce((SELECT s.calendar_id FROM incidents i JOIN slas s ON s.id = i.sla_id WHERE i.id = $1),
+                     (SELECT calendar_id FROM slas WHERE is_default ORDER BY id LIMIT 1)) AS id`,
+    [incidentId],
+  );
+  return rows[0]?.id ? loadCalendar(db, rows[0].id) : undefined;
 }
 
 const fmtTime = (d: Date | string) => new Date(d).toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
@@ -85,8 +102,12 @@ async function impactFacts(user: User, ref: string) {
   return { incident: i, text: facts.join('\n') };
 }
 
+/**
+ * The prefill uses the full timeline, whoever opens the review first: the review's fields are masked when read
+ * (MASKED_FIELDS), so a confidential incident's text is stored once and shown only to those who may read it.
+ */
 async function prefill(user: User, ref: string) {
-  const t = await timeline(user, ref);
+  const t = await timeline(user, ref, { full: true });
   const story = t.entries.map((e) => `- ${fmtTime(e.at)} ${e.label}${e.body ? `: ${e.body.split('\n')[0].slice(0, 200)}` : ''}`).join('\n');
   const { text: impact } = await impactFacts(user, ref);
   return { what_happened: story, impact_summary: impact };
@@ -94,13 +115,18 @@ async function prefill(user: User, ref: string) {
 
 async function loadReview(db: Db, incidentRef: string, lock = false) {
   const { rows } = await db.query(
-    `SELECT r.*, r.due::text AS due, i.ref, i.title AS incident_title, i.is_major, i.major_lead_id, i.problem_id, i.impact, i.urgency, i.category_id, i.status AS incident_status
+    `SELECT r.*, r.due::text AS due, i.ref, i.title AS incident_title, i.is_major, i.major_lead_id, i.problem_id, i.impact, i.urgency, i.category_id, i.status AS incident_status,
+            i.restricted, i.classification
      FROM incident_reviews r JOIN incidents i ON i.id = r.incident_id WHERE i.ref = $1 ${lock ? 'FOR UPDATE OF r' : ''}`,
     [incidentRef.toUpperCase()],
   );
   if (!rows[0]) throw notFound(`${incidentRef.toUpperCase()} has no post-incident review`);
   return rows[0];
 }
+
+/** Is the problem readable by more people than the incident? Then the incident's text does not go into it. */
+const broader = (incident: { restricted: boolean; classification: string }, problem: { restricted: boolean; classification: string }) =>
+  (incident.restricted && !problem.restricted) || (incident.classification === 'confidential' && problem.classification !== 'confidential');
 
 /** Owner, lead or a manager may finish the review; anyone working on incidents may contribute to it. */
 const mayFinish = (user: User, r: any) => r.owner_id === user.id || r.major_lead_id === user.id || can(user.role, 'incident.flag_major');
@@ -116,7 +142,7 @@ export async function scheduleReviewInTx(db: Db, actorId: number, incident: { id
     if (!rows[0]) throw badRequest('The review owner must be an active user who can work on incidents');
   }
   const owner = input.owner_id ?? incident.major_lead_id ?? actorId;
-  const due = input.due ?? addWorkingDays(new Date(), 5);
+  const due = input.due ?? addWorkingDays(new Date(), 5, await calendarForIncident(db, incident.id));
   const { rows } = await db.query(
     `INSERT INTO incident_reviews (incident_id, owner_id, due, created_by) VALUES ($1, $2, $3, $4)
      ON CONFLICT (incident_id) DO UPDATE SET owner_id = CASE WHEN $5 THEN excluded.owner_id ELSE incident_reviews.owner_id END,
@@ -250,39 +276,61 @@ export async function removeItem(user: User, ref: string, itemId: number) {
   return getReview(user, ref);
 }
 
-/** Contributing factor → problem: a new problem with the factor as its statement, or an existing one, linked both ways. */
+/**
+ * Contributing factor → problem: a new problem with the factor as its statement, or an existing one, linked both ways.
+ * A new problem is as narrow as the incident (restricted, confidential); an existing, broader one gets the link but
+ * not the factor's text.
+ */
 export async function itemToProblem(user: User, ref: string, itemId: number, input: z.infer<typeof itemProblemSchema>) {
   authorize(user, 'incident.update');
   authorize(user, 'problem.link');
-  const r = await loadReview({ query } as unknown as Db, ref);
-  const { rows: items } = await query('SELECT * FROM incident_review_items WHERE id = $1 AND review_id = $2', [itemId, r.id]);
-  const item = items[0];
-  if (!item) throw notFound('Review item not found');
-  if (item.kind !== 'factor') throw badRequest('Only a contributing factor becomes a problem; a follow-up becomes an action');
-  if (item.problem_id) throw conflict('This factor already has a problem');
-  let problemRef = input.problem?.toUpperCase();
-  if (!problemRef) {
-    const created: any = await createProblem(user, {
-      title: item.body.split('\n')[0].slice(0, 300),
-      description: `Contributing factor from the post-incident review of ${r.ref} (${r.incident_title}):\n\n${item.body}`,
-      impact: r.impact, urgency: r.urgency, ...(r.category_id ? { category_id: r.category_id } : {}),
-    });
-    problemRef = created.ref as string;
-  }
   await tx(async (db) => {
+    const r = await loadReview(db, ref, true);
+    // The item stays locked while the problem is created, so two clicks cannot make two problems.
+    const { rows: items } = await db.query('SELECT * FROM incident_review_items WHERE id = $1 AND review_id = $2 FOR UPDATE', [itemId, r.id]);
+    const item = items[0];
+    if (!item) throw notFound('Review item not found');
+    if (item.kind !== 'factor') throw badRequest('Only a contributing factor becomes a problem; a follow-up becomes an action');
+    if (item.problem_id) throw conflict('This factor already has a problem');
+    let problemRef = input.problem?.toUpperCase();
+    const created = !problemRef;
+    if (!problemRef) {
+      const p: any = await createProblem(user, {
+        title: item.body.split('\n')[0].slice(0, 300),
+        description: `Contributing factor from the post-incident review of ${r.ref} (${r.incident_title}):\n\n${item.body}`,
+        impact: r.impact, urgency: r.urgency, ...(r.category_id ? { category_id: r.category_id } : {}),
+      });
+      problemRef = p.ref as string;
+    }
     const problem = await loadForUpdate(db, problemRef!);
-    const { rowCount } = await db.query('UPDATE incident_review_items SET problem_id = $2 WHERE id = $1 AND problem_id IS NULL', [item.id, problem.id]);
-    if (!rowCount) throw conflict('This factor already has a problem');
+    if (created) await inheritNarrowness(db, user, r, problem);
+    const wide = !created && broader(r, problem);
+    await db.query('UPDATE incident_review_items SET problem_id = $2 WHERE id = $1', [item.id, problem.id]);
     await db.query(
       `INSERT INTO problem_links (problem_id, kind, reference, system, note, created_by) VALUES ($1, 'incident', $2, 'Kernel', $3, $4) ON CONFLICT DO NOTHING`,
       [problem.id, r.ref, `From the post-incident review of ${r.ref}`, user.id],
     );
-    await logActivity(db, problem.id, user.id, 'link', `From the post-incident review of ${r.ref}`, { kind: 'incident', reference: r.ref, system: 'Kernel', action: 'add', review_item: item.id });
+    // An existing problem more people can read gets the reference, never the factor's words.
+    await logActivity(db, problem.id, user.id, 'link', wide ? `Linked from the post-incident review of ${r.ref}` : `From the post-incident review of ${r.ref}: ${item.body}`.slice(0, 2000), { kind: 'incident', reference: r.ref, system: 'Kernel', action: 'add', review_item: item.id });
     await logIncident(db, r.incident_id, user.id, 'link', `Contributing factor → problem ${problem.ref}`, { kind: 'problem', reference: problem.ref, action: 'add', review_item: item.id });
     // The incident needs a problem before it closes: the first factor's problem is it, unless it has one.
     if (!r.problem_id) await db.query('UPDATE incidents SET problem_id = $2 WHERE id = $1 AND problem_id IS NULL', [r.incident_id, problem.id]);
   });
   return getReview(user, ref);
+}
+
+/** A problem made from a restricted or confidential incident's review is just as narrow. */
+async function inheritNarrowness(db: Db, user: User, incident: { ref: string; restricted: boolean; restricted_teams?: number[]; classification: string }, problem: { id: number; ref: string }) {
+  if (incident.restricted) {
+    await db.query('UPDATE problems SET restricted = true, restricted_teams = (SELECT restricted_teams FROM incidents WHERE ref = $2) WHERE id = $1', [problem.id, incident.ref]);
+    await logActivity(db, problem.id, user.id, 'update', `Restricted like ${incident.ref}`, { restricted: { from: false, to: true } });
+  }
+  if (incident.classification === 'confidential') {
+    await db.query("UPDATE problems SET classification = 'confidential' WHERE id = $1", [problem.id]);
+    await logActivity(db, problem.id, user.id, 'update', `Confidential like ${incident.ref}`, { classification: { from: 'normal', to: 'confidential' } });
+    await db.query("SELECT pg_notify('kernel_live', 'classification:' || $1)", [problem.id]);
+    forgetExists();
+  }
 }
 
 /** Follow-up → action on a problem: the one named, the factor's, or the incident's. */
@@ -303,10 +351,13 @@ export async function itemToAction(user: User, ref: string, itemId: number, inpu
       problemId = factor[0]?.problem_id ?? r.problem_id;
     }
     if (!problemId) throw badRequest('Actions live on a problem: turn a contributing factor into a problem first, or name one');
-    const { rows: p } = await db.query('SELECT id, ref FROM problems WHERE id = $1 FOR UPDATE', [problemId]);
+    const { rows: p } = await db.query('SELECT id, ref, restricted, classification FROM problems WHERE id = $1 FOR UPDATE', [problemId]);
+    // On a problem more people can read, the action says where it came from but not what the review said.
+    const wide = broader(r, p[0]);
+    if (wide && !input.title) throw badRequest(`${p[0].ref} is readable by more people than ${r.ref}: give the action a title of its own`);
     const actionId = await insertAction(db, user, p[0], {
       title: (input.title ?? item.body.split('\n')[0]).slice(0, 300),
-      description: `Follow-up from the post-incident review of ${r.ref}:\n\n${item.body}`,
+      description: wide ? `Follow-up from the post-incident review of ${r.ref}.` : `Follow-up from the post-incident review of ${r.ref}:\n\n${item.body}`,
       ...(input.owner_id !== undefined ? { owner_id: input.owner_id } : {}),
       ...(input.due_date !== undefined ? { due_date: input.due_date } : {}),
     });
@@ -344,6 +395,9 @@ export async function waiveReview(user: User, ref: string, input: z.infer<typeof
 
 /** The lessons as a draft knowledge article (#47), for a person to edit and publish. */
 export async function reviewToArticle(user: User, ref: string) {
+  const { rows: inc } = await query('SELECT restricted, classification FROM incidents WHERE ref = $1', [ref.toUpperCase()]);
+  if (inc[0]?.restricted) throw badRequest('A restricted incident\'s review cannot become a knowledge article: articles are read by everyone');
+  if (inc[0]?.classification === 'confidential') throw badRequest('A confidential incident\'s review is not copied into an article: articles are read by everyone. Write a separate article without the confidential details.');
   const r = await getReview(user, ref);
   const sections = [
     ['What happened', r.what_happened], ['What went well', r.went_well], ['What was hard', r.was_hard], ['Where we were lucky', r.lucky],

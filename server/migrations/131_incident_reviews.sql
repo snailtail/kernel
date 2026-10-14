@@ -41,3 +41,11 @@ INSERT INTO incident_reviews (incident_id, owner_id, due, created_at)
   SELECT id, pir_owner_id, pir_due, coalesce(resolved_at, now()) FROM incidents
   WHERE is_major AND status IN ('resolved', 'closed');
 ALTER TABLE incidents DROP COLUMN pir_owner_id, DROP COLUMN pir_due;
+
+-- Visibility (#53): a review and its items follow their incident, like everything else attached to a record.
+ALTER TABLE incident_reviews ENABLE ROW LEVEL SECURITY;
+ALTER TABLE incident_reviews FORCE ROW LEVEL SECURITY;
+CREATE POLICY incident_reviews_visible ON incident_reviews USING (EXISTS (SELECT 1 FROM incidents i WHERE i.id = incident_id));
+ALTER TABLE incident_review_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE incident_review_items FORCE ROW LEVEL SECURITY;
+CREATE POLICY incident_review_items_visible ON incident_review_items USING (EXISTS (SELECT 1 FROM incident_reviews r WHERE r.id = review_id));
