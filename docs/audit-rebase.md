@@ -46,7 +46,7 @@ docker compose exec app node server/dist/rebase-audit.js --execute
 
 The rewrite runs in one transaction under the same lock as every append, so no entry is written meanwhile. It runs in this order:
 
-1. An `audit.chain_rebase_intent` entry records the current head.
+1. An `audit.chain_rebase_intent` entry records the current head. It then becomes the last entry of the old chain: the `old_head` that the result names.
 2. Every entry is rewritten and the chain is recomputed.
 3. An `audit.chain_rebased` entry records the old head, the new head, the number of rows rewritten and the key id.
 4. The chain is verified.
@@ -64,8 +64,8 @@ Restoring the backup from step 1 with `scripts/restore.sh` is the last resort, f
 
 Elasticsearch keeps an anchor (id and hash) for every entry. It never changes, which is what makes it useful against tampering. After a re-base, the anchors split at the boundary named in `audit.chain_rebased`:
 
-- **Anchors up to and including `old_head.id`** were made over the old chain. Do not compare them with the database. Check instead that the anchor for `old_head.id` equals `old_head.hash` in the `audit.chain_rebased` entry. That links the old chain, as Elasticsearch saw it, to the re-base.
-- **Anchors after `old_head.id`** compare with the database as usual. The `chain_rebase_intent` and `chain_rebased` entries are among them.
+- **Anchors up to and including `old_head.id`** were made over the old chain. Do not compare them with the database. `old_head` is the `chain_rebase_intent` entry itself: it is written just before the rewrite, and the rewrite reads the head under the append lock. Check that its anchor equals `old_head.hash` in the `audit.chain_rebased` entry, and that it names the head before it. Together these link the old chain, as Elasticsearch saw it, to the re-base.
+- **Anchors after `old_head.id`** compare with the database as usual. The first of them is the `chain_rebased` entry.
 
 A mismatch in the second group is a real finding. In the first group a mismatch is expected for every entry except `old_head`.
 - **ADR 0001:** fill in the execution date.
