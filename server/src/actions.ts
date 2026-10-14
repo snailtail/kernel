@@ -61,22 +61,26 @@ export async function listActions(filter: z.infer<typeof listActionsSchema>) {
 
 export async function createAction(user: User, ref: string, input: z.infer<typeof createActionSchema>) {
   authorize(user, 'action.write');
-  await tx(async (db) => {
-    const problem = await loadForUpdate(db, ref);
-    await validateOwner(db, input.owner_id);
-    const cols = Object.keys(input);
-    const { rows } = await db.query(
-      `INSERT INTO problem_actions (${[...cols, 'problem_id', 'created_by'].join(', ')})
-       VALUES (${[...cols, 'p', 'c'].map((_, i) => `$${i + 1}`).join(', ')}) RETURNING id`,
-      [...Object.values(input), problem.id, user.id],
-    );
-    await logActivity(db, problem.id, user.id, 'action', `Added action: ${input.title}`, { action_id: rows[0].id, change: 'added' });
-    if (input.owner_id) {
-      await notify(db, { users: [input.owner_id], event: 'assigned', ref: problem.ref, title: input.title, summary: `An action on ${problem.ref} was assigned to you.`, path: `/problems/${problem.ref}`, dedupe: `action:${rows[0].id}:${input.owner_id}`, actorId: user.id });
-    }
-    await db.query('UPDATE problems SET updated_at = now() WHERE id = $1', [problem.id]);
-  });
+  await tx(async (db) => insertAction(db, user, await loadForUpdate(db, ref), input));
   return getProblem(ref);
+}
+
+/** Adds an action to a problem the caller has locked; returns its id. Post-incident reviews (#109) use it too. */
+export async function insertAction(db: Db, user: User, problem: { id: number; ref: string }, input: z.infer<typeof createActionSchema>) {
+  authorize(user, 'action.write');
+  await validateOwner(db, input.owner_id);
+  const cols = Object.keys(input);
+  const { rows } = await db.query(
+    `INSERT INTO problem_actions (${[...cols, 'problem_id', 'created_by'].join(', ')})
+     VALUES (${[...cols, 'p', 'c'].map((_, i) => `$${i + 1}`).join(', ')}) RETURNING id`,
+    [...Object.values(input), problem.id, user.id],
+  );
+  await logActivity(db, problem.id, user.id, 'action', `Added action: ${input.title}`, { action_id: rows[0].id, change: 'added' });
+  if (input.owner_id) {
+    await notify(db, { users: [input.owner_id], event: 'assigned', ref: problem.ref, title: input.title, summary: `An action on ${problem.ref} was assigned to you.`, path: `/problems/${problem.ref}`, dedupe: `action:${rows[0].id}:${input.owner_id}`, actorId: user.id });
+  }
+  await db.query('UPDATE problems SET updated_at = now() WHERE id = $1', [problem.id]);
+  return rows[0].id as number;
 }
 
 export async function updateAction(user: User, ref: string, actionId: number, input: z.infer<typeof updateActionSchema>) {

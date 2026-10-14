@@ -11,8 +11,8 @@ import { Modal } from './Modal';
 export interface MajorInfo {
   declared_at: string | null; lead_id: number | null; lead: string | null; comms_id: number | null; comms: string | null; bridge: string;
   update_minutes: number | null; next_update_at: string | null; update_overdue: boolean; last_update: { body: string; created_at: string } | null;
-  pir_owner_id: number | null; pir_owner: string | null; pir_due: string | null;
 }
+export interface ReviewSummary { status: 'scheduled' | 'draft' | 'published' | 'waived'; owner: string | null; due: string | null; due_in_days: number | null; overdue: boolean; published_at: string | null }
 export interface RelatedRow { ref: string; title: string; status: string; priority?: number; resolve_with_parent?: boolean; is_major?: boolean }
 export interface StatusProposal { services: string[]; status: string; phase: string; message: string }
 
@@ -61,7 +61,6 @@ export function MajorHeader({ incidentRef, major, open, canEdit, onChange }: { i
             <dd>{major.update_overdue ? <span className="badge overdue">{countdown}</span> : countdown ?? '–'} <span className="muted small">every {major.update_minutes} min</span></dd>
           </div>
         )}
-        {!open && major.pir_owner && <div><dt>Review</dt><dd>{major.pir_owner}{major.pir_due ? `, by ${major.pir_due.slice(0, 10)}` : ''}</dd></div>}
       </dl>
       {canEdit && (
         <div className="actions">
@@ -264,5 +263,31 @@ export function KeyMomentToggle({ incidentRef, activityId, marked, onChange }: {
       onClick={async () => { await api.put(`/api/incidents/${incidentRef}/activity/${activityId}/key-moment`, { key_moment: !marked }); onChange(); }}>
       {marked ? '★' : '☆'}
     </button>
+  );
+}
+
+/** The post-incident review (#109) on the incident page: when it is due, and the way in. */
+export function ReviewCard({ incidentRef, review, resolved, editable, onCreated }: { incidentRef: string; review: ReviewSummary | null; resolved: boolean; editable: boolean; onCreated: () => void }) {
+  const [error, setError] = useState<string | null>(null);
+  if (!review && !(resolved && editable)) return null;
+  return (
+    <section className={`card${review?.overdue ? ' attention-card' : ''}`}>
+      <h2>Post-incident review</h2>
+      {review ? (
+        <>
+          <p>
+            {review.status === 'published' ? 'Published.' : review.status === 'waived' ? 'Waived.' : review.overdue ? <span className="badge overdue">Overdue</span> : review.due_in_days !== null ? `Review due in ${review.due_in_days} day${review.due_in_days === 1 ? '' : 's'}.` : 'Scheduled.'}
+            {review.owner && <span className="muted small"> Owner {review.owner}{review.due ? `, by ${review.due}` : ''}</span>}
+          </p>
+          <Link className="btn" to={`/incidents/${incidentRef}/review`}>{review.status === 'scheduled' ? 'Start the review' : 'Open the review'}</Link>
+        </>
+      ) : (
+        <>
+          <p className="muted small">A short, blameless look back: it starts from the timeline and impact, and turns contributing factors into problems.</p>
+          <button className="btn" onClick={async () => { setError(null); try { await api.post(`/api/incidents/${incidentRef}/review`, {}); onCreated(); } catch (err) { setError((err as Error).message); } }}>Plan a review</button>
+        </>
+      )}
+      {error && <div className="error">{error}</div>}
+    </section>
   );
 }

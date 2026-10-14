@@ -3,6 +3,7 @@ import { slaCompliance } from './sla.js';
 import { moduleEnabled } from './modules.js';
 import { z } from 'zod';
 import { query } from './db.js';
+import { reviewStats } from './reviews.js';
 
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
 
@@ -216,7 +217,7 @@ export async function report({ from, to, bucket }: ReportParams) {
     // Sections of switched-off modules are left out (#36).
     changes: moduleEnabled('change') ? changeStats.rows[0] : null,
     sla: moduleEnabled('sla') && moduleEnabled('incident') ? await slaCompliance(from, to) : null,
-    incidents: !moduleEnabled('incident') ? null : { ...incidentStats.rows[0], mtta_median_min: round(incidentStats.rows[0].mtta_median_min), mttr_median_h: round(incidentStats.rows[0].mttr_median_h), by_ci: incidentCis.rows },
+    incidents: !moduleEnabled('incident') ? null : { ...incidentStats.rows[0], mtta_median_min: round(incidentStats.rows[0].mtta_median_min), mttr_median_h: round(incidentStats.rows[0].mttr_median_h), by_ci: incidentCis.rows, reviews: await reviewStats(from, to) },
     known_errors: knownErrors.rows[0],
     actions: {
       created: a.created,

@@ -144,6 +144,8 @@ export interface ProblemDetail extends Problem {
   impact_hint: import('./components/AffectedCis').ImpactHint | null;
   impact_incomplete: boolean;
   incidents: { ref: string; title: string; status: string; priority: number; created_at: string }[];
+  /** Post-incident reviews (#109) whose contributing factors became this problem. */
+  from_reviews?: { incident_ref: string; incident_title: string }[];
   changes: { ref: string; title: string; status: string; change_type: string; outcome: string | null; planned_start: string | null }[];
   links: Link[];
   activity: Activity[];

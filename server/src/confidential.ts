@@ -24,6 +24,8 @@ export const MASKED_FIELDS = new Set([
   'description', 'root_cause', 'workaround', 'resolution', 'major_review', 'ec_risk', 'ec_fix_cost', 'ec_decision_note',
   'implementation_plan', 'test_plan', 'backout_plan', 'outcome', 'review', 'cancel_reason', 'hold_reason', 'reporter',
   'body', 'conclusion', 'note', 'summary', 'comment', 'snippet', 'excerpt',
+  // Post-incident reviews (#109).
+  'what_happened', 'impact_summary', 'went_well', 'was_hard', 'lucky', 'attendees', 'waived_reason',
 ]);
 
 const kindOfRef = (ref: string) => PREFIX[ref.toUpperCase().match(/^[A-Z]+/)?.[0] ?? ''] as Kind | undefined;

@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { requireUser } from '../auth.js';
 import * as inc from '../incidents.js';
 import * as major from '../major-incidents.js';
+import * as reviews from '../reviews.js';
 
 type RefParams = { Params: { ref: string } };
 
@@ -47,6 +48,35 @@ export async function incidentRoutes(app: FastifyInstance) {
   app.put<{ Params: { ref: string; id: string } }>('/api/incidents/:ref/activity/:id/key-moment', async (req) =>
     major.setKeyMoment(requireUser(req), req.params.ref, Number(req.params.id), major.keyMomentSchema.parse(req.body).key_moment),
   );
+  // Post-incident reviews (#109).
+  type ItemParams = { Params: { ref: string; id: string } };
+  app.get<RefParams>('/api/incidents/:ref/review', async (req) => reviews.openReview(requireUser(req), req.params.ref));
+  app.post<RefParams>('/api/incidents/:ref/review', async (req, reply) => {
+    const created = await reviews.createReview(requireUser(req), req.params.ref, reviews.createReviewSchema.parse(req.body ?? {}));
+    reply.code(201);
+    return created;
+  });
+  app.patch<RefParams>('/api/incidents/:ref/review', async (req) => reviews.updateReview(requireUser(req), req.params.ref, reviews.updateReviewSchema.parse(req.body)));
+  app.post<RefParams>('/api/incidents/:ref/review/items', async (req) => reviews.addItem(requireUser(req), req.params.ref, reviews.itemSchema.parse(req.body)));
+  app.delete<ItemParams>('/api/incidents/:ref/review/items/:id', async (req) => reviews.removeItem(requireUser(req), req.params.ref, Number(req.params.id)));
+  app.post<ItemParams>('/api/incidents/:ref/review/items/:id/problem', async (req) =>
+    reviews.itemToProblem(requireUser(req), req.params.ref, Number(req.params.id), reviews.itemProblemSchema.parse(req.body ?? {})),
+  );
+  app.post<ItemParams>('/api/incidents/:ref/review/items/:id/action', async (req) =>
+    reviews.itemToAction(requireUser(req), req.params.ref, Number(req.params.id), reviews.itemActionSchema.parse(req.body ?? {})),
+  );
+  app.post<RefParams>('/api/incidents/:ref/review/publish', async (req) => reviews.publishReview(requireUser(req), req.params.ref));
+  app.post<RefParams>('/api/incidents/:ref/review/waive', async (req) => reviews.waiveReview(requireUser(req), req.params.ref, reviews.waiveSchema.parse(req.body)));
+  app.post<RefParams>('/api/incidents/:ref/review/article', async (req, reply) => {
+    const created = await reviews.reviewToArticle(requireUser(req), req.params.ref);
+    reply.code(201);
+    return created;
+  });
+  app.get<RefParams>('/api/incidents/:ref/review/export.md', async (req, reply) => {
+    const md = await reviews.reviewMarkdown(requireUser(req), req.params.ref);
+    reply.header('Content-Type', 'text/markdown; charset=utf-8').header('Content-Disposition', `attachment; filename="${req.params.ref.toUpperCase().replace(/[^A-Z0-9]/g, '')}-review.md"`);
+    return md;
+  });
   app.post<RefParams>('/api/problems/:ref/resolve-incidents', async (req) =>
     inc.resolveLinkedIncidents(requireUser(req), req.params.ref, inc.resolveLinkedSchema.parse(req.body)),
   );

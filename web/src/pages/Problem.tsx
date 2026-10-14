@@ -108,6 +108,9 @@ export function ProblemPage() {
           </div>
         )}
         {actionError && <div className="error">{actionError}</div>}
+        {!!p.from_reviews?.length && (
+          <p className="muted small from-review">From the post-incident review of {p.from_reviews.map((r, n) => <span key={r.incident_ref}>{n ? ', ' : ''}<Link to={`/incidents/${r.incident_ref}/review`} className="mono">{r.incident_ref}</Link> {r.incident_title}</span>)}</p>
+        )}
         {p.pending_approvals?.map((a) => (
           <div key={a.id} className="approval">
             <div>

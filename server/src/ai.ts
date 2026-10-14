@@ -24,7 +24,7 @@ import { typeForRef } from './records.js';
 import { decryptSecret, encryptSecret } from './secrets.js';
 
 
-export const TASKS = { summarize: 'Summaries ("catch me up")', analyze_log: 'Log analysis' } as const;
+export const TASKS = { summarize: 'Summaries ("catch me up")', analyze_log: 'Log analysis', review_wording: 'Blameless wording hints in post-incident reviews' } as const;
 export type Task = keyof typeof TASKS;
 export const DATA_CLASSES = ['internal', 'personal', 'confidential', 'restricted'] as const;
 type DataClass = (typeof DATA_CLASSES)[number];
@@ -234,6 +234,23 @@ export async function analyzeLog(user: User, attachmentId: number) {
   return { ...(await callModel(user, provider, model, input, 1500)), lines_sent: f.kept, lines_total: f.total };
 }
 
+/**
+ * Post-incident reviews (#109): flags blameful phrasing and suggests neutral wording. Only a hint for the team, opt-in
+ * by routing the task to a model; nothing is changed in the review.
+ */
+export async function reviewWording(user: User, ref: string) {
+  const { getReview } = await import('./reviews.js');
+  const r = await getReview(user, ref); // read access and visibility apply
+  const { rows } = await query('SELECT restricted, classification FROM incidents WHERE ref = $1', [r.ref]);
+  const { provider, model } = await route('review_wording');
+  const sections = [['What happened', r.what_happened], ['What went well', r.went_well], ['What was hard', r.was_hard], ['Where we were lucky', r.lucky], ['Contributing factors', r.items.map((x: any) => `- ${x.body}`).join('\n')]]
+    .filter(([, v]) => String(v).trim()).map(([h, v]) => `## ${h}\n${v}`).join('\n\n');
+  const input = prepareForModel('review_wording', provider, 'You help a team write a blameless post-incident review. List sentences that blame or judge people (names, "forgot", "should have", "careless", "human error") and suggest a neutral rewrite that describes actions and conditions. Quote each sentence exactly. If the wording is already blameless, say so in one line. Do not judge the technical content.', [
+    { label: `review of ${r.ref}`, text: sections, restricted: !!rows[0]?.restricted, confidential: rows[0]?.classification === 'confidential', personal: true, ref: r.ref },
+  ]);
+  return callModel(user, provider, model, input, 800);
+}
+
 // ---- Administration --------------------------------------------------------------------------------------------------
 
 export const providerSchema = z.object({
@@ -307,7 +324,7 @@ export async function deleteProvider(user: User, id: number) {
   return { ok: true };
 }
 
-export const routingSchema = z.record(z.enum(Object.keys(TASKS) as [Task, ...Task[]]), z.object({ provider_id: z.number().int(), model: z.string().min(1).max(200) }).nullable());
+export const routingSchema = z.partialRecord(z.enum(Object.keys(TASKS) as [Task, ...Task[]]), z.object({ provider_id: z.number().int(), model: z.string().min(1).max(200) }).nullable());
 
 export async function saveRouting(user: User, input: z.infer<typeof routingSchema>, reason: string) {
   authorize(user, 'mfa.policy');

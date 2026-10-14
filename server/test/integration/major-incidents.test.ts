@@ -132,8 +132,8 @@ describe('major incidents (#108)', { skip }, () => {
     const r = await pm.post(`/api/incidents/${major}/transition`, { to: 'resolved', resolution_code: 'fixed', resolution: 'Cleaned the disk and restarted checkout', pir_owner_id: pmId, pir_due: '2026-11-01' });
     ok(r);
     assert.equal(r.body.major.next_update_at, null, 'no more countdown');
-    assert.equal(r.body.major.pir_owner, 'Pm');
-    assert.equal(r.body.major.pir_due.slice(0, 10), '2026-11-01');
+    assert.equal(r.body.review.owner, 'Pm', 'the post-incident review is scheduled (#109)');
+    assert.equal(r.body.review.due, '2026-11-01');
     const c = (await analyst.get(`/api/incidents/${child}`)).body;
     assert.equal(c.status, 'resolved');
     assert.equal(c.resolution_code, 'fixed');
