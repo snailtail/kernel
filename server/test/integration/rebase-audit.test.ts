@@ -97,6 +97,23 @@ describe('re-basing legacy audit entries (ADR 0001)', { skip }, () => {
     assert.ok(done.old_head.hash && done.new_head.hash && done.old_head.hash !== done.new_head.hash);
   });
 
+  test('a chain that does not verify inside the transaction is rolled back', async () => {
+    const { withOwner } = await import('../../src/db.js');
+    const before = (await ownerQuery('SELECT id, hash FROM audit_log ORDER BY id DESC LIMIT 1')).rows[0];
+    // Something goes wrong between the rewrite and the commit: one rewritten hash is off.
+    const err = await withOwner((c) => rebase.rebaseAudit(c, {
+      execute: true,
+      beforeVerify: async (o) => {
+        await o.query('ALTER TABLE audit_log DISABLE TRIGGER audit_log_no_update');
+        await o.query("UPDATE audit_log SET hash = repeat('0', 64) WHERE id = (SELECT id FROM audit_log ORDER BY id LIMIT 1 OFFSET 1)");
+      },
+    })).catch((e) => e);
+    assert.ok(err instanceof Error && /nothing was changed/.test(err.message), String(err));
+    assert.deepEqual((await ownerQuery('SELECT id, hash FROM audit_log ORDER BY id DESC LIMIT 1')).rows[0], before, 'rolled back');
+    assert.equal((await audit.verifyChain()).ok, true, 'the trail is as it was');
+    assert.equal((await ownerQuery("SELECT tgenabled FROM pg_trigger WHERE tgname = 'audit_log_no_update'")).rows[0].tgenabled, 'O', 'the append-only trigger is on');
+  });
+
   test('running it again changes nothing', async () => {
     const r = await rebase.runRebase(false, () => {});
     assert.equal(r.rows_rewritten, 0, JSON.stringify(r.fields));
