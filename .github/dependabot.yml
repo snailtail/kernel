@@ -1,6 +1,6 @@
 # Grouped weekly updates (#66): npm packages, the Node base image digest and the pinned GitHub Actions.
 # Cooldown: a release is proposed only once it has aged (14 days, 30 for a major), so a compromised or broken release
-# is usually caught by others first. Security updates ignore the cooldown and still arrive at once.
+# is usually caught by others first (the 30-day major cooldown exists for npm only). Security updates ignore the cooldown and still arrive at once.
 version: 2
 updates:
   - package-ecosystem: npm
@@ -18,7 +18,7 @@ updates:
   - package-ecosystem: docker
     directory: /
     schedule: { interval: weekly, day: monday }
-    cooldown: { default-days: 14, semver-major-days: 30 }
+    cooldown: { default-days: 14 }
     ignore:
       # Stay on the active LTS line: odd-numbered Node releases never become LTS, and the next LTS (26) is adopted
       # deliberately once it is promoted.
@@ -27,7 +27,7 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly, day: monday }
-    cooldown: { default-days: 14, semver-major-days: 30 }
+    cooldown: { default-days: 14 }
     groups:
       actions:
         patterns: ["*"]
