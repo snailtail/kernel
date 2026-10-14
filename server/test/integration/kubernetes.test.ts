@@ -13,19 +13,27 @@ const ok = (r: { status: number; body: unknown }) => assert.ok(r.status >= 200 &
 
 /** A fake Kubernetes API server: TLS with its own CA, bearer auth, paginated lists, a forbidden and a missing kind. */
 function fakeCluster(cert: string, key: string) {
-  const state = { deployments: true, daemonsets: false, gone: new Set<string>(), requests: [] as string[] };
+  const state = { deployments: true, daemonsets: false, broad: false, gone: new Set<string>(), requests: [] as string[] };
   const deployment = (name: string) => ({
     metadata: { name, namespace: 'shop', labels: { 'app.kubernetes.io/part-of': 'webshop', team: 'payments', 'internal-note': 'not kept' }, annotations: { secret: 'never read' } },
     spec: { replicas: 3, template: { spec: { containers: [{ name: 'app', image: `registry.example.com/${name}:1.4.2`, env: [{ name: 'DB_PASSWORD', value: ENV_SECRET }], args: [`--password=${ENV_SECRET}`] }] } } },
     status: { readyReplicas: 2 },
   });
-  const server: Server = createServer({ cert, key }, (req, res) => {
+  const server: Server = createServer({ cert, key }, async (req, res) => {
     const url = new URL(req.url!, 'https://x');
+    let body = '';
+    for await (const chunk of req) body += chunk;
     state.requests.push(url.pathname + url.search);
     if (req.headers.authorization !== `Bearer ${TOKEN}`) { res.writeHead(401).end(); return; }
     const json = (v: unknown, status = 200) => { res.writeHead(status, { 'Content-Type': 'application/json' }).end(JSON.stringify(v)); };
     switch (url.pathname) {
       case '/version': return json({ gitVersion: 'v1.31.2' });
+      case '/apis/authorization.k8s.io/v1/selfsubjectaccessreviews': {
+        if (req.method !== 'POST') return json({}, 405);
+        const { resource, subresource } = JSON.parse(body).spec.resourceAttributes;
+        const allowed = resource === 'daemonsets' ? state.daemonsets : ['secrets', 'configmaps'].includes(resource) || subresource ? state.broad : true;
+        return json({ kind: 'SelfSubjectAccessReview', status: { allowed } });
+      }
       case '/api/v1/nodes': return json({ items: [
         { metadata: { name: 'aks-node-1' }, spec: { providerID: 'azure:///subscriptions/SUB-1/resourceGroups/RG/providers/Microsoft.Compute/virtualMachines/aks-node-1' }, status: { addresses: [{ type: 'InternalIP', address: '10.2.0.4' }], nodeInfo: { osImage: 'Ubuntu 22.04', kubeletVersion: 'v1.31.2' }, capacity: { cpu: '4', memory: '16Gi' } } },
         { metadata: { name: 'aks-node-2' }, spec: { providerID: 'azure:///subscriptions/SUB-1/resourceGroups/RG/providers/Microsoft.Compute/virtualMachines/aks-node-2' }, status: { nodeInfo: {}, capacity: {} } },
@@ -98,6 +106,30 @@ describe('Kubernetes connector (#24)', { skip }, () => {
     const t = (await admin.post(`/api/connectors/${id}/test`, {})).body;
     assert.equal(t.ok, true, t.message);
     assert.match(t.message, /v1\.31\.2/);
+    assert.match(t.message, /Not readable: daemonsets/, 'a missing permission shows before the first run');
+    assert.doesNotMatch(t.message, /Warning/, 'positive control: a read-only token gets no warning');
+    cluster.state.broad = true;
+    const broad = (await admin.post(`/api/connectors/${id}/test`, {})).body;
+    assert.match(broad.message, /Warning: this token can also list secrets, list configmaps, create pods\/exec/);
+    cluster.state.broad = false;
+  });
+
+  test('the setup manifest grants get/list on exactly what is read, events only when synced (#112)', async () => {
+    const { rbacManifest } = await import('../../src/connector-kubernetes.js');
+    const withEvents = (await admin.get('/api/connectors/types/kubernetes/setup?cluster_name=aks-prod&sync_events=true')).body.text;
+    assert.match(withEvents, /read-only access to aks-prod/);
+    for (const r of ['nodes', 'namespaces', 'events', 'deployments', 'statefulsets', 'daemonsets', 'cronjobs']) assert.match(withEvents, new RegExp(`"${r}"`));
+    assert.doesNotMatch(withEvents, /secrets"|configmaps|"pods|watch|"\*"/, 'no Secrets, ConfigMaps, pods, watch or wildcards');
+    assert.deepEqual([...withEvents.matchAll(/verbs: (.*)/g)].map((m: RegExpMatchArray) => m[1]), ['["get", "list"]', '["get", "list"]', '["get", "list"]']);
+    const without = (await admin.get('/api/connectors/types/kubernetes/setup?cluster_name=aks-prod')).body.text;
+    assert.doesNotMatch(without, /"events"/);
+    assert.match(rbacManifest({ cluster_name: 'x\nkind: ClusterRoleBinding' }), /^# Kernel: read-only access to xkind: ClusterRoleBinding\./, 'the name cannot break out of the comment');
+    assert.equal((await analyst.get('/api/connectors/types/kubernetes/setup')).status, 403);
+    assert.equal((await admin.get('/api/connectors/types/op5/setup')).status, 404);
+    assert.equal((await admin.get('/api/connectors/types/__proto__/setup')).status, 404);
+    // The docs carry the same manifest, so the two cannot drift apart.
+    const docs = readFileSync(new URL('../../../docs/connectors/kubernetes.md', import.meta.url), 'utf8');
+    assert.ok(docs.includes(rbacManifest({ sync_events: true })), 'docs/connectors/kubernetes.md has the generated manifest');
   });
 
   test('a sync maps cluster, nodes, namespaces and workloads; pods are not CIs; nothing secret is kept', async () => {

@@ -304,6 +304,7 @@ export const OPERATIONS: Op[] = [
   { method: 'post', path: '/api/connectors', tag: 'CMDB', summary: 'Create a connector; credentials are encrypted and never returned', body: conn.connectorSchema },
   { method: 'put', path: '/api/connectors/:id', tag: 'CMDB', summary: 'Update a connector (omit secret to keep the credentials)', body: conn.connectorSchema },
   { method: 'delete', path: '/api/connectors/:id', tag: 'CMDB', summary: 'Delete a connector' },
+  { method: 'get', path: '/api/connectors/types/:type/setup', tag: 'CMDB', summary: 'Setup text for a connector type from the form settings, e.g. the Kubernetes least-privilege RBAC manifest (cluster_name, sync_events)' },
   { method: 'post', path: '/api/connectors/:id/test', tag: 'CMDB', summary: 'Test the connection' },
   { method: 'post', path: '/api/connectors/:id/run', tag: 'CMDB', summary: 'Run now (never overlaps a running sync)' },
   { method: 'get', path: '/api/connectors/:id/runs', tag: 'CMDB', summary: 'The run log: counts, errors, duration' },

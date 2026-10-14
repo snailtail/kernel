@@ -93,6 +93,85 @@ const WORKLOADS = [
   { kind: 'CronJob', path: '/apis/batch/v1/cronjobs' },
 ] as const;
 
+/** Exactly what the connector reads: the manifest grants this and the connection test checks it. */
+export const ACCESS = [
+  { group: '', resource: 'nodes' },
+  { group: '', resource: 'namespaces' },
+  { group: 'apps', resource: 'deployments' },
+  { group: 'apps', resource: 'statefulsets' },
+  { group: 'apps', resource: 'daemonsets' },
+  { group: 'batch', resource: 'cronjobs' },
+  { group: '', resource: 'events', onlyWithEvents: true },
+] as const;
+
+/** What a read-only role must not reach; the connection test warns when the token can. */
+const TOO_MUCH = [{ group: '', resource: 'secrets' }, { group: '', resource: 'configmaps' }, { group: '', resource: 'pods/exec', verb: 'create' }] as const;
+
+/**
+ * A least-privilege manifest: a ServiceAccount with get/list on exactly what is read, and a token Secret. No watch,
+ * no pods, no Secrets or ConfigMaps.
+ */
+export function rbacManifest(config: { cluster_name?: unknown; sync_events?: unknown }): string {
+  const cluster = String(config.cluster_name ?? '').replace(/[^\x20-\x7e]/g, '').slice(0, 100) || 'your cluster';
+  const events = config.sync_events === true || config.sync_events === 'true';
+  const rules = Object.entries(
+    ACCESS.filter((a) => !('onlyWithEvents' in a) || events).reduce<Record<string, string[]>>((by, a) => ({ ...by, [a.group]: [...(by[a.group] ?? []), a.resource] }), {}),
+  ).map(([group, resources]) => `  - apiGroups: [${JSON.stringify(group)}]\n    resources: [${resources.map((r) => JSON.stringify(r)).join(', ')}]\n    verbs: ["get", "list"]`);
+  return `# Kernel: read-only access to ${cluster}. Apply with: kubectl apply -f kernel-reader.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kernel
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kernel-reader
+  namespace: kernel
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kernel-reader
+rules:
+${rules.join('\n')}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kernel-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kernel-reader
+subjects:
+  - kind: ServiceAccount
+    name: kernel-reader
+    namespace: kernel
+---
+# The token Kernel uses: kubectl -n kernel get secret kernel-reader-token -o jsonpath='{.data.token}' | base64 -d
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kernel-reader-token
+  namespace: kernel
+  annotations:
+    kubernetes.io/service-account.name: kernel-reader
+type: kubernetes.io/service-account-token
+`;
+}
+
+/** May this token do verb on resource? A SelfSubjectAccessReview, which every authenticated account may ask. */
+async function canI(ctx: RunContext, a: { group: string; resource: string; verb?: string }): Promise<boolean> {
+  const [resource, subresource] = a.resource.split('/');
+  const review = await ctx.postJson('/apis/authorization.k8s.io/v1/selfsubjectaccessreviews', {
+    apiVersion: 'authorization.k8s.io/v1', kind: 'SelfSubjectAccessReview',
+    spec: { resourceAttributes: { group: a.group, resource, ...(subresource ? { subresource } : {}), verb: a.verb ?? 'list' } },
+  });
+  return review.status?.allowed === true;
+}
+
 /** Warning reasons worth an alert, and how loud. */
 const REASONS: Record<string, NormalisedEvent['severity']> = { BackOff: 'major', OOMKilling: 'major', OOMKilled: 'major', FailedScheduling: 'minor', FailedMount: 'minor', Unhealthy: 'warning' };
 
@@ -121,11 +200,37 @@ export const KUBERNETES: ConnectorType = {
   }),
   secret: z.object({ token: z.string().min(20).max(10_000) }),
 
+  // Version and node count, then per kind whether the token may list it, so a missing permission shows up here and
+  // not as an incomplete first run; and a warning when the token can read more than it should.
   test: async (ctx) => {
     const v = await ctx.fetchJson('/version');
-    const nodes = await ctx.fetchJson('/api/v1/nodes?limit=1');
-    return `Connected to Kubernetes ${v.gitVersion ?? '?'}${nodes.metadata?.remainingItemCount !== undefined ? `, ${nodes.metadata.remainingItemCount + (nodes.items?.length ?? 0)} nodes` : ''}`;
+    // The node count, when the token may list nodes (the per-kind check below says if not).
+    const nodes = await ctx.fetchJson('/api/v1/nodes?limit=1').catch(() => undefined);
+    const count = nodes?.metadata?.remainingItemCount !== undefined ? `, ${nodes.metadata.remainingItemCount + (nodes.items?.length ?? 0)} nodes` : nodes?.items && !nodes.metadata?.continue ? `, ${nodes.items.length} node${nodes.items.length === 1 ? '' : 's'}` : '';
+    const wanted = ACCESS.filter((a) => !('onlyWithEvents' in a) || ctx.config.sync_events);
+    let readable: string[] = [], forbidden: string[] = [], tooMuch: string[] = [];
+    try {
+      const allowed = await Promise.all(wanted.map((a) => canI(ctx, a)));
+      readable = wanted.filter((_, i) => allowed[i]).map((a) => a.resource);
+      forbidden = wanted.filter((_, i) => !allowed[i]).map((a) => a.resource);
+      const extra = await Promise.all(TOO_MUCH.map((a) => canI(ctx, a)));
+      tooMuch = TOO_MUCH.filter((_, i) => extra[i]).map((a) => ('verb' in a ? `${a.verb} ${a.resource}` : `list ${a.resource}`));
+    } catch {
+      // A cluster without the access-review API: try one item of each kind instead (never Secrets).
+      const paths: Record<string, string> = { nodes: '/api/v1/nodes', namespaces: '/api/v1/namespaces', events: '/api/v1/events', cronjobs: '/apis/batch/v1/cronjobs' };
+      for (const a of wanted) {
+        const r = await listKind(ctx, `${paths[a.resource] ?? `/apis/apps/v1/${a.resource}`}?limit=1`);
+        ('items' in r ? readable : forbidden).push(a.resource);
+      }
+    }
+    return [
+      `Connected to Kubernetes ${v.gitVersion ?? '?'}${count}.`,
+      forbidden.length ? `Readable: ${readable.join(', ') || 'nothing'}. Not readable: ${forbidden.join(', ')} – runs skip these until the role allows list (see the manifest).` : `Every kind the connector reads is readable (${readable.join(', ')}).`,
+      ...(tooMuch.length ? [`Warning: this token can also ${tooMuch.join(', ')}. Kernel never uses that; bind it to the read-only role instead.`] : []),
+    ].join(' ');
   },
+
+  setup: rbacManifest,
 
   fetch: async (ctx) => {
     const cfg = ctx.config;
