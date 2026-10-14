@@ -154,6 +154,11 @@ function cleanAttributes(schema: { key: string; type: string }[], attrs: Record<
       out[a.key] = n;
     } else out[a.key] = String(v).slice(0, 500);
   }
+  // Cross-source identity (cloud resource id, BIOS UUID) is kept for every type: reconciliation matches on it.
+  for (const key of ['resource_id', 'bios_uuid']) {
+    const v = attrs?.[key];
+    if (v !== undefined && v !== null && v !== '') out[key] = String(v).slice(0, 500);
+  }
   return out;
 }
 

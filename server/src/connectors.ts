@@ -3,6 +3,7 @@
 // - credentials are encrypted and write-only; a connector may only reach the private addresses it lists;
 // - runs never overlap (a lease per connector) and every run is logged with counts and errors;
 // - a full snapshot that failed or shrank implausibly never marks CIs missing.
+import { KUBERNETES } from './connector-kubernetes.js';
 import { z } from 'zod';
 import type { User } from './auth.js';
 import { audit } from './audit.js';
@@ -41,9 +42,13 @@ async function reconciliation(): Promise<Reconciliation> {
  */
 export async function ciBatch(user: User, input: z.infer<typeof ciBatchSchema>) {
   authorize(user, 'ci.ingest');
-  const cis = input.cis.length
-    ? await upsertCis(user, upsertSchema.parse({ items: input.cis.map((c) => ({ ...c, source_system: input.source_system })) }))
-    : { created: 0, updated: 0, unchanged: 0, matched: 0, errors: [] };
+  // upsertCis takes 1000 items a call; a snapshot can be larger (a cluster's workloads, a big monitoring estate).
+  const cis = { created: 0, updated: 0, unchanged: 0, matched: 0, errors: [] as unknown[] };
+  for (let i = 0; i < input.cis.length; i += 1000) {
+    const part = await upsertCis(user, upsertSchema.parse({ items: input.cis.slice(i, i + 1000).map((c) => ({ ...c, source_system: input.source_system })) }));
+    cis.created += part.created; cis.updated += part.updated; cis.unchanged += part.unchanged; cis.matched += part.matched;
+    cis.errors.push(...part.errors);
+  }
   // Relationships are only reconciled when the snapshot includes them; a CI-only source never wipes its relationships.
   const rels = input.relationships.length
     ? await syncRelationships(user, { source_system: input.source_system, relationships: input.relationships, full: input.full_sync })
@@ -81,19 +86,31 @@ async function markMissed(user: User, source: string, seenIds: string[]) {
 
 // ---- Connector types ---------------------------------------------------------------------------
 
-interface RunContext {
+export interface RunContext {
   config: Record<string, any>;
   secret: Record<string, string>;
+  /** GET base_url + path as JSON. Errors carry the HTTP status (err.status), e.g. 403 for a kind RBAC forbids. */
   fetchJson: (path: string) => Promise<any>;
+  /** The connector's source system, for types that compare with what they reported before. */
+  sourceSystem: string;
 }
-interface ConnectorType {
+export interface ConnectorType {
   label: string;
   /** Non-secret settings the type needs, validated on save. */
   config: z.ZodType<Record<string, any>>;
   secret: z.ZodType<Record<string, string>>;
   test: (ctx: RunContext) => Promise<string>;
   /** Fetch and map: CIs (complete snapshot) and the current problems as events. */
-  fetch: (ctx: RunContext) => Promise<{ cis: z.infer<typeof batchCi>[]; events?: NormalisedEvent[] }>;
+  fetch: (ctx: RunContext) => Promise<{
+    cis: z.infer<typeof batchCi>[];
+    relationships?: { from_id: string; type: string; to_id: string }[];
+    events?: NormalisedEvent[];
+    /**
+     * Something could not be read (a kind RBAC forbids, a list that came back suspiciously empty): the snapshot is
+     * incomplete, so nothing is marked missing this run. Each entry says what and why.
+     */
+    partial?: string[];
+  }>;
 }
 
 const OP5_STATE: Record<number, NormalisedEvent['severity']> = { 1: 'warning', 2: 'critical', 3: 'minor' };
@@ -145,12 +162,12 @@ const OP5: ConnectorType = {
   },
 };
 
-export const CONNECTOR_TYPES: Record<string, ConnectorType> = { op5: OP5 };
+export const CONNECTOR_TYPES: Record<string, ConnectorType> = { op5: OP5, kubernetes: KUBERNETES };
 
 // ---- Registry ----------------------------------------------------------------------------------
 
 export const connectorSchema = z.object({
-  type: z.enum(['op5']),
+  type: z.enum(['op5', 'kubernetes']),
   name: z.string().trim().min(1).max(100),
   source_system: z.string().trim().min(1).max(100),
   config: z.record(z.string(), z.unknown()),
@@ -221,10 +238,11 @@ function contextFor(c: any): RunContext {
   const type = CONNECTOR_TYPES[c.type];
   const secret = c.secret ? JSON.parse(decryptSecret(c.secret)) : {};
   const config = type.config.parse(c.config);
-  const auth = secret.username ? `Basic ${Buffer.from(`${secret.username}:${secret.password}`).toString('base64')}` : undefined;
+  const auth = secret.token ? `Bearer ${secret.token}` : secret.username ? `Basic ${Buffer.from(`${secret.username}:${secret.password}`).toString('base64')}` : undefined;
   return {
     config,
     secret,
+    sourceSystem: c.source_system,
     fetchJson: async (path) => {
       const res = await outboundFetch(config.base_url.replace(/\/$/, '') + path, {
         headers: { Accept: 'application/json', ...(auth ? { Authorization: auth } : {}) },
@@ -233,7 +251,7 @@ function contextFor(c: any): RunContext {
         timeoutMs: 30_000,
         maxBytes: 50_000_000,
       });
-      if (!res.ok) throw new Error(`${c.name}: HTTP ${res.status}`);
+      if (!res.ok) throw Object.assign(new Error(`${c.name}: HTTP ${res.status}`), { status: res.status });
       try {
         return JSON.parse(res.body);
       } catch {
@@ -276,7 +294,8 @@ export async function runConnector(id: number, trigger: 'schedule' | 'manual', a
     if (!owner[0]) throw new Error('The connector has no owner; save it again as an administrator');
     const user = owner[0] as User;
     const fetched = await CONNECTOR_TYPES[c.type].fetch(contextFor(c));
-    const result = await ciBatch(user, { source_system: c.source_system, cis: fetched.cis, relationships: [], full_sync: true });
+    // An incomplete snapshot (a forbidden kind, a list that came back empty) never marks anything missing.
+    const result = await ciBatch(user, { source_system: c.source_system, cis: fetched.cis, relationships: fetched.relationships ?? [], full_sync: !fetched.partial?.length });
     let events: { reported: number; cleared: number } | undefined;
     if (fetched.events && moduleEnabled('event')) {
       // Current problems open or refresh alerts; alerts from this connector that are no longer a problem clear.
@@ -291,9 +310,10 @@ export async function runConnector(id: number, trigger: 'schedule' | 'manual', a
       }
       events = { reported: results.length, cleared: toClear.length };
     }
-    const errors = [...result.cis.errors, ...result.relationships.errors];
+    const errors = [...(fetched.partial ?? []).map((p) => ({ skipped: p })), ...result.cis.errors, ...result.relationships.errors];
     const status = result.missing.refused ? 'refused' : 'succeeded';
-    await finish(status, { ...result.cis, errors: undefined, ...result.missing, refused: undefined, ...(events ? { events } : {}) }, errors, result.missing.refused ?? `${fetched.cis.length} CIs synced`);
+    const message = result.missing.refused ?? (fetched.partial?.length ? `${fetched.cis.length} CIs synced; incomplete, so nothing was marked missing: ${fetched.partial.join('; ')}` : `${fetched.cis.length} CIs synced`);
+    await finish(status, { ...result.cis, errors: undefined, ...result.missing, refused: undefined, ...(events ? { events } : {}) }, errors, message);
     return { status, ...result, events };
   } catch (err) {
     // A failed fetch never marks anything missing: ciBatch was not reached.
