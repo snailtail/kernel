@@ -8,6 +8,9 @@ const Icon = ({ children, size = 16 }: { children: ReactNode; size?: number }) =
 );
 
 export const icons = {
+  home: <Icon><path d="M3 11l9-8 9 8" /><path d="M5 10v10h14V10" /><path d="M10 20v-6h4v6" /></Icon>,
+  services: <Icon><path d="M12 3l9 5-9 5-9-5 9-5z" /><path d="M3 13l9 5 9-5" /></Icon>,
+  chevron: <Icon><path d="M9 6l6 6-6 6" /></Icon>,
   dashboard: <Icon><rect x="3" y="3" width="7" height="9" rx="1" /><rect x="14" y="3" width="7" height="5" rx="1" /><rect x="14" y="12" width="7" height="9" rx="1" /><rect x="3" y="16" width="7" height="5" rx="1" /></Icon>,
   problems: <Icon><circle cx="12" cy="12" r="9" /><path d="M12 8v4" /><path d="M12 16h.01" /></Icon>,
   candidates: <Icon><path d="M3 12h4l3-8 4 16 3-8h4" /></Icon>,

@@ -1,3 +1,4 @@
+import { useSearchParams } from 'react-router';
 import { useCallback, useEffect, useState } from 'react';
 import { api } from './api';
 
@@ -35,4 +36,17 @@ export function useApi<T>(path: string | null) {
   }, [path]);
 
   return { data, setData, error, loading, reload, refresh };
+}
+
+/** "+ New" links to a list page with ?new=1 (#102): opens its create form, then drops the parameter. */
+export function useOpenOnNew(open: () => void) {
+  const [params, setParams] = useSearchParams();
+  useEffect(() => {
+    if (params.get('new') !== '1') return;
+    open();
+    const next = new URLSearchParams(params);
+    next.delete('new');
+    setParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params]);
 }

@@ -17,7 +17,7 @@ import { Modal } from '../components/Modal';
 import { duration, formatDate, relativeTime } from '../format';
 import { useLive } from '../live';
 import { Presence } from '../components/Presence';
-import { useApi } from '../hooks';
+import { useApi, useOpenOnNew } from '../hooks';
 import { useSession } from '../session';
 import { Term } from '../components/Glossary';
 import { SeverityBadge, SlaBadge } from '../components/Badges';
@@ -62,6 +62,7 @@ export function IncidentsPage() {
   const [params, setParams] = useSearchParams();
   const [q, setQ] = useState(params.get('q') ?? '');
   const [creating, setCreating] = useState(false);
+  useOpenOnNew(() => setCreating(true));
   const navigate = useNavigate();
   const set = (k: string, v: string) => setParams((prev) => { const n = new URLSearchParams(prev); if (v) n.set(k, v); else n.delete(k); return n; }, { replace: true });
   useEffect(() => {

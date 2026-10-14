@@ -1,4 +1,5 @@
 // Cross-practice operations over the record type registry: one predictable surface for agents and scripts.
+import { moduleEnabled } from './modules.js';
 import { z } from 'zod';
 import { linkArticleCi } from './knowledge.js';
 import { myTeams } from './teams.js';
@@ -154,4 +155,25 @@ export async function myWork(user: User) {
     decisions: decisions.rows.map((p) => ({ type: 'problem', ...p, url: recordUrl(problemType, p.ref) })),
     approvals: decide ? await listApprovals() : [],
   };
+}
+
+/**
+ * The menu's badges (#102): only things that need someone, counted with the caller's visibility (row-level security)
+ * and the modules that are on. One cheap query per badge.
+ */
+export async function navCounts(user: User) {
+  const n = async (sql: string, params: unknown[] = []) => Number((await query(sql, params)).rows[0].n);
+  const zero = Promise.resolve(0);
+  const [myProblems, myIncidents, myActions, alerts, queue, decisions, overdue] = await Promise.all([
+    n("SELECT count(*) AS n FROM problems WHERE assignee_id = $1 AND status NOT IN ('resolved', 'closed')", [user.id]),
+    can(user.role, 'incident.read') && moduleEnabled('incident') ? n("SELECT count(*) AS n FROM incidents WHERE assignee_id = $1 AND status NOT IN ('resolved', 'closed')", [user.id]) : zero,
+    n("SELECT count(*) AS n FROM problem_actions WHERE owner_id = $1 AND status = 'open'", [user.id]),
+    can(user.role, 'event.read') && moduleEnabled('event') ? n("SELECT count(*) AS n FROM alerts WHERE status = 'open' AND incident_id IS NULL AND suppressed = ''") : zero,
+    can(user.role, 'incident.read') && moduleEnabled('incident')
+      ? n("SELECT count(*) AS n FROM incidents i WHERE i.assignee_id IS NULL AND i.status NOT IN ('resolved', 'closed') AND i.team_id IN (SELECT team_id FROM team_members WHERE user_id = $1)", [user.id])
+      : zero,
+    can(user.role, 'problem.accept_risk') ? n("SELECT count(*) AS n FROM problems WHERE status = 'known_error' AND coalesce(ec_decision, 'pending') = 'pending'") : zero,
+    n("SELECT count(*) AS n FROM problem_actions WHERE status = 'open' AND due_date < current_date"),
+  ]);
+  return { my_work: myProblems + myIncidents + myActions, events: alerts, incidents: queue, kedb: decisions, actions: overdue };
 }
