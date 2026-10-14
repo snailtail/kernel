@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { audit, requireReason } from './audit.js';
 import type { User } from './auth.js';
 import { query, tx } from './db.js';
+import { currentContext } from './context.js';
 import { badRequest, forbidden, notFound } from './errors.js';
 import { authorize } from './policy.js';
 import { typeForRef } from './records.js';
@@ -73,6 +74,23 @@ export async function onlyTitleMatches<T extends { ref: string; title?: string |
     const title = (h.title ?? '').toLowerCase();
     return h.ref.toUpperCase() === q.trim().toUpperCase() || (terms.length > 0 && terms.every((t) => title.includes(t)));
   });
+}
+
+/**
+ * A list's text filter (`?q=`) as SQL, for the record alias `a` (#61). Like onlyTitleMatches, but inside the query so
+ * LIMIT and ordering stay right: a confidential record the viewer may not read matches on its ref and title only, so
+ * a word from its description cannot confirm it. The viewer is the request's user; agents (MCP) never read
+ * confidential text. Pushes its parameters onto `params`.
+ */
+export function textFilterSql(a: string, kind: Kind, tsquery: string, params: unknown[]): string {
+  const ctx = currentContext();
+  params.push(tsquery, ctx.channel === 'mcp' ? null : ctx.userId, kind);
+  const [q, u, k] = [params.length - 2, params.length - 1, params.length].map((n) => `$${n}`);
+  return `(${a}.search @@ to_tsquery('simple', ${q}) AND (${a}.classification IS DISTINCT FROM 'confidential'
+    OR to_tsvector('simple', ${a}.ref || ' ' || ${a}.title) @@ to_tsquery('simple', ${q})
+    OR (${u}::int IS NOT NULL AND (${a}.assignee_id = ${u}::int OR ${a}.created_by = ${u}::int
+      OR EXISTS (SELECT 1 FROM team_members m WHERE m.user_id = ${u}::int AND m.team_id = ${a}.team_id)
+      OR EXISTS (SELECT 1 FROM record_reveals v WHERE v.user_id = ${u}::int AND v.record_type = ${k}::text AND v.record_id = ${a}.id AND v.expires_at > now())))))`;
 }
 
 /** Masks free text in place: in objects that carry a masked ref, and – for a page about one record – everywhere. */
