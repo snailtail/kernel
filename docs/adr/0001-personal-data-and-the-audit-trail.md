@@ -60,7 +60,7 @@ shows how many such entries remain, and the erase dialog says that they may stil
 
 IP addresses and user agents move into `audit_context`, where they are subject to its retention. The tool then recomputes the whole chain with the active key. It writes an `audit.chain_rebase_intent` entry (the old head) before the rewrite and an `audit.chain_rebased` entry (old head, new head, rows rewritten, key id) after it. Both entries also go to the SIEM anchor stream. Anchors up to the old head are compared with the old head's hash, which the `audit.chain_rebased` entry records, and anchors after it with the database.
 
-Executed: *(date filled in when run)*.
+Executed on 2026-10-14 in production, after a verified backup and a dress rehearsal on a restored copy whose dry run gave the same counts. Two of the three legacy entries were rewritten (actor name, IP address, user agent and user reference). The chain was recomputed with key `k0` and verifies, and a second dry run finds nothing left to change. The old head was entry 3 (`7f1283b9…`), and the intent entry 4 became the boundary: its hash before the rewrite was `ae1cb0cc…` and after it `0881565f…`. The pre-re-base dump is kept outside the backup rotation.
 
 ## Consequences
 
