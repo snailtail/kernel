@@ -69,7 +69,9 @@ read by everyone. `server/src/audience.ts` holds the one rule:
 
 - `audienceOf(db, ref)` → `{ restricted, restricted_teams, classification }` of a problem, incident or change.
 - `mayCopyText(from, to, kind)` decides; a title (`kind: 'title'`) only stops at restriction, because confidential
-  titles stay readable.
+  titles stay readable. A restriction without teams is the narrowest (only the record's assignee and creator), so any
+  team on the target is broader. The rule compares restriction, teams and classification only: it does not follow who
+  is assignee or creator on each record, which can differ between a source and its target.
 - `copyText(db, from, to, text, fallback, path)` returns the text or the fallback (`Resolved with INC000123.`) and
   audits what was left behind.
 - A record made from another starts as narrow as its source from its first insert: `startNarrow(from)` passed to

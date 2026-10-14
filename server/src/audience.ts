@@ -35,14 +35,14 @@ export async function audienceOf(db: Queryable | null, ref: string): Promise<Aud
 
 /**
  * May text from `from` be stored in `to`? Titles stay readable on a confidential record (#61), so a title only stops
- * at restriction; free text stops at both.
+ * at restriction; free text stops at both. The rule compares audiences as restriction, teams and classification; it
+ * does not follow who is assignee or creator on each record, which can differ between a source and its target.
  */
 export function mayCopyText(from: Audience, to: Audience, kind: 'text' | 'title' = 'text') {
   if (from.restricted && !to.restricted) return false;
-  if (from.restricted && to.restricted && from.restricted_teams.length && to.restricted_teams.length && from.restricted_teams.some((t) => !to.restricted_teams.includes(t))) {
-    // Both restricted, but the target lets in teams the source does not: broader.
-    return false;
-  }
+  // Both restricted, but the target lets in a team the source does not: broader. A restriction without teams is the
+  // narrowest of all (only the record's own assignee and creator), so any team on the target is broader.
+  if (from.restricted && to.restricted && to.restricted_teams.some((t) => !from.restricted_teams.includes(t))) return false;
   if (kind === 'text' && from.classification === 'confidential' && to.classification !== 'confidential') return false;
   return true;
 }
