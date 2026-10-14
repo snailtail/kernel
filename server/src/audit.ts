@@ -27,7 +27,7 @@ export let anchorSink: (a: { id: number; hash: string }) => void = () => {};
 export const setAnchorSink = (fn: typeof anchorSink) => {
   anchorSink = fn;
 };
-const GENESIS = '0'.repeat(64);
+export const GENESIS = '0'.repeat(64);
 
 /** JSON with sorted keys at every level, so jsonb's own key ordering cannot change the hash. */
 export function stableStringify(v: unknown): string {
@@ -87,8 +87,16 @@ export const digestOf = (v: string) => {
     // Without a key a plain hash of a short value could be reversed, so only the fact and size of the change remain.
     : { changed: true, length: v.length };
 };
+/** An already minimised value ({digest, length} or {changed, length}): left as it is, so minimising is idempotent. */
+const isMinimised = (v: unknown) => !!v && typeof v === 'object' && !Array.isArray(v) && 'length' in v && ('digest' in v || 'changed' in v) && Object.keys(v).length === 2;
+
 export function minimise(value: unknown, key = ''): unknown {
-  if (typeof value === 'string') return PERSONAL.test(key) || !TOKEN.test(value) ? digestOf(value) : value;
+  if (typeof value === 'string') {
+    if (value === '[changed]') return value;
+    // Short code-like values stay readable – unless the scanner sees a secret or personal data in them (#61).
+    return PERSONAL.test(key) || !TOKEN.test(value) || scan(value).length ? digestOf(value) : value;
+  }
+  if (isMinimised(value)) return value;
   if (Array.isArray(value)) return value.map((v) => minimise(v, key));
   if (value && typeof value === 'object' && !(value instanceof Date)) {
     // In { field: { from, to } } the field name decides, not "from"/"to".
@@ -98,9 +106,9 @@ export function minimise(value: unknown, key = ''): unknown {
 }
 
 /** Secrets never enter the audit trail, only the fact that they changed. */
-function redact(changes: Record<string, unknown>) {
+export function withoutSecrets(changes: Record<string, unknown>) {
   const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(changes)) out[k] = /secret|password|token_hash|mfa_secret/i.test(k) ? '[changed]' : v;
+  for (const [k, v] of Object.entries(changes)) out[k] = /secret|password|passwd|api[_-]?key|access[_-]?token|token_hash|credential|private[_-]?key/i.test(k) ? '[changed]' : v;
   return out;
 }
 
@@ -135,7 +143,7 @@ export async function audit(db: Db | null, entry: AuditEntry) {
       entity_type: entry.entity_type,
       entity_ref: entityRef,
       action: entry.action,
-      changes: minimise(JSON.parse(JSON.stringify(redact(entry.changes ?? {})))) as Record<string, unknown>,
+      changes: minimise(JSON.parse(JSON.stringify(withoutSecrets(entry.changes ?? {})))) as Record<string, unknown>,
       reason: entry.reason ?? '',
     };
     const version = currentHashVersion();

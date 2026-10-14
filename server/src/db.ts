@@ -211,3 +211,17 @@ export function listen(channel: string, handler: (payload: string) => void, log:
     await client?.end().catch(() => {});
   };
 }
+
+/**
+ * A connection as the database owner, for operator scripts that must change what the app role cannot (the audit
+ * trail's one-time re-base). Never used while serving requests.
+ */
+export async function withOwner<T>(fn: (client: pg.Client) => Promise<T>): Promise<T> {
+  const client = new pg.Client({ connectionString: config.databaseUrl });
+  await client.connect();
+  try {
+    return await fn(client);
+  } finally {
+    await client.end();
+  }
+}
