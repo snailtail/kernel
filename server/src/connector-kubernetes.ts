@@ -105,10 +105,18 @@ export const ACCESS = [
 ] as const;
 
 /** What a read-only role must not reach; the connection test warns when the token can. */
-const TOO_MUCH = [{ group: '', resource: 'secrets' }, { group: '', resource: 'configmaps' }, { group: '', resource: 'pods/exec', verb: 'create' }] as const;
+const TOO_MUCH = [
+  { group: '', resource: 'secrets' },
+  { group: '', resource: 'configmaps' },
+  // Pod specs carry environment literals, often credentials.
+  { group: '', resource: 'pods' },
+  { group: '', resource: 'pods/exec', verb: 'create' },
+  // The kubelet API through the API server: in practice exec on every node.
+  { group: '', resource: 'nodes/proxy', verb: 'get' },
+] as const;
 
 /**
- * A least-privilege manifest: a ServiceAccount with get/list on exactly what is read, and a token Secret. No watch,
+ * A least-privilege manifest: a ServiceAccount with list on exactly what is read, and a token Secret. No get, watch,
  * no pods, no Secrets or ConfigMaps.
  */
 export function rbacManifest(config: { cluster_name?: unknown; sync_events?: unknown }): string {
@@ -116,7 +124,7 @@ export function rbacManifest(config: { cluster_name?: unknown; sync_events?: unk
   const events = config.sync_events === true || config.sync_events === 'true';
   const rules = Object.entries(
     ACCESS.filter((a) => !('onlyWithEvents' in a) || events).reduce<Record<string, string[]>>((by, a) => ({ ...by, [a.group]: [...(by[a.group] ?? []), a.resource] }), {}),
-  ).map(([group, resources]) => `  - apiGroups: [${JSON.stringify(group)}]\n    resources: [${resources.map((r) => JSON.stringify(r)).join(', ')}]\n    verbs: ["get", "list"]`);
+  ).map(([group, resources]) => `  - apiGroups: [${JSON.stringify(group)}]\n    resources: [${resources.map((r) => JSON.stringify(r)).join(', ')}]\n    verbs: ["list"]`);
   return `# Kernel: read-only access to ${cluster}. Apply with: kubectl apply -f kernel-reader.yaml
 apiVersion: v1
 kind: Namespace
@@ -208,13 +216,11 @@ export const KUBERNETES: ConnectorType = {
     const nodes = await ctx.fetchJson('/api/v1/nodes?limit=1').catch(() => undefined);
     const count = nodes?.metadata?.remainingItemCount !== undefined ? `, ${nodes.metadata.remainingItemCount + (nodes.items?.length ?? 0)} nodes` : nodes?.items && !nodes.metadata?.continue ? `, ${nodes.items.length} node${nodes.items.length === 1 ? '' : 's'}` : '';
     const wanted = ACCESS.filter((a) => !('onlyWithEvents' in a) || ctx.config.sync_events);
-    let readable: string[] = [], forbidden: string[] = [], tooMuch: string[] = [];
+    let readable: string[] = [], forbidden: string[] = [];
     try {
       const allowed = await Promise.all(wanted.map((a) => canI(ctx, a)));
       readable = wanted.filter((_, i) => allowed[i]).map((a) => a.resource);
       forbidden = wanted.filter((_, i) => !allowed[i]).map((a) => a.resource);
-      const extra = await Promise.all(TOO_MUCH.map((a) => canI(ctx, a)));
-      tooMuch = TOO_MUCH.filter((_, i) => extra[i]).map((a) => ('verb' in a ? `${a.verb} ${a.resource}` : `list ${a.resource}`));
     } catch {
       // A cluster without the access-review API: try one item of each kind instead (never Secrets).
       const paths: Record<string, string> = { nodes: '/api/v1/nodes', namespaces: '/api/v1/namespaces', events: '/api/v1/events', cronjobs: '/apis/batch/v1/cronjobs' };
@@ -222,6 +228,17 @@ export const KUBERNETES: ConnectorType = {
         const r = await listKind(ctx, `${paths[a.resource] ?? `/apis/apps/v1/${a.resource}`}?limit=1`);
         ('items' in r ? readable : forbidden).push(a.resource);
       }
+    }
+    // More than it needs: everything (cluster-admin or a wildcard role), or the specific dangerous rights.
+    let tooMuch: string[] = [];
+    try {
+      if (await canI(ctx, { group: '*', resource: '*', verb: '*' })) tooMuch = ['do everything (cluster-admin)'];
+      else {
+        const extra = await Promise.all(TOO_MUCH.map((a) => canI(ctx, a)));
+        tooMuch = TOO_MUCH.filter((_, i) => extra[i]).map((a) => `${'verb' in a ? a.verb : 'list'} ${a.resource}`);
+      }
+    } catch {
+      // Without the access-review API this cannot be checked; the per-kind result above still stands.
     }
     return [
       `Connected to Kubernetes ${v.gitVersion ?? '?'}${count}.`,
