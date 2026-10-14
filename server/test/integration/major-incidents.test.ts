@@ -177,6 +177,26 @@ describe('major incidents (#108)', { skip }, () => {
     assert.ok(due.some((d: any) => d.username === 'pm'), JSON.stringify(due));
   });
 
+  test('a confidential major incident: its timeline is masked for outsiders and its resolution is not copied', async () => {
+    const SECRET = 'Payroll export leaked via shared folder';
+    const conf = (await pm.post('/api/incidents', { title: 'Payroll outage', impact: 1, urgency: 1 })).body.ref;
+    ok(await pm.post(`/api/incidents/${conf}/major`, {}));
+    ok(await pm.post(`/api/incidents/${conf}/communications`, { body: `Update: ${SECRET}` }));
+    ok(await pm.put(`/api/records/${conf}/classification`, { classification: 'confidential', reason: 'Personal data' }));
+    const kid = (await analyst2.post('/api/incidents', { title: 'Cannot see my payslip' })).body.ref;
+    ok(await analyst2.post(`/api/incidents/${conf}/children`, { child: kid }));
+    const md = async (c: Client) => (await fetch(`${k.base}/api/incidents/${conf}/timeline?format=md`, { headers: { Cookie: c.cookie! } })).text();
+    assert.ok((await md(pm)).includes(SECRET), 'positive control: the creator reads the timeline in full');
+    const outside = await md(analyst2);
+    assert.equal(outside.includes(SECRET), false, 'the Markdown export is masked for someone outside the record');
+    assert.match(outside, /Confidential: notes, updates and the resolution are not included/);
+    assert.equal(JSON.stringify((await analyst2.get(`/api/incidents/${conf}/timeline`)).body).includes(SECRET), false);
+    ok(await pm.post(`/api/incidents/${conf}/transition`, { to: 'resolved', resolution_code: 'fixed', resolution: `Closed the share. ${SECRET}` }));
+    const child = (await analyst2.get(`/api/incidents/${kid}`)).body;
+    assert.equal(child.status, 'resolved');
+    assert.equal(child.resolution, `Resolved with ${conf}.`, 'only the reference reaches the ordinary child');
+  });
+
   test('agents have the same contract (MCP)', async () => {
     const mcp = new McpClient({ name: 'major', version: '1' });
     await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('pm')}` } } }));
