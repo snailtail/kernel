@@ -13,7 +13,7 @@ const ok = (r: { status: number; body: unknown }) => assert.ok(r.status >= 200 &
 
 /** A fake Kubernetes API server: TLS with its own CA, bearer auth, paginated lists, a forbidden and a missing kind. */
 function fakeCluster(cert: string, key: string) {
-  const state = { deployments: true, daemonsets: false, broad: false, gone: new Set<string>(), requests: [] as string[] };
+  const state = { deployments: true, daemonsets: false, broad: false as boolean | 'admin', gone: new Set<string>(), requests: [] as string[] };
   const deployment = (name: string) => ({
     metadata: { name, namespace: 'shop', labels: { 'app.kubernetes.io/part-of': 'webshop', team: 'payments', 'internal-note': 'not kept' }, annotations: { secret: 'never read' } },
     spec: { replicas: 3, template: { spec: { containers: [{ name: 'app', image: `registry.example.com/${name}:1.4.2`, env: [{ name: 'DB_PASSWORD', value: ENV_SECRET }], args: [`--password=${ENV_SECRET}`] }] } } },
@@ -31,7 +31,7 @@ function fakeCluster(cert: string, key: string) {
       case '/apis/authorization.k8s.io/v1/selfsubjectaccessreviews': {
         if (req.method !== 'POST') return json({}, 405);
         const { resource, subresource } = JSON.parse(body).spec.resourceAttributes;
-        const allowed = resource === 'daemonsets' ? state.daemonsets : ['secrets', 'configmaps'].includes(resource) || subresource ? state.broad : true;
+        const allowed = resource === '*' ? state.broad === 'admin' : resource === 'daemonsets' ? state.daemonsets : ['secrets', 'configmaps', 'pods'].includes(resource) || subresource ? !!state.broad : true;
         return json({ kind: 'SelfSubjectAccessReview', status: { allowed } });
       }
       case '/api/v1/nodes': return json({ items: [
@@ -110,17 +110,19 @@ describe('Kubernetes connector (#24)', { skip }, () => {
     assert.doesNotMatch(t.message, /Warning/, 'positive control: a read-only token gets no warning');
     cluster.state.broad = true;
     const broad = (await admin.post(`/api/connectors/${id}/test`, {})).body;
-    assert.match(broad.message, /Warning: this token can also list secrets, list configmaps, create pods\/exec/);
+    assert.match(broad.message, /Warning: this token can also list secrets, list configmaps, list pods, create pods\/exec, get nodes\/proxy\./);
+    cluster.state.broad = 'admin';
+    assert.match((await admin.post(`/api/connectors/${id}/test`, {})).body.message, /Warning: this token can also do everything \(cluster-admin\)/);
     cluster.state.broad = false;
   });
 
-  test('the setup manifest grants get/list on exactly what is read, events only when synced (#112)', async () => {
+  test('the setup manifest grants list on exactly what is read, events only when synced (#112)', async () => {
     const { rbacManifest } = await import('../../src/connector-kubernetes.js');
     const withEvents = (await admin.get('/api/connectors/types/kubernetes/setup?cluster_name=aks-prod&sync_events=true')).body.text;
     assert.match(withEvents, /read-only access to aks-prod/);
     for (const r of ['nodes', 'namespaces', 'events', 'deployments', 'statefulsets', 'daemonsets', 'cronjobs']) assert.match(withEvents, new RegExp(`"${r}"`));
     assert.doesNotMatch(withEvents, /secrets"|configmaps|"pods|watch|"\*"/, 'no Secrets, ConfigMaps, pods, watch or wildcards');
-    assert.deepEqual([...withEvents.matchAll(/verbs: (.*)/g)].map((m: RegExpMatchArray) => m[1]), ['["get", "list"]', '["get", "list"]', '["get", "list"]']);
+    assert.deepEqual([...withEvents.matchAll(/verbs: (.*)/g)].map((m: RegExpMatchArray) => m[1]), ['["list"]', '["list"]', '["list"]']);
     const without = (await admin.get('/api/connectors/types/kubernetes/setup?cluster_name=aks-prod')).body.text;
     assert.doesNotMatch(without, /"events"/);
     assert.match(rbacManifest({ cluster_name: 'x\nkind: ClusterRoleBinding' }), /^# Kernel: read-only access to xkind: ClusterRoleBinding\./, 'the name cannot break out of the comment');

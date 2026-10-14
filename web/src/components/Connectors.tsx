@@ -123,7 +123,7 @@ function ConnectorEditor({ connector: c, types, onClose, onDone }: { connector: 
         <label>Name<input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
         {k8s ? (
           <>
-            <p className="hint-box full">Kernel reads the cluster with a read-only ServiceAccount: get and list on nodes, namespaces and workloads, never Secrets, ConfigMaps or pods. Apply the manifest below, then paste the API server, its CA and the token. <strong>Test</strong> then shows per kind whether the token may read it.</p>
+            <p className="hint-box full">Kernel reads the cluster with a read-only ServiceAccount: list on nodes, namespaces and workloads, never Secrets, ConfigMaps or pods. Apply the manifest below, then paste the API server, its CA and the token. <strong>Test</strong> then shows per kind whether the token may read it.</p>
             <RbacManifest clusterName={form.cluster_name} events={form.sync_events} />
             <label className="full">API server<input required type="url" placeholder="https://k8s.example.com:6443" value={form.base_url} onChange={(e) => setForm({ ...form, base_url: e.target.value })} /></label>
             <label className="full">ServiceAccount token<input type="password" autoComplete="new-password" placeholder={unchanged} required={!c.id} value={form.token} onChange={(e) => setForm({ ...form, token: e.target.value })} /></label>

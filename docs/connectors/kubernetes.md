@@ -11,8 +11,8 @@ allow it to.
 
 The connector form shows this manifest with your cluster name filled in, and leaves out `events` unless **Warning
 events as alerts** is on (`GET /api/connectors/types/kubernetes/setup?cluster_name=…&sync_events=true` returns the
-same). It grants `get` and `list` on exactly the kinds the connector reads and nothing else: no `watch`, no pods, no
-Secrets or ConfigMaps. Save it as `kernel-reader.yaml` and apply it with `kubectl apply -f kernel-reader.yaml`.
+same). It grants `list` on exactly the kinds the connector reads and nothing else: no `watch`, no pods, no
+Secrets or ConfigMaps, not even `get` (the connector only lists). Save it as `kernel-reader.yaml` and apply it with `kubectl apply -f kernel-reader.yaml`.
 
 ```yaml
 # Kernel: read-only access to your cluster. Apply with: kubectl apply -f kernel-reader.yaml
@@ -35,13 +35,13 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: ["nodes", "namespaces", "events"]
-    verbs: ["get", "list"]
+    verbs: ["list"]
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets", "daemonsets"]
-    verbs: ["get", "list"]
+    verbs: ["list"]
   - apiGroups: ["batch"]
     resources: ["cronjobs"]
-    verbs: ["get", "list"]
+    verbs: ["list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -106,8 +106,9 @@ private address (e.g. `https://10.0.0.10:6443`), add that address under **Privat
 private address that is not listed there.
 
 **Test** reports the Kubernetes version, the node count, and for every kind the connector reads whether the token
-may list it (a `SelfSubjectAccessReview`, so before the first run). It warns when the token can also read Secrets or
-ConfigMaps or exec into pods: Kernel never uses that, so bind the token to the read-only role instead.
+may list it (a `SelfSubjectAccessReview`, so before the first run). It warns when the token can do everything
+(cluster-admin), or can list Secrets, ConfigMaps or pods (pod specs carry environment values), exec into pods or reach
+the kubelet through `nodes/proxy`: Kernel never uses that, so bind the token to the read-only role instead.
 
 A kind the role forbids is reported on each run ("forbidden by the ServiceAccount's role"); its CIs and relationships
 are left as they are, while every kind that was read completely is synced as usual (deleted objects count as missed).
