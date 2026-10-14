@@ -52,10 +52,8 @@ export const redactHistorySchema = z.object({
   dry_run: z.boolean().default(false),
 });
 
-/** Thrown to roll back a dry run after counting with the very same statements that would apply it. */
-class Preview extends Error {
-  constructor(public result: unknown) { super('preview'); }
-}
+/** Thrown (empty) to roll back a dry run after counting with the very same statements that would apply it. */
+class RollBack extends Error {}
 
 /** Returns the cleaned string and how many replacements were made. */
 function cleaner(input: z.infer<typeof redactHistorySchema>) {
@@ -122,6 +120,7 @@ export async function redactHistory(user: User, ref: string, input: z.infer<type
   if (!TABLE[type]) throw badRequest('Only problems, incidents and changes have a history to clean');
   if (input.text && input.text.toUpperCase().includes(ref.toUpperCase())) throw badRequest('The text cannot include the record\'s own reference');
   const clean = cleaner(input);
+  let preview: { removed: number; places: Record<string, number>; outside: unknown; dry_run: true } | null = null;
   try {
   return await tx(async (db) => {
     // The caller must see the record (row-level security).
@@ -181,7 +180,10 @@ export async function redactHistory(user: User, ref: string, input: z.infer<type
       articles: articles as { ref: string; title: string }[],
       images: images.map((i) => i.filename as string),
     };
-    if (input.dry_run) throw new Preview({ removed: total, places, outside, dry_run: true });
+    if (input.dry_run) {
+      preview = { removed: total, places, outside, dry_run: true };
+      throw new RollBack();
+    }
     if (!total) return { removed: 0, places, outside };
     const [log, col] = LOG[type];
     await db.query(`INSERT INTO ${log} (${col}, user_id, kind, body, data, channel) VALUES ($1, $2, 'update', $3, $4, 'web')`, [
@@ -192,7 +194,7 @@ export async function redactHistory(user: User, ref: string, input: z.infer<type
     return { removed: total, places, outside };
   });
   } catch (err) {
-    if (err instanceof Preview) return err.result as { removed: number; places: Record<string, number>; outside: unknown; dry_run: true };
+    if (err instanceof RollBack && preview) return preview;
     throw err;
   }
 }
