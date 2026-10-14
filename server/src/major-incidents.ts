@@ -4,6 +4,8 @@
 // Shared by REST, MCP and the web UI like every other practice.
 import { z } from 'zod';
 import { audit } from './audit.js';
+import { maskedRefs } from './confidential.js';
+import { currentContext } from './context.js';
 import type { User } from './auth.js';
 import { query, tx } from './db.js';
 import { badRequest, conflict, forbidden, notFound } from './errors.js';
@@ -206,15 +208,16 @@ export async function unlinkChild(user: User, parentRef: string, childRef: strin
  * When a parent is resolved, its related incidents that resolve with it get its resolution, each with its own
  * history and audit entry. Ones someone unticked stay open.
  */
-export async function resolveChildren(db: Db, actorId: number, parent: { id: number; ref: string; restricted?: boolean; problem_id?: number | null }, code: string, resolution: string) {
+export async function resolveChildren(db: Db, actorId: number, parent: { id: number; ref: string; restricted?: boolean; classification?: string; problem_id?: number | null }, code: string, resolution: string) {
   const { rows: children } = await db.query(
-    "SELECT id, ref, title, status, restricted, problem_id FROM incidents WHERE parent_id = $1 AND resolve_with_parent AND status NOT IN ('resolved', 'closed') ORDER BY id FOR UPDATE",
+    "SELECT id, ref, title, status, restricted, classification, problem_id FROM incidents WHERE parent_id = $1 AND resolve_with_parent AND status NOT IN ('resolved', 'closed') ORDER BY id FOR UPDATE",
     [parent.id],
   );
   const { rows: problem } = parent.problem_id ? await db.query('SELECT id, ref FROM problems WHERE id = $1', [parent.problem_id]) : { rows: [] as any[] };
   for (const c of children) {
-    // A restricted parent's resolution never reaches a child more people can read: only the reference does.
-    const text = (parent.restricted && !c.restricted ? `Resolved with ${parent.ref}.` : `Resolved with ${parent.ref}: ${resolution}`).slice(0, 20000);
+    // A restricted or confidential parent's resolution never reaches a child more people can read: only the reference.
+    const narrower = (parent.restricted && !c.restricted) || (parent.classification === 'confidential' && c.classification !== 'confidential');
+    const text = (narrower ? `Resolved with ${parent.ref}.` : `Resolved with ${parent.ref}: ${resolution}`).slice(0, 20000);
     if (problem[0] && !c.problem_id) await attachToProblem(db, actorId, c, problem[0]);
     await db.query(
       `UPDATE incidents SET status = 'resolved', resolution_code = $2, resolution = $3, resolved_at = now(),
@@ -295,6 +298,8 @@ export async function majorDetail(user: User, i: any, affectedServices: { ref: s
 
 // ---- Timeline ----------------------------------------------------------------------------------
 
+const STATUS_LABEL: Record<string, string> = { new: 'New', in_progress: 'In progress', on_hold: 'On hold', resolved: 'Resolved', closed: 'Closed' };
+
 /**
  * The key moments only: declared, first response, communications, status changes, linked changes, events and
  * problems, related incidents, the workaround and resolution, and anything someone marked. Oldest first.
@@ -304,6 +309,9 @@ export async function timeline(user: User, ref: string) {
   const { rows: inc } = await query('SELECT id, ref, title, created_at, responded_at, is_major, major_declared_at FROM incidents WHERE ref = $1', [ref.toUpperCase()]);
   if (!inc[0]) throw notFound(`Incident ${ref} not found`);
   const i = inc[0];
+  // A confidential incident's notes, updates and resolution stay masked for those who may not read them (#61), also in
+  // the Markdown export, which the response masking cannot reach. Agents never read them.
+  const masked = (await maskedRefs(currentContext().channel === 'mcp' ? null : user, [i.ref])).has(i.ref);
   const { rows } = await query(
     `SELECT a.id, a.kind, a.body, a.data, a.key_moment, a.created_at, u.display_name AS by
      FROM incident_activity a LEFT JOIN users u ON u.id = a.user_id
@@ -315,18 +323,18 @@ export async function timeline(user: User, ref: string) {
   const entries = rows.map((a) => ({
     activity_id: a.id as number, at: a.created_at as Date, kind: a.kind as string, key_moment: a.key_moment as boolean, by: a.by as string | null,
     label: a.kind === 'status'
-      ? `${a.data.from} → ${a.data.to}${a.data.resolution_code ? ` (${a.data.resolution_code.replace('_', ' ')})` : ''}${a.data.with_parent ? ` with ${a.data.with_parent}` : ''}`
+      ? `${STATUS_LABEL[a.data.from] ?? a.data.from} → ${STATUS_LABEL[a.data.to] ?? a.data.to}${a.data.resolution_code ? ` (${String(a.data.resolution_code).replace('_', ' ')})` : ''}${a.data.with_parent ? ` with ${a.data.with_parent}` : ''}`
       : a.kind === 'communication' ? 'Communication update' : a.kind === 'created' ? 'Logged' : a.kind === 'comment' ? 'Note' : a.body,
-    body: a.kind === 'communication' || a.kind === 'comment' ? a.body : a.kind === 'status' ? (a.data.resolution ?? a.body ?? '') : '',
+    body: masked ? '' : a.kind === 'communication' || a.kind === 'comment' ? a.body : a.kind === 'status' ? (a.data.resolution ?? a.body ?? '') : '',
   }));
   if (i.responded_at) entries.push({ activity_id: 0, at: i.responded_at, kind: 'response', key_moment: false, by: null, label: 'First response', body: '' });
   entries.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime() || a.activity_id - b.activity_id);
-  return { ref: i.ref, title: i.title, is_major: i.is_major, declared_at: i.major_declared_at, entries };
+  return { ref: i.ref, title: i.title, is_major: i.is_major, declared_at: i.major_declared_at, confidential_masked: masked || undefined, entries };
 }
 
 export function timelineMarkdown(t: Awaited<ReturnType<typeof timeline>>) {
   const time = (d: Date) => new Date(d).toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
-  const lines = [`# Timeline: ${t.ref} ${t.title}`, '', '| Time | What | By |', '|---|---|---|'];
+  const lines = [`# Timeline: ${t.ref} ${t.title}`, '', ...(t.confidential_masked ? ['Confidential: notes, updates and the resolution are not included.', ''] : []), '| Time | What | By |', '|---|---|---|'];
   const cell = (s: string) => s.replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
   for (const e of t.entries) lines.push(`| ${time(e.at)} | ${cell(e.label)}${e.body ? `: ${cell(e.body.slice(0, 500))}` : ''}${e.key_moment ? ' ★' : ''} | ${cell(e.by ?? '')} |`);
   return lines.join('\n') + '\n';

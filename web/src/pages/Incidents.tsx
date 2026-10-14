@@ -349,6 +349,9 @@ export function IncidentPage() {
           </section>
         </div>
         <aside className="problem-side">
+          {/* During an outage these come first: the same outage reported again, and what the status page says. */}
+          <RelatedIncidentsPanel incidentRef={i.ref} isMajor={i.is_major} parent={i.parent} children={i.children} suggested={i.suggested_parent} editable={editable} onChange={setData} />
+          {i.status_proposal && editable && <StatusProposalCard incidentRef={i.ref} proposal={i.status_proposal} onPosted={reload} />}
           {i.sla && (
             <section className={`card sla-card sla-${i.sla.resolution.state}`}>
               <h2>Service level <span className="muted small">{i.sla.name} · {i.sla.calendar}</span></h2>
@@ -392,8 +395,6 @@ export function IncidentPage() {
           <VisibilityPanel record={i as any} onChange={reload} />
           <DevLinksPanel recordRef={i.ref} editable={editable} />
           <AttachmentsPanel recordRef={i.ref} editable={editable} canDelete={(a) => a.uploaded_by === user.id || manager} />
-          {i.status_proposal && editable && <StatusProposalCard incidentRef={i.ref} proposal={i.status_proposal} onPosted={reload} />}
-          <RelatedIncidentsPanel incidentRef={i.ref} isMajor={i.is_major} parent={i.parent} children={i.children} suggested={i.suggested_parent} editable={editable} onChange={setData} />
           {meta.modules?.cmdb !== false && <AffectedCisPanel record={i} basePath={path} editable={editable} onChange={setData} />}
           <section className="card">
             <h2>Problem</h2>
