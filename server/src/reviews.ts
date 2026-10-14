@@ -6,7 +6,8 @@ import { z } from 'zod';
 import { insertAction } from './actions.js';
 import { audit } from './audit.js';
 import type { User } from './auth.js';
-import { forgetExists, maskedRefs } from './confidential.js';
+import { audienceOf, copyText, mayCopyText, startNarrow, titleAudience, whyNotForEveryone } from './audience.js';
+import { maskedRefs } from './confidential.js';
 import { currentContext } from './context.js';
 import { query, tx } from './db.js';
 import { badRequest, conflict, forbidden, notFound } from './errors.js';
@@ -123,10 +124,6 @@ async function loadReview(db: Db, incidentRef: string, lock = false) {
   if (!rows[0]) throw notFound(`${incidentRef.toUpperCase()} has no post-incident review`);
   return rows[0];
 }
-
-/** Is the problem readable by more people than the incident? Then the incident's text does not go into it. */
-const broader = (incident: { restricted: boolean; classification: string }, problem: { restricted: boolean; classification: string }) =>
-  (incident.restricted && !problem.restricted) || (incident.classification === 'confidential' && problem.classification !== 'confidential');
 
 /** Owner, lead or a manager may finish the review; anyone working on incidents may contribute to it. */
 const mayFinish = (user: User, r: any) => r.owner_id === user.id || r.major_lead_id === user.id || can(user.role, 'incident.flag_major');
@@ -294,22 +291,21 @@ export async function itemToProblem(user: User, ref: string, itemId: number, inp
     if (item.problem_id) throw conflict('This factor already has a problem');
     let problemRef = input.problem?.toUpperCase();
     const created = !problemRef;
+    const from = await audienceOf(db, r.ref);
     if (!problemRef) {
       // In this transaction and as narrow as the incident from the start, so no notice, webhook or event about the
       // new problem ever goes out while it is broader than its source.
-      // A confidential record's title stays readable to everyone (#61), so the factor's words do not become one.
+      // A confidential record's title stays readable to everyone (#61), so the factor's words become one only when the
+      // title is as narrow as the factor.
+      const narrow = startNarrow(from);
       problemRef = await createProblemInTx(db, user, {
-        title: r.classification === 'confidential' ? `Contributing factor from the post-incident review of ${r.ref}` : item.body.split('\n')[0].slice(0, 300),
+        title: (await copyText(db, from, titleAudience({ ...from, ref: null }), item.body.split('\n')[0], `Contributing factor from the post-incident review of ${r.ref}`, 'review factor → problem title')).slice(0, 300),
         description: `Contributing factor from the post-incident review of ${r.ref} (${r.incident_title}):\n\n${item.body}`,
         impact: r.impact, urgency: r.urgency, ...(r.category_id ? { category_id: r.category_id } : {}),
-      }, { restricted: r.restricted, restricted_teams: r.restricted_teams ?? [], classification: r.classification, from: r.ref });
-      if (r.classification === 'confidential') {
-        await db.query("SELECT pg_notify('kernel_live', 'classification:' || (SELECT id FROM problems WHERE ref = $1))", [problemRef]);
-        forgetExists();
-      }
+      }, narrow);
     }
     const problem = await loadForUpdate(db, problemRef!);
-    const wide = !created && broader(r, problem);
+    const wide = !created && !mayCopyText(from, await audienceOf(db, problem.ref));
     await db.query('UPDATE incident_review_items SET problem_id = $2 WHERE id = $1', [item.id, problem.id]);
     await db.query(
       `INSERT INTO problem_links (problem_id, kind, reference, system, note, created_by) VALUES ($1, 'incident', $2, 'Kernel', $3, $4) ON CONFLICT DO NOTHING`,
@@ -345,7 +341,7 @@ export async function itemToAction(user: User, ref: string, itemId: number, inpu
     if (!problemId) throw badRequest('Actions live on a problem: turn a contributing factor into a problem first, or name one');
     const { rows: p } = await db.query('SELECT id, ref, restricted, classification FROM problems WHERE id = $1 FOR UPDATE', [problemId]);
     // On a problem more people can read, the action says where it came from but not what the review said.
-    const wide = broader(r, p[0]);
+    const wide = !mayCopyText(await audienceOf(db, r.ref), await audienceOf(db, p[0].ref));
     if (wide && !input.title) throw badRequest(`${p[0].ref} is readable by more people than ${r.ref}: give the action a title of its own`);
     const actionId = await insertAction(db, user, p[0], {
       title: (input.title ?? item.body.split('\n')[0]).slice(0, 300),
@@ -387,9 +383,8 @@ export async function waiveReview(user: User, ref: string, input: z.infer<typeof
 
 /** The lessons as a draft knowledge article (#47), for a person to edit and publish. */
 export async function reviewToArticle(user: User, ref: string) {
-  const { rows: inc } = await query('SELECT restricted, classification FROM incidents WHERE ref = $1', [ref.toUpperCase()]);
-  if (inc[0]?.restricted) throw badRequest('A restricted incident\'s review cannot become a knowledge article: articles are read by everyone');
-  if (inc[0]?.classification === 'confidential') throw badRequest('A confidential incident\'s review is not copied into an article: articles are read by everyone. Write a separate article without the confidential details.');
+  const refusal = whyNotForEveryone(await audienceOf(null, ref), 'an article');
+  if (refusal) throw badRequest(refusal);
   const r = await getReview(user, ref);
   const sections = [
     ['What happened', r.what_happened], ['What went well', r.went_well], ['What was hard', r.was_hard], ['Where we were lucky', r.lucky],

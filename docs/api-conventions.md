@@ -61,6 +61,24 @@ Cross-practice: `GET /api/search?q=`, `GET /api/records/:ref`, `GET /api/records
 Webhook events are named `<type>.<event>` (`problem.created`, `problem.status_changed`…) and carry ref, title,
 status and url, never long texts.
 
+## Copying text between records
+
+Text never moves from a narrower audience into a broader one (#117): not from a restricted record into an
+unrestricted one, and not from a confidential record into a normal one. Articles, actions and status updates count as
+read by everyone. `server/src/audience.ts` holds the one rule:
+
+- `audienceOf(db, ref)` → `{ restricted, restricted_teams, classification }` of a problem, incident or change.
+- `mayCopyText(from, to, kind)` decides; a title (`kind: 'title'`) only stops at restriction, because confidential
+  titles stay readable.
+- `copyText(db, from, to, text, fallback, path)` returns the text or the fallback (`Resolved with INC000123.`) and
+  audits what was left behind.
+- A record made from another starts as narrow as its source from its first insert: `startNarrow(from)` passed to
+  `createProblemInTx` or `createChange`, so no notice, webhook or event goes out while it is broader.
+- `whyNotForEveryone(audience, what)` gives the refusal for paths into something everyone reads (articles).
+
+`test/integration/copy-text.test.ts` runs every path with a restricted and a confidential source and an ordinary one
+as positive control, and counts where records are created: a new path fails it until it has a row.
+
 ## Checklist for a new practice
 
 1. Migration (`1xx_<practice>.sql`), service module, policy actions, audit entries.
@@ -68,3 +86,4 @@ status and url, never long texts.
 3. OpenAPI entries (the coverage test checks all routes), parity test passes.
 4. Guidance (`next_steps`), MCP prompt(s), webhook events, UI with the shared record layout.
 5. Authorisation matrix rows for the new routes.
+6. Every path that copies text from another record goes through `audience.ts` and gets a row in `copy-text.test.ts`.
