@@ -290,28 +290,39 @@ export async function getProblem(ref: string) {
 }
 
 export async function createProblem(user: User, input: z.infer<typeof createProblemSchema>) {
+  const ref = await tx(async (db) => createProblemInTx(db, user, input));
+  return getProblem(ref);
+}
+
+/** How narrow a record made from another starts (#117): set at insert, before any notice or webhook goes out. */
+export interface StartNarrow { restricted: boolean; restricted_teams: number[]; classification: 'normal' | 'confidential'; from: string | null }
+
+/** Creates a problem in the caller's transaction, optionally as narrow as the record it was made from. */
+export async function createProblemInTx(db: Db, user: User, input: z.infer<typeof createProblemSchema>, narrow?: StartNarrow) {
   authorize(user, 'problem.create');
   if (input.is_major) authorize(user, 'problem.flag_major');
-  const ref = await tx(async (db) => {
-    await validateReferences(db, input);
-    await checkAssigneeInTeam(db, input.team_id, input.assignee_id);
-    // Categories such as security problems start restricted (#53).
-    const values: Record<string, unknown> = { ...input, ...((await restrictedByCategory(input.category_id)) ? { restricted: true } : {}) };
-    const cols = Object.keys(values);
-    const { rows } = await db.query(
-      `INSERT INTO problems (${[...cols, 'created_by'].join(', ')})
-       VALUES (${[...cols, 'created_by'].map((_, i) => `$${i + 1}`).join(', ')}) RETURNING id, ref`,
-      [...Object.values(values), user.id],
-    );
-    await watch(db, rows[0].id, user.id);
-    await watch(db, rows[0].id, input.assignee_id);
-    await logActivity(db, rows[0].id, user.id, 'created', `Problem record ${rows[0].ref} logged`);
-    if (input.assignee_id) {
-      await notify(db, { users: [input.assignee_id], event: 'assigned', ref: rows[0].ref, title: input.title, summary: 'A problem was assigned to you.', path: `/problems/${rows[0].ref}`, dedupe: `assigned:${rows[0].ref}:created`, actorId: user.id });
-    }
-    return rows[0].ref as string;
-  });
-  return getProblem(ref);
+  await validateReferences(db, input);
+  await checkAssigneeInTeam(db, input.team_id, input.assignee_id);
+  // Categories such as security problems start restricted (#53), and so does a problem made from a restricted record.
+  const values: Record<string, unknown> = { ...input, ...((await restrictedByCategory(input.category_id)) ? { restricted: true } : {}) };
+  if (narrow?.restricted) Object.assign(values, { restricted: true, restricted_teams: narrow.restricted_teams });
+  if (narrow?.classification === 'confidential') values.classification = 'confidential';
+  const cols = Object.keys(values);
+  const { rows } = await db.query(
+    `INSERT INTO problems (${[...cols, 'created_by'].join(', ')})
+     VALUES (${[...cols, 'created_by'].map((_, i) => `$${i + 1}`).join(', ')}) RETURNING id, ref`,
+    [...Object.values(values), user.id],
+  );
+  await watch(db, rows[0].id, user.id);
+  await watch(db, rows[0].id, input.assignee_id);
+  const inherited = narrow && (narrow.restricted || narrow.classification === 'confidential')
+    ? { inherited_from: narrow.from, restricted: narrow.restricted, classification: narrow.classification }
+    : undefined;
+  await logActivity(db, rows[0].id, user.id, 'created', `Problem record ${rows[0].ref} logged${inherited ? `, ${[narrow!.restricted && 'restricted', narrow!.classification === 'confidential' && 'confidential'].filter(Boolean).join(' and ')} like ${narrow!.from}` : ''}`, inherited ?? {});
+  if (input.assignee_id) {
+    await notify(db, { users: [input.assignee_id], event: 'assigned', ref: rows[0].ref, title: input.title, summary: 'A problem was assigned to you.', path: `/problems/${rows[0].ref}`, dedupe: `assigned:${rows[0].ref}:created`, actorId: user.id });
+  }
+  return rows[0].ref as string;
 }
 
 const same = (a: unknown, b: unknown) => (a ?? null) === (b ?? null);

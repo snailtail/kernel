@@ -57,7 +57,7 @@ export async function enqueue(db: Db, event: EventType, problemId: number, actor
   );
   if (!hooks.length) return;
   const { rows } = await db.query(
-    `SELECT p.ref, p.title, p.status, p.priority, p.is_major, p.restricted, a.username AS assignee,
+    `SELECT p.ref, p.title, p.status, p.priority, p.is_major, p.restricted, p.classification, a.username AS assignee,
             u.username AS actor_username, u.display_name AS actor_name
      FROM problems p LEFT JOIN users a ON a.id = p.assignee_id LEFT JOIN users u ON u.id = $2 WHERE p.id = $1`,
     [problemId, actorId],
@@ -72,8 +72,9 @@ export async function enqueue(db: Db, event: EventType, problemId: number, actor
     occurred_at: new Date().toISOString(),
     problem: { ref: p.ref, title: p.title, status: p.status, priority: p.priority, is_major: p.is_major, assignee: p.assignee, url: problemUrl(p.ref) },
     actor: p.actor_username ? { username: p.actor_username, display_name: p.actor_name } : null,
-    summary: summaryFor(event, summary),
-    data: minimiseData(data),
+    // A confidential problem's title stays readable (#61), but what changed may quote its text.
+    summary: p.classification === 'confidential' ? 'A confidential problem changed.' : summaryFor(event, summary),
+    data: p.classification === 'confidential' ? {} : minimiseData(data),
   };
   for (const h of hooks) {
     await db.query('INSERT INTO webhook_deliveries (webhook_id, event, payload) VALUES ($1, $2, $3)', [h.id, event, JSON.stringify(payload)]);
