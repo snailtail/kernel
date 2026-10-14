@@ -21,6 +21,7 @@ import { checkAssigneeInTeam, defaultTeamFor, nameTeams, notifyTeamQueue, pickAs
 import { managers, notify } from './notifications.js';
 import { pool } from './db.js';
 import { declareInTx, majorDetail, resolveChildren, undeclareInTx } from './major-incidents.js';
+import { reviewBlocksClosing, reviewSummary, scheduleReviewInTx } from './reviews.js';
 
 export { logIncident };
 
@@ -215,7 +216,8 @@ export async function getIncident(user: User, ref: string) {
   const refs = [...cis.rows.map((c) => c.ref), ...affected.affected_services.map((s) => s.ref)];
   const { rows: endUsers } = await query('SELECT 1 FROM configuration_items WHERE ref = ANY($1) AND has_end_users LIMIT 1', [refs]);
   const major = await majorDetail(user, i, affected.affected_services);
-  const detail = { ...i, ...affected, ...major, activity: await nameTeams(await namePeople(activity.rows)), links: links.rows, known_errors: knownErrors.rows, alerts: alerts.rows, possible_change_causes: possibleChanges, sla, ...people, asks_affected_users: !!endUsers[0] || people.affected_people.length > 0, articles_used: articlesUsed, suggested_articles: suggested };
+  const review = await reviewSummary(i.id);
+  const detail = { ...i, ...affected, ...major, review, activity: await nameTeams(await namePeople(activity.rows)), links: links.rows, known_errors: knownErrors.rows, alerts: alerts.rows, possible_change_causes: possibleChanges, sla, ...people, asks_affected_users: !!endUsers[0] || people.affected_people.length > 0, articles_used: articlesUsed, suggested_articles: suggested };
   return { type: 'incident', ...detail, url: incidentUrl(i.ref), next_steps: incidentGuidance(detail) };
 }
 
@@ -235,7 +237,12 @@ function incidentGuidance(i: any) {
     ...(open && i.reopen_count > 0 && (i.children ?? []).some((c: any) => c.status === 'resolved')
       ? [{ id: 'children_reopen', label: `${i.children.filter((c: any) => c.status === 'resolved').length} related incident(s) were resolved with this one`, hint: 'It came back: reopen any related incident whose users are still affected.', done: null as unknown as boolean }]
       : []),
-    ...(i.is_major && !open ? [{ id: 'review', label: 'Plan the post-incident review', hint: 'Name who runs the review and by when; it starts from the timeline.', done: !!i.pir_owner_id }] : []),
+    ...(i.review && i.review.status !== 'waived' ? [{
+      id: 'review',
+      label: i.review.status === 'published' ? 'Post-incident review published' : i.review.overdue ? 'The post-incident review is overdue' : `Post-incident review due ${i.review.due_in_days === 0 ? 'today' : `in ${i.review.due_in_days} days`}`,
+      hint: 'A short, blameless look back: it starts from the timeline and impact, and turns contributing factors into problems and follow-ups into actions.',
+      done: i.review.status === 'published',
+    }] : []),
     ...(i.is_major || i.reopen_count > 0 ? [{ id: 'problem', label: 'Hand over to problem management', hint: i.is_major ? 'A major incident needs a problem record to find the root cause.' : 'It came back: a problem record finds out why.', done: !!i.problem_id }] : []),
   ];
   const knownError = i.known_errors[0];
@@ -394,6 +401,10 @@ export async function transitionIncident(user: User, ref: string, input: z.infer
     if (input.to === 'closed' && current.is_major && !current.problem_id) {
       throw conflict('A major incident needs a problem record before it is closed: create one from the incident or link an existing one');
     }
+    if (input.to === 'closed' && current.is_major) {
+      const blocked = await reviewBlocksClosing(db, current.id);
+      if (blocked) throw conflict(blocked);
+    }
     const reopening = from === 'resolved' && input.to === 'in_progress';
     await db.query(
       `UPDATE incidents SET status = $2,
@@ -408,14 +419,11 @@ export async function transitionIncident(user: User, ref: string, input: z.infer
       [current.id, input.to, code, resolution, input.hold_reason ?? '', reopening],
     );
     await slaOnTransition(db, current.id, input.to);
-    let pir: { pir_owner_id?: number | null; pir_due?: string | null } = {};
-    if (current.is_major && (input.pir_owner_id !== undefined || input.pir_due !== undefined)) {
-      if (input.pir_owner_id) {
-        const { rows: owner } = await db.query("SELECT 1 FROM users WHERE id = $1 AND active AND role NOT IN ('viewer', 'integration')", [input.pir_owner_id]);
-        if (!owner[0]) throw badRequest('The review owner must be an active user who can work on incidents');
-      }
-      pir = { pir_owner_id: input.pir_owner_id ?? current.pir_owner_id, pir_due: input.pir_due ?? current.pir_due };
-      await db.query('UPDATE incidents SET pir_owner_id = $2, pir_due = $3 WHERE id = $1', [current.id, pir.pir_owner_id, pir.pir_due]);
+    // Resolving a major incident schedules its post-incident review (#109): the owner and date asked for, or defaults.
+    let pir: { review?: { owner_id: number; due: string } } = {};
+    if (current.is_major && input.to === 'resolved') {
+      const r = await scheduleReviewInTx(db, user.id, current, { owner_id: input.pir_owner_id, due: input.pir_due });
+      pir = { review: { owner_id: r.owner_id, due: r.due } };
     }
     // A major incident's countdown stops when it is resolved and starts again if it is reopened (#108).
     if (current.is_major && input.to === 'resolved') await db.query('UPDATE incidents SET major_next_update_at = NULL WHERE id = $1', [current.id]);

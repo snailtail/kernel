@@ -263,7 +263,7 @@ export async function majorDetail(user: User, i: any, affectedServices: { ref: s
   const [children, parent, people, lastUpdate, suggested, statusPosted] = await Promise.all([
     query('SELECT ref, title, status, priority, resolve_with_parent FROM incidents WHERE parent_id = $1 ORDER BY id', [i.id]),
     i.parent_id ? query('SELECT ref, title, status, is_major FROM incidents WHERE id = $1', [i.parent_id]) : Promise.resolve({ rows: [] as any[] }),
-    query('SELECT id, display_name FROM users WHERE id = ANY($1)', [[i.major_lead_id, i.major_comms_id, i.pir_owner_id].filter(Boolean)]),
+    query('SELECT id, display_name FROM users WHERE id = ANY($1)', [[i.major_lead_id, i.major_comms_id].filter(Boolean)]),
     i.is_major ? query("SELECT body, created_at FROM incident_activity WHERE incident_id = $1 AND kind = 'communication' ORDER BY created_at DESC, id DESC LIMIT 1", [i.id]) : Promise.resolve({ rows: [] as any[] }),
     !i.is_major && !i.parent_id && isOpen(i) ? suggestParent(i.id, affectedServices) : Promise.resolve({ rows: [] as any[] }),
     i.is_major ? query('SELECT 1 FROM status_updates WHERE incident_id = $1 LIMIT 1', [i.id]) : Promise.resolve({ rows: [] as any[] }),
@@ -280,7 +280,6 @@ export async function majorDetail(user: User, i: any, affectedServices: { ref: s
         next_update_at: open ? i.major_next_update_at : null,
         update_overdue: open && !!i.major_next_update_at && new Date(i.major_next_update_at) < new Date(),
         last_update: lastUpdate.rows[0] ?? null,
-        pir_owner_id: i.pir_owner_id, pir_owner: name(i.pir_owner_id), pir_due: i.pir_due,
       }
     : null;
   // A proposal only: a person reviews it and posts it to the status board; nothing goes public by itself.

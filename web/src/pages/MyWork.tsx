@@ -12,6 +12,7 @@ import { useSession } from '../session';
 interface MyWork {
   problems: { ref: string; title: string; status: Status; priority: number; updated_at: string; url: string }[];
   incidents: { ref: string; title: string; status: string; priority: number; is_major: boolean; created_at: string; update_overdue?: boolean }[];
+  reviews?: { ref: string; title: string; status: string; due: string | null; overdue: boolean }[];
   major_updates?: { ref: string; title: string; priority: number; next_update_at: string | null; update_overdue: boolean; role: string }[];
   teams?: { id: number; name: string; role: string; unassigned: number }[];
   team_queue?: { ref: string; title: string; status: string; priority: number; is_major: boolean; created_at: string; team: string }[];
@@ -33,7 +34,7 @@ export function MyWorkPage() {
     await api.post<ProblemDetail>(`/api/approvals/${id}/${approve ? 'approve' : 'reject'}`, {});
     reload();
   };
-  const nothing = !data.major_updates?.length && !data.problems.length && !data.incidents.length && !data.team_queue?.length && !data.change_votes.length && !data.changes.length && !data.actions.length && !data.decisions.length && !data.approvals.length;
+  const nothing = !data.reviews?.length && !data.major_updates?.length && !data.problems.length && !data.incidents.length && !data.team_queue?.length && !data.change_votes.length && !data.changes.length && !data.actions.length && !data.decisions.length && !data.approvals.length;
   return (
     <>
       <header className="page-head">
@@ -116,6 +117,20 @@ export function MyWorkPage() {
               <li key={m.ref}>
                 <div><Link to={`/incidents/${m.ref}`} className="mono">{m.ref}</Link> <Link to={`/incidents/${m.ref}`} className="work-title">{m.title}</Link> <span className="muted small">you are the {m.role}</span></div>
                 <span className="work-meta">{m.update_overdue ? <span className="badge overdue">Update overdue</span> : m.next_update_at && <span className="muted small">next update {relativeTime(m.next_update_at)}</span>}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {!!data.reviews?.length && (
+        <section className="card">
+          <h2>Post-incident reviews <span className="count">{data.reviews.length}</span></h2>
+          <ul className="work-list">
+            {data.reviews.map((r) => (
+              <li key={r.ref}>
+                <div><Link to={`/incidents/${r.ref}/review`} className="mono">{r.ref}</Link> <Link to={`/incidents/${r.ref}/review`} className="work-title">{r.title}</Link></div>
+                <span className="work-meta">{r.overdue ? <span className="badge overdue">Overdue</span> : r.due && <span className="muted small">due {r.due}</span>}<span className="muted small">{r.status}</span></span>
               </li>
             ))}
           </ul>

@@ -135,6 +135,19 @@ With affected services, the status page gets a draft that a person posts. Resolv
 when. API: `POST/PATCH /api/incidents/:ref/major`, `/communications`, `/children`, `/timeline`; MCP: `declare_major`,
 `set_major_roles`, `post_communication`, `link_child_incident`, `get_incident_timeline`, `mark_key_moment` and the
 prompt `lead_major_incident`.
+
+**Post-incident reviews**: resolving a major incident schedules a short, blameless review (owner: the lead unless
+someone else is named; due in five working days); any other incident can have one too. Opened for the first time, it
+is filled in with the timeline and the impact Kernel knows (duration, services, CIs, people, related incidents, SLA,
+changes shortly before, alerts), under a guided template: what happened, impact, what went well, what was hard, where
+we were lucky. Contributing factors become problems in one click (the problem says it came from the review), follow-ups
+become actions with an owner and a date, and the lessons become a draft knowledge article. With AI routed for it, a
+button flags blameful wording (a hint only). A major incident closes once its review is published, or waived by a
+manager with a reason (settings `major_incident.review_required`, on by default). My work lists the reviews you own,
+reports show the share of major incidents with a published review and the time to it, and the review exports as
+Markdown or prints. API: `/api/incidents/:ref/review` (+ `/items`, `/publish`, `/waive`, `/article`, `/export.md`);
+MCP: `get_review`, `create_review`, `update_review`, `add_review_item`, `review_factor_to_problem`,
+`review_follow_up_to_action`, `publish_review`, `waive_review` and the prompt `draft_post_incident_review`.
 Viewers stay strictly read-only (auditors, stakeholders): end users report incidents through the service desk or,
 later, the self-service portal (#45), not with a viewer account.
 
@@ -343,7 +356,7 @@ claude mcp add --transport http kernel http://dockerhost:8080/mcp \
 
 Prompts (slash commands in Claude Code, e.g. `/mcp__kernel__five_whys PRB000012`): `five_whys`, `ishikawa`,
 `kepner_tregoe`, `timeline`, `triage_problem`, `assess_known_error`, `major_problem_review`, `verify_resolution`,
-`review_candidates`, `problem_review_board`, `triage_incident`, `lead_major_incident`. Resources: `kernel://guides/<id>` and `kernel://problems/{ref}`. They let Claude facilitate the analysis or review with you and record the
+`review_candidates`, `problem_review_board`, `triage_incident`, `lead_major_incident`, `draft_post_incident_review`. Resources: `kernel://guides/<id>` and `kernel://problems/{ref}`. They let Claude facilitate the analysis or review with you and record the
 result in Kernel.
 
 Tools: `whoami`, `list_reference_data`, `search_problems`, `get_problem`, `search_known_errors`, `get_dashboard`,

@@ -9,6 +9,7 @@ import * as conn from './connectors.js';
 import * as problemCis from './problem-cis.js';
 import * as inc from './incidents.js';
 import * as majorInc from './major-incidents.js';
+import * as reviewsMod from './reviews.js';
 import * as events from './events.js';
 import * as ch from './changes.js';
 import * as slaMod from './sla.js';
@@ -141,6 +142,7 @@ export const OPERATIONS: Op[] = [
   { method: 'put', path: '/api/templates/:id', tag: 'Reference data', summary: 'Update a template', body: setupMod.templateSchema },
   { method: 'get', path: '/api/ai/status', tag: 'AI', summary: 'Which AI tasks are set up (all off until an administrator configures a provider)' },
   { method: 'post', path: '/api/ai/summarize', tag: 'AI', summary: 'Catch me up: a labelled AI summary of a record (state, timeline, next steps); never saved by itself' },
+  { method: 'post', path: '/api/ai/review-wording', tag: 'AI', summary: 'AI hints on blameful wording in a post-incident review (opt-in; changes nothing)' },
   { method: 'post', path: '/api/ai/analyze-log', tag: 'AI', summary: 'AI analysis of a text attachment (errors, timeline, probable cause), pre-filtered and with secrets redacted' },
   { method: 'get', path: '/api/admin/ai/providers', tag: 'AI', summary: 'Model providers, routing per task and usage this month' },
   { method: 'post', path: '/api/admin/ai/providers', tag: 'AI', summary: 'Add a provider (OpenAI-compatible such as Ollama or vLLM, Anthropic, OpenAI, Google) with its location and allowed data classes', body: aiMod.providerSchema },
@@ -298,6 +300,17 @@ export const OPERATIONS: Op[] = [
   { method: 'delete', path: '/api/incidents/:ref/children/:child', tag: 'Incidents', summary: 'Unrelate an incident' },
   { method: 'get', path: '/api/incidents/:ref/timeline', tag: 'Incidents', summary: 'Key moments, oldest first (?format=md for Markdown): declared, first response, updates, status, linked changes and events, marked entries' },
   { method: 'put', path: '/api/incidents/:ref/activity/:id/key-moment', tag: 'Incidents', summary: 'Mark or unmark an activity entry as a key moment for the timeline', body: majorInc.keyMomentSchema },
+  { method: 'get', path: '/api/incidents/:ref/review', tag: 'Incidents', summary: 'The post-incident review with its items, the timeline and impact as context, and the blameless guide (filled in from what Kernel knows when first opened)' },
+  { method: 'post', path: '/api/incidents/:ref/review', tag: 'Incidents', summary: 'Schedule a post-incident review for any incident (major incidents get one when resolved)', body: reviewsMod.createReviewSchema },
+  { method: 'patch', path: '/api/incidents/:ref/review', tag: 'Incidents', summary: 'Edit the review: owner, due date, attendees and the template sections', body: reviewsMod.updateReviewSchema },
+  { method: 'post', path: '/api/incidents/:ref/review/items', tag: 'Incidents', summary: 'Add a contributing factor, follow-up or detection/response gap', body: reviewsMod.itemSchema },
+  { method: 'delete', path: '/api/incidents/:ref/review/items/:id', tag: 'Incidents', summary: 'Remove an item that has not become a problem or action' },
+  { method: 'post', path: '/api/incidents/:ref/review/items/:id/problem', tag: 'Incidents', summary: 'Contributing factor → a new problem (the factor as its statement) or an existing one, linked both ways', body: reviewsMod.itemProblemSchema },
+  { method: 'post', path: '/api/incidents/:ref/review/items/:id/action', tag: 'Incidents', summary: "Follow-up → an action with owner and due date, on the named problem, the factor's or the incident's", body: reviewsMod.itemActionSchema },
+  { method: 'post', path: '/api/incidents/:ref/review/publish', tag: 'Incidents', summary: 'Publish the review (owner, incident lead or manager)' },
+  { method: 'post', path: '/api/incidents/:ref/review/waive', tag: 'Incidents', summary: 'Waive the review with a reason (managers; audited)', body: reviewsMod.waiveSchema },
+  { method: 'post', path: '/api/incidents/:ref/review/article', tag: 'Knowledge', summary: 'Draft a knowledge article from the lessons of the review' },
+  { method: 'get', path: '/api/incidents/:ref/review/export.md', tag: 'Incidents', summary: 'The review as Markdown' },
   { method: 'post', path: '/api/incidents/:ref/links', tag: 'Incidents', summary: 'Link an external incident, event, change or document', body: inc.incidentLinkSchema },
   { method: 'delete', path: '/api/incidents/:ref/links/:id', tag: 'Incidents', summary: 'Remove a link' },
   { method: 'post', path: '/api/incidents/:ref/cis', tag: 'Incidents', summary: 'Link an affected CI or service', body: problemCis.linkCiSchema },

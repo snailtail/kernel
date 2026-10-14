@@ -43,7 +43,7 @@ describe('AI providers and the data gate (#68)', { skip }, () => {
   const provider = (over: object = {}) => ({ name: 'Local Ollama', kind: 'openai_compatible', base_url: stubUrl, models: ['llama3'], location: 'on_prem', data_classes: ['internal'], private_allow: [], ...over });
 
   test('everything is off until an administrator configures a provider and a route', async () => {
-    assert.deepEqual((await analyst.get('/api/ai/status')).body, { summarize: false, analyze_log: false });
+    assert.deepEqual((await analyst.get('/api/ai/status')).body, { summarize: false, analyze_log: false, review_wording: false });
     const p = (await analyst.post('/api/problems', { title: 'Checkout slow' })).body;
     assert.equal((await analyst.post('/api/ai/summarize', { ref: p.ref })).status, 503);
     assert.equal((await analyst.post('/api/admin/ai/providers', provider())).status, 403);
@@ -56,7 +56,7 @@ describe('AI providers and the data gate (#68)', { skip }, () => {
     assert.equal(test1.body.ok, true, JSON.stringify(test1.body));
     assert.equal((await admin.put('/api/admin/ai/routing', { routing: { summarize: { provider_id: created.body.id, model: 'nope' } }, reason: 'x' })).status, 400);
     assert.equal((await admin.put('/api/admin/ai/routing', { routing: { summarize: { provider_id: created.body.id, model: 'llama3' }, analyze_log: { provider_id: created.body.id, model: 'llama3' } }, reason: 'Local model for summaries' })).status, 200);
-    assert.deepEqual((await viewer.get('/api/ai/status')).body, { summarize: true, analyze_log: true });
+    assert.deepEqual((await viewer.get('/api/ai/status')).body, { summarize: true, analyze_log: true, review_wording: false });
   });
 
   test('a summary is a labelled suggestion; record text goes in untrusted blocks; usage and audit hold no content', async () => {

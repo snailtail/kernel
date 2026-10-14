@@ -13,6 +13,7 @@ export async function aiRoutes(app: FastifyInstance) {
     return ai.aiStatus();
   });
   app.post('/api/ai/summarize', async (req) => ai.summarize(requireUser(req, 'meta.read'), z.object({ ref: z.string().max(30) }).parse(req.body).ref));
+  app.post('/api/ai/review-wording', async (req) => ai.reviewWording(requireUser(req, 'incident.read'), z.object({ ref: z.string().max(20) }).parse(req.body).ref));
   app.post('/api/ai/analyze-log', async (req) => ai.analyzeLog(requireUser(req, 'meta.read'), z.object({ attachment_id: z.number().int() }).parse(req.body).attachment_id));
 
   app.get('/api/admin/ai/providers', async (req) => ai.listProviders(requireUser(req, 'mfa.policy')));

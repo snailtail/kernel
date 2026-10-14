@@ -19,6 +19,7 @@ import { addChangeLink, setChangeCi } from './changes.js';
 const incidentExists = async (ref: string) => (await query('SELECT 1 FROM incidents WHERE ref = $1', [ref.toUpperCase()])).rows.length > 0;
 import { addLink, LINK_KINDS, SELECT_ACTION } from './problems.js';
 import { recordTypes, recordUrl, typeForRef, type SearchHit } from './records.js';
+import { myReviews } from './reviews.js';
 
 export const searchSchema = z.object({
   q: z.string().trim().min(1).max(200),
@@ -147,6 +148,7 @@ export async function myWork(user: User) {
         [user.id],
       )).rows
     : [];
+  const reviews = can(user.role, 'incident.read') ? await myReviews(user.id) : [];
   const problemType = recordTypes().find((t) => t.type === 'problem')!;
   const teams = can(user.role, 'team.read') ? await myTeams(user.id) : [];
   const teamQueue = can(user.role, 'incident.read') && teams.length
@@ -162,6 +164,7 @@ export async function myWork(user: User) {
     problems: problems.rows.map((p) => ({ type: 'problem', ...p, url: recordUrl(problemType, p.ref) })),
     incidents: incidents.rows,
     major_updates: majorUpdates,
+    reviews,
     change_votes: changeVotes.rows,
     changes: myChanges.rows,
     actions: actions.rows,

@@ -150,7 +150,7 @@ describe('sensitive data in records (#61)', { skip }, () => {
     const writes = k.routes.filter((r) => ['post', 'put', 'patch'].includes(r.method) && r.url.startsWith('/api/'));
     const skipped = [...new Set(writes.filter((r) => UNSCANNED.some((re) => re.test(r.url))).map((r) => r.url.replace(/\/:.*$/, '').split('/').slice(0, 4).join('/')))].sort();
     assert.deepEqual(skipped, [
-      '/api/admin/ai', '/api/admin/cf-access', '/api/admin/sso', '/api/ai/analyze-log', '/api/ai/summarize',
+      '/api/admin/ai', '/api/admin/cf-access', '/api/admin/sso', '/api/ai/analyze-log', '/api/ai/review-wording', '/api/ai/summarize',
       '/api/auth/access', '/api/auth/login', '/api/auth/logout', '/api/auth/mfa', '/api/auth/passkey', '/api/auth/passkeys',
       '/api/auth/password', '/api/auth/preferences', '/api/auth/reauth', '/api/auth/sessions', '/api/connectors', '/api/dev-hooks',
       '/api/dev-sources', '/api/event-sources', '/api/live', '/api/notifications/settings', '/api/records', '/api/sensitive/check',

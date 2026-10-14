@@ -26,7 +26,7 @@ interface Report {
   };
   sla: { overall: Compliance; by_priority: (Compliance & { priority: number })[]; by_group: (Compliance & { name: string })[]; by_service: (Compliance & { name: string })[] };
   changes: { requested: number; implemented: number; successful: number; failed: number; emergency: number; standard: number; followed_by_incidents: number };
-  incidents: { opened: number; resolved: number; major: number; open_now: number; reopened: number; with_problem: number; mtta_median_min: number | null; mttr_median_h: number | null; by_ci: { ref: string; name: string; incidents: number; without_problem: number }[] };
+  incidents: { opened: number; resolved: number; major: number; open_now: number; reopened: number; with_problem: number; mtta_median_min: number | null; mttr_median_h: number | null; reviews?: { major_resolved: number; reviewed: number; waived: number; reviewed_share: number | null; median_days_to_review: number | null }; by_ci: { ref: string; name: string; incidents: number; without_problem: number }[] };
   known_errors: { count: number; avg_age_days: number; with_workaround: number; with_decision: number; risk_accepted: number; review_due: number };
   actions: { created: number; completed: number; on_time_rate: number | null; open_now: number; overdue_now: number };
 }
@@ -238,6 +238,12 @@ export function ReportsPage() {
                   <dt>Median time to resolve (MTTR)</dt><dd>{r.incidents.mttr_median_h === null ? '–' : `${r.incidents.mttr_median_h} h`}</dd>
                   <dt>Reopened</dt><dd className={r.incidents.reopened ? 'attention' : ''}>{r.incidents.opened ? Math.round((r.incidents.reopened / r.incidents.opened) * 100) : 0}%</dd>
                   <dt>Linked to a problem</dt><dd>{r.incidents.opened ? Math.round((r.incidents.with_problem / r.incidents.opened) * 100) : 0}%</dd>
+                  {r.incidents.reviews && r.incidents.reviews.major_resolved > 0 && (
+                    <>
+                      <dt>Major incidents with a published review</dt><dd className={(r.incidents.reviews.reviewed_share ?? 0) < 100 ? 'attention' : ''}>{r.incidents.reviews.reviewed_share}% <span className="muted small">({r.incidents.reviews.reviewed} of {r.incidents.reviews.major_resolved}{r.incidents.reviews.waived ? `, ${r.incidents.reviews.waived} waived` : ''})</span></dd>
+                      <dt>Median time from resolve to review</dt><dd>{r.incidents.reviews.median_days_to_review === null ? '–' : `${r.incidents.reviews.median_days_to_review} days`}</dd>
+                    </>
+                  )}
                 </dl>
               </section>
               {r.changes && (

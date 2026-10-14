@@ -83,6 +83,9 @@ describe('incident management (#28)', { skip }, () => {
     assert.equal(prb.body.title, 'Webshop down');
     assert.deepEqual(prb.body.affected_cis.map((c: any) => c.ref), [svc]);
     assert.ok(prb.body.links.some((l: any) => l.reference === i.ref && l.system === 'Kernel'));
+    // Since #109 a major incident also closes only once its post-incident review is published or waived.
+    assert.match((await analyst.post(`/api/incidents/${i.ref}/transition`, { to: 'closed' })).body.error, /post-incident review/);
+    assert.equal((await pm.post(`/api/incidents/${i.ref}/review/waive`, { reason: 'Covered by the problem review' })).status, 200);
     assert.equal((await analyst.post(`/api/incidents/${i.ref}/transition`, { to: 'closed' })).body.status, 'closed');
     // Link another open incident, then resolve it from the problem.
     await analyst.put(`/api/incidents/${normal.ref}/problem`, { problem: prb.body.ref });

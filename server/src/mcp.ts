@@ -19,6 +19,7 @@ import * as connectors from './connectors.js';
 import * as problemCis from './problem-cis.js';
 import * as incidents from './incidents.js';
 import * as major from './major-incidents.js';
+import * as reviews from './reviews.js';
 import * as events from './events.js';
 import * as changes from './changes.js';
 import * as sla from './sla.js';
@@ -145,6 +146,8 @@ function buildServer(user: User, scopes?: string[]) {
     list_slas: 'meta.read', get_service_catalogue: 'ci.read', get_my_notifications: 'meta.read',
     list_incidents: 'incident.read', get_incident: 'incident.read', create_incident: 'incident.create', update_incident: 'incident.update',
     transition_incident: 'incident.update', resolve_incident: 'incident.update', link_incident_to_problem: 'incident.update',
+    get_review: 'incident.read', create_review: 'incident.update', update_review: 'incident.update', add_review_item: 'incident.update', review_factor_to_problem: 'incident.update',
+    review_follow_up_to_action: 'incident.update', publish_review: 'incident.update', waive_review: 'incident.flag_major',
     declare_major: 'incident.flag_major', set_major_roles: 'incident.update', post_communication: 'incident.update', link_child_incident: 'incident.update', get_incident_timeline: 'incident.read', mark_key_moment: 'incident.update',
     create_problem_from_incident: 'problem.create', link_ci_to_incident: 'incident.update',
     list_changes: 'change.read', get_change: 'change.read', create_change: 'change.create', update_change: 'change.update',
@@ -445,7 +448,8 @@ function buildServer(user: User, scopes?: string[]) {
     possible_change_causes: (i.possible_change_causes ?? []).map((c: any) => ({ ref: c.ref, ci: c.ci, started_at: c.started_at, outcome: c.outcome })),
     links: i.links.map((l: any) => ({ kind: l.kind, reference: l.reference, system: l.system, url: l.url })),
     alerts: (i.alerts ?? []).map((a: any) => ({ id: a.id, source: a.source, severity: a.severity, status: a.status, count: a.count, flap_count: a.flap_count, ci: a.ci_ref, last_seen: a.last_seen })),
-    major: i.major ? { declared_at: i.major.declared_at, lead: i.major.lead, comms_lead: i.major.comms, update_minutes: i.major.update_minutes, next_update_at: i.major.next_update_at, update_overdue: i.major.update_overdue, last_update_at: i.major.last_update?.created_at ?? null, review_owner: i.major.pir_owner, review_due: i.major.pir_due } : null,
+    major: i.major ? { declared_at: i.major.declared_at, lead: i.major.lead, comms_lead: i.major.comms, update_minutes: i.major.update_minutes, next_update_at: i.major.next_update_at, update_overdue: i.major.update_overdue, last_update_at: i.major.last_update?.created_at ?? null } : null,
+    review: i.review ? { status: i.review.status, owner: i.review.owner, due: i.review.due, overdue: i.review.overdue } : null,
     related_incidents: (i.children ?? []).map((c: any) => ({ ref: c.ref, status: c.status, priority: c.priority, resolve_with_parent: c.resolve_with_parent })),
     parent: i.parent ? { ref: i.parent.ref, status: i.parent.status } : null,
     suggested_parent: i.suggested_parent?.ref ?? null,
@@ -507,6 +511,52 @@ function buildServer(user: User, scopes?: string[]) {
     async ({ ref, review_owner, review_due, ...args }) =>
       incidentForAgent(await incidents.transitionIncident(user, ref, incidents.transitionIncidentSchema.parse({ to: 'resolved', ...args, pir_owner_id: await resolveAssignee(review_owner), pir_due: review_due }))),
   );
+  // ---- Post-incident reviews (#109) ----
+  const reviewForAgent = (r: Awaited<ReturnType<typeof reviews.getReview>>) => ({
+    ref: r.ref, status: r.status, owner: r.owner, due: r.due, due_in_days: r.due_in_days, overdue: r.overdue, published_at: r.published_at,
+    items: r.items.map((x: any) => ({ id: x.id, kind: x.kind, problem: x.problem_ref, action_id: x.action_id, action_problem: x.action_problem_ref })),
+    guide: r.guide,
+    untrusted_content: {
+      incident_title: r.incident_title, attendees: r.attendees, what_happened: r.what_happened, impact_summary: r.impact_summary,
+      went_well: r.went_well, was_hard: r.was_hard, lucky: r.lucky, waived_reason: r.waived_reason || undefined,
+      items: Object.fromEntries(r.items.map((x: any) => [x.id, x.body])),
+      timeline: r.context.timeline.map((e: any) => ({ at: e.at, label: e.label, body: e.body || undefined })),
+      impact_facts: r.context.impact,
+    },
+  });
+  tool('get_review', 'The post-incident review of an incident: status, owner, due date, the template sections, contributing factors, follow-ups and gaps, with the timeline and impact as context and the blameless guide. Opening it fills in a scheduled review from what Kernel knows.', { ref: z.string() }, true, async ({ ref }) =>
+    reviewForAgent(await reviews.openReview(user, ref)),
+  );
+  tool('create_review', 'Schedule a post-incident review for an incident that has none (major incidents get one when resolved). owner is a username; due YYYY-MM-DD (default five working days).', { ref: z.string(), owner: z.string().optional(), due: z.string().optional() }, false, async ({ ref, owner, due }) =>
+    reviewForAgent(await reviews.createReview(user, ref, reviews.createReviewSchema.parse({ owner_id: await resolveAssignee(owner), due }))),
+  );
+  tool(
+    'update_review',
+    'Edit the review sections (Markdown): what_happened, impact_summary, went_well, was_hard, lucky, and attendees. Use blameless wording: actions and conditions, not people. Draft for a person to confirm.',
+    { ref: z.string(), what_happened: z.string().optional(), impact_summary: z.string().optional(), went_well: z.string().optional(), was_hard: z.string().optional(), lucky: z.string().optional(), attendees: z.string().optional(), owner: z.string().optional(), due: z.string().optional() },
+    false,
+    async ({ ref, owner, ...fields }) => reviewForAgent(await reviews.updateReview(user, ref, reviews.updateReviewSchema.parse({ ...fields, ...(owner !== undefined ? { owner_id: await resolveAssignee(owner) } : {}) }))),
+  );
+  tool('add_review_item', 'Add a contributing factor (kind factor), a follow-up (follow_up) or a detection or response gap (gap) to the review.', { ref: z.string(), kind: z.enum(reviews.ITEM_KINDS), body: z.string() }, false, async ({ ref, ...args }) =>
+    reviewForAgent(await reviews.addItem(user, ref, reviews.itemSchema.parse(args))),
+  );
+  tool('review_factor_to_problem', 'Turn a contributing factor into a problem (the factor as its problem statement), or link it to an existing problem; the problem shows it came from this review.', { ref: z.string(), item_id: z.number().int(), problem: z.string().optional() }, false, async ({ ref, item_id, problem }) =>
+    reviewForAgent(await reviews.itemToProblem(user, ref, item_id, { problem })),
+  );
+  tool(
+    'review_follow_up_to_action',
+    "Turn a follow-up (or gap) into an action with an owner (username) and due date, on the named problem, else the first factor's problem, else the incident's problem.",
+    { ref: z.string(), item_id: z.number().int(), title: z.string().optional(), owner: z.string().optional(), due_date: z.string().optional(), problem: z.string().optional() },
+    false,
+    async ({ ref, item_id, owner, ...args }) => reviewForAgent(await reviews.itemToAction(user, ref, item_id, reviews.itemActionSchema.parse({ ...args, ...(owner !== undefined ? { owner_id: await resolveAssignee(owner) } : {}) }))),
+  );
+  tool('publish_review', 'Publish the review (its owner, the incident lead or a manager). Ask a person to confirm first.', { ref: z.string() }, false, async ({ ref }) =>
+    reviewForAgent(await reviews.publishReview(user, ref)),
+  );
+  tool('waive_review', 'Waive the review with a reason (managers; audited). A major incident then closes without one.', { ref: z.string(), reason: z.string() }, false, async ({ ref, reason }) =>
+    reviewForAgent(await reviews.waiveReview(user, ref, { reason })),
+  );
+
   // ---- Major incidents (#108) ----
   tool(
     'declare_major',
@@ -1306,6 +1356,21 @@ ${RULES}` } }],
 4. Look for the same outage reported again (list_incidents on the same CIs or services, suggested_parent on new incidents) and propose link_child_incident for each.
 5. Propose key moments for the timeline (mark_key_moment) when something important happens: cause found, workaround applied, change backed out.
 6. When service is restored, propose resolve_incident with the resolution, a post-incident review owner and date, and create_problem_from_incident if there is no problem yet.
+Do only what I confirm.
+
+${RULES}` } }],
+    }),
+  );
+
+  if (moduleEnabled('incident')) server.registerPrompt(
+    'draft_post_incident_review',
+    { title: 'Draft a post-incident review', description: 'Draft the blameless review of an incident from its timeline and impact, and turn factors into problems and follow-ups into actions.', argsSchema: { ref: z.string().describe('Incident reference, e.g. INC000012') } },
+    ({ ref }) => ({
+      messages: [{ role: 'user', content: { type: 'text', text: `Help me draft the post-incident review of ${ref.toUpperCase()} in Kernel.
+1. Read it with get_review (create_review first if it has none). The timeline and impact are already filled in.
+2. Draft what happened (what people knew and decided, in order), what went well, what was hard and where we were lucky. Blameless: describe actions and conditions, not people; ask how it made sense at the time. Show me the draft; save it with update_review only when I agree.
+3. Propose contributing factors and follow-ups (add_review_item). For each factor I accept, propose review_factor_to_problem; for each follow-up, an owner and due date with review_follow_up_to_action.
+4. When I say it is done, ask me to publish it (publish_review); never publish on your own.
 Do only what I confirm.
 
 ${RULES}` } }],

@@ -1197,3 +1197,15 @@ ol.timeline time { color: var(--text-2); font-size: 12.5px; font-variant-numeric
 @media (max-width: 640px) {
   ol.timeline li { grid-template-columns: 1fr; gap: 2px; }
 }
+
+/* Post-incident reviews (#109). */
+.badge.review-scheduled, .badge.review-draft { background: var(--accent-soft); color: var(--accent); }
+.badge.review-published { background: var(--surface-2); color: var(--text); }
+.badge.review-waived { background: var(--surface-2); color: var(--text-2); }
+.attention-card { border-left: 4px solid var(--danger); }
+.pir-form label .muted { font-weight: 400; display: block; margin-top: 2px; }
+.pir-items li { display: block; padding: 8px 0; border-top: 1px solid var(--border); }
+.pir-items li:first-child { border-top: none; }
+.pir-items .rel-form { margin-top: 6px; flex-wrap: wrap; }
+ol.timeline.compact li { grid-template-columns: 8rem 1fr; padding: 5px 0; font-size: 13px; }
+.from-review { margin: 6px 0 0; }
