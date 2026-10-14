@@ -57,8 +57,23 @@ function rewrite(r: Row, usernames: Map<string, number>) {
   };
 }
 
+/** verifyChain's check, on the owner's connection and inside its transaction. */
+async function verifyWithin(owner: pg.ClientBase): Promise<{ ok: boolean; broken_at?: string }> {
+  let prev = GENESIS;
+  let after = 0n;
+  for (;;) {
+    const { rows } = await owner.query<Row>('SELECT * FROM audit_log WHERE id > $1 ORDER BY id LIMIT 2000', [after.toString()]);
+    if (!rows.length) return { ok: true };
+    for (const r of rows) {
+      if (r.prev_hash !== prev || hashOf(prev, { ...r, at: r.at.toISOString() }, r.hash_version, r.key_id) !== r.hash) return { ok: false, broken_at: r.id };
+      prev = r.hash;
+      after = BigInt(r.id);
+    }
+  }
+}
+
 /** Rewrites (or, without execute, only counts) every entry and recomputes the chain. `owner` is a connection as the database owner. */
-export async function rebaseAudit(owner: pg.ClientBase, options: { execute: boolean }): Promise<RebaseReport> {
+export async function rebaseAudit(owner: pg.ClientBase, options: { execute: boolean; /** Tests only: runs just before the in-transaction check. */ beforeVerify?: (owner: pg.ClientBase) => Promise<void> }): Promise<RebaseReport> {
   const key = activeKey();
   if (!key) throw new Error('KERNEL_SECRET_KEY is needed: the chain is recomputed with the active key');
   await owner.query('BEGIN');
@@ -106,6 +121,11 @@ export async function rebaseAudit(owner: pg.ClientBase, options: { execute: bool
     }
     if (options.execute) {
       await owner.query('ALTER TABLE audit_log ENABLE TRIGGER audit_log_no_update');
+      // Verify the rewritten chain inside the transaction: any mismatch rolls everything back, so a failed re-base
+      // leaves the trail as it was (the backup stays the last resort, not the first).
+      await options.beforeVerify?.(owner);
+      const check = await verifyWithin(owner);
+      if (!check.ok) throw new Error(`The recomputed chain does not verify at entry ${check.broken_at}; nothing was changed`);
       await owner.query('COMMIT');
     } else {
       await owner.query('ROLLBACK');
@@ -138,6 +158,7 @@ export async function runRebase(execute: boolean, log: (msg: string) => void = c
     }));
     const verified = await verifyChain();
     log(`Rewrote ${r.rows_rewritten} of ${r.rows} entries; chain ${verified.ok ? 'verifies' : `BROKEN at ${verified.broken_at}`} (${verified.checked} entries).`);
+    // Verified inside the transaction already; this checks the committed trail with the app's own code path.
     if (!verified.ok) throw new Error('The chain does not verify after the re-base; restore the backup taken before it');
     return r;
   });

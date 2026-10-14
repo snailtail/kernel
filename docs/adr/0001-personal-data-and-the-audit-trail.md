@@ -58,7 +58,7 @@ shows how many such entries remain, and the erase dialog says that they may stil
 - digests in place of personal values and free text;
 - the sensitive-data scanner run on short values and reasons.
 
-IP addresses and user agents move into `audit_context`, where they are subject to its retention. The tool then recomputes the whole chain with the active key. It writes an `audit.chain_rebase_intent` entry (the old head) before the rewrite and an `audit.chain_rebased` entry (old head, new head, rows rewritten, key id) after it. Both entries also go to the SIEM anchor stream.
+IP addresses and user agents move into `audit_context`, where they are subject to its retention. The tool then recomputes the whole chain with the active key. It writes an `audit.chain_rebase_intent` entry (the old head) before the rewrite and an `audit.chain_rebased` entry (old head, new head, rows rewritten, key id) after it. Both entries also go to the SIEM anchor stream. Anchors up to the old head are compared with the old head's hash, which the `audit.chain_rebased` entry records, and anchors after it with the database.
 
 Executed: *(date filled in when run)*.
 

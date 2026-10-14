@@ -51,11 +51,22 @@ The rewrite runs in one transaction under the same lock as every append, so no e
 3. An `audit.chain_rebased` entry records the old head, the new head, the number of rows rewritten and the key id.
 4. The chain is verified.
 
-If verification fails, the tool says so and exits non-zero. Then restore the backup from step 1 with `scripts/restore.sh`.
+The rewritten chain is verified inside the transaction, before it commits. If it does not verify, everything is rolled back and the trail is as it was. After the commit, the app's own check runs once more.
+
+Restoring the backup from step 1 with `scripts/restore.sh` is the last resort, for a failure after the commit.
 
 ## 4. Afterwards
 
 - **Security status:** **Administration → Security status → Audit trail personal data** shows no legacy entries, and the chain verification is OK.
-- **SIEM:** search Elasticsearch for `audit.chain_rebased`. The anchors older than it point at the old hashes. That is expected, and the entry names both heads.
+- **SIEM:** search Elasticsearch for `audit.chain_rebased`.
+
+### Comparing anchors after a re-base
+
+Elasticsearch keeps an anchor (id and hash) for every entry. It never changes, which is what makes it useful against tampering. After a re-base, the anchors split at the boundary named in `audit.chain_rebased`:
+
+- **Anchors up to and including `old_head.id`** were made over the old chain. Do not compare them with the database. Check instead that the anchor for `old_head.id` equals `old_head.hash` in the `audit.chain_rebased` entry. That links the old chain, as Elasticsearch saw it, to the re-base.
+- **Anchors after `old_head.id`** compare with the database as usual. The `chain_rebase_intent` and `chain_rebased` entries are among them.
+
+A mismatch in the second group is a real finding. In the first group a mismatch is expected for every entry except `old_head`.
 - **ADR 0001:** fill in the execution date.
 - **The backup:** delete the manual dump once the next scheduled backup has been taken and verified.
