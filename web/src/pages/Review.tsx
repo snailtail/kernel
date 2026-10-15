@@ -36,7 +36,7 @@ export function ReviewPage() {
     <>
       <header className="page-head">
         <div>
-          <h1>Problem review</h1>
+          <h1>Problem review board</h1>
           <p className="muted">Agenda for the problem review meeting: everything in the backlog that needs a decision or attention.</p>
         </div>
         <div className="head-actions no-print">

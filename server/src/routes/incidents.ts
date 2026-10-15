@@ -48,7 +48,8 @@ export async function incidentRoutes(app: FastifyInstance) {
   app.put<{ Params: { ref: string; id: string } }>('/api/incidents/:ref/activity/:id/key-moment', async (req) =>
     major.setKeyMoment(requireUser(req), req.params.ref, Number(req.params.id), major.keyMomentSchema.parse(req.body).key_moment),
   );
-  // Post-incident reviews (#109).
+  // Post-incident reviews (#109, #120).
+  app.get('/api/incident-reviews', async (req) => reviews.listReviews(requireUser(req), reviews.listReviewsSchema.parse(req.query)));
   type ItemParams = { Params: { ref: string; id: string } };
   app.get<RefParams>('/api/incidents/:ref/review', async (req) => reviews.openReview(requireUser(req), req.params.ref));
   app.post<RefParams>('/api/incidents/:ref/review', async (req, reply) => {

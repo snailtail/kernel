@@ -143,7 +143,9 @@ changes shortly before, alerts), under a guided template: what happened, impact,
 we were lucky. Contributing factors become problems in one click (the problem says it came from the review), follow-ups
 become actions with an owner and a date, and the lessons become a draft knowledge article. With AI routed for it, a
 button flags blameful wording (a hint only). A major incident closes once its review is published, or waived by a
-manager with a reason (settings `major_incident.review_required`, on by default). My work lists the reviews you own,
+manager with a reason (settings `major_incident.review_required`, on by default). Learn → *Post-incident reviews*
+lists them all (due with overdue first, published, waived; by owner and team), with a menu badge for overdue reviews
+of yours or your teams; the process map has the step between incident and problem. My work lists the reviews you own,
 reports show the share of major incidents with a published review and the time to it, and the review exports as
 Markdown or prints. API: `/api/incidents/:ref/review` (+ `/items`, `/publish`, `/waive`, `/article`, `/export.md`);
 MCP: `get_review`, `create_review`, `update_review`, `add_review_item`, `review_factor_to_problem`,

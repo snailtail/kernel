@@ -146,7 +146,7 @@ function buildServer(user: User, scopes?: string[]) {
     list_slas: 'meta.read', get_service_catalogue: 'ci.read', get_my_notifications: 'meta.read',
     list_incidents: 'incident.read', get_incident: 'incident.read', create_incident: 'incident.create', update_incident: 'incident.update',
     transition_incident: 'incident.update', resolve_incident: 'incident.update', link_incident_to_problem: 'incident.update',
-    get_review: 'incident.read', create_review: 'incident.update', update_review: 'incident.update', add_review_item: 'incident.update', review_factor_to_problem: 'incident.update',
+    get_review: 'incident.read', list_incident_reviews: 'incident.read', create_review: 'incident.update', update_review: 'incident.update', add_review_item: 'incident.update', review_factor_to_problem: 'incident.update',
     review_follow_up_to_action: 'incident.update', publish_review: 'incident.update', waive_review: 'incident.flag_major',
     declare_major: 'incident.flag_major', set_major_roles: 'incident.update', post_communication: 'incident.update', link_child_incident: 'incident.update', get_incident_timeline: 'incident.read', mark_key_moment: 'incident.update',
     create_problem_from_incident: 'problem.create', link_ci_to_incident: 'incident.update',
@@ -524,6 +524,16 @@ function buildServer(user: User, scopes?: string[]) {
       impact_facts: r.context.impact,
     },
   });
+  tool(
+    'list_incident_reviews',
+    'Post-incident reviews: tab due (scheduled and draft, overdue first), published or waived; owner "me" or a user id; team "mine" or a team id.',
+    { tab: z.enum(['due', 'published', 'waived']).optional(), owner: z.union([z.literal('me'), z.number().int()]).optional(), team: z.union([z.literal('mine'), z.number().int()]).optional() },
+    true,
+    async (args) => (await reviews.listReviews(user, reviews.listReviewsSchema.parse(args))).map((r) => ({
+      ref: r.ref, status: r.status, owner: r.owner, team: r.team, due: r.due, overdue: r.overdue, published_at: r.published_at,
+      factors: r.factors, factors_to_problems: r.factors_to_problems, follow_ups: r.follow_ups, follow_ups_to_actions: r.follow_ups_to_actions, url: r.url, title_untrusted: r.title,
+    })),
+  );
   tool('get_review', 'The post-incident review of an incident: status, owner, due date, the template sections, contributing factors, follow-ups and gaps, with the timeline and impact as context and the blameless guide. Opening it fills in a scheduled review from what Kernel knows.', { ref: z.string() }, true, async ({ ref }) =>
     reviewForAgent(await reviews.openReview(user, ref)),
   );

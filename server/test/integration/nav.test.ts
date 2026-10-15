@@ -15,7 +15,7 @@ describe('menu badges (#102)', { skip }, () => {
 
   test('counts what needs someone, per person, filtered by visibility', async () => {
     const zero = (await analyst.get('/api/nav/counts')).body;
-    assert.deepEqual(Object.keys(zero).sort(), ['actions', 'events', 'incidents', 'kedb', 'my_work']);
+    assert.deepEqual(Object.keys(zero).sort(), ['actions', 'events', 'incidents', 'kedb', 'my_work', 'reviews']);
     const ids = Object.fromEntries((await admin.get('/api/users')).body.map((u: any) => [u.username, u.id]));
     // My work: a problem assigned to the analyst.
     ok(await pm.post('/api/problems', { title: 'Assigned to the analyst', assignee_id: ids.analyst }));
