@@ -7,6 +7,7 @@ import { RecordNotFound, VisibilityPanel } from '../components/Visibility';
 import { DevLinksPanel } from '../components/DevLinks';
 import { PagesCard } from '../components/OnCall';
 import { SummaryButton } from '../components/Ai';
+import { useColumns, useListToolkit, type ColumnKey } from '../components/ListToolkit';
 import { SavedViews } from '../components/SavedViews';
 import { TeamAndAssignee, useTeams } from './Teams';
 import { ArticleSuggestions, IncidentKnowledgePanel, type ArticleRow } from './Knowledge';
@@ -61,6 +62,11 @@ export function IncidentStatusBadge({ status }: { status: IncidentStatus }) {
   return <span className={`badge inc-${status}`}>{INCIDENT_STATUS[status]}</span>;
 }
 
+const INCIDENT_COLUMNS: { key: ColumnKey; label: string }[] = [
+  { key: 'status', label: 'Status' }, { key: 'priority', label: 'Priority' }, { key: 'sla', label: 'SLA' }, { key: 'cis', label: 'CIs' },
+  { key: 'assignee', label: 'Assignee' }, { key: 'problem', label: 'Problem' }, { key: 'opened', label: 'Opened' },
+];
+
 export function IncidentsPage() {
   const teams = useTeams();
   const { user } = useSession();
@@ -72,6 +78,8 @@ export function IncidentsPage() {
   const set = (k: string, v: string) => setParams((prev) => { const n = new URLSearchParams(prev); if (v) n.set(k, v); else n.delete(k); return n; }, { replace: true });
   const { data, loading, refresh } = useApi<IncidentRow[]>(`/api/incidents?${params}`);
   useLive(['incident:*'], refresh);
+  const tk = useListToolkit({ list: 'incidents', rows: data, idOf: (i) => i.ref, hrefOf: (i) => `/incidents/${i.ref}`, filter: params.toString(), onChanged: refresh });
+  const cols = useColumns('incidents', INCIDENT_COLUMNS);
   return (
     <>
       <header className="page-head">
@@ -99,15 +107,17 @@ export function IncidentsPage() {
           </select>
         )}
         <label className="check"><input type="checkbox" checked={params.get('major') === 'true'} onChange={(e) => set('major', e.target.checked ? 'true' : '')} /> Major only</label>
+        {cols.picker}
       </div>
-      <section className={`card flush ${loading ? 'is-loading' : ''}`}>
+      <section className={`card flush ${loading ? 'is-loading' : ''}`} {...cols.container}>
         {data?.length === 0 ? <p className="empty">No incidents match.</p> : (
           <div className="table-wrap">
             <table className="table">
-              <thead><tr><th>Ref</th><th>Title</th><th>Status</th><th>Priority</th><th>SLA</th><th className="hide-sm">CIs</th><th className="hide-sm">Assignee</th><th className="hide-sm">Problem</th><th className="hide-sm">Opened</th></tr></thead>
+              <thead><tr>{tk.selectAll && <th className="check-col">{tk.selectAll}</th>}<th>Ref</th><th>Title</th><th data-col="status">Status</th><th data-col="priority">Priority</th><th data-col="sla">SLA</th><th className="hide-sm" data-col="cis">CIs</th><th className="hide-sm" data-col="assignee">Assignee</th><th className="hide-sm" data-col="problem">Problem</th><th className="hide-sm" data-col="opened">Opened</th></tr></thead>
               <tbody>
-                {data?.map((i) => (
-                  <tr key={i.id}>
+                {data?.map((i, n) => (
+                  <tr key={i.id} {...tk.rowProps(i, n)}>
+                    {tk.selectAll && <td className="check-col">{tk.select(i, n)}</td>}
                     <td className="mono nowrap"><Link to={`/incidents/${i.ref}`}>{i.ref}</Link></td>
                     <td className="title-cell">
                       <Link to={`/incidents/${i.ref}`}>{i.title}</Link> {i.is_major && <MajorBadge />}
@@ -115,13 +125,13 @@ export function IncidentsPage() {
                       {i.parent_ref && <div className="muted small">part of <Link to={`/incidents/${i.parent_ref}`} className="mono">{i.parent_ref}</Link></div>}
                       {!!i.child_count && <div className="muted small">{i.child_count} related</div>}
                     </td>
-                    <td><IncidentStatusBadge status={i.status} /></td>
-                    <td><PriorityBadge priority={i.priority} /></td>
-                    <td className="nowrap"><SlaBadge state={i.sla_state} />{i.resolution_due_at && ['on_track', 'at_risk'].includes(i.sla_state ?? '') && <div className="muted small">due {relativeTime(i.resolution_due_at)}</div>}</td>
-                    <td className="hide-sm small">{i.cis?.join(', ') ?? '–'}</td>
-                    <td className="hide-sm muted">{i.assignee ?? (i.assignment_group || '–')}</td>
-                    <td className="hide-sm mono small">{i.problem_ref ? <Link to={`/problems/${i.problem_ref}`}>{i.problem_ref}</Link> : '–'}</td>
-                    <td className="hide-sm muted nowrap" title={formatDate(i.created_at)}>{relativeTime(i.created_at)}</td>
+                    <td data-col="status"><IncidentStatusBadge status={i.status} /></td>
+                    <td data-col="priority"><PriorityBadge priority={i.priority} /></td>
+                    <td className="nowrap" data-col="sla"><SlaBadge state={i.sla_state} />{i.resolution_due_at && ['on_track', 'at_risk'].includes(i.sla_state ?? '') && <div className="muted small">due {relativeTime(i.resolution_due_at)}</div>}</td>
+                    <td className="hide-sm small" data-col="cis">{i.cis?.join(', ') ?? '–'}</td>
+                    <td className="hide-sm muted" data-col="assignee">{i.assignee ?? (i.assignment_group || '–')}</td>
+                    <td className="hide-sm mono small" data-col="problem">{i.problem_ref ? <Link to={`/problems/${i.problem_ref}`}>{i.problem_ref}</Link> : '–'}</td>
+                    <td className="hide-sm muted nowrap" data-col="opened" title={formatDate(i.created_at)}>{relativeTime(i.created_at)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -129,6 +139,7 @@ export function IncidentsPage() {
           </div>
         )}
       </section>
+      {tk.bar}
       {creating && <NewIncident onClose={() => setCreating(false)} onDone={(ref) => navigate(`/incidents/${ref}`)} />}
     </>
   );

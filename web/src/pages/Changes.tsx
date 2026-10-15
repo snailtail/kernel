@@ -10,6 +10,8 @@ import { DevLinksPanel } from '../components/DevLinks';
 import { SummaryButton } from '../components/Ai';
 import { AttachmentsPanel } from '../components/Attachments';
 import { Modal } from '../components/Modal';
+import { useColumns, useListToolkit, type ColumnKey } from '../components/ListToolkit';
+import { SavedViews } from '../components/SavedViews';
 import { Term } from '../components/Glossary';
 import { formatDate, relativeTime } from '../format';
 import { useLive } from '../live';
@@ -57,6 +59,7 @@ export function ChangesPage() {
           <h1>Changes</h1>
           <p className="muted">Assess the risk, authorise, schedule without collisions or freezes, and review.</p>
         </div>
+        {tab === 'list' && <SavedViews list="changes" />}
         {user.role !== 'viewer' && <button className="btn primary page-new" onClick={() => setCreating(true)}>New change</button>}
       </header>
       <div className="seg-toggle tabs" role="tablist">
@@ -73,11 +76,17 @@ export function ChangesPage() {
   );
 }
 
+const CHANGE_COLUMNS: { key: ColumnKey; label: string }[] = [
+  { key: 'type', label: 'Type' }, { key: 'status', label: 'Status' }, { key: 'risk', label: 'Risk' }, { key: 'window', label: 'Window' }, { key: 'cis', label: 'CIs' },
+];
+
 function ChangeList({ params, set }: { params: URLSearchParams; set: (k: string, v: string) => void }) {
   const query = new URLSearchParams([...params].filter(([k]) => k !== 'tab'));
   const { data, loading, refresh } = useApi<Row[]>(`/api/changes?${query}`);
   useLive(['change:*'], refresh);
   const { user } = useSession();
+  const tk = useListToolkit({ list: 'changes', rows: data, idOf: (c) => c.ref, hrefOf: (c) => `/changes/${c.ref}`, filter: query.toString(), onChanged: refresh });
+  const cols = useColumns('changes', CHANGE_COLUMNS);
   return (
     <>
       <div className="filters">
@@ -86,22 +95,24 @@ function ChangeList({ params, set }: { params: URLSearchParams; set: (k: string,
         </select>
         <select value={params.get('type') ?? ''} onChange={(e) => set('type', e.target.value)}><option value="">Any type</option><option value="standard">Standard</option><option value="normal">Normal</option><option value="emergency">Emergency</option></select>
         {(user.role === 'admin' || user.role === 'problem_manager') && <label className="check"><input type="checkbox" checked={params.get('awaiting_my_vote') === 'true'} onChange={(e) => set('awaiting_my_vote', e.target.checked ? 'true' : '')} /> Awaiting my approval</label>}
+        {cols.picker}
       </div>
-      <section className={`card flush ${loading ? 'is-loading' : ''}`}>
+      <section className={`card flush ${loading ? 'is-loading' : ''}`} {...cols.container}>
         {data?.length === 0 ? <p className="empty">No changes match.</p> : (
           <div className="table-wrap">
             <table className="table">
-              <thead><tr><th>Ref</th><th>Title</th><th>Type</th><th>Status</th><th className="hide-sm">Risk</th><th className="hide-sm">Window</th><th className="hide-sm">CIs</th></tr></thead>
+              <thead><tr>{tk.selectAll && <th className="check-col">{tk.selectAll}</th>}<th>Ref</th><th>Title</th><th data-col="type">Type</th><th data-col="status">Status</th><th className="hide-sm" data-col="risk">Risk</th><th className="hide-sm" data-col="window">Window</th><th className="hide-sm" data-col="cis">CIs</th></tr></thead>
               <tbody>
-                {data?.map((c) => (
-                  <tr key={c.id}>
+                {data?.map((c, n) => (
+                  <tr key={c.id} {...tk.rowProps(c, n)}>
+                    {tk.selectAll && <td className="check-col">{tk.select(c, n)}</td>}
                     <td className="mono nowrap"><Link to={`/changes/${c.ref}`}>{c.ref}</Link></td>
                     <td className="title-cell"><Link to={`/changes/${c.ref}`}>{c.title}</Link>{c.source === 'pipeline' && <span className="tag">pipeline</span>}</td>
-                    <td><span className={`tag type-${c.change_type}`}>{c.change_type}</span></td>
-                    <td><ChangeStatusBadge status={c.status} />{c.outcome && <div className="muted small">{OUTCOME[c.outcome]}</div>}</td>
-                    <td className="hide-sm">{c.risk ?? <span className="muted">assessed</span>}</td>
-                    <td className="hide-sm small nowrap">{fmtWindow(c.planned_start, c.planned_end)}</td>
-                    <td className="hide-sm small">{c.cis?.join(', ') ?? '–'}</td>
+                    <td data-col="type"><span className={`tag type-${c.change_type}`}>{c.change_type}</span></td>
+                    <td data-col="status"><ChangeStatusBadge status={c.status} />{c.outcome && <div className="muted small">{OUTCOME[c.outcome]}</div>}</td>
+                    <td className="hide-sm" data-col="risk">{c.risk ?? <span className="muted">assessed</span>}</td>
+                    <td className="hide-sm small nowrap" data-col="window">{fmtWindow(c.planned_start, c.planned_end)}</td>
+                    <td className="hide-sm small" data-col="cis">{c.cis?.join(', ') ?? '–'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -109,6 +120,7 @@ function ChangeList({ params, set }: { params: URLSearchParams; set: (k: string,
           </div>
         )}
       </section>
+      {tk.bar}
     </>
   );
 }

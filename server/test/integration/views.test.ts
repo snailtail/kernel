@@ -86,6 +86,16 @@ describe('saved list views (#110)', { skip }, () => {
     assert.equal((await analyst.get('/api/views?list=changes')).body.default, String(own.id));
     await analyst.del(`/api/views/${own.id}`);
     assert.equal((await analyst.get('/api/views?list=changes')).body.default, null, 'removing the view clears the default');
+
+    // A team view stops being the default when its user leaves the team.
+    const desk = (await analyst.post('/api/views', { list: 'changes', name: 'Desk changes', query: 'status=all', scope: 'team', team_id: team.id })).body;
+    await analyst2.put('/api/views/default', { list: 'changes', view: desk.id });
+    assert.equal((await analyst2.get('/api/views?list=changes')).body.default, String(desk.id));
+    await admin.put(`/api/teams/${team.id}/members`, { members: [{ user_id: ids.analyst, role: 'lead' }] });
+    const after = (await analyst2.get('/api/views?list=changes')).body;
+    assert.equal(after.default, null, 'a view they can no longer see is not their default');
+    assert.ok(!after.views.some((v: any) => v.id === desk.id));
+    await admin.put(`/api/teams/${team.id}/members`, { members: [{ user_id: ids.analyst, role: 'lead' }, { user_id: ids.analyst2 }] });
   });
 
   test('the Unassigned P1–P2 view filters what it says', async () => {

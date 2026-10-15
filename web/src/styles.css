@@ -795,6 +795,7 @@ kbd { font: 11px var(--mono); padding: 1px 6px; border: 1px solid var(--border-s
 .view-chip .pin { padding: 3px 6px 3px 0; color: var(--accent); }
 .view-chip.builtin { border-style: dashed; }
 .view-chip .view-scope { color: var(--text-3); }
+.view-query { display: block; margin: 4px 0 8px; padding: 6px 8px; border-radius: 6px; background: var(--surface-2, var(--bg)); font-size: 12.5px; overflow-wrap: anywhere; }
 @media (max-width: 820px) { .saved-views { justify-content: flex-start; flex-basis: 100%; margin-right: 0; } }
 @media (max-width: 820px) { .shortcuts { grid-template-columns: 1fr; } }
 
@@ -1222,3 +1223,69 @@ ol.timeline.compact li { grid-template-columns: 8rem 1fr; padding: 5px 0; font-s
 .badge.page-skipped { background: var(--surface-2); color: var(--text-2); }
 .rotation-order { margin: 0; padding-left: 20px; }
 .rotation-order li { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0; }
+
+/* List toolkit (#110): selection, bulk bar, undo, columns */
+.row-check { margin: 0; width: 16px; height: 16px; cursor: pointer; }
+.table th.check-col, .table td.check-col { width: 28px; padding-right: 0; }
+.table tr.row-selected td, .row-selected { background: var(--accent-soft); }
+.table tr.row-cursor td:first-child, .row-cursor { box-shadow: inset 3px 0 0 var(--accent); }
+.bulk-bar {
+  position: sticky; bottom: 12px; z-index: 9; display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  margin: 12px 0; padding: 10px 14px; border: 1px solid var(--accent); border-radius: 12px; background: var(--surface);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
+}
+.bulk-bar .bulk-count { font-weight: 600; }
+.bulk-bar .spacer { flex: 1; }
+.bulk-bar kbd { margin-left: 6px; font-size: 11px; opacity: 0.7; }
+.bulk-toast {
+  position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 9; display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; border-radius: 10px; background: var(--text); color: var(--surface); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.2);
+  max-width: calc(100vw - 32px);
+}
+.bulk-toast .btn-link { color: inherit; }
+.bulk-preview { font-size: 15px; }
+.bulk-outcomes ul { margin: 6px 0 0; padding-left: 18px; font-size: 13px; max-height: 180px; overflow: auto; }
+.warn-box { padding: 10px 12px; border-radius: 8px; border: 1px solid var(--warn, #d97706); background: color-mix(in srgb, var(--warn, #d97706) 10%, transparent); }
+.warn-box p { margin: 0 0 6px; }
+.column-picker { position: relative; }
+.column-picker > summary { list-style: none; cursor: pointer; }
+.column-picker > summary::-webkit-details-marker { display: none; }
+.column-menu {
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 8; display: flex; flex-direction: column; gap: 4px; min-width: 180px;
+  padding: 10px 12px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--surface); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
+}
+@media (max-width: 820px) {
+  /* Within thumb reach on a phone. */
+  .bulk-bar { position: fixed; left: 8px; right: 8px; bottom: 8px; margin: 0; }
+  .bulk-bar .btn { min-height: 40px; }
+  .bulk-bar kbd { display: none; }
+  .bulk-toast { bottom: 84px; }
+}
+
+/* Hidden list columns (#110): one rule per column key in ListToolkit's COLUMN_KEYS. */
+[data-hide~="status"] [data-col="status"],
+[data-hide~="priority"] [data-col="priority"],
+[data-hide~="sla"] [data-col="sla"],
+[data-hide~="cis"] [data-col="cis"],
+[data-hide~="assignee"] [data-col="assignee"],
+[data-hide~="problem"] [data-col="problem"],
+[data-hide~="opened"] [data-col="opened"],
+[data-hide~="service"] [data-col="service"],
+[data-hide~="age"] [data-col="age"],
+[data-hide~="updated"] [data-col="updated"],
+[data-hide~="type"] [data-col="type"],
+[data-hide~="risk"] [data-col="risk"],
+[data-hide~="window"] [data-col="window"],
+[data-hide~="audience"] [data-col="audience"],
+[data-hide~="used"] [data-col="used"],
+[data-hide~="helpful"] [data-col="helpful"],
+[data-hide~="env"] [data-col="env"],
+[data-hide~="criticality"] [data-col="criticality"],
+[data-hide~="team"] [data-col="team"],
+[data-hide~="sources"] [data-col="sources"],
+[data-hide~="seen"] [data-col="seen"],
+[data-hide~="host"] [data-col="host"],
+[data-hide~="source"] [data-col="source"],
+[data-hide~="count"] [data-col="count"],
+[data-hide~="incident"] [data-col="incident"] { display: none; }
+.action-select { margin-left: auto; padding-left: 12px; align-self: center; }

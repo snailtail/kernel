@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
 import { api, type Action, type ProblemDetail } from '../api';
 import { daysUntil, formatDay } from '../format';
+import type { Toolkit } from './ListToolkit';
 import { Modal } from './Modal';
 import { useSession } from '../session';
 
@@ -20,12 +21,15 @@ export function ActionList({
   showProblem,
   onChange,
   onEdit,
+  toolkit,
 }: {
   actions: Action[];
   editable: boolean;
   showProblem?: boolean;
   onChange: (p: ProblemDetail) => void;
   onEdit?: (a: Action) => void;
+  /** Selection and bulk changes in cross-problem lists (#110). */
+  toolkit?: Toolkit<Action>;
 }) {
   const [busy, setBusy] = useState<number | null>(null);
   const toggle = async (a: Action) => {
@@ -38,8 +42,10 @@ export function ActionList({
   };
   return (
     <ul className="action-list">
-      {actions.map((a) => (
-        <li key={a.id} className={`action status-${a.status}`}>
+      {actions.map((a, n) => {
+        const row = toolkit?.rowProps(a, n);
+        return (
+        <li key={a.id} {...row} className={[`action status-${a.status}`, row?.className].filter(Boolean).join(' ')}>
           <input
             type="checkbox"
             aria-label={a.status === 'open' ? 'Mark done' : 'Reopen'}
@@ -61,8 +67,11 @@ export function ActionList({
               <DueLabel action={a} />
             </div>
           </div>
+          {/* Selecting sits at the end, apart from the box that marks the action done. */}
+          {toolkit && <span className="action-select" title="Select for a bulk change">{toolkit.select(a, n)}</span>}
         </li>
-      ))}
+        );
+      })}
     </ul>
   );
 }

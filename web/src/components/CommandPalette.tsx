@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router';
 import { api } from '../api';
 import { useSession } from '../session';
 import { Modal } from './Modal';
-import { FOOTER, HOME, NAV, PALETTE_ONLY, SHORTCUTS as GO_KEYS, visible } from '../nav';
+import { FOOTER, HOME, LIST_KEYS, NAV, PALETTE_ONLY, SHORTCUTS as GO_KEYS, visible } from '../nav';
 
 interface Hit { type: string; ref: string; title: string; status: string; url: string; summary?: string }
 interface Item { id: string; label: string; hint?: string; go: () => void }
@@ -73,6 +73,8 @@ const SHORTCUTS: [string, string][] = [
   ['Ctrl+K or /', 'Search and go to…'],
   ['n', 'Log a problem'],
   ...Object.entries(GO_KEYS).map(([k, to]) => [`g ${k}`, LABELS[to]] as [string, string]),
+  ...Object.values(LIST_KEYS).map((k) => [k.key, k.label] as [string, string]),
+  ['Esc', 'Clear the selection in a list'],
   ['?', 'This help'],
 ];
 

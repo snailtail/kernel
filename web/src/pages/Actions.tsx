@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router';
 import type { Action } from '../api';
 import { ActionList } from '../components/Actions';
 import { SavedViews } from '../components/SavedViews';
+import { useListToolkit } from '../components/ListToolkit';
 import { useApi, useSearchText } from '../hooks';
 import { canEdit, useSession } from '../session';
 
@@ -23,6 +24,7 @@ export function ActionsPage() {
   if (!query.has('owner_id') && !params.has('everyone')) query.set('owner_id', String(user.id));
   query.delete('everyone');
   const { data, reload } = useApi<Action[]>(`/api/actions?${query}`);
+  const tk = useListToolkit({ list: 'actions', rows: data, idOf: (a) => String(a.id), hrefOf: (a) => `/problems/${a.ref}`, filter: query.toString(), onChanged: reload });
   const owner = params.get('owner_id') ?? (params.has('everyone') ? '' : String(user.id));
 
   return (
@@ -66,8 +68,9 @@ export function ActionsPage() {
       </div>
       <section className="card">
         {data?.length === 0 && <p className="empty">No actions match.</p>}
-        {data && <ActionList actions={data} editable={canEdit(user)} showProblem onChange={() => reload()} />}
+        {data && <ActionList actions={data} editable={canEdit(user)} showProblem onChange={() => reload()} toolkit={tk} />}
       </section>
+      {tk.bar}
     </>
   );
 }
