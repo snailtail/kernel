@@ -36,7 +36,12 @@ Lists (#110): saved views at `GET/POST /api/views`, `PATCH/DELETE /api/views/:id
 actions at `POST /api/<list>/bulk` with `{ ids | filter, operation, dry_run }`, or `{ items }` (as returned in `undo`).
 A bulk operation calls the same service function as a single edit for each record (`server/src/bulk.ts`), so a new
 practice adds its operations there instead of writing to its tables. The answer has an outcome per record
-(`changed`, `would_change`, `unchanged`, `skipped`, `failed` with the reason). At most 500 records are allowed per request.
+(`changed`, `would_change`, `unchanged`, `skipped`, `failed` with the reason). At most 500 records are allowed per request;
+clients send large selections in chunks so each request stays well within proxy timeouts (the web UI uses 50).
+- A bulk change pages on-call teams exactly as single edits would. The answer (and the dry run) counts the pages per
+  team, and a request that would page a team more than once is refused with 409 unless it carries `confirm_paging: true`.
+- Bulk is an explicit mass change: it does not take `base`, so it does not detect a concurrent edit, and an `undo`
+  sets the values from before the bulk change even if someone has changed the record since.
 
 - Errors are `{ "error": "message" }` plus optional details (e.g. `conflicts` on 409). Status codes: 400 invalid
   input, 401 not signed in, 403 not allowed (or a missing step-up / token scope), 404 not found, 409 conflicts with

@@ -305,6 +305,20 @@ async function matches(db: Db, i: any, rule: z.infer<typeof ruleSchema>) {
 }
 
 /**
+ * Would the incident, in the state given (e.g. after a bulk change, #110), page its team now? The same test as
+ * syncPaging's trigger, without queuing anything; returns the team it would page.
+ */
+export async function wouldPage(db: Db, i: { id: number; priority: number; impact: number; is_major: boolean; status: string; team_id: number | null }) {
+  if (!i.team_id || ['resolved', 'closed'].includes(i.status)) return null;
+  const { rows: targets } = await db.query('SELECT t.id, t.rule, m.name FROM paging_targets t JOIN teams m ON m.id = t.team_id WHERE t.team_id = $1 AND t.enabled', [i.team_id]);
+  const t = targets[0];
+  if (!t) return null;
+  const { rows: history } = await db.query("SELECT action FROM pages WHERE incident_id = $1 AND target_id = $2 AND status <> 'failed' ORDER BY id DESC LIMIT 1", [i.id, t.id]);
+  if (history[0] && history[0].action !== 'resolve') return null;
+  return (await matches(db, i, ruleSchema.parse(t.rule))) ? { team_id: i.team_id as number, team: t.name as string } : null;
+}
+
+/**
  * Brings the paging tool in line with the incident: trigger when it starts to match its team's rule, acknowledge when
  * someone responds in Kernel, resolve when it is resolved. Queued in the caller's transaction; delivered afterwards.
  */
