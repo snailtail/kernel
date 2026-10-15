@@ -32,6 +32,12 @@ and every change writes the audit trail (`server/src/audit.ts`) in the same tran
 Cross-practice: `GET /api/search?q=`, `GET /api/records/:ref`, `GET /api/records/:ref/next-steps`,
 `POST /api/records/:ref/links`, `GET /api/my-work`.
 
+Lists (#110): saved views at `GET/POST /api/views`, `PATCH/DELETE /api/views/:id` and `PUT /api/views/default`. Bulk
+actions at `POST /api/<list>/bulk` with `{ ids | filter, operation, dry_run }`, or `{ items }` (as returned in `undo`).
+A bulk operation calls the same service function as a single edit for each record (`server/src/bulk.ts`), so a new
+practice adds its operations there instead of writing to its tables. The answer has an outcome per record
+(`changed`, `would_change`, `unchanged`, `skipped`, `failed` with the reason). At most 500 records are allowed per request.
+
 - Errors are `{ "error": "message" }` plus optional details (e.g. `conflicts` on 409). Status codes: 400 invalid
   input, 401 not signed in, 403 not allowed (or a missing step-up / token scope), 404 not found, 409 conflicts with
   the current state or a workflow rule, 422 misused idempotency key, 429 rate limited.
@@ -55,6 +61,7 @@ Cross-practice: `GET /api/search?q=`, `GET /api/records/:ref`, `GET /api/records
   `kernel://guides/<id>`), an MCP prompt per flow, a server-side check (like `check_analysis`) and `next_steps`.
   Content written through MCP is marked as proposed until a person confirms it; decisions through MCP take a
   `human_confirmation` argument and are flagged `destructiveHint`.
+- `bulk_update` previews unless `apply: true`; decisions (closing problems) stay with their own tools.
 
 ## Webhooks and events
 

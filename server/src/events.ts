@@ -535,6 +535,15 @@ export async function acknowledgeAlert(user: User, id: number) {
   return { ok: true };
 }
 
+/** Closes an alert by hand (the source said nothing more, or it was noise); a new event for it opens it again. */
+export async function closeAlert(user: User, id: number) {
+  authorize(user, 'event.ack');
+  const { rows } = await query("UPDATE alerts SET status = 'closed', cleared_at = now(), state_at = now() WHERE id = $1 AND status <> 'closed' RETURNING id, check_key", [id]);
+  if (!rows[0]) throw conflict('Alert not found or already closed');
+  await audit(null, { entity_type: 'alert', entity_ref: String(id), action: 'close', changes: { check: rows[0].check_key } });
+  return { ok: true };
+}
+
 export async function reportEvents(user: User, input: z.infer<typeof reportEventsSchema>) {
   authorize(user, 'event.ingest');
   const results = await processEvents(input.source, '', input.events);

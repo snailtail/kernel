@@ -34,6 +34,7 @@ export async function eventRoutes(app: FastifyInstance) {
   app.get('/api/alerts', async (req) => events.listAlerts(requireUser(req), events.listAlertsSchema.parse(req.query)));
   app.get<Id>('/api/alerts/:id', async (req) => events.getAlert(requireUser(req), Number(req.params.id)));
   app.post<Id>('/api/alerts/:id/ack', async (req) => events.acknowledgeAlert(requireUser(req), Number(req.params.id)));
+  app.post<Id>('/api/alerts/:id/close', async (req) => events.closeAlert(requireUser(req), Number(req.params.id)));
 
   app.get('/api/event-rules', async (req) => events.listRules(requireUser(req)));
   app.post('/api/event-rules', async (req, reply) => {

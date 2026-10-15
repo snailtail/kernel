@@ -20,6 +20,7 @@ import * as ppl from './people.js';
 import * as kb from './knowledge.js';
 import * as tm from './teams.js';
 import * as vw from './views.js';
+import * as bulkMod from './bulk.js';
 import * as dv from './dev.js';
 import * as aiMod from './ai.js';
 import * as st from './status.js';
@@ -56,6 +57,8 @@ const user = z.object({
   password: z.string().min(10),
 });
 const ids = integrations.candidateIdsSchema;
+
+const BULK_TAG: Record<bulkMod.Practice, string> = { incidents: 'Incidents', problems: 'Problems', changes: 'Changes', alerts: 'Events', actions: 'Actions', articles: 'Knowledge', cis: 'CMDB' };
 
 export const OPERATIONS: Op[] = [
   { method: 'post', path: '/api/auth/login', tag: 'Authentication', summary: 'Sign in with username and password (sets a session cookie)', body: z.object({ username: z.string(), password: z.string() }), public: true },
@@ -290,6 +293,7 @@ export const OPERATIONS: Op[] = [
   { method: 'get', path: '/api/alerts', tag: 'Events', summary: 'Alerts (open by default), most severe first', query: events.listAlertsSchema },
   { method: 'get', path: '/api/alerts/:id', tag: 'Events', summary: 'An alert with its recent events' },
   { method: 'post', path: '/api/alerts/:id/ack', tag: 'Events', summary: 'Acknowledge an alert' },
+  { method: 'post', path: '/api/alerts/:id/close', tag: 'Events', summary: 'Close an alert by hand; a new event for it opens it again' },
   { method: 'get', path: '/api/event-rules', tag: 'Events', summary: 'Rules that open or group incidents from alerts' },
   { method: 'post', path: '/api/event-rules', tag: 'Events', summary: 'Create a rule (problem managers)', body: events.ruleSchema },
   { method: 'put', path: '/api/event-rules/:id', tag: 'Events', summary: 'Update a rule', body: events.ruleSchema },
@@ -394,6 +398,11 @@ export const OPERATIONS: Op[] = [
   { method: 'post', path: '/api/webhooks/:id/ping', tag: 'Administration', summary: 'Send a test delivery' },
 
   { method: 'get', path: '/api/openapi.json', tag: 'Reference data', summary: 'This document', public: true },
+  // Bulk actions (#110): one per practice list.
+  ...bulkMod.PRACTICES.map((p): Op => ({
+    method: 'post', path: `/api/${p}/bulk`, tag: BULK_TAG[p], body: bulkMod.bulkSchema,
+    summary: `Apply one operation (${bulkMod.operationsFor(p).join(', ')}) to many ${p} by ids or the list filter (at most ${bulkMod.BULK_LIMIT}), through the same rules as single edits; dry_run previews. Returns an outcome per record and, when reversible, an undo body. Supports Idempotency-Key`,
+  })),
 ];
 
 const toSchema = (s: z.ZodType) => z.toJSONSchema(s, { io: 'input', unrepresentable: 'any' }) as Record<string, any>;
