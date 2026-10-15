@@ -29,12 +29,19 @@ export async function onCallRoutes(app: FastifyInstance) {
   app.delete<{ Params: { id: string; override: string } }>('/api/teams/:id/rotation/overrides/:override', async (req) =>
     oncall.removeOverride(requireUser(req), Number(req.params.id), Number(req.params.override)),
   );
-  // The paging tool's webhook: authenticated with the target's own token, never as a user.
-  app.post<Team & { Querystring: { token?: string } }>('/api/paging/:id/inbound', { bodyLimit: 256 * 1024 }, async (req, reply) => {
-    rateLimit(`paging-inbound:${req.params.id}`, 120, 60_000);
-    const auth = req.headers.authorization ?? '';
-    const token = auth.startsWith('Bearer ') ? auth.slice(7) : String(req.headers['x-kernel-token'] ?? req.query.token ?? '');
-    reply.code(202);
-    return oncall.receiveInbound(Number(req.params.id), token, req.body ?? {});
+  // The paging tool's webhook: authenticated with the target's token in a header (never the URL: it would land in
+  // request logs) or, for PagerDuty, its webhook signature over the raw body. Never as a user.
+  await app.register(async (scope) => {
+    scope.addContentTypeParser('application/json', { parseAs: 'string', bodyLimit: 256 * 1024 }, (req, body, done) => {
+      (req as any).rawBody = body;
+      try { done(null, body ? JSON.parse(body as string) : {}); } catch { done(Object.assign(new Error('Body is not valid JSON'), { statusCode: 400 }), undefined); }
+    });
+    scope.post<Team>('/api/paging/:id/inbound', async (req, reply) => {
+      rateLimit(`paging-inbound:${req.params.id}`, 120, 60_000);
+      const auth = req.headers.authorization ?? '';
+      const token = auth.startsWith('Bearer ') ? auth.slice(7) : String(req.headers['x-kernel-token'] ?? '');
+      reply.code(202);
+      return oncall.receiveInbound(Number(req.params.id), { token, pagerDutySignature: req.headers['x-pagerduty-signature'] as string | undefined, raw: (req as any).rawBody ?? '' }, req.body ?? {});
+    });
   });
 }
