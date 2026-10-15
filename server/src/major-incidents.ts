@@ -335,7 +335,8 @@ export async function timeline(user: User, ref: string) {
 export function timelineMarkdown(t: Awaited<ReturnType<typeof timeline>>) {
   const time = (d: Date) => new Date(d).toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
   const lines = [`# Timeline: ${t.ref} ${t.title}`, '', ...(t.confidential_masked ? ['Confidential: notes, updates and the resolution are not included.', ''] : []), '| Time | What | By |', '|---|---|---|'];
-  const cell = (s: string) => s.replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+  // Backslashes first, then pipes, so a cell cannot end the table row early.
+  const cell = (s: string) => s.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
   for (const e of t.entries) lines.push(`| ${time(e.at)} | ${cell(e.label)}${e.body ? `: ${cell(e.body.slice(0, 500))}` : ''}${e.key_moment ? ' ★' : ''} | ${cell(e.by ?? '')} |`);
   return lines.join('\n') + '\n';
 }

@@ -494,12 +494,13 @@ export async function linkIncidentToProblem(user: User, ref: string, problemRef:
       await db.query("DELETE FROM problem_links WHERE problem_id = $1 AND kind = 'incident' AND reference = $2 AND system = 'Kernel'", [inc.problem_id, inc.ref]);
       if (old[0]) await logActivity(db, old[0].id, user.id, 'link', `Unlinked incident ${inc.ref}`, { kind: 'incident', reference: inc.ref, system: 'Kernel', action: 'remove' });
     }
-    if (!problemRef) {
+    // Both ways need the same permissions (checked above); the problem row, not the input, decides which way it goes.
+    const problem: { id: number; ref: string } | null = problemRef ? await loadForUpdate(db, problemRef) : null;
+    if (!problem) {
       await db.query('UPDATE incidents SET problem_id = NULL WHERE id = $1', [inc.id]);
       await logIncident(db, inc.id, user.id, 'link', 'Unlinked from its problem', { kind: 'problem', reference: null, action: 'remove' });
       return;
     }
-    const problem: { id: number; ref: string } = await loadForUpdate(db, problemRef);
     await attachToProblem(db, user.id, inc, problem);
     // Related incidents of a major incident count for its problem too (#108), unless they already have their own.
     const { rows: children } = await db.query('SELECT id, ref, title FROM incidents WHERE parent_id = $1 AND problem_id IS NULL ORDER BY id FOR UPDATE', [inc.id]);
