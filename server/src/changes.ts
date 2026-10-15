@@ -79,6 +79,8 @@ export const listChangesSchema = z.object({
   type: z.enum(CHANGE_TYPES).optional(),
   ci: z.string().max(30).optional(),
   awaiting_my_vote: z.coerce.boolean().optional(),
+  /** The records one bulk request changed (#125), as its summary notification links to them. */
+  bulk: z.uuid().optional(),
   limit: z.coerce.number().int().min(1).max(500).default(200),
 });
 /** A deployment pipeline registers a standard change it has carried out (or is carrying out). */
@@ -182,6 +184,7 @@ export async function listChanges(user: User, f: z.infer<typeof listChangesSchem
   if (f.status === 'open') where.push("c.status NOT IN ('closed', 'rejected', 'cancelled')");
   else if (f.status !== 'all') add('c.status = ?', f.status);
   if (f.type) add('c.change_type = ?', f.type);
+  if (f.bulk) add('c.ref IN (SELECT unnest(refs) FROM bulk_requests WHERE id = ?)', f.bulk);
   if (f.ci) add('EXISTS (SELECT 1 FROM change_cis x JOIN configuration_items ci ON ci.id = x.ci_id WHERE x.change_id = c.id AND ci.ref = ?)', f.ci.toUpperCase());
   if (f.awaiting_my_vote) {
     where.push("c.status = 'authorize'");
@@ -382,7 +385,7 @@ async function linkToProblem(db: Db, user: User, change: { id: number; ref: stri
   await logActivity(db, problem.id, user.id, 'link', `Change ${change.ref} raised for the fix`, { kind: 'change', reference: change.ref, system: 'Kernel', action: 'add' });
 }
 
-export async function updateChange(user: User, ref: string, { base, ...input }: z.infer<typeof updateChangeSchema>) {
+export async function updateChangeLean(user: User, ref: string, { base, ...input }: z.infer<typeof updateChangeSchema>): Promise<void> {
   authorize(user, 'change.update');
   await tx(async (db) => {
     const current = await loadChange(db, ref);
@@ -409,10 +412,15 @@ export async function updateChange(user: User, ref: string, { base, ...input }: 
     }
     await logChange(db, current.id, user.id, 'update', `Updated ${changed.map(([k]) => k).join(', ')}`, Object.fromEntries(changed.map(([k, v]) => [k, { from: current[k] ?? null, to: v }])));
   });
-  return getChange(user, ref);
 }
 
-export async function transitionChange(user: User, ref: string, input: z.infer<typeof transitionChangeSchema>) {
+/** The same, then the full record as the API returns it. */
+export async function updateChange(...args: Parameters<typeof updateChangeLean>) {
+  await updateChangeLean(...args);
+  return getChange(args[0], args[1]);
+}
+
+export async function transitionChangeLean(user: User, ref: string, input: z.infer<typeof transitionChangeSchema>): Promise<void> {
   authorize(user, 'change.update');
   const before = await getChange(user, ref);
   await tx(async (db) => {
@@ -466,7 +474,12 @@ export async function transitionChange(user: User, ref: string, input: z.infer<t
       await logActivity(db, c.problem_id, user.id, 'link', `Change ${c.ref} implemented: ${input.outcome?.replace('_', ' ')}`, { kind: 'change', reference: c.ref, outcome: input.outcome });
     }
   });
-  return getChange(user, ref);
+}
+
+/** The same, then the full record as the API returns it. */
+export async function transitionChange(...args: Parameters<typeof transitionChangeLean>) {
+  await transitionChangeLean(...args);
+  return getChange(args[0], args[1]);
 }
 
 /** A vote by the change authority. Enough approvals schedule the change; one rejection rejects it. */

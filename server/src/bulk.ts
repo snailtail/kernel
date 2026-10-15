@@ -1,11 +1,14 @@
 // Bulk actions on a practice list (#110): one operation on many records, by ids or by the list's filter. Every record
-// goes through the same service function as a single edit, so permissions, visibility, audit entries, live updates,
-// notifications and SLA effects are exactly the same; nothing here writes to a record table itself. The answer has an
-// outcome per record (changed, unchanged, skipped or failed, and why), and for operations that can be reversed, the
-// request that undoes them.
+// goes through the same service function as a single edit (its lean form, which skips building the detail view), so
+// permissions, visibility, audit entries, live updates, notifications and SLA effects are exactly the same; nothing
+// here writes to a record table itself. Pages and notifications are summarised per target and person (#125). The
+// answer has an outcome per record (changed, unchanged, skipped or failed, and why), and for operations that can be
+// reversed, the request that undoes them.
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { User } from './auth.js';
 import { audit } from './audit.js';
+import { asBulk, type BulkContext } from './context.js';
 import { query, tx } from './db.js';
 import { badRequest, HttpError } from './errors.js';
 import * as actions from './actions.js';
@@ -16,6 +19,7 @@ import * as incidents from './incidents.js';
 import * as knowledge from './knowledge.js';
 import { logger } from './log.js';
 import * as major from './major-incidents.js';
+import { flushBulkNotices } from './notifications.js';
 import * as oncall from './oncall.js';
 import { authorize, can, type Action } from './policy.js';
 import * as problems from './problems.js';
@@ -125,20 +129,20 @@ const DEFS: Record<Practice, PracticeDef> = {
     }),
     select: async (user, f, limit) => (await incidents.listIncidents(user, incidents.listIncidentsSchema.parse(params(f, limit)))).map((r: any) => r.ref),
     ops: {
-      assign: { action: 'incident.update', noop: assignNoop('assignee_id'), undo: assignUndo('assignee_id'), apply: (u, r, op) => incidents.updateIncident(u, r.id, assignInput(op)) },
-      priority: { action: 'incident.update', ...priority, apply: (u, r, op) => incidents.updateIncident(u, r.id, { impact: op.impact, urgency: op.urgency }) },
-      status: { action: 'incident.update', noop: statusNoop, apply: (u, r, op) => incidents.transitionIncident(u, r.id, incidents.transitionIncidentSchema.parse({ ...op.details, to: op.to })) },
+      assign: { action: 'incident.update', noop: assignNoop('assignee_id'), undo: assignUndo('assignee_id'), apply: (u, r, op) => incidents.updateIncidentLean(u, r.id, assignInput(op)) },
+      priority: { action: 'incident.update', ...priority, apply: (u, r, op) => incidents.updateIncidentLean(u, r.id, { impact: op.impact, urgency: op.urgency }) },
+      status: { action: 'incident.update', noop: statusNoop, apply: (u, r, op) => incidents.transitionIncidentLean(u, r.id, incidents.transitionIncidentSchema.parse({ ...op.details, to: op.to })) },
       // Linking copies the incident's title into the problem's history: incidents.ts does that through audience.ts (#117).
       link_problem: {
         action: 'incident.update',
         noop: (row, op) => same(row.problem, op.problem?.toUpperCase()),
         undo: (row) => ({ op: 'link_problem', problem: row.problem ?? null }),
-        apply: (u, r, op) => incidents.linkIncidentToProblem(u, r.id, op.problem),
+        apply: (u, r, op) => incidents.linkIncidentToProblemLean(u, r.id, op.problem),
       },
       set_parent: {
         action: 'incident.update',
         noop: (row, op) => same(row.parent, op.parent.toUpperCase()),
-        apply: (u, r, op) => major.linkChild(u, op.parent, { child: r.id, resolve_with_parent: op.resolve_with_parent }),
+        apply: (u, r, op) => major.linkChildLean(u, op.parent, { child: r.id, resolve_with_parent: op.resolve_with_parent }),
       },
     },
   },
@@ -147,9 +151,9 @@ const DEFS: Record<Practice, PracticeDef> = {
     rows: async (ids) => (await query('SELECT ref AS id, title, status, assignee_id, team_id, impact, urgency FROM problems WHERE ref = ANY($1)', [ids.map((i) => i.toUpperCase())])).rows,
     select: async (_user, f, limit) => (await problems.listProblems(problems.listSchema.parse(params(f, limit)))).map((r: any) => r.ref),
     ops: {
-      assign: { action: 'problem.update', noop: assignNoop('assignee_id'), undo: assignUndo('assignee_id'), apply: (u, r, op) => problems.updateProblem(u, r.id, assignInput(op)) },
-      priority: { action: 'problem.update', ...priority, apply: (u, r, op) => problems.updateProblem(u, r.id, { impact: op.impact, urgency: op.urgency }) },
-      status: { action: 'problem.transition', noop: statusNoop, apply: (u, r, op) => problems.transitionProblem(u, r.id, problems.transitionSchema.parse({ ...op.details, to: op.to })) },
+      assign: { action: 'problem.update', noop: assignNoop('assignee_id'), undo: assignUndo('assignee_id'), apply: (u, r, op) => problems.updateProblemLean(u, r.id, assignInput(op)) },
+      priority: { action: 'problem.update', ...priority, apply: (u, r, op) => problems.updateProblemLean(u, r.id, { impact: op.impact, urgency: op.urgency }) },
+      status: { action: 'problem.transition', noop: statusNoop, apply: (u, r, op) => problems.transitionProblemLean(u, r.id, problems.transitionSchema.parse({ ...op.details, to: op.to })) },
     },
   },
   changes: {
@@ -157,8 +161,8 @@ const DEFS: Record<Practice, PracticeDef> = {
     rows: async (ids) => (await query('SELECT ref AS id, title, status, assignee_id, team_id FROM changes WHERE ref = ANY($1)', [ids.map((i) => i.toUpperCase())])).rows,
     select: async (user, f, limit) => (await changes.listChanges(user, changes.listChangesSchema.parse(params(f, limit)))).map((r: any) => r.ref),
     ops: {
-      assign: { action: 'change.update', noop: assignNoop('assignee_id'), undo: assignUndo('assignee_id'), apply: (u, r, op) => changes.updateChange(u, r.id, assignInput(op)) },
-      status: { action: 'change.update', noop: statusNoop, apply: (u, r, op) => changes.transitionChange(u, r.id, changes.transitionChangeSchema.parse({ ...op.details, to: op.to })) },
+      assign: { action: 'change.update', noop: assignNoop('assignee_id'), undo: assignUndo('assignee_id'), apply: (u, r, op) => changes.updateChangeLean(u, r.id, assignInput(op)) },
+      status: { action: 'change.update', noop: statusNoop, apply: (u, r, op) => changes.transitionChangeLean(u, r.id, changes.transitionChangeSchema.parse({ ...op.details, to: op.to })) },
     },
   },
   alerts: {
@@ -264,44 +268,65 @@ export async function bulk(user: User, practice: Practice, input: z.infer<typeof
   const results: ItemResult[] = [];
   const undo: { id: string; operation: Operation }[] = [];
   let undoable = true;
-  for (const w of work) {
-    const row = rows.get(w.id.toUpperCase());
-    if (!row) {
-      results.push({ id: w.id, outcome: 'skipped', reason: 'Not found, or not visible to you' });
-      continue;
-    }
-    const op = def.ops[w.operation.op]!;
-    if (op.noop(row, w.operation)) {
-      results.push({ id: row.id, title: row.title, outcome: 'unchanged', reason: 'Already so' });
-      continue;
-    }
-    if (input.dry_run) {
-      results.push({ id: row.id, title: row.title, outcome: 'would_change' });
-      continue;
-    }
-    try {
-      await op.apply(user, row, w.operation);
-      results.push({ id: row.id, title: row.title, outcome: 'changed' });
-      if (op.undo) undo.push({ id: row.id, operation: op.undo(row, w.operation) });
-      else undoable = false;
-    } catch (err) {
-      if (err instanceof z.ZodError) results.push({ id: row.id, title: row.title, outcome: 'failed', reason: err.issues.map((i) => `${i.path.join('.') || 'value'}: ${i.message}`).join('; ') });
-      else if (err instanceof HttpError) results.push({ id: row.id, title: row.title, outcome: err.statusCode === 404 ? 'skipped' : 'failed', reason: err.message });
-      else {
-        logger.error({ err, practice, id: row.id }, 'bulk operation failed');
-        results.push({ id: row.id, title: row.title, outcome: 'failed', reason: 'Could not be changed; try this one on its own' });
+  // One request: its pages go as one summary per target, its notifications as one per person and event (#125).
+  const ctx: BulkContext = { id: randomUUID(), practice, actor: { id: user.id, name: user.display_name }, staged: [], notices: [], done: false };
+  await asBulk(ctx, async () => {
+    for (const w of work) {
+      const row = rows.get(w.id.toUpperCase());
+      if (!row) {
+        results.push({ id: w.id, outcome: 'skipped', reason: 'Not found, or not visible to you' });
+        continue;
+      }
+      const op = def.ops[w.operation.op]!;
+      if (op.noop(row, w.operation)) {
+        results.push({ id: row.id, title: row.title, outcome: 'unchanged', reason: 'Already so' });
+        continue;
+      }
+      if (input.dry_run) {
+        results.push({ id: row.id, title: row.title, outcome: 'would_change' });
+        continue;
+      }
+      ctx.staged = [];
+      try {
+        await op.apply(user, row, w.operation);
+        // A record's notices count only once its change has committed.
+        ctx.notices.push(...ctx.staged);
+        results.push({ id: row.id, title: row.title, outcome: 'changed' });
+        if (op.undo) undo.push({ id: row.id, operation: op.undo(row, w.operation) });
+        else undoable = false;
+      } catch (err) {
+        if (err instanceof z.ZodError) results.push({ id: row.id, title: row.title, outcome: 'failed', reason: err.issues.map((i) => `${i.path.join('.') || 'value'}: ${i.message}`).join('; ') });
+        else if (err instanceof HttpError) results.push({ id: row.id, title: row.title, outcome: err.statusCode === 404 ? 'skipped' : 'failed', reason: err.message });
+        else {
+          logger.error({ err, practice, id: row.id }, 'bulk operation failed');
+          results.push({ id: row.id, title: row.title, outcome: 'failed', reason: 'Could not be changed; try this one on its own' });
+        }
       }
     }
-  }
+  });
   const count = (o: Outcome) => results.filter((r) => r.outcome === o).length;
   const summary = { changed: count('changed'), would_change: count('would_change'), unchanged: count('unchanged'), skipped: count('skipped'), failed: count('failed') };
   // Each record's own audit entry comes from its service function; this one ties them together as one request.
   if (!input.dry_run && summary.changed) {
     const ops = [...new Set(work.map((w) => w.operation.op))];
-    await audit(null, { entity_type: 'bulk', entity_ref: practice, action: ops.join(','), changes: { ...summary, ids: results.filter((r) => r.outcome === 'changed').map((r) => r.id) } });
+    const changed = results.filter((r) => r.outcome === 'changed').map((r) => r.id);
+    await audit(null, { entity_type: 'bulk', entity_ref: practice, action: ops.join(','), changes: { ...summary, request: ctx.id, ids: changed } });
+    // The list a summary notification links to.
+    await query('INSERT INTO bulk_requests (id, practice, user_id, refs) VALUES ($1, $2, $3, $4)', [ctx.id, practice, user.id, changed]);
+  }
+  if (!input.dry_run) {
+    await oncall.releaseBulkPages(ctx.id);
+    try {
+      await flushBulkNotices(ctx);
+    } catch (err) {
+      // The changes are made; a lost summary must not turn them into an error.
+      logger.error({ err, practice }, 'bulk notifications failed');
+    }
   }
   return {
     practice,
+    /** Ties the request's audit entry, summary pages and notifications together; ?bulk=<id> lists what it changed. */
+    request_id: input.dry_run ? null : ctx.id,
     dry_run: input.dry_run,
     total: work.length,
     summary,

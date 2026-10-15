@@ -97,6 +97,7 @@ function ChangeList({ params, set }: { params: URLSearchParams; set: (k: string,
         {(user.role === 'admin' || user.role === 'problem_manager') && <label className="check"><input type="checkbox" checked={params.get('awaiting_my_vote') === 'true'} onChange={(e) => set('awaiting_my_vote', e.target.checked ? 'true' : '')} /> Awaiting my approval</label>}
         {cols.picker}
       </div>
+      {tk.scope}
       <section className={`card flush ${loading ? 'is-loading' : ''}`} {...cols.container}>
         {data?.length === 0 ? <p className="empty">No changes match.</p> : (
           <div className="table-wrap">

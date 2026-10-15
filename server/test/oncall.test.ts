@@ -25,13 +25,18 @@ test('an override wins while it lasts; an empty rotation has nobody', () => {
 });
 
 test('inbound webhooks: PagerDuty, Opsgenie, Grafana OnCall and the generic form, with anchored actions', () => {
-  assert.deepEqual(parseInbound({ event: { event_type: 'incident.acknowledged', agent: { summary: 'Nora' }, data: { title: 'INC000012: router' } } }), { refs: ['INC000012'], action: 'acknowledge', by: 'Nora' });
-  assert.deepEqual(parseInbound({ action: 'Acknowledge', alert: { alias: 'INC000012', username: 'dba@example.com' } }), { refs: ['INC000012'], action: 'acknowledge', by: 'dba@example.com' });
+  assert.deepEqual(parseInbound({ event: { event_type: 'incident.acknowledged', agent: { summary: 'Nora' }, data: { title: 'INC000012: router' } } }), { refs: ['INC000012'], bulk: null, action: 'acknowledge', by: 'Nora' });
+  assert.deepEqual(parseInbound({ action: 'Acknowledge', alert: { alias: 'INC000012', username: 'dba@example.com' } }), { refs: ['INC000012'], bulk: null, action: 'acknowledge', by: 'dba@example.com' });
   assert.equal(parseInbound({ alert_uid: 'INC000012', state: 'ok' })?.action, 'resolve');
   assert.equal(parseInbound({ event: { event_type: 'incident.resolved', data: { title: 'INC000012' } } })?.action, 'resolve');
-  assert.deepEqual(parseInbound({ ref: 'inc000012', action: 'resolve', by: 'sms-gw' }), { refs: ['INC000012'], action: 'resolve', by: 'sms-gw' });
+  assert.deepEqual(parseInbound({ ref: 'inc000012', action: 'resolve', by: 'sms-gw' }), { refs: ['INC000012'], bulk: null, action: 'resolve', by: 'sms-gw' });
   assert.deepEqual(parseInbound({ ref: 'INC000012', note: 'see INC000099', action: 'ack' })?.refs, ['INC000012', 'INC000099'], 'explicit ref first');
   assert.equal(parseInbound({ action: 'acknowledge' }), null, 'no ref');
+  // A bulk page (#125) is known by its key, alone or next to the refs it names.
+  const key = 'bulk:0f8b6c1e-2d3a-4b5c-8d9e-0a1b2c3d4e5f';
+  assert.deepEqual(parseInbound({ alert: { alias: key, username: 'dba' }, action: 'Acknowledge' }), { refs: [], bulk: key, action: 'acknowledge', by: 'dba' });
+  assert.equal(parseInbound({ event: { event_type: 'incident.acknowledged', data: { incident_key: key.toUpperCase(), title: '5 incidents: INC000001, INC000002' } } })?.bulk, key);
+  assert.equal(parseInbound({ ref: 'bulk:not-a-key', action: 'ack' }), null);
   assert.equal(parseInbound({ ref: 'INC000012', action: 'snooze' }), null, 'nothing Kernel acts on');
   assert.equal(parseInbound({ ref: 'INC000012', state: 'lookup' }), null, 'not an unanchored "ok"');
 });

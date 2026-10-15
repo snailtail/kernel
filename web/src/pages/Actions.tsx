@@ -21,11 +21,12 @@ export function ActionsPage() {
 
 
   const query = new URLSearchParams(params);
-  if (!query.has('owner_id') && !params.has('everyone')) query.set('owner_id', String(user.id));
+  // Mine by default, unless the link is to the actions of one bulk change.
+  if (!query.has('owner_id') && !params.has('everyone') && !params.has('bulk')) query.set('owner_id', String(user.id));
   query.delete('everyone');
   const { data, reload } = useApi<Action[]>(`/api/actions?${query}`);
   const tk = useListToolkit({ list: 'actions', rows: data, idOf: (a) => String(a.id), hrefOf: (a) => `/problems/${a.ref}`, filter: query.toString(), onChanged: reload });
-  const owner = params.get('owner_id') ?? (params.has('everyone') ? '' : String(user.id));
+  const owner = params.get('owner_id') ?? (params.has('everyone') || params.has('bulk') ? '' : String(user.id));
 
   return (
     <>
@@ -66,6 +67,7 @@ export function ActionsPage() {
           Overdue only
         </label>
       </div>
+      {tk.scope}
       <section className="card">
         {data?.length === 0 && <p className="empty">No actions match.</p>}
         {data && <ActionList actions={data} editable={canEdit(user)} showProblem onChange={() => reload()} toolkit={tk} />}

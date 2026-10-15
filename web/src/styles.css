@@ -1229,6 +1229,13 @@ ol.timeline.compact li { grid-template-columns: 8rem 1fr; padding: 5px 0; font-s
 .table th.check-col, .table td.check-col { width: 28px; padding-right: 0; }
 .table tr.row-selected td, .row-selected { background: var(--accent-soft); }
 .table tr.row-cursor td:first-child, .row-cursor { box-shadow: inset 3px 0 0 var(--accent); }
+.bulk-scope {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  font-size: 0.9rem;
+}
 .bulk-bar {
   position: sticky; bottom: 12px; z-index: 9; display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
   margin: 12px 0; padding: 10px 14px; border: 1px solid var(--accent); border-radius: 12px; background: var(--surface);

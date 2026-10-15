@@ -157,7 +157,7 @@ export async function postCommunication(user: User, ref: string, input: z.infer<
 // ---- Related incidents -------------------------------------------------------------------------
 
 /** Links an incident under a major (or any open) incident; one level only. */
-export async function linkChild(user: User, parentRef: string, input: z.infer<typeof childSchema>) {
+export async function linkChildLean(user: User, parentRef: string, input: z.infer<typeof childSchema>): Promise<void> {
   authorize(user, 'incident.update');
   await tx(async (db) => {
     // Lock both in id order, so two people linking the other way round cannot deadlock.
@@ -188,7 +188,12 @@ export async function linkChild(user: User, parentRef: string, input: z.infer<ty
       if (problem[0]) await attachToProblem(db, user.id, child, problem[0]);
     }
   });
-  return getIncident(user, parentRef);
+}
+
+/** The same, then the full record as the API returns it. */
+export async function linkChild(...args: Parameters<typeof linkChildLean>) {
+  await linkChildLean(...args);
+  return getIncident(args[0], args[1]);
 }
 
 export async function unlinkChild(user: User, parentRef: string, childRef: string) {

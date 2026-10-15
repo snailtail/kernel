@@ -18,10 +18,10 @@ export interface BulkResult {
 
 export type Post = <T>(path: string, body: unknown) => Promise<T>;
 
-export const CHUNK = 50;
+export const CHUNK = 200;
 
 /**
- * Sends ids (or undo items) in chunks of 50, so a big selection shows progress and each request stays well within
+ * Sends ids (or undo items) in chunks of 200, so a big selection shows progress and each request stays well within
  * proxy limits. A failing chunk stops the run; what the earlier chunks did, and their undo, is kept and returned
  * with the error, so the person sees "applied to X of Y" and can still undo it.
  */

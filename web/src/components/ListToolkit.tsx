@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent, type ReactNode, type TouchEvent } from 'react';
-import { useNavigate } from 'react-router';
+import { Link, useLocation, useNavigate } from 'react-router';
 import { api } from '../api';
 import { applyUndo, previewUndo, runBulk, storms, type BulkResult, type ItemResult, type OpName, type Operation, type Practice } from '../bulk';
 import { CLOSURE_LABEL, STATUS_LABEL } from '../format';
@@ -220,7 +220,15 @@ export function useListToolkit<T>({ list, rows, idOf, hrefOf, filter = '', pageS
     </>
   ) : null;
 
-  return { select, selectAll, rowProps, bar, selected, cursor };
+  // A summary notification links to the records one bulk change touched (#125): say so, and how to get the list back.
+  const location = useLocation();
+  const scope = new URLSearchParams(filter).has('bulk') ? (
+    <p className="bulk-scope">
+      Showing only the {BULK[list]?.noun[1] ?? 'records'} changed by one bulk change. <Link to={location.pathname}>Show the whole list</Link>
+    </p>
+  ) : null;
+
+  return { select, selectAll, rowProps, bar, scope, selected, cursor };
 }
 
 function UndoToast({ toast, spec, onDone }: { toast: { text: string; undo: BulkResult['undo']; until: number }; spec: BulkSpec; onDone: () => void }) {

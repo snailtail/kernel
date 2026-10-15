@@ -8,7 +8,8 @@ import nodemailer, { type Transporter } from 'nodemailer';
 import { z } from 'zod';
 import type { User } from './auth.js';
 import { config } from './config.js';
-import { query } from './db.js';
+import { currentBulk, type BulkContext } from './context.js';
+import { query, tx } from './db.js';
 import { badRequest } from './errors.js';
 import { localDate, zonedToUtc } from './business-time.js';
 import { checkUrl, outboundFetch } from './outbound.js';
@@ -52,6 +53,12 @@ export interface Notice {
 export async function notify(db: Db, n: Notice) {
   const users = [...new Set(n.users.filter((u): u is number => !!u && u !== n.actorId))];
   if (!users.length) return 0;
+  // In a bulk request (#125) notices wait for the end of it, and then go as one per person and event.
+  const bulk = currentBulk();
+  if (bulk) {
+    bulk.staged.push({ ...n, users });
+    return users.length;
+  }
   // Only people who may see the record hear about it (#53): a restricted record's title never reaches others.
   const { rows } = await db.query(
     `INSERT INTO notifications (user_id, event, ref, title, summary, url, dedupe_key)
@@ -80,6 +87,46 @@ export async function notify(db: Db, n: Notice) {
     }
   }
   return rows.length;
+}
+
+/**
+ * Sends what a bulk request held back: a person who would get one notice gets it as it was; a person who would get
+ * several for the same event gets one that counts them and links to the list of the records the request changed.
+ * Only records the person may see are counted.
+ */
+export async function flushBulkNotices(b: BulkContext) {
+  b.done = true;
+  const groups = new Map<string, { user: number; event: NotificationEvent; notices: Notice[] }>();
+  for (const n of b.notices) {
+    for (const u of n.users) {
+      const key = `${u}:${n.event}`;
+      const g = groups.get(key) ?? { user: u as number, event: n.event, notices: [] };
+      g.notices.push(n);
+      groups.set(key, g);
+    }
+  }
+  if (!groups.size) return;
+  const many = b.practice === 'cis' ? 'CIs' : b.practice;
+  await tx(async (db) => {
+    for (const g of groups.values()) {
+      const refs = [...new Set(g.notices.map((n) => n.ref))];
+      const { rows } = await db.query('SELECT r FROM unnest($2::text[]) r WHERE kernel_user_can_see($1, r)', [g.user, refs]);
+      const seen = new Set(rows.map((r) => r.r));
+      const notices = g.notices.filter((n) => seen.has(n.ref));
+      if (notices.length <= 1) {
+        for (const n of notices) await notify(db, { ...n, users: [g.user] });
+        continue;
+      }
+      const count = `${notices.length} ${many}`;
+      const summary = g.event === 'assigned' ? `${b.actor.name} assigned ${count} to you.`
+        : g.event === 'team_queue' ? `${count} came into your team's queue, from a change by ${b.actor.name}.`
+        : `${b.actor.name} changed ${count} at once: ${EVENTS[g.event].label.toLowerCase()}.`;
+      await notify(db, {
+        users: [g.user], event: g.event, ref: '', title: count, summary, path: `/${b.practice}?bulk=${b.id}&status=all`,
+        dedupe: `bulk:${b.id}:${g.event}`, actorId: b.actor.id,
+      });
+    }
+  });
 }
 
 /** Active problem managers and administrators (the change authority, and who hears about major incidents). */
@@ -296,5 +343,9 @@ export async function queueDigests(now = Date.now()) {
 export function startNotificationWorker(log: (msg: string) => void) {
   setInterval(() => processNotificationDeliveries().catch((err) => log(`notification delivery failed: ${err.message}`)), 15_000).unref();
   setInterval(() => queueDigests().catch((err) => log(`digest failed: ${err.message}`)), 60_000).unref();
-  setInterval(() => query("DELETE FROM notifications WHERE created_at < now() - interval '90 days'").catch(() => {}), 86400_000).unref();
+  setInterval(() => {
+    query("DELETE FROM notifications WHERE created_at < now() - interval '90 days'").catch(() => {});
+    // The lists that bulk summaries link to (#125) live as long as the notifications.
+    query("DELETE FROM bulk_requests WHERE created_at < now() - interval '90 days'").catch(() => {});
+  }, 86400_000).unref();
 }

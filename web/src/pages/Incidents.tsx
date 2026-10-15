@@ -109,6 +109,7 @@ export function IncidentsPage() {
         <label className="check"><input type="checkbox" checked={params.get('major') === 'true'} onChange={(e) => set('major', e.target.checked ? 'true' : '')} /> Major only</label>
         {cols.picker}
       </div>
+      {tk.scope}
       <section className={`card flush ${loading ? 'is-loading' : ''}`} {...cols.container}>
         {data?.length === 0 ? <p className="empty">No incidents match.</p> : (
           <div className="table-wrap">

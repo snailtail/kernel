@@ -23,7 +23,7 @@ import { managers, notify } from './notifications.js';
 import { pool } from './db.js';
 import { declareInTx, majorDetail, resolveChildren, undeclareInTx } from './major-incidents.js';
 import { reviewBlocksClosing, reviewSummary, scheduleReviewInTx } from './reviews.js';
-import { pagesFor, syncPaging, syncPagingByRef } from './oncall.js';
+import { pagesFor, syncPaging } from './oncall.js';
 
 export { logIncident };
 
@@ -80,6 +80,8 @@ export const listIncidentsSchema = z.object({
   team: z.union([z.literal('mine'), z.coerce.number().int()]).optional(),
   /** Open incidents whose resolution target falls within this many minutes (or is already breached). */
   breaching_within: z.coerce.number().int().min(0).max(100_000).optional(),
+  /** The records one bulk request changed (#125), as its summary notification links to them. */
+  bulk: z.uuid().optional(),
   limit: z.coerce.number().int().min(1).max(500).default(200),
 });
 export const incidentCommentSchema = z.object({ body: z.string().max(20000), kind: z.enum(['comment', 'communication']).default('comment') });
@@ -138,6 +140,7 @@ export async function listIncidents(user: User, f: z.infer<typeof listIncidentsS
   else if (f.assignee === 'none') where.push('i.assignee_id IS NULL');
   else if (typeof f.assignee === 'number') add('i.assignee_id = ?', f.assignee);
   if (f.major) where.push('i.is_major');
+  if (f.bulk) add(`i.ref IN (SELECT unnest(refs) FROM bulk_requests WHERE id = ?)`, f.bulk);
   if (f.team === 'mine') add('i.team_id IN (SELECT team_id FROM team_members WHERE user_id = ?)', user.id);
   else if (typeof f.team === 'number') add('i.team_id = ?', f.team);
   if (f.breaching_within !== undefined) {
@@ -336,7 +339,7 @@ export async function insertIncident(
   return rows[0] as { id: number; ref: string };
 }
 
-export async function updateIncident(user: User, ref: string, { base, caller, ...rawInput }: z.infer<typeof updateIncidentSchema>) {
+export async function updateIncidentLean(user: User, ref: string, { base, caller, ...rawInput }: z.infer<typeof updateIncidentSchema>): Promise<void> {
   let input = rawInput;
   authorize(user, 'incident.update');
   await tx(async (db) => {
@@ -370,7 +373,8 @@ export async function updateIncident(user: User, ref: string, { base, caller, ..
     if (major === false && current.is_major) await undeclareInTx(db, user.id, current);
     input = plain;
     const changed = Object.entries(input).filter(([k, v]) => v !== undefined && current[k] !== v);
-    if (!changed.length) return;
+    // Priority, team, assignee or a declaration can each change what the paging tool should know.
+    if (!changed.length) return syncPaging(db, current.id, user.id);
     await db.query(`UPDATE incidents SET ${changed.map(([k], n) => `${k} = $${n + 2}`).join(', ')} WHERE id = $1`, [current.id, ...changed.map(([, v]) => v)]);
     if (input.assignee_id && !current.responded_at) await db.query('UPDATE incidents SET responded_at = now() WHERE id = $1', [current.id]);
     const path = `/incidents/${current.ref}`;
@@ -388,13 +392,17 @@ export async function updateIncident(user: User, ref: string, { base, caller, ..
     const rest = changed.filter(([k]) => k !== 'team_id');
     if (teamChanged) await logIncident(db, current.id, user.id, 'update', input.team_id ? `Moved to team #${input.team_id}` : 'Removed from its team', { team_id: { from: current.team_id ?? null, to: input.team_id } });
     if (rest.length) await logIncident(db, current.id, user.id, 'update', `Updated ${rest.map(([k]) => k).join(', ')}`, Object.fromEntries(rest.map(([k, v]) => [k, { from: current[k] ?? null, to: v }])));
+    await syncPaging(db, current.id, user.id);
   });
-  // Priority, team, assignee or a declaration can each change what the paging tool should know.
-  await syncPagingByRef(ref, user.id);
-  return getIncident(user, ref);
 }
 
-export async function transitionIncident(user: User, ref: string, input: z.infer<typeof transitionIncidentSchema>) {
+/** The same, then the full record as the API returns it. */
+export async function updateIncident(...args: Parameters<typeof updateIncidentLean>) {
+  await updateIncidentLean(...args);
+  return getIncident(args[0], args[1]);
+}
+
+export async function transitionIncidentLean(user: User, ref: string, input: z.infer<typeof transitionIncidentSchema>): Promise<void> {
   authorize(user, 'incident.update');
   await tx(async (db) => {
     const current = await loadIncident(db, ref);
@@ -444,7 +452,12 @@ export async function transitionIncident(user: User, ref: string, input: z.infer
     if (input.to === 'resolved') await resolveChildren(db, user.id, current, code, resolution);
     await syncPaging(db, current.id, user.id);
   });
-  return getIncident(user, ref);
+}
+
+/** The same, then the full record as the API returns it. */
+export async function transitionIncident(...args: Parameters<typeof transitionIncidentLean>) {
+  await transitionIncidentLean(...args);
+  return getIncident(args[0], args[1]);
 }
 
 export async function addIncidentComment(user: User, ref: string, input: z.infer<typeof incidentCommentSchema>) {
@@ -502,7 +515,7 @@ export async function setIncidentCi(user: User, ref: string, ciRef: string, link
 // ---- Problem management ------------------------------------------------------------------------
 
 /** Links the incident to a problem; the problem lists it like any linked incident (kind incident, system Kernel). */
-export async function linkIncidentToProblem(user: User, ref: string, problemRef: string | null) {
+export async function linkIncidentToProblemLean(user: User, ref: string, problemRef: string | null): Promise<void> {
   authorize(user, 'incident.update');
   // Linking and unlinking both change the problem record too.
   authorize(user, 'problem.link');
@@ -526,7 +539,12 @@ export async function linkIncidentToProblem(user: User, ref: string, problemRef:
     const { rows: children } = await db.query('SELECT id, ref, title FROM incidents WHERE parent_id = $1 AND problem_id IS NULL ORDER BY id FOR UPDATE', [inc.id]);
     for (const c of children) await attachToProblem(db, user.id, c, problem);
   });
-  return getIncident(user, ref);
+}
+
+/** The same, then the full record as the API returns it. */
+export async function linkIncidentToProblem(...args: Parameters<typeof linkIncidentToProblemLean>) {
+  await linkIncidentToProblemLean(...args);
+  return getIncident(args[0], args[1]);
 }
 
 /** Links one incident (locked by the caller) to a problem, both ways; its CIs become the problem's affected CIs. */
