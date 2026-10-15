@@ -4,21 +4,15 @@ import type { Problem } from '../api';
 import { ProblemTable } from '../components/ProblemTable';
 import { PRIORITY_LABEL, STATUS_LABEL } from '../format';
 import { useLive } from '../live';
-import { useApi } from '../hooks';
+import { useApi, useSearchText } from '../hooks';
 import { canEdit, useSession } from '../session';
 import { SavedViews } from '../components/SavedViews';
 
 export function ProblemsPage() {
   const { user, meta } = useSession();
   const [params, setParams] = useSearchParams();
-  const [q, setQ] = useState(params.get('q') ?? '');
+  const [q, setQ] = useSearchText();
 
-  // Debounce free text into the URL so filters are shareable.
-  useEffect(() => {
-    const t = setTimeout(() => setParam('q', q), 300);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q]);
 
   const setParam = (key: string, value: string) => {
     setParams(
@@ -41,7 +35,7 @@ export function ProblemsPage() {
     <>
       <header className="page-head">
         <h1>Problems</h1>
-        <SavedViews page="problems" />
+        <SavedViews list="problems" />
         {canEdit(user) && <Link className="btn primary page-new" to="/problems/new">New problem</Link>}
       </header>
       <div className="filters">

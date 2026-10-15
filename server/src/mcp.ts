@@ -30,6 +30,7 @@ import * as people from './people.js';
 import * as attachments from './attachments.js';
 import * as knowledge from './knowledge.js';
 import * as teams from './teams.js';
+import * as views from './views.js';
 import * as dev from './dev.js';
 import * as aiTasks from './ai.js';
 import * as generic from './generic.js';
@@ -140,7 +141,8 @@ function buildServer(user: User, scopes?: string[]) {
     list_attachments: 'meta.read', read_attachment: 'meta.read', add_attachment: 'attachment.add',
     summarize_record: 'meta.read', analyze_log: 'meta.read',
     get_service_report: 'report.read', get_service_status: 'ci.read', post_status_update: 'status.set',
-    get_on_call: 'team.read', list_teams: 'team.read', link_dev_item: 'meta.read', list_dev_links: 'meta.read',
+    get_on_call: 'team.read', list_teams: 'team.read',
+    list_views: 'meta.read', save_view: 'meta.read', delete_view: 'meta.read', set_default_view: 'meta.read', link_dev_item: 'meta.read', list_dev_links: 'meta.read',
     search_knowledge: 'article.read', get_article: 'article.read', create_article: 'article.write', update_article: 'article.write', transition_article: 'article.write', use_article: 'incident.update',
     search_people: 'person.read', get_person: 'person.read', add_affected_person: 'incident.update',
     get_process_map: 'meta.read', get_health_tips: 'meta.read',
@@ -685,6 +687,43 @@ function buildServer(user: User, scopes?: string[]) {
   );
   tool('list_teams', "Teams (assignment groups): members, the services and CIs they support, and how much open and unassigned work they have. Use a team's id as team_id on incidents, problems and changes.", {}, true, async () =>
     (await teams.listTeams(user)).filter((t: any) => t.active).map((t: any) => ({ id: t.id, name: t.name, members: t.members.map((m: any) => ({ id: m.user_id, name: m.name, role: m.role })), supports: t.supports.map((c: any) => c.ref), open_incidents: t.open_incidents, unassigned: t.unassigned })),
+  );
+
+  // ---- Saved list views (#110) ----
+  const listName = z.enum(views.LISTS).describe('The practice list');
+  tool(
+    'list_views',
+    "A list's saved views: built-in queues (e.g. incidents: My team's queue, Unassigned P1–P2, Breaching SLA), the person's own, their teams' and everyone's. Each view's query holds the list filters, usable with the list's tool.",
+    { list: listName },
+    true,
+    async ({ list }) => views.listViews(user, list),
+  );
+  tool(
+    'save_view',
+    'Save a list view (filters and sort as a query string, and visible columns), or change one by id. Personal by default; scope team shares it with a team (its leads), everyone with all users (problem managers).',
+    {
+      id: z.number().int().optional().describe('Change this view instead of creating one'),
+      list: listName.optional().describe('Required when creating'),
+      name: z.string().optional(),
+      query: z.string().optional().describe('URL query string without "?", e.g. "team=mine&assignee=none"'),
+      columns: z.array(z.string()).optional(),
+      scope: z.enum(['personal', 'team', 'everyone']).optional(),
+      team_id: z.number().int().nullable().optional(),
+    },
+    false,
+    async ({ id, list, ...rest }) => {
+      if (id) return views.updateView(user, id, views.updateViewSchema.parse(rest));
+      if (!list) throw badRequest('Give the list to save the view for');
+      return views.createView(user, views.viewSchema.parse({ list, ...rest }));
+    },
+  );
+  tool('delete_view', 'Remove a saved view you own (team views: team leads; shared views: problem managers).', { id: z.number().int() }, false, async ({ id }) => views.deleteView(user, id), { destructive: true });
+  tool(
+    'set_default_view',
+    "Pin a view as the person's default for a list: a view id, \"builtin:<key>\", or null to clear it.",
+    { list: listName, view: z.union([z.number().int(), z.string(), z.null()]) },
+    false,
+    async (args) => views.setDefault(user, views.defaultSchema.parse(args)),
   );
 
   // ---- Knowledge (#47) ----

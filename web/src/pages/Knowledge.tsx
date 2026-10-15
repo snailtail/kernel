@@ -6,7 +6,7 @@ import { Markdown } from '../components/Markdown';
 import { Modal } from '../components/Modal';
 import { richPaste } from '../components/RichPaste';
 import { formatDate, relativeTime } from '../format';
-import { useApi, useOpenOnNew } from '../hooks';
+import { useApi, useOpenOnNew, useSearchText } from '../hooks';
 import { canEdit, isManager, useSession } from '../session';
 
 export interface ArticleRow {
@@ -31,16 +31,11 @@ export function ArticleStatus({ status }: { status: string }) {
 export function KnowledgePage() {
   const { user } = useSession();
   const [params, setParams] = useSearchParams();
-  const [q, setQ] = useState(params.get('q') ?? '');
+  const [q, setQ] = useSearchText({ trim: true });
   const [creating, setCreating] = useState(false);
   useOpenOnNew(() => setCreating(true));
   const navigate = useNavigate();
   const set = (k: string, v: string) => setParams((prev) => { const n = new URLSearchParams(prev); if (v) n.set(k, v); else n.delete(k); return n; }, { replace: true });
-  useEffect(() => {
-    const t = setTimeout(() => set('q', q.trim()), 300);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q]);
   const { data, loading } = useApi<ArticleRow[]>(`/api/articles?${params}`);
   const writer = canEdit(user);
   return (

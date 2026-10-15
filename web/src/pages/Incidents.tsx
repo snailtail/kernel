@@ -7,6 +7,7 @@ import { RecordNotFound, VisibilityPanel } from '../components/Visibility';
 import { DevLinksPanel } from '../components/DevLinks';
 import { PagesCard } from '../components/OnCall';
 import { SummaryButton } from '../components/Ai';
+import { SavedViews } from '../components/SavedViews';
 import { TeamAndAssignee, useTeams } from './Teams';
 import { ArticleSuggestions, IncidentKnowledgePanel, type ArticleRow } from './Knowledge';
 import { AttachmentsPanel } from '../components/Attachments';
@@ -19,7 +20,7 @@ import { Modal } from '../components/Modal';
 import { duration, formatDate, relativeTime } from '../format';
 import { useLive } from '../live';
 import { Presence } from '../components/Presence';
-import { useApi, useOpenOnNew } from '../hooks';
+import { useApi, useOpenOnNew, useSearchText } from '../hooks';
 import { useSession } from '../session';
 import { Term } from '../components/Glossary';
 import { SeverityBadge, SlaBadge } from '../components/Badges';
@@ -64,16 +65,11 @@ export function IncidentsPage() {
   const teams = useTeams();
   const { user } = useSession();
   const [params, setParams] = useSearchParams();
-  const [q, setQ] = useState(params.get('q') ?? '');
+  const [q, setQ] = useSearchText();
   const [creating, setCreating] = useState(false);
   useOpenOnNew(() => setCreating(true));
   const navigate = useNavigate();
   const set = (k: string, v: string) => setParams((prev) => { const n = new URLSearchParams(prev); if (v) n.set(k, v); else n.delete(k); return n; }, { replace: true });
-  useEffect(() => {
-    const t = setTimeout(() => set('q', q), 300);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q]);
   const { data, loading, refresh } = useApi<IncidentRow[]>(`/api/incidents?${params}`);
   useLive(['incident:*'], refresh);
   return (
@@ -83,6 +79,7 @@ export function IncidentsPage() {
           <h1>Incidents</h1>
           <p className="muted">Restore service first; hand recurring and major incidents to problem management.</p>
         </div>
+        <SavedViews list="incidents" />
         {user.role !== 'viewer' && <button className="btn primary page-new" onClick={() => setCreating(true)}>New incident</button>}
       </header>
       <div className="filters">

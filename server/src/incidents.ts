@@ -71,6 +71,8 @@ export const listIncidentsSchema = z.object({
   q: z.string().trim().max(200).optional(),
   status: z.union([z.enum(INCIDENT_STATUSES), z.literal('open'), z.literal('all')]).default('open'),
   priority: z.coerce.number().int().min(1).max(5).optional(),
+  /** Priority 1 up to and including this one, e.g. 2 for P1–P2. */
+  max_priority: z.coerce.number().int().min(1).max(5).optional(),
   assignee: z.union([z.literal('me'), z.literal('none'), z.coerce.number().int()]).optional(),
   major: z.coerce.boolean().optional(),
   ci: z.string().max(30).optional(),
@@ -131,6 +133,7 @@ export async function listIncidents(user: User, f: z.infer<typeof listIncidentsS
   if (f.status === 'open') where.push("i.status NOT IN ('resolved', 'closed')");
   else if (f.status !== 'all') add('i.status = ?', f.status);
   if (f.priority) add('i.priority = ?', f.priority);
+  if (f.max_priority) add('i.priority <= ?', f.max_priority);
   if (f.assignee === 'me') add('i.assignee_id = ?', user.id);
   else if (f.assignee === 'none') where.push('i.assignee_id IS NULL');
   else if (typeof f.assignee === 'number') add('i.assignee_id = ?', f.assignee);
