@@ -30,7 +30,6 @@ export interface Preferences {
   /** Step-by-step guidance through the process; on unless turned off. */
   guided?: boolean;
   intro_seen?: boolean;
-  saved_views?: { name: string; page: 'problems' | 'actions'; query: string }[];
   /** Show others when I have a record open (#70); on unless turned off. */
   live_presence?: boolean;
   nav_collapsed?: string[];

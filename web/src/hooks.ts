@@ -50,3 +50,28 @@ export function useOpenOnNew(open: () => void) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params]);
 }
+
+/**
+ * The search box of a list page: typing is debounced into ?q= so the list can be shared, and the box follows ?q= when
+ * something else changes it (a saved view, #110). It writes nothing until the user types, so it never undoes a view
+ * applied while the page loads.
+ */
+export function useSearchText({ trim = false } = {}) {
+  const [params, setParams] = useSearchParams();
+  const fromUrl = params.get('q') ?? '';
+  const [q, setQ] = useState(fromUrl);
+  useEffect(() => setQ(fromUrl), [fromUrl]);
+  useEffect(() => {
+    const value = trim ? q.trim() : q;
+    if (value === fromUrl) return;
+    const t = setTimeout(() => setParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (value) next.set('q', value);
+      else next.delete('q');
+      return next;
+    }, { replace: true }), 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q]);
+  return [q, setQ] as const;
+}

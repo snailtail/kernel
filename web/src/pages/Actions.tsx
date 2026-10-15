@@ -2,13 +2,14 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import type { Action } from '../api';
 import { ActionList } from '../components/Actions';
-import { useApi } from '../hooks';
+import { SavedViews } from '../components/SavedViews';
+import { useApi, useSearchText } from '../hooks';
 import { canEdit, useSession } from '../session';
 
 export function ActionsPage() {
   const { user, meta } = useSession();
   const [params, setParams] = useSearchParams();
-  const [q, setQ] = useState(params.get('q') ?? '');
+  const [q, setQ] = useSearchText();
   const setParam = (key: string, value: string) =>
     setParams((prev) => {
       const next = new URLSearchParams(prev);
@@ -17,11 +18,6 @@ export function ActionsPage() {
       return next;
     }, { replace: true });
 
-  useEffect(() => {
-    const t = setTimeout(() => setParam('q', q), 300);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q]);
 
   const query = new URLSearchParams(params);
   if (!query.has('owner_id') && !params.has('everyone')) query.set('owner_id', String(user.id));
@@ -36,6 +32,7 @@ export function ActionsPage() {
           <h1>Follow-up actions</h1>
           <p className="muted">Work that follows from problem analysis, error control and major problem reviews.</p>
         </div>
+        <SavedViews list="actions" />
       </header>
       <div className="filters">
         <input className="search" placeholder="Search actions or problems…" value={q} onChange={(e) => setQ(e.target.value)} />

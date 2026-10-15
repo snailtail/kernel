@@ -12,7 +12,7 @@ import { Term } from '../components/Glossary';
 import { formatDate, relativeTime } from '../format';
 import { useLive } from '../live';
 import { Presence } from '../components/Presence';
-import { useApi } from '../hooks';
+import { useApi, useSearchText } from '../hooks';
 import { useSession } from '../session';
 
 export interface CiType { name: string; label: string; class: 'ci' | 'service'; attributes: { key: string; label: string; type: 'string' | 'number' }[]; active: boolean }
@@ -40,16 +40,11 @@ export function CiStatus({ status }: { status: string }) {
 export function CmdbListPage() {
   const { user } = useSession();
   const [params, setParams] = useSearchParams();
-  const [q, setQ] = useState(params.get('q') ?? '');
+  const [q, setQ] = useSearchText();
   const { data: types } = useApi<CiType[]>('/api/ci-types');
   const [creating, setCreating] = useState(false);
   const navigate = useNavigate();
   const set = (k: string, v: string) => setParams((prev) => { const n = new URLSearchParams(prev); if (v) n.set(k, v); else n.delete(k); return n; }, { replace: true });
-  useEffect(() => {
-    const t = setTimeout(() => set('q', q), 300);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q]);
   const { data, loading, refresh } = useApi<Ci[]>(`/api/cis?${params}`);
   useLive(['ci:*'], refresh);
 

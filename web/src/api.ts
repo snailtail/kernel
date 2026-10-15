@@ -21,7 +21,6 @@ export interface Preferences {
   /** Menu groups the user folded (#102); unset means only Directory is folded. */
   nav_collapsed?: string[];
   intro_seen?: boolean;
-  saved_views?: { name: string; page: 'problems' | 'actions'; query: string }[];
 }
 
 export interface Guidance {

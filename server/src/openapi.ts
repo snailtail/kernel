@@ -19,6 +19,7 @@ import * as setupMod from './setup.js';
 import * as ppl from './people.js';
 import * as kb from './knowledge.js';
 import * as tm from './teams.js';
+import * as vw from './views.js';
 import * as dv from './dev.js';
 import * as aiMod from './ai.js';
 import * as st from './status.js';
@@ -212,6 +213,11 @@ export const OPERATIONS: Op[] = [
   { method: 'post', path: '/api/teams/:id/rotation/overrides', tag: 'Teams', summary: 'Take a shift (or, as lead, give one)', body: oc.overrideSchema },
   { method: 'delete', path: '/api/teams/:id/rotation/overrides/:override', tag: 'Teams', summary: 'Remove a shift' },
   { method: 'post', path: '/api/paging/:id/inbound', tag: 'Teams', summary: "The paging tool's webhook (Authorization: Bearer or X-Kernel-Token, or a PagerDuty v3 signature): acknowledged by X becomes the first response of an incident this target paged; resolved is recorded" },
+  { method: 'get', path: '/api/views', tag: 'Views', summary: "A list's saved views (?list=incidents): built-in, mine, my teams' and everyone's, with my default", query: vw.listSchema },
+  { method: 'post', path: '/api/views', tag: 'Views', summary: 'Save a view: filters and sort as a query string, and visible columns; personal, shared with a team (its leads) or with everyone (problem managers)', body: vw.viewSchema },
+  { method: 'patch', path: '/api/views/:id', tag: 'Views', summary: 'Change a view (the owner, the team leads, or problem managers for shared views)', body: vw.updateViewSchema },
+  { method: 'delete', path: '/api/views/:id', tag: 'Views', summary: 'Remove a view' },
+  { method: 'put', path: '/api/views/default', tag: 'Views', summary: 'Pin a view (an id or builtin:<key>) as my default for a list; null clears it', body: vw.defaultSchema },
   { method: 'get', path: '/api/teams/:id/queue', tag: 'Teams', summary: "A team's queue: unassigned, mine and at risk of breaching" },
   { method: 'get', path: '/api/articles', tag: 'Knowledge', summary: 'Search knowledge articles (published by default; drafts for roles that write articles)', query: kb.listArticlesSchema },
   { method: 'post', path: '/api/articles', tag: 'Knowledge', summary: 'Draft an article', body: kb.createArticleSchema },
