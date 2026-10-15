@@ -44,7 +44,7 @@ const COUNTS_SQL = `SELECT (SELECT count(*) FROM configuration_items WHERE statu
     (SELECT count(*) FROM incident_reviews WHERE status IN ('scheduled', 'draft'))::int AS c21,
     (SELECT count(*) FROM incident_reviews WHERE status IN ('scheduled', 'draft') AND due < current_date)::int AS c22,
     (SELECT count(*) FROM incidents i WHERE i.is_major AND i.status IN ('resolved', 'closed')
-       AND NOT EXISTS (SELECT 1 FROM incident_reviews r WHERE r.incident_id = i.id AND r.status = 'published'))::int AS c23,
+       AND NOT EXISTS (SELECT 1 FROM incident_reviews r WHERE r.incident_id = i.id AND r.status IN ('published', 'waived')))::int AS c23,
     (SELECT count(DISTINCT ci_id) FROM ci_sources s JOIN configuration_items c ON c.id = s.ci_id WHERE c.status = 'active' AND s.last_seen_at < now() - interval '30 days')::int AS c20`;
 async function counts(): Promise<Record<string, number>> {
   return (await query(COUNTS_SQL)).rows[0];
@@ -93,7 +93,7 @@ export async function processMap(user: User) {
       counts: [
         { label: 'due', value: c.c21, link: '/incident-reviews' },
         { label: 'overdue', value: c.c22, link: '/incident-reviews' },
-        { label: 'major incidents resolved without a published review', value: c.c23, link: '/incident-reviews' },
+        { label: 'major incidents resolved, review not published or waived', value: c.c23, link: '/incident-reviews' },
       ],
     });
   }
