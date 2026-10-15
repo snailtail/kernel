@@ -88,6 +88,8 @@ export const listSchema = z.object({
   is_major: z.preprocess((v) => (v === 'true' ? true : v === 'false' ? false : v), z.boolean().optional()),
   needs_decision: z.preprocess((v) => v === 'true' || v === true, z.boolean()).default(false),
   review_due: z.preprocess((v) => v === 'true' || v === true, z.boolean()).default(false),
+  /** The records one bulk request changed (#125), as its summary notification links to them. */
+  bulk: z.uuid().optional(),
   sort: z.enum(['priority', 'updated', 'created', 'ref']).default('priority'),
   limit: z.coerce.number().int().min(1).max(500).default(200),
 });
@@ -222,6 +224,7 @@ export async function listProblems(filter: z.infer<typeof listSchema>) {
   if (filter.priority !== undefined) add('p.priority = ?', filter.priority);
   if (filter.category_id !== undefined) add('p.category_id = ?', filter.category_id);
   if (filter.is_major !== undefined) add('p.is_major = ?', filter.is_major);
+  if (filter.bulk) add('p.ref IN (SELECT unnest(refs) FROM bulk_requests WHERE id = ?)', filter.bulk);
   if (filter.needs_decision) where.push("p.status = 'known_error' AND coalesce(p.ec_decision, 'pending') = 'pending'");
   if (filter.review_due) where.push("p.status = 'known_error' AND p.ec_review_date <= current_date");
   if (filter.q) {
@@ -374,7 +377,7 @@ export async function checkBase(db: Db, problemId: number, current: Record<strin
   );
 }
 
-export async function updateProblem(user: User, ref: string, { base, ...input }: z.infer<typeof updateProblemSchema>) {
+export async function updateProblemLean(user: User, ref: string, { base, ...input }: z.infer<typeof updateProblemSchema>): Promise<void> {
   authorize(user, 'problem.update');
   await tx(async (db) => {
     const current = await loadForUpdate(db, ref);
@@ -395,10 +398,15 @@ export async function updateProblem(user: User, ref: string, { base, ...input }:
     if (input.assignee_id) await watch(db, current.id, input.assignee_id);
     await logActivity(db, current.id, user.id, 'update', `Updated ${changed.map(([k]) => k).join(', ')}`, data);
   });
-  return getProblem(ref);
 }
 
-export async function transitionProblem(user: User, ref: string, input: z.infer<typeof transitionSchema>) {
+/** The same, then the full record as the API returns it. */
+export async function updateProblem(...args: Parameters<typeof updateProblemLean>) {
+  await updateProblemLean(...args);
+  return getProblem(args[1]);
+}
+
+export async function transitionProblemLean(user: User, ref: string, input: z.infer<typeof transitionSchema>): Promise<void> {
   authorize(user, 'problem.transition');
   await tx(async (db) => {
     const current = await loadForUpdate(db, ref);
@@ -438,7 +446,12 @@ export async function transitionProblem(user: User, ref: string, input: z.infer<
     await trackProposals(db, current.id, Object.keys(texts));
     await logActivity(db, current.id, user.id, 'status', input.comment ?? '', { from, to: input.to, closure_code, ...texts });
   });
-  return getProblem(ref);
+}
+
+/** The same, then the full record as the API returns it. */
+export async function transitionProblem(...args: Parameters<typeof transitionProblemLean>) {
+  await transitionProblemLean(...args);
+  return getProblem(args[1]);
 }
 
 export async function addComment(user: User, ref: string, body: string) {

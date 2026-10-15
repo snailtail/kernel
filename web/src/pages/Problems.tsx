@@ -87,6 +87,7 @@ export function ProblemsPage() {
         {cols.picker}
       </div>
       {error && <div className="error">{error}</div>}
+      {tk.scope}
       <section className={`card flush ${loading ? 'is-loading' : ''}`} {...cols.container}>
         {data && <ProblemTable problems={data} toolkit={tk} />}
       </section>

@@ -66,9 +66,37 @@ describe('bulk actions on lists (#110)', { skip }, () => {
     const done = (await pm.post('/api/incidents/bulk', { ids: refs, operation: { op: 'priority', impact: 1, urgency: 1 }, confirm_paging: true })).body;
     assert.equal(done.summary.changed, 3);
     assert.equal(await pagesFor(), 3);
+    // One summary page goes to the team (#125); the other two are recorded as on it.
+    const pages = (await ownerQuery('SELECT p.status, p.dedup_key FROM pages p JOIN incidents i ON i.id = p.incident_id WHERE i.ref = ANY($1) ORDER BY p.id', [refs])).rows;
+    assert.deepEqual(pages.map((p: any) => p.status), ['queued', 'skipped', 'skipped']);
+    assert.ok(pages.every((p: any) => p.dedup_key === `bulk:${done.request_id}`));
     // One page is not a storm.
     const single = (await pm.post('/api/incidents', { title: 'One more', team_id: oncall.id, impact: 3, urgency: 3 })).body.ref;
     assert.equal((await pm.post('/api/incidents/bulk', { ids: [single], operation: { op: 'priority', impact: 1, urgency: 1 } })).status, 200);
+  });
+
+  test('at scale (#125): a hundred assignments are one notification, linking to just those records; lean per record', async () => {
+    const refs: string[] = (await ownerQuery("INSERT INTO incidents (title, created_by, impact, urgency) SELECT 'Scale ' || n, $1, 3, 3 FROM generate_series(1, 100) n RETURNING ref", [ids.analyst])).rows.map((r: any) => r.ref);
+    const assigned = async (user: number) => (await ownerQuery("SELECT ref, title, summary, url FROM notifications WHERE user_id = $1 AND event = 'assigned' ORDER BY id", [user])).rows;
+    const before = (await assigned(ids.pm)).length;
+    // The single path, to compare with: each edit also returns the full record.
+    let t = performance.now();
+    for (const ref of refs.slice(0, 10)) assert.equal((await admin.patch(`/api/incidents/${ref}`, { urgency: 2 })).status, 200);
+    const single = (performance.now() - t) / 10;
+    t = performance.now();
+    const done = (await admin.post('/api/incidents/bulk', { ids: refs, operation: { op: 'assign', assignee_id: ids.pm } })).body;
+    const perRecord = (performance.now() - t) / 100;
+    assert.equal(done.summary.changed, 100);
+    const got = (await assigned(ids.pm)).slice(before);
+    assert.equal(got.length, 1, 'one notification, not a hundred');
+    assert.deepEqual(got[0], { ref: '', title: '100 incidents', summary: 'Admin assigned 100 incidents to you.', url: `/incidents?bulk=${done.request_id}&status=all` });
+    assert.equal((await pm.get(`/api/incidents?bulk=${done.request_id}&status=all`)).body.length, 100, 'the link lists what the request changed');
+    assert.equal((await pm.get('/api/incidents?bulk=not-a-request')).status, 400);
+    // One record is told as usual.
+    await admin.post('/api/incidents/bulk', { ids: refs.slice(0, 1), operation: { op: 'assign', assignee_id: ids.analyst } });
+    assert.equal((await assigned(ids.analyst)).at(-1).ref, refs[0]);
+    // Under 50 ms per record on a local database; elsewhere (a database over a tunnel), well under a single edit.
+    assert.ok(perRecord < 50 || perRecord < single * 0.6, `bulk ${perRecord.toFixed(0)} ms per record, single edits ${single.toFixed(0)} ms`);
   });
 
   test('outcomes per record: skipped when missing, failed with the rule that stopped it', async () => {

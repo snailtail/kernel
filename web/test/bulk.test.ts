@@ -11,7 +11,7 @@ const reply = (ids: string[], extra: Partial<BulkResult> = {}): BulkResult => ({
 });
 
 test('a chunk that fails keeps what the earlier chunks did, and their undo (#110)', async () => {
-  const ids = Array.from({ length: 120 }, (_, n) => `INC${n}`);
+  const ids = Array.from({ length: 300 }, (_, n) => `INC${n}`);
   const calls: any[] = [];
   const post: Post = async <T,>(_path: string, body: any) => {
     calls.push(body);
@@ -21,9 +21,9 @@ test('a chunk that fails keeps what the earlier chunks did, and their undo (#110
   const r = await runBulk(post, 'incidents', { ids }, { operation: { op: 'assign', team_id: 2 } });
   assert.equal(calls.length, 2, 'stops at the failing chunk');
   assert.equal(r.error, 'Bad gateway');
-  assert.equal(r.sent, 50, 'applied to 50 of 120');
-  assert.equal(r.summary.changed, 50);
-  assert.equal(r.undo?.items.length, 50, 'the applied part can still be undone');
+  assert.equal(r.sent, 200, 'applied to 200 of 300');
+  assert.equal(r.summary.changed, 200);
+  assert.equal(r.undo?.items.length, 200, 'the applied part can still be undone');
 });
 
 test('undo asks before paging a team more than once; it never confirms on its own', async () => {

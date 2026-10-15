@@ -25,6 +25,8 @@ export const listActionsSchema = z.object({
   status: z.enum([...ACTION_STATUSES, 'all']).default('open'),
   owner_id: z.coerce.number().int().optional(),
   overdue: z.preprocess((v) => v === 'true' || v === true, z.boolean()).default(false),
+  /** The records one bulk request changed (#125), as its summary notification links to them. */
+  bulk: z.uuid().optional(),
   q: z.string().trim().max(200).optional(),
   limit: z.coerce.number().int().min(1).max(500).default(200),
 });
@@ -44,6 +46,7 @@ export async function listActions(filter: z.infer<typeof listActionsSchema>) {
   };
   if (filter.status !== 'all') add('a.status = ?', filter.status);
   if (filter.owner_id !== undefined) add('a.owner_id = ?', filter.owner_id);
+  if (filter.bulk) add('a.id::text IN (SELECT unnest(refs) FROM bulk_requests WHERE id = ?)', filter.bulk);
   if (filter.overdue) where.push("a.status = 'open' AND a.due_date < current_date");
   if (filter.q) {
     params.push(`%${filter.q}%`);

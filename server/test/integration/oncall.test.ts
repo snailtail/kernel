@@ -200,6 +200,44 @@ describe('on-call and paging (#111)', { skip }, () => {
     assert.equal(ack.accepted, true);
   });
 
+  test('a bulk change pages each target once, and the tool answers for every incident on that page (#125)', async () => {
+    const refs: string[] = [];
+    for (let n = 0; n < 5; n++) refs.push((await analyst.post('/api/incidents', { title: `Branch office ${n} offline`, impact: 3, urgency: 3, team_id: network })).body.ref);
+    await deliver();
+    const enqueued = (from: number) => tools.state.received.slice(from).filter((x) => x.path === '/v2/enqueue').map((x) => x.body);
+    const before = tools.state.received.length;
+    const raised = await analyst.post('/api/incidents/bulk', { ids: refs, operation: { op: 'priority', impact: 1, urgency: 1 }, confirm_paging: true });
+    ok(raised);
+    const key = `bulk:${raised.body.request_id}`;
+    await deliver();
+    const sent = enqueued(before);
+    assert.equal(sent.length, 1, 'one page for the team, not five');
+    assert.deepEqual([sent[0].event_action, sent[0].dedup_key], ['trigger', key]);
+    assert.match(sent[0].payload.summary, new RegExp(`^5 incidents \\(P1\\) after a bulk change by Analyst: ${refs.slice(0, 3).join(', ')} \\(\\+2\\)$`));
+    assert.deepEqual(sent[0].payload.custom_details.incidents, refs);
+    assert.match(sent[0].links[0].href, new RegExp(`/incidents\\?bulk=${raised.body.request_id}&status=all$`));
+    for (const ref of refs) {
+      const inc = (await analyst.get(`/api/incidents/${ref}`)).body;
+      assert.ok(inc.activity.some((a: any) => a.body === 'Paged Network via PagerDuty in one page for 5 incidents (P1)'), `${ref} shows the page`);
+    }
+    // PagerDuty's webhook names the page by its title; the acknowledgement reaches all five incidents.
+    const res = await fetch(`${k.base}/api/paging/${targetId}/inbound`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${inboundToken}` },
+      body: JSON.stringify({ event: { event_type: 'incident.acknowledged', agent: { summary: 'Nora Network' }, data: { title: sent[0].payload.summary } } }),
+    });
+    assert.equal(res.status, 202);
+    assert.deepEqual((await res.json()).refs, refs);
+    for (const ref of refs) assert.ok((await analyst.get(`/api/incidents/${ref}`)).body.responded_at, `${ref} has its first response`);
+    // The page is resolved when the last incident on it is.
+    const resolve = (ref: string) => analyst.post(`/api/incidents/${ref}/transition`, { to: 'resolved', resolution_code: 'fixed', resolution: 'Line restored' });
+    for (const ref of refs.slice(0, 4)) ok(await resolve(ref));
+    await deliver();
+    assert.equal(enqueued(before).length, 1, 'still open while one incident is');
+    ok(await resolve(refs[4]));
+    await deliver();
+    assert.deepEqual(enqueued(before).map((b) => [b.event_action, b.dedup_key]), [['trigger', key], ['resolve', key]]);
+  });
+
   test('who is on call: from PagerDuty, from the rotation, and never stale names', async () => {
     let calls = (await analyst.get('/api/on-call')).body;
     const net = calls.find((c: any) => c.team_id === network);

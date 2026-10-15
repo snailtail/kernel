@@ -13,7 +13,7 @@ import { audit } from './audit.js';
 import type { User } from './auth.js';
 import { businessMinutes, localDate, zonedToUtc } from './business-time.js';
 import { config as appConfig } from './config.js';
-import { asSystem } from './context.js';
+import { asSystem, currentBulk, outsideBulk } from './context.js';
 import { query, tx } from './db.js';
 import { badRequest, forbidden, notFound } from './errors.js';
 import { logIncident } from './incident-log.js';
@@ -335,8 +335,7 @@ export async function syncPaging(db: Db, incidentId: number, actorId: number | n
   );
   const { rows: now } = i.team_id ? await db.query('SELECT name FROM teams WHERE id = $1', [i.team_id]) : { rows: [] as any[] };
   for (const s of stale.filter((x) => x.action !== 'resolve' && x.target_id)) {
-    await db.query('INSERT INTO pages (incident_id, team_id, target_id, kind, action, reason, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-      [i.id, s.team_id, s.target_id, s.kind, 'resolve', now[0] ? `moved to ${now[0].name}` : 'no longer with the team', actorId]);
+    await followUp(db, i.id, { id: s.target_id, team_id: s.team_id, kind: s.kind }, 'resolve', now[0] ? `moved to ${now[0].name}` : 'no longer with the team', actorId);
   }
   if (!i.team_id) return kick();
   const { rows: targets } = await db.query('SELECT id, kind, rule FROM paging_targets WHERE team_id = $1 AND enabled', [i.team_id]);
@@ -345,16 +344,62 @@ export async function syncPaging(db: Db, incidentId: number, actorId: number | n
   const { rows: history } = await db.query("SELECT action FROM pages WHERE incident_id = $1 AND target_id = $2 AND status <> 'failed' ORDER BY id", [i.id, t.id]);
   const last = history.at(-1)?.action as string | undefined;
   const open = !['resolved', 'closed'].includes(i.status);
-  const queue = (action: string, reason: string) =>
-    db.query('INSERT INTO pages (incident_id, team_id, target_id, kind, action, reason, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7)', [i.id, i.team_id, t.id, t.kind, action, reason, actorId]);
+  const target = { id: t.id, team_id: i.team_id, kind: t.kind };
   if (open && (!last || last === 'resolve') && (await matches(db, i, ruleSchema.parse(t.rule)))) {
-    await queue('trigger', i.is_major && !ruleSchema.parse(t.rule).priorities.includes(i.priority) ? 'major incident' : `P${i.priority}`);
+    await trigger(db, i.id, target, i.is_major && !ruleSchema.parse(t.rule).priorities.includes(i.priority) ? 'major incident' : `P${i.priority}`, actorId);
   } else if (open && last === 'trigger' && i.responded_at) {
-    await queue('acknowledge', 'responded in Kernel');
+    await followUp(db, i.id, target, 'acknowledge', 'responded in Kernel', actorId);
   } else if (!open && last && last !== 'resolve') {
-    await queue('resolve', i.status);
+    await followUp(db, i.id, target, 'resolve', i.status, actorId);
   }
   kick();
+}
+
+type PageTarget = { id: number; team_id: number | null; kind: string };
+const insertPage = (db: Db, incidentId: number, t: PageTarget, action: string, reason: string, actorId: number | null, extra: { dedup_key?: string | null; status?: string; hold?: boolean } = {}) =>
+  db.query(
+    `INSERT INTO pages (incident_id, team_id, target_id, kind, action, reason, created_by, dedup_key, status, next_attempt_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now() + CASE WHEN $10 THEN interval '2 minutes' ELSE interval '0' END)`,
+    [incidentId, t.team_id, t.id, t.kind, action, reason, actorId, extra.dedup_key ?? null, extra.status ?? 'queued', !!extra.hold],
+  );
+
+/**
+ * A trigger. In a bulk request (#125) the first one per target becomes the summary page and is held until the request
+ * is done, so it names every incident; the others are recorded under the same dedup key as covered by it. If the
+ * request never finishes (a crash), the hold runs out after two minutes and the page goes anyway.
+ */
+async function trigger(db: Db, incidentId: number, t: PageTarget, reason: string, actorId: number | null) {
+  const b = currentBulk();
+  if (!b) return insertPage(db, incidentId, t, 'trigger', reason, actorId);
+  const key = `bulk:${b.id}`;
+  const { rows } = await db.query("SELECT 1 FROM pages WHERE target_id = $1 AND dedup_key = $2 AND action = 'trigger' AND status <> 'skipped' LIMIT 1", [t.id, key]);
+  if (rows[0]) return insertPage(db, incidentId, t, 'trigger', `${reason}, in the bulk page`, actorId, { dedup_key: key, status: 'skipped' });
+  return insertPage(db, incidentId, t, 'trigger', reason, actorId, { dedup_key: key, hold: true });
+}
+
+/**
+ * Acknowledge or resolve what was paged. An incident on a bulk page speaks for that page: the first acknowledgement
+ * acknowledges it, and it is resolved when the last incident on it is resolved (or leaves the team).
+ */
+async function followUp(db: Db, incidentId: number, t: PageTarget, action: 'acknowledge' | 'resolve', reason: string, actorId: number | null) {
+  const { rows } = await db.query("SELECT dedup_key FROM pages WHERE incident_id = $1 AND target_id = $2 AND action = 'trigger' AND status <> 'failed' ORDER BY id DESC LIMIT 1", [incidentId, t.id]);
+  const key: string | null = rows[0]?.dedup_key ?? null;
+  if (!key) return insertPage(db, incidentId, t, action, reason, actorId);
+  const { rows: done } = action === 'acknowledge'
+    ? await db.query("SELECT 'the bulk page is acknowledged' AS why FROM pages WHERE target_id = $1 AND dedup_key = $2 AND action = 'acknowledge' AND status <> 'failed' LIMIT 1", [t.id, key])
+    : await db.query(
+      `SELECT 'other incidents on the bulk page are open' AS why FROM (
+         SELECT DISTINCT ON (incident_id) action FROM pages WHERE target_id = $1 AND dedup_key = $2 AND status <> 'failed' AND incident_id <> $3 ORDER BY incident_id, id DESC
+       ) l WHERE action <> 'resolve' LIMIT 1`,
+      [t.id, key, incidentId],
+    );
+  return insertPage(db, incidentId, t, action, done[0] ? `${reason}; ${done[0].why}` : reason, actorId, { dedup_key: key, status: done[0] ? 'skipped' : 'queued' });
+}
+
+/** The bulk request is done: its summary pages go now, naming every incident they cover. */
+export async function releaseBulkPages(bulkId: string) {
+  const { rowCount } = await asSystem(() => query("UPDATE pages SET next_attempt_at = now() WHERE dedup_key = $1 AND status = 'queued'", [`bulk:${bulkId}`]));
+  if (rowCount) kick();
 }
 
 // ---- Delivery (the worker) -------------------------------------------------------------------
@@ -363,26 +408,49 @@ let kickTimer: NodeJS.Timeout | null = null;
 /** Deliver soon after the change commits, instead of waiting for the next tick. */
 function kick() {
   if (kickTimer || process.env.NODE_ENV === 'test') return;
-  kickTimer = setTimeout(() => { kickTimer = null; deliverPages().catch(() => {}); }, 500);
+  // Delivery outlives the request that kicked it, and must not be counted in its bulk summaries.
+  kickTimer = outsideBulk(() => setTimeout(() => { kickTimer = null; deliverPages().catch(() => {}); }, 500));
   kickTimer.unref();
 }
 
 const SEVERITY: Record<number, string> = { 1: 'critical', 2: 'error', 3: 'warning', 4: 'info', 5: 'info' };
 
-async function send(page: any, target: any, i: any): Promise<{ status: number; skipped?: boolean; pagedUser?: number }> {
+/** The incidents a bulk page covers, in the order they were changed. */
+async function coveredBy(page: { target_id: number; dedup_key: string }) {
+  const { rows } = await query(
+    `SELECT i.ref FROM pages p JOIN incidents i ON i.id = p.incident_id
+     WHERE p.target_id = $1 AND p.dedup_key = $2 AND p.action = 'trigger' GROUP BY i.ref ORDER BY min(p.id)`,
+    [page.target_id, page.dedup_key],
+  );
+  return rows.map((r) => r.ref as string);
+}
+
+async function send(page: any, target: any, i: any, covered: string[]): Promise<{ status: number; skipped?: boolean; pagedUser?: number }> {
   const cfg = target.config;
   const secret = target.secret ? JSON.parse(decryptSecret(target.secret)) : {};
-  const url = `${(appConfig.publicUrl || '').replace(/\/$/, '')}/incidents/${i.ref}`;
-  // The paging tool is read by everyone on call there: a restricted incident leaves Kernel as its ref (#117).
-  const title = mayCopyText(await audienceOf(null, i.ref), BROADEST, 'title') ? `${i.ref}: ${i.title}` : `${i.ref} (restricted incident)`;
+  const base = (appConfig.publicUrl || '').replace(/\/$/, '');
+  const many = covered.length > 1;
+  // A bulk page (#125) is one page for many incidents: the tool knows it by the request's key, and links to the list.
+  const key: string = page.dedup_key ?? i.ref;
+  const url = many ? `${base}/incidents?bulk=${key.slice(5)}&status=all` : `${base}/incidents/${i.ref}`;
+  let title: string;
+  if (many) {
+    const { rows: by } = await query('SELECT display_name FROM users WHERE id = $1', [page.created_by]);
+    // Refs only: the incidents may include restricted ones, and a page has room for a line.
+    title = `${covered.length} incidents (${page.reason}) after a bulk change by ${by[0]?.display_name ?? 'someone'}: ${covered.slice(0, 3).join(', ')}${covered.length > 3 ? ` (+${covered.length - 3})` : ''}`;
+  } else {
+    // The paging tool is read by everyone on call there: a restricted incident leaves Kernel as its ref (#117).
+    title = mayCopyText(await audienceOf(null, i.ref), BROADEST, 'title') ? `${i.ref}: ${i.title}` : `${i.ref} (restricted incident)`;
+  }
+  const open = many ? 'Open the incidents in Kernel' : `Open ${i.ref} in Kernel`;
   const opts = { privateAllow: target.private_allow, ca: cfg.ca_pem || undefined, timeoutMs: 10_000 };
   const post = (u: string, body: unknown, headers: Record<string, string> = {}) =>
     outboundFetch(u, { ...opts, method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
   switch (target.kind as Kind) {
     case 'pagerduty': {
       const res = await post(`${cfg.events_url}/v2/enqueue`, {
-        routing_key: secret.routing_key, event_action: page.action, dedup_key: i.ref,
-        ...(page.action === 'trigger' ? { payload: { summary: title.slice(0, 1024), source: 'Kernel', severity: SEVERITY[i.priority] ?? 'error', custom_details: { priority: `P${i.priority}`, major: i.is_major } }, links: [{ href: url, text: `Open ${i.ref} in Kernel` }] } : {}),
+        routing_key: secret.routing_key, event_action: page.action, dedup_key: key,
+        ...(page.action === 'trigger' ? { payload: { summary: title.slice(0, 1024), source: 'Kernel', severity: SEVERITY[i.priority] ?? 'error', custom_details: { priority: `P${i.priority}`, major: i.is_major, ...(many ? { incidents: covered } : {}) } }, links: [{ href: url, text: open }] } : {}),
       });
       return { status: res.status };
     }
@@ -390,20 +458,20 @@ async function send(page: any, target: any, i: any): Promise<{ status: number; s
       const api = cfg.api_url ?? (cfg.region === 'eu' ? 'https://api.eu.opsgenie.com' : 'https://api.opsgenie.com');
       const auth = { Authorization: `GenieKey ${secret.api_key}` };
       const res = page.action === 'trigger'
-        ? await post(`${api}/v2/alerts`, { message: title.slice(0, 130), alias: i.ref, description: `Open ${i.ref} in Kernel: ${url}`, priority: `P${Math.min(i.priority, 5)}`, source: 'Kernel', details: { url } }, auth)
-        : await post(`${api}/v2/alerts/${encodeURIComponent(i.ref)}/${page.action === 'acknowledge' ? 'acknowledge' : 'close'}?identifierType=alias`, { source: 'Kernel', note: page.reason }, auth);
+        ? await post(`${api}/v2/alerts`, { message: title.slice(0, 130), alias: key, description: `${open}: ${url}`, priority: `P${Math.min(i.priority, 5)}`, source: 'Kernel', details: { url, ...(many ? { incidents: covered.join(', ') } : {}) } }, auth)
+        : await post(`${api}/v2/alerts/${encodeURIComponent(key)}/${page.action === 'acknowledge' ? 'acknowledge' : 'close'}?identifierType=alias`, { source: 'Kernel', note: page.reason }, auth);
       return { status: res.status };
     }
     case 'grafana_oncall': {
       // The formatted webhook knows firing and resolved; an acknowledgement is made in Grafana OnCall itself.
       if (page.action === 'acknowledge') return { status: 0, skipped: true };
-      const res = await post(secret.url, { alert_uid: i.ref, title, state: page.action === 'resolve' ? 'ok' : 'alerting', message: `Open ${i.ref} in Kernel`, link_to_upstream_details: url });
+      const res = await post(secret.url, { alert_uid: key, title, state: page.action === 'resolve' ? 'ok' : 'alerting', message: many ? `${title}. ${open}.` : open, link_to_upstream_details: url });
       return { status: res.status };
     }
     case 'webhook': {
       const id = `page_${page.id}`;
       const ts = Math.floor(Date.now() / 1000);
-      const body = JSON.stringify({ type: `page.${page.action}`, incident: { ref: i.ref, title, priority: i.priority, major: i.is_major, url }, reason: page.reason });
+      const body = JSON.stringify({ type: `page.${page.action}`, dedup_key: key, incident: { ref: i.ref, title, priority: i.priority, major: i.is_major, url }, ...(page.dedup_key ? { incidents: covered } : {}), reason: page.reason });
       const res = await outboundFetch(cfg.url, { ...opts, method: 'POST', headers: { 'Content-Type': 'application/json', 'webhook-id': id, 'webhook-timestamp': String(ts), 'webhook-signature': standardSignature(secret.signing_secret, id, ts, body) }, body });
       return { status: res.status };
     }
@@ -423,7 +491,8 @@ export async function deliverPages() {
   const { rows } = await query(
     `UPDATE pages SET lease_until = now() + interval '1 minute', attempts = attempts + 1
      WHERE id IN (SELECT p.id FROM pages p WHERE p.status = 'queued' AND p.next_attempt_at <= now() AND (p.lease_until IS NULL OR p.lease_until < now())
-                    AND NOT EXISTS (SELECT 1 FROM pages e WHERE e.incident_id = p.incident_id AND e.target_id = p.target_id AND e.id < p.id AND e.status = 'queued')
+                    AND NOT EXISTS (SELECT 1 FROM pages e WHERE e.target_id = p.target_id AND e.id < p.id AND e.status = 'queued'
+                                      AND (e.incident_id = p.incident_id OR e.dedup_key = p.dedup_key))
                   ORDER BY p.id LIMIT 20 FOR UPDATE SKIP LOCKED)
      RETURNING *`,
   );
@@ -432,10 +501,11 @@ export async function deliverPages() {
     const { rows: inc } = await query('SELECT id, ref, title, priority, is_major FROM incidents WHERE id = $1', [page.incident_id]);
     const { rows: team } = await query('SELECT name FROM teams WHERE id = $1', [page.team_id]);
     if (!tr[0] || !inc[0]) { await query("UPDATE pages SET status = 'skipped', error = 'target or incident gone' WHERE id = $1", [page.id]); continue; }
+    const covered = page.dedup_key ? await coveredBy(page) : [inc[0].ref];
     let result: Awaited<ReturnType<typeof send>> | null = null;
     let error = '';
     try {
-      result = await send(page, tr[0], inc[0]);
+      result = await send(page, tr[0], inc[0], covered);
       if (!result.skipped && (result.status < 200 || result.status >= 300)) error = `HTTP ${result.status}`;
     } catch (err) {
       error = (err as Error).message.slice(0, 300);
@@ -446,9 +516,19 @@ export async function deliverPages() {
         await db.query("UPDATE pages SET status = $2, sent_at = now(), response_code = $3, error = '', lease_until = NULL, paged_user_id = $4 WHERE id = $1", [page.id, result!.skipped ? 'skipped' : 'sent', result!.status || null, result!.pagedUser ?? null]);
         if (result!.skipped) return;
         const what = { trigger: `Paged ${team[0]?.name ?? 'the team'} via ${via}`, acknowledge: `Acknowledged the page in ${via}`, resolve: `Resolved the page in ${via}` }[page.action as 'trigger'];
-        await logIncident(db, page.incident_id, null, 'update', `${what}${page.reason && page.action === 'trigger' ? ` (${page.reason})` : ''}`, { paging: { action: page.action, via: tr[0].kind, page_id: Number(page.id) } });
+        const one = covered.length > 1 ? ` in one page for ${covered.length} incidents` : '';
+        // A bulk page shows on every incident it covers.
+        const { rows: ids } = await db.query('SELECT id FROM incidents WHERE ref = ANY($1)', [covered]);
+        for (const { id } of page.action === 'trigger' ? ids : [{ id: page.incident_id }]) {
+          await logIncident(db, id, null, 'update', `${what}${page.action === 'trigger' ? one : ''}${page.reason && page.action === 'trigger' ? ` (${page.reason})` : ''}`, { paging: { action: page.action, via: tr[0].kind, page_id: Number(page.id) } });
+        }
         if (result!.pagedUser) {
-          await notify(db, { users: [result!.pagedUser], event: 'paged', ref: inc[0].ref, title: inc[0].title, summary: `You are on call for ${team[0]?.name ?? 'your team'}: ${page.reason || 'a page'}.`, path: `/incidents/${inc[0].ref}`, dedupe: `paged:${page.id}`, actorId: null });
+          const many = covered.length > 1;
+          await notify(db, {
+            users: [result!.pagedUser], event: 'paged', ref: many ? '' : inc[0].ref, title: many ? `${covered.length} incidents` : inc[0].title,
+            summary: `You are on call for ${team[0]?.name ?? 'your team'}: ${page.reason || 'a page'}${many ? `, ${covered.length} incidents from one bulk change` : ''}.`,
+            path: many ? `/incidents?bulk=${page.dedup_key.slice(5)}&status=all` : `/incidents/${inc[0].ref}`, dedupe: `paged:${page.id}`, actorId: null,
+          });
         }
       } else if (page.attempts >= 5) {
         await db.query("UPDATE pages SET status = 'failed', error = $2, response_code = $3, lease_until = NULL WHERE id = $1", [page.id, error, result?.status ?? null]);
@@ -463,14 +543,6 @@ export async function deliverPages() {
     });
   }
   return rows.length;
-}
-
-/** After a change committed elsewhere (REST and MCP paths that do not hold the incident's transaction). */
-export async function syncPagingByRef(ref: string, actorId: number | null) {
-  await tx(async (db) => {
-    const { rows } = await db.query('SELECT id FROM incidents WHERE ref = $1', [ref.toUpperCase()]);
-    if (rows[0]) await syncPaging(db, rows[0].id, actorId);
-  });
 }
 
 export function startPagingWorker(log: (msg: string) => void, enabled: () => boolean) {
@@ -490,6 +562,7 @@ export async function pagesFor(incidentId: number) {
 // ---- Inbound: the tool says who acknowledged -----------------------------------------------------
 
 const REF = /\bINC\d{6}\b/gi;
+const BULK_KEY = /\bbulk:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
 const ACK = new Set(['incident.acknowledged', 'acknowledge', 'acknowledged', 'ack']);
 const RESOLVE = new Set(['incident.resolved', 'resolve', 'resolved', 'close', 'closed', 'ok']);
 
@@ -498,16 +571,18 @@ const RESOLVE = new Set(['incident.resolved', 'resolve', 'resolved', 'close', 'c
  * generic form): the candidate incident refs (explicit fields first), the action and who. The action is matched
  * against each tool's known values only.
  */
-export function parseInbound(body: any): { refs: string[]; action: 'acknowledge' | 'resolve'; by: string } | null {
-  const explicit = [body?.ref, body?.alert?.alias, body?.alert_uid, body?.event?.data?.incident_key].filter((x) => typeof x === 'string');
+export function parseInbound(body: any): { refs: string[]; bulk: string | null; action: 'acknowledge' | 'resolve'; by: string } | null {
+  const explicit = [body?.ref, body?.alert?.alias, body?.alert_uid, body?.event?.data?.incident_key, body?.dedup_key].filter((x) => typeof x === 'string');
   const found = [...explicit, ...(JSON.stringify(body ?? {}).match(REF) ?? [])].map((r) => r.toUpperCase()).filter((r) => /^INC\d{6}$/.test(r));
   const refs = [...new Set(found)];
-  if (!refs.length) return null;
+  // A bulk page (#125) is known to the tool by its key.
+  const bulk = [...explicit, ...(JSON.stringify(body ?? {}).match(BULK_KEY) ?? [])].find((x) => new RegExp(`^${BULK_KEY.source}$`, 'i').test(x))?.toLowerCase() ?? null;
+  if (!refs.length && !bulk) return null;
   const kind = String(body?.event?.event_type ?? body?.action ?? body?.event_type ?? body?.state ?? '').trim().toLowerCase();
   const action = ACK.has(kind) ? 'acknowledge' : RESOLVE.has(kind) ? 'resolve' : null;
   if (!action) return null;
   const by = String(body?.by ?? body?.alert?.username ?? body?.event?.agent?.summary ?? body?.user?.username ?? body?.acknowledged_by ?? 'the on-call person').slice(0, 100);
-  return { refs, action, by };
+  return { refs, bulk, action, by };
 }
 
 /** PagerDuty v3 webhooks: X-PagerDuty-Signature carries one or more "v1=<hex HMAC-SHA256 of the body>". */
@@ -537,21 +612,40 @@ export async function receiveInbound(targetId: number, auth: { token?: string; p
   if (!msg) return refused;
   // The target is the authority from here on: it may see what it paged, restricted incidents included.
   return asSystem(() => tx(async (db) => {
-    const { rows: inc } = await db.query(
-      `SELECT i.id, i.ref, i.responded_at FROM incidents i
-       WHERE i.ref = ANY($1) AND EXISTS (SELECT 1 FROM pages p WHERE p.incident_id = i.id AND p.target_id = $2 AND p.action = 'trigger' AND p.status = 'sent')
-       ORDER BY array_position($1, i.ref) LIMIT 1 FOR UPDATE OF i`,
+    // The page the message is about: the first ref this target paged (with its key), or a bulk page by its key.
+    const { rows: paged } = await db.query(
+      `SELECT p.dedup_key FROM pages p JOIN incidents i ON i.id = p.incident_id
+       WHERE i.ref = ANY($1) AND p.target_id = $2 AND p.action = 'trigger' AND p.status = 'sent'
+       ORDER BY array_position($1, i.ref), p.id DESC LIMIT 1`,
       [msg.refs, t.id],
     );
+    const key: string | null = msg.bulk ?? (paged[0] ? paged[0].dedup_key : null);
+    const { rows: inc } = key
+      ? await db.query(
+        `SELECT i.id, i.ref, i.responded_at FROM incidents i
+         WHERE i.id IN (SELECT incident_id FROM pages WHERE target_id = $2 AND dedup_key = $1 AND action = 'trigger')
+           AND EXISTS (SELECT 1 FROM pages WHERE target_id = $2 AND dedup_key = $1 AND action = 'trigger' AND status = 'sent')
+         ORDER BY i.id FOR UPDATE OF i`,
+        [key, t.id],
+      )
+      : await db.query(
+        `SELECT i.id, i.ref, i.responded_at FROM incidents i
+         WHERE i.ref = ANY($1) AND EXISTS (SELECT 1 FROM pages p WHERE p.incident_id = i.id AND p.target_id = $2 AND p.action = 'trigger' AND p.status = 'sent')
+         ORDER BY array_position($1, i.ref) LIMIT 1 FOR UPDATE OF i`,
+        [msg.refs, t.id],
+      );
     // Whether the incident exists at all is not told.
     if (!inc[0]) return refused;
     const via = LABEL[t.kind as Kind];
-    if (msg.action === 'acknowledge') {
-      await db.query('UPDATE incidents SET responded_at = coalesce(responded_at, now()) WHERE id = $1', [inc[0].id]);
-      // Kernel need not acknowledge it back.
-      await db.query("INSERT INTO pages (incident_id, team_id, target_id, kind, action, reason, status, sent_at) VALUES ($1, $2, $3, $4, 'acknowledge', $5, 'skipped', now())", [inc[0].id, t.team_id, t.id, t.kind, `acknowledged in ${via}`]);
+    // A bulk page speaks for every incident on it (#125).
+    for (const i of inc) {
+      if (msg.action === 'acknowledge') {
+        await db.query('UPDATE incidents SET responded_at = coalesce(responded_at, now()) WHERE id = $1', [i.id]);
+        // Kernel need not acknowledge it back.
+        await db.query("INSERT INTO pages (incident_id, team_id, target_id, kind, action, reason, status, sent_at, dedup_key) VALUES ($1, $2, $3, $4, 'acknowledge', $5, 'skipped', now(), $6)", [i.id, t.team_id, t.id, t.kind, `acknowledged in ${via}`, key]);
+      }
+      await logIncident(db, i.id, null, 'update', msg.action === 'acknowledge' ? `Acknowledged in ${via} by ${msg.by}` : `Resolved in ${via} by ${msg.by}; resolve the incident in Kernel when service is restored`, { paging: { inbound: msg.action, via: t.kind, by: msg.by } });
     }
-    await logIncident(db, inc[0].id, null, 'update', msg.action === 'acknowledge' ? `Acknowledged in ${via} by ${msg.by}` : `Resolved in ${via} by ${msg.by}; resolve the incident in Kernel when service is restored`, { paging: { inbound: msg.action, via: t.kind, by: msg.by } });
-    return { accepted: true, ref: inc[0].ref, action: msg.action, first_response: msg.action === 'acknowledge' && !inc[0].responded_at };
+    return { accepted: true, ref: inc[0].ref, refs: inc.map((i) => i.ref), action: msg.action, first_response: msg.action === 'acknowledge' && !inc[0].responded_at };
   }));
 }
