@@ -697,7 +697,8 @@ function buildServer(user: User, scopes?: string[]) {
     'bulk_update',
     `Apply one operation to many records of a list, by ids or by the list's filter (a query string, e.g. from list_views), at most ${bulk.BULK_LIMIT}. ` +
       `Operations per list: ${bulk.PRACTICES.map((p) => `${p}: ${bulk.operationsFor(p).join(', ')}`).join('; ')}. ` +
-      'It is a preview unless apply is true: show the person the preview (how many records, which) and apply only after they agree. ' +
+      'It is a preview unless apply is true: show the person the preview (how many records, which, and the on-call pages it would send per team) and apply only after they agree. ' +
+      'Paging a team more than once also needs confirm_paging, after the person has seen that number. ' +
       'Every record goes through the same rules and audit as a single edit; the answer has an outcome per record and, when reversible, an undo body for bulk_update items.',
     {
       practice: z.enum(bulk.PRACTICES),
@@ -706,6 +707,7 @@ function buildServer(user: User, scopes?: string[]) {
       operation: bulk.operationSchema.optional(),
       items: z.array(z.object({ id: z.union([z.string(), z.number().int()]), operation: bulk.operationSchema })).optional().describe('Per-record operations, e.g. an undo'),
       apply: z.boolean().default(false).describe('false (default): preview only'),
+      confirm_paging: z.boolean().optional().describe('Required when the preview shows a team paged more than once; ask the person first'),
     },
     false,
     async ({ practice, apply, ...rest }) => {

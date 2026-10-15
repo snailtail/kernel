@@ -6,7 +6,7 @@
 import { z } from 'zod';
 import type { User } from './auth.js';
 import { audit } from './audit.js';
-import { query } from './db.js';
+import { query, tx } from './db.js';
 import { badRequest, HttpError } from './errors.js';
 import * as actions from './actions.js';
 import * as changes from './changes.js';
@@ -16,6 +16,7 @@ import * as incidents from './incidents.js';
 import * as knowledge from './knowledge.js';
 import { logger } from './log.js';
 import * as major from './major-incidents.js';
+import * as oncall from './oncall.js';
 import { authorize, can, type Action } from './policy.js';
 import * as problems from './problems.js';
 
@@ -52,6 +53,8 @@ export const bulkSchema = z
     items: z.array(z.object({ id: z.union([z.string(), z.number().int()]), operation: operationSchema })).min(1).max(BULK_LIMIT).optional(),
     /** Report what would happen without changing anything. */
     dry_run: z.boolean().default(false),
+    /** Needed when the change would page a team more than once (#110): a mistake here wakes up the whole on-call rota. */
+    confirm_paging: z.boolean().default(false),
   })
   .refine((b) => (b.items ? !b.ids && b.filter === undefined && !b.operation : !!b.operation && (b.ids ? b.filter === undefined : b.filter !== undefined)), {
     message: 'Give ids or filter together with an operation, or items',
@@ -69,6 +72,8 @@ interface OpDef {
 }
 
 interface PracticeDef {
+  /** The teams the changes would page, and how often (incidents). */
+  pages?: (changes: { row: Row; op: Operation }[]) => Promise<Map<string, number>>;
   read: Action;
   /** The rows the user may see, keyed by id, with the fields the operations compare. */
   rows: (ids: string[]) => Promise<Row[]>;
@@ -100,10 +105,24 @@ const DEFS: Record<Practice, PracticeDef> = {
     read: 'incident.read',
     rows: async (ids) =>
       (await query(
-        `SELECT i.ref AS id, i.title, i.status, i.assignee_id, i.team_id, i.impact, i.urgency, p.ref AS problem, pa.ref AS parent
+        `SELECT i.ref AS id, i.id AS incident_id, i.title, i.status, i.is_major, i.assignee_id, i.team_id, i.impact, i.urgency, p.ref AS problem, pa.ref AS parent
          FROM incidents i LEFT JOIN problems p ON p.id = i.problem_id LEFT JOIN incidents pa ON pa.id = i.parent_id WHERE i.ref = ANY($1)`,
         [ids.map((i) => i.toUpperCase())],
       )).rows,
+    pages: (changes) => tx(async (db) => {
+      const count = new Map<string, number>();
+      for (const { row, op } of changes) {
+        // The incident as it would be after the change; only what paging looks at.
+        const after = { id: row.incident_id, is_major: row.is_major, status: row.status, team_id: row.team_id, impact: row.impact, urgency: row.urgency };
+        if (op.op === 'assign' && op.team_id !== undefined) after.team_id = op.team_id;
+        else if (op.op === 'priority') Object.assign(after, { impact: op.impact ?? row.impact, urgency: op.urgency ?? row.urgency });
+        else if (op.op === 'status') after.status = op.to;
+        else continue;
+        const hit = await oncall.wouldPage(db, { ...after, priority: after.impact + after.urgency - 1 });
+        if (hit) count.set(hit.team, (count.get(hit.team) ?? 0) + 1);
+      }
+      return count;
+    }),
     select: async (user, f, limit) => (await incidents.listIncidents(user, incidents.listIncidentsSchema.parse(params(f, limit)))).map((r: any) => r.ref),
     ops: {
       assign: { action: 'incident.update', noop: assignNoop('assignee_id'), undo: assignUndo('assignee_id'), apply: (u, r, op) => incidents.updateIncident(u, r.id, assignInput(op)) },
@@ -230,6 +249,18 @@ export async function bulk(user: User, practice: Practice, input: z.infer<typeof
 
   // Records the user cannot see are not there (#53).
   const rows = new Map((await def.rows(work.map((w) => w.id))).map((r) => [r.id.toUpperCase(), r]));
+
+  // On-call: count the pages this would send, and ask for confirmation before paging a team more than once.
+  const changing = work.flatMap((w) => {
+    const row = rows.get(w.id.toUpperCase());
+    return row && !def.ops[w.operation.op]!.noop(row, w.operation) ? [{ row, op: w.operation }] : [];
+  });
+  const pageCount = def.pages ? await def.pages(changing) : new Map<string, number>();
+  const pages = [...pageCount].map(([team, count]) => ({ team, count }));
+  const storm = pages.filter((p) => p.count > 1);
+  if (storm.length && !input.dry_run && !input.confirm_paging) {
+    throw new HttpError(409, `This would page ${storm.map((p) => `${p.team} ${p.count} times`).join(' and ')}; confirm with confirm_paging`, { pages, confirm_paging_required: true });
+  }
   const results: ItemResult[] = [];
   const undo: { id: string; operation: Operation }[] = [];
   let undoable = true;
@@ -274,6 +305,8 @@ export async function bulk(user: User, practice: Practice, input: z.infer<typeof
     dry_run: input.dry_run,
     total: work.length,
     summary,
+    /** Pages the change sends (dry run: would send), per team. */
+    pages,
     results,
     // Send this back as the request body to reverse what was changed.
     undo: !input.dry_run && undoable && undo.length ? { items: undo } : null,

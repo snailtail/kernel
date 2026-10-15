@@ -47,6 +47,30 @@ describe('bulk actions on lists (#110)', { skip }, () => {
     assert.equal((await analyst.get(`/api/incidents/${refs[0]}`)).body.team_id, null);
   });
 
+  test('paging a team more than once needs confirmation; the preview counts the pages', async () => {
+    const oncall = (await admin.post('/api/teams', { name: 'Payments on call' })).body;
+    await admin.put(`/api/teams/${oncall.id}/members`, { members: [{ user_id: ids.pm, role: 'lead' }] });
+    await ownerQuery("INSERT INTO paging_targets (team_id, kind, rule) VALUES ($1, 'rotation', '{\"priorities\": [1, 2], \"major\": true, \"services\": [], \"hours\": \"always\"}')", [oncall.id]);
+    const refs: string[] = [];
+    for (let n = 0; n < 3; n++) refs.push((await pm.post('/api/incidents', { title: `Card payments slow ${n}`, team_id: oncall.id, impact: 3, urgency: 3 })).body.ref);
+    const pagesFor = async () => (await ownerQuery('SELECT count(*)::int AS n FROM pages p JOIN incidents i ON i.id = p.incident_id WHERE i.ref = ANY($1)', [refs])).rows[0].n;
+
+    const preview = (await pm.post('/api/incidents/bulk', { ids: refs, operation: { op: 'priority', impact: 1, urgency: 1 }, dry_run: true })).body;
+    assert.deepEqual(preview.pages, [{ team: 'Payments on call', count: 3 }]);
+    const refused = await pm.post('/api/incidents/bulk', { ids: refs, operation: { op: 'priority', impact: 1, urgency: 1 } });
+    assert.equal(refused.status, 409);
+    assert.match(refused.body.error, /page Payments on call 3 times/);
+    assert.equal(refused.body.confirm_paging_required, true);
+    assert.equal(await pagesFor(), 0, 'nothing changed, nobody paged');
+
+    const done = (await pm.post('/api/incidents/bulk', { ids: refs, operation: { op: 'priority', impact: 1, urgency: 1 }, confirm_paging: true })).body;
+    assert.equal(done.summary.changed, 3);
+    assert.equal(await pagesFor(), 3);
+    // One page is not a storm.
+    const single = (await pm.post('/api/incidents', { title: 'One more', team_id: oncall.id, impact: 3, urgency: 3 })).body.ref;
+    assert.equal((await pm.post('/api/incidents/bulk', { ids: [single], operation: { op: 'priority', impact: 1, urgency: 1 } })).status, 200);
+  });
+
   test('outcomes per record: skipped when missing, failed with the rule that stopped it', async () => {
     const a = (await analyst.post('/api/incidents', { title: 'Printer offline' })).body.ref;
     await analyst.post(`/api/incidents/${a}/transition`, { to: 'resolved', resolution_code: 'fixed', resolution: 'Cable' });
