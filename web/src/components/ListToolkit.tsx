@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent, type ReactNode, type TouchEvent } from 'react';
 import { useNavigate } from 'react-router';
-import { api, ApiError } from '../api';
+import { api } from '../api';
+import { applyUndo, previewUndo, runBulk, storms, type BulkResult, type ItemResult, type OpName, type Operation, type Practice } from '../bulk';
 import { CLOSURE_LABEL, STATUS_LABEL } from '../format';
 import { LIST_KEYS } from '../nav';
 import { useTeams } from '../pages/Teams';
@@ -12,9 +13,6 @@ import type { ListName } from './SavedViews';
 // them in bulk through POST /api/<practice>/bulk, and triage with the keyboard (j/k, x, a, s, e). Every page list
 // uses it; a bulk change is previewed, applied in chunks, reported per record and can be undone for 30 seconds.
 
-export type Practice = 'incidents' | 'problems' | 'changes' | 'alerts' | 'actions' | 'articles' | 'cis';
-type OpName = 'assign' | 'status' | 'priority' | 'tags' | 'link_problem' | 'set_parent' | 'acknowledge' | 'close';
-type Operation = { op: OpName } & Record<string, unknown>;
 
 export interface BulkSpec {
   practice: Practice;
@@ -47,32 +45,7 @@ const OP_LABEL: Record<OpName, string> = {
   assign: 'Assign', status: 'Status', priority: 'Priority', tags: 'Tags', link_problem: 'Link to problem', set_parent: 'Relate to incident', acknowledge: 'Acknowledge', close: 'Close',
 };
 
-const CHUNK = 50;
 const UNDO_SECONDS = 30;
-
-interface ItemResult { id: string; title?: string; outcome: 'changed' | 'would_change' | 'unchanged' | 'skipped' | 'failed'; reason?: string }
-interface BulkResult { summary: Record<string, number>; results: ItemResult[]; pages: { team: string; count: number }[]; undo: { items: { id: string; operation: Operation }[] } | null }
-
-/** One bulk request, or several in chunks of 50 so that a big selection shows progress and stays within proxy limits. */
-async function runBulk(practice: Practice, ids: string[], body: object, onProgress?: (done: number) => void): Promise<BulkResult> {
-  const total: BulkResult = { summary: {}, results: [], pages: [], undo: { items: [] } };
-  let undoable = true;
-  for (let i = 0; i < ids.length; i += CHUNK) {
-    const r = await api.post<BulkResult>(`/api/${practice}/bulk`, { ...body, ids: ids.slice(i, i + CHUNK) });
-    for (const [k, v] of Object.entries(r.summary)) total.summary[k] = (total.summary[k] ?? 0) + v;
-    total.results.push(...r.results);
-    for (const p of r.pages) {
-      const same = total.pages.find((x) => x.team === p.team);
-      if (same) same.count += p.count;
-      else total.pages.push({ ...p });
-    }
-    if (r.undo) total.undo!.items.push(...r.undo.items);
-    else if (r.summary.changed) undoable = false;
-    onProgress?.(Math.min(i + CHUNK, ids.length));
-  }
-  if (!undoable || !total.undo!.items.length) total.undo = null;
-  return total;
-}
 
 interface Options<T> {
   list: ListName;
@@ -254,21 +227,35 @@ function UndoToast({ toast, spec, onDone }: { toast: { text: string; undo: BulkR
   const [now, setNow] = useState(Date.now());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Teams the undo would page more than once: shown, and confirmed, before anything is sent.
+  const [confirm, setConfirm] = useState<{ team: string; count: number }[] | null>(null);
+  const [confirmed, setConfirmed] = useState(false);
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
   const left = Math.max(0, Math.ceil((toast.until - now) / 1000));
   useEffect(() => {
-    if (left === 0 && !busy) onDone();
-  }, [left, busy, onDone]);
-  const undo = async () => {
+    if (left === 0 && !busy && !confirm && !error) onDone();
+  }, [left, busy, confirm, error, onDone]);
+  const run = async (confirmPaging: boolean) => {
     if (!toast.undo) return;
     setBusy(true);
+    setError(null);
     try {
-      const items = toast.undo.items;
-      for (let i = 0; i < items.length; i += CHUNK) await api.post(`/api/${spec.practice}/bulk`, { items: items.slice(i, i + CHUNK), confirm_paging: true });
-      onDone();
+      if (!confirmPaging) {
+        const many = storms(await previewUndo(api.post, spec.practice, toast.undo));
+        if (many.length) {
+          setConfirm(many);
+          setBusy(false);
+          return;
+        }
+      }
+      const r = await applyUndo(api.post, spec.practice, toast.undo, confirmPaging);
+      if (r.error) {
+        setError(`Undone for ${r.summary.changed ?? 0} of ${toast.undo.items.length}: ${r.error}`);
+        setBusy(false);
+      } else onDone();
     } catch (err) {
       setError((err as Error).message);
       setBusy(false);
@@ -277,7 +264,13 @@ function UndoToast({ toast, spec, onDone }: { toast: { text: string; undo: BulkR
   return (
     <div className="bulk-toast" role="status">
       <span>{toast.text}</span>
-      {toast.undo && <button className="btn small" disabled={busy} onClick={undo}>Undo ({left}s)</button>}
+      {toast.undo && !confirm && <button className="btn small" disabled={busy || left === 0} onClick={() => run(false)}>Undo ({left}s)</button>}
+      {confirm && (
+        <>
+          <label className="check small"><input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} /> Undo pages {confirm.map((p) => `${p.team} ${p.count} times`).join(' and ')}</label>
+          <button className="btn small" disabled={!confirmed || busy} onClick={() => run(true)}>Undo anyway</button>
+        </>
+      )}
       {error && <span className="error small">{error}</span>}
       <button className="btn-link small" aria-label="Dismiss" onClick={onDone}>×</button>
     </div>
@@ -355,8 +348,9 @@ function BulkDialog({ spec, op, ids, filter, onClose, onApplied }: {
     try {
       // "All matching": the server resolves the filter once; the preview lists the records, which are then applied by id.
       const result = ids
-        ? await runBulk(spec.practice, ids, { operation: o, dry_run: true })
+        ? await runBulk(api.post, spec.practice, { ids }, { operation: o, dry_run: true })
         : await api.post<BulkResult>(`/api/${spec.practice}/bulk`, { filter, operation: o, dry_run: true });
+      if (result.error) throw new Error(result.error);
       setPreview({ operation: o, result, ids: result.results.filter((r) => r.outcome === 'would_change').map((r) => r.id) });
       setConfirmPaging(false);
     } catch (err) {
@@ -368,14 +362,11 @@ function BulkDialog({ spec, op, ids, filter, onClose, onApplied }: {
     if (!preview) return;
     setError(null);
     setProgress(0);
-    try {
-      const result = await runBulk(spec.practice, preview.ids, { operation: preview.operation, confirm_paging: confirmPaging }, setProgress);
-      setDone(result);
-      setProgress(null);
-    } catch (err) {
-      setProgress(null);
-      setError(err instanceof ApiError && err.details.confirm_paging_required ? `${err.message}. Tick the box to page them.` : (err as Error).message);
-    }
+    const result = await runBulk(api.post, spec.practice, { ids: preview.ids }, { operation: preview.operation, confirm_paging: confirmPaging }, setProgress);
+    setProgress(null);
+    // Nothing went through: stay on the preview with the reason. Otherwise show what was done, and keep its undo.
+    if (result.error && !result.sent) setError(result.error);
+    else setDone(result);
   };
 
   const noun = (n: number) => `${n} ${n === 1 ? spec.noun[0] : spec.noun[1]}`;
@@ -388,6 +379,7 @@ function BulkDialog({ spec, op, ids, filter, onClose, onApplied }: {
     return (
       <Modal title={OP_LABEL[op]} onClose={() => onApplied(done, text)}>
         <div className="form">
+          {done.error && <div className="error full" role="alert">Applied to {done.sent} of {preview!.ids.length}, then stopped: {done.error}</div>}
           <p className="full"><strong>{noun(changed)}</strong> changed{done.summary.unchanged ? `, ${done.summary.unchanged} already so` : ''}.</p>
           {done.pages.length > 0 && <p className="full hint">Paged: {done.pages.map((p) => `${p.team} (${p.count})`).join(', ')}.</p>}
           <Outcomes items={problems(done)} done />
