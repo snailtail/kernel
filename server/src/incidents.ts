@@ -23,6 +23,7 @@ import { managers, notify } from './notifications.js';
 import { pool } from './db.js';
 import { declareInTx, majorDetail, resolveChildren, undeclareInTx } from './major-incidents.js';
 import { reviewBlocksClosing, reviewSummary, scheduleReviewInTx } from './reviews.js';
+import { pagesFor, syncPaging, syncPagingByRef } from './oncall.js';
 
 export { logIncident };
 
@@ -218,7 +219,8 @@ export async function getIncident(user: User, ref: string) {
   const { rows: endUsers } = await query('SELECT 1 FROM configuration_items WHERE ref = ANY($1) AND has_end_users LIMIT 1', [refs]);
   const major = await majorDetail(user, i, affected.affected_services);
   const review = await reviewSummary(i.id);
-  const detail = { ...i, ...affected, ...major, review, activity: await nameTeams(await namePeople(activity.rows)), links: links.rows, known_errors: knownErrors.rows, alerts: alerts.rows, possible_change_causes: possibleChanges, sla, ...people, asks_affected_users: !!endUsers[0] || people.affected_people.length > 0, articles_used: articlesUsed, suggested_articles: suggested };
+  const pages = await pagesFor(i.id);
+  const detail = { ...i, ...affected, ...major, review, pages, activity: await nameTeams(await namePeople(activity.rows)), links: links.rows, known_errors: knownErrors.rows, alerts: alerts.rows, possible_change_causes: possibleChanges, sla, ...people, asks_affected_users: !!endUsers[0] || people.affected_people.length > 0, articles_used: articlesUsed, suggested_articles: suggested };
   return { type: 'incident', ...detail, url: incidentUrl(i.ref), next_steps: incidentGuidance(detail) };
 }
 
@@ -326,6 +328,8 @@ export async function insertIncident(
     const { rows: actor } = actorId ? await db.query('SELECT display_name FROM users WHERE id = $1', [actorId]) : { rows: [] as any[] };
     await declareInTx(db, { id: actorId, name: actor[0]?.display_name ?? 'Monitoring' }, created[0], {});
   }
+  // A P1 opened by an event rule at 03:00 wakes the team (#111).
+  await syncPaging(db, rows[0].id, actorId);
   return rows[0] as { id: number; ref: string };
 }
 
@@ -382,6 +386,8 @@ export async function updateIncident(user: User, ref: string, { base, caller, ..
     if (teamChanged) await logIncident(db, current.id, user.id, 'update', input.team_id ? `Moved to team #${input.team_id}` : 'Removed from its team', { team_id: { from: current.team_id ?? null, to: input.team_id } });
     if (rest.length) await logIncident(db, current.id, user.id, 'update', `Updated ${rest.map(([k]) => k).join(', ')}`, Object.fromEntries(rest.map(([k, v]) => [k, { from: current[k] ?? null, to: v }])));
   });
+  // Priority, team, assignee or a declaration can each change what the paging tool should know.
+  await syncPagingByRef(ref, user.id);
   return getIncident(user, ref);
 }
 
@@ -433,6 +439,7 @@ export async function transitionIncident(user: User, ref: string, input: z.infer
       from, to: input.to, ...(input.to === 'resolved' ? { resolution_code: code, resolution } : {}), ...(input.to === 'on_hold' ? { hold_reason: input.hold_reason } : {}), ...pir,
     });
     if (input.to === 'resolved') await resolveChildren(db, user.id, current, code, resolution);
+    await syncPaging(db, current.id, user.id);
   });
   return getIncident(user, ref);
 }

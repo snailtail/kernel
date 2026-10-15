@@ -11,6 +11,7 @@ import type { User } from './auth.js';
 import { query, tx } from './db.js';
 import { badRequest, conflict, forbidden, notFound } from './errors.js';
 import { logIncident } from './incident-log.js';
+import { syncPaging } from './oncall.js';
 import { attachToProblem, getIncident } from './incidents.js';
 import { managers, notify } from './notifications.js';
 import { authorize, can } from './policy.js';
@@ -105,6 +106,7 @@ export async function declareMajor(user: User, ref: string, input: z.infer<typeo
     if (current.is_major) throw conflict(`${current.ref} is already a major incident: change its roles instead`);
     if (current.parent_id) throw conflict('This incident is related to another major incident: unlink it first');
     await declareInTx(db, { id: user.id, name: user.display_name }, current, input);
+    await syncPaging(db, current.id, user.id);
   });
   return getIncident(user, ref);
 }
@@ -226,6 +228,7 @@ export async function resolveChildren(db: Db, actorId: number, parent: { id: num
     );
     await slaOnTransition(db, c.id, 'resolved');
     await logIncident(db, c.id, actorId, 'status', '', { from: c.status, to: 'resolved', resolution_code: code, resolution: text, with_parent: parent.ref });
+    await syncPaging(db, c.id, actorId);
   }
   if (children.length) {
     await logIncident(db, parent.id, actorId, 'update', `Resolved ${children.length} related incident${children.length === 1 ? '' : 's'} with it`, { resolved_children: children.map((c) => c.ref) });

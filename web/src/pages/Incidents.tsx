@@ -5,6 +5,7 @@ import { GuidePanel } from '../components/Guide';
 import { richPaste } from '../components/RichPaste';
 import { RecordNotFound, VisibilityPanel } from '../components/Visibility';
 import { DevLinksPanel } from '../components/DevLinks';
+import { PagesCard } from '../components/OnCall';
 import { SummaryButton } from '../components/Ai';
 import { TeamAndAssignee, useTeams } from './Teams';
 import { ArticleSuggestions, IncidentKnowledgePanel, type ArticleRow } from './Knowledge';
@@ -43,7 +44,7 @@ interface Incident extends IncidentRow {
   links: { id: number; kind: string; reference: string; system: string; url: string }[];
   alerts: { id: number; source: string; check_key: string; severity: string; status: string; count: number; flap_count: number; last_seen: string; ci_hint: string; ci_ref: string | null; ci_name: string | null; source_url: string }[];
   activity: { id: number; kind: string; body: string; data: any; channel: string; key_moment: boolean; created_at: string; user_name: string | null }[];
-  major: MajorInfo | null; review: ReviewSummary | null; parent: RelatedRow | null; children: RelatedRow[]; suggested_parent: RelatedRow | null; status_proposal: StatusProposal | null;
+  major: MajorInfo | null; review: ReviewSummary | null; pages: Parameters<typeof PagesCard>[0]['pages']; parent: RelatedRow | null; children: RelatedRow[]; suggested_parent: RelatedRow | null; status_proposal: StatusProposal | null;
   next_steps: { phase: string; purpose: string; next: string; steps: { id: string; label: string; hint: string; done: boolean }[] };
 }
 
@@ -349,6 +350,7 @@ export function IncidentPage() {
           </section>
         </div>
         <aside className="problem-side">
+          <PagesCard teamId={i.team_id} pages={i.pages ?? []} />
           <ReviewCard incidentRef={i.ref} review={i.review} resolved={['resolved', 'closed'].includes(i.status)} editable={user.role !== 'viewer'} onCreated={reload} />
           {/* During an outage these come first: the same outage reported again, and what the status page says. */}
           <RelatedIncidentsPanel incidentRef={i.ref} isMajor={i.is_major} parent={i.parent} children={i.children} suggested={i.suggested_parent} editable={editable} onChange={setData} />

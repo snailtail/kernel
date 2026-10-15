@@ -114,7 +114,7 @@ describe('key rotation (#63)', { skip }, () => {
     const dir = new URL('../../src/', import.meta.url);
     const files = (await readdir(dir)).filter((f) => f.endsWith('.ts') && !['secrets.ts', 'rotate-keys.ts'].includes(f));
     const tables = rot.SECRET_COLUMNS.map(([t]) => t);
-    const expected: Record<string, string> = { 'webhooks.ts': 'webhooks', 'event-hooks.ts': 'event_sources', 'connectors.ts': 'connectors', 'dev.ts': 'dev_sources', 'ai.ts': 'ai_providers', 'notifications.ts': 'notification_settings', 'mfa.ts': 'users', 'sso.ts': 'settings' };
+    const expected: Record<string, string> = { 'webhooks.ts': 'webhooks', 'event-hooks.ts': 'event_sources', 'connectors.ts': 'connectors', 'dev.ts': 'dev_sources', 'ai.ts': 'ai_providers', 'notifications.ts': 'notification_settings', 'mfa.ts': 'users', 'sso.ts': 'settings', 'oncall.ts': 'paging_targets' };
     for (const f of files) {
       if (!(await readFile(new URL(f, dir), 'utf8')).includes('encryptSecret(')) continue;
       assert.ok(expected[f], `${f} encrypts a secret: add its column to SECRET_COLUMNS (and to this test)`);

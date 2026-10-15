@@ -20,6 +20,7 @@ import * as problemCis from './problem-cis.js';
 import * as incidents from './incidents.js';
 import * as major from './major-incidents.js';
 import * as reviews from './reviews.js';
+import * as oncall from './oncall.js';
 import * as events from './events.js';
 import * as changes from './changes.js';
 import * as sla from './sla.js';
@@ -139,7 +140,7 @@ function buildServer(user: User, scopes?: string[]) {
     list_attachments: 'meta.read', read_attachment: 'meta.read', add_attachment: 'attachment.add',
     summarize_record: 'meta.read', analyze_log: 'meta.read',
     get_service_report: 'report.read', get_service_status: 'ci.read', post_status_update: 'status.set',
-    list_teams: 'team.read', link_dev_item: 'meta.read', list_dev_links: 'meta.read',
+    get_on_call: 'team.read', list_teams: 'team.read', link_dev_item: 'meta.read', list_dev_links: 'meta.read',
     search_knowledge: 'article.read', get_article: 'article.read', create_article: 'article.write', update_article: 'article.write', transition_article: 'article.write', use_article: 'incident.update',
     search_people: 'person.read', get_person: 'person.read', add_affected_person: 'incident.update',
     get_process_map: 'meta.read', get_health_tips: 'meta.read',
@@ -449,6 +450,7 @@ function buildServer(user: User, scopes?: string[]) {
     links: i.links.map((l: any) => ({ kind: l.kind, reference: l.reference, system: l.system, url: l.url })),
     alerts: (i.alerts ?? []).map((a: any) => ({ id: a.id, source: a.source, severity: a.severity, status: a.status, count: a.count, flap_count: a.flap_count, ci: a.ci_ref, last_seen: a.last_seen })),
     major: i.major ? { declared_at: i.major.declared_at, lead: i.major.lead, comms_lead: i.major.comms, update_minutes: i.major.update_minutes, next_update_at: i.major.next_update_at, update_overdue: i.major.update_overdue, last_update_at: i.major.last_update?.created_at ?? null } : null,
+    pages: (i.pages ?? []).map((p: any) => ({ action: p.action, via: p.kind, team: p.team, status: p.status, sent_at: p.sent_at, error: p.error || undefined })),
     review: i.review ? { status: i.review.status, owner: i.review.owner, due: i.review.due, overdue: i.review.overdue } : null,
     related_incidents: (i.children ?? []).map((c: any) => ({ ref: c.ref, status: c.status, priority: c.priority, resolve_with_parent: c.resolve_with_parent })),
     parent: i.parent ? { ref: i.parent.ref, status: i.parent.status } : null,
@@ -678,6 +680,9 @@ function buildServer(user: User, scopes?: string[]) {
   );
 
   // ---- Teams (#42) ----
+  tool('get_on_call', 'Who is on call now per team (or one team), from PagerDuty or Opsgenie when configured, else the built-in rotation. When the tool cannot be reached, unavailable says so; never guess a name.', { team_id: z.number().int().optional() }, true, async ({ team_id }) =>
+    oncall.onCall(user, team_id ? [team_id] : undefined),
+  );
   tool('list_teams', "Teams (assignment groups): members, the services and CIs they support, and how much open and unassigned work they have. Use a team's id as team_id on incidents, problems and changes.", {}, true, async () =>
     (await teams.listTeams(user)).filter((t: any) => t.active).map((t: any) => ({ id: t.id, name: t.name, members: t.members.map((m: any) => ({ id: m.user_id, name: m.name, role: m.role })), supports: t.supports.map((c: any) => c.ref), open_incidents: t.open_incidents, unassigned: t.unassigned })),
   );

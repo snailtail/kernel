@@ -1209,3 +1209,12 @@ ol.timeline time { color: var(--text-2); font-size: 12.5px; font-variant-numeric
 .pir-items .rel-form { margin-top: 6px; flex-wrap: wrap; }
 ol.timeline.compact li { grid-template-columns: 8rem 1fr; padding: 5px 0; font-size: 13px; }
 .from-review { margin: 6px 0 0; }
+
+/* On-call (#111). */
+.on-call { margin-top: 4px; }
+.badge.page-sent { background: var(--surface-2); color: var(--text); }
+.badge.page-queued { background: var(--accent-soft); color: var(--accent); }
+.badge.page-failed { background: var(--danger); color: var(--surface); }
+.badge.page-skipped { background: var(--surface-2); color: var(--text-2); }
+.rotation-order { margin: 0; padding-left: 20px; }
+.rotation-order li { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0; }

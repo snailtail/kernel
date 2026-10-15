@@ -10,6 +10,7 @@ import * as problemCis from './problem-cis.js';
 import * as inc from './incidents.js';
 import * as majorInc from './major-incidents.js';
 import * as reviewsMod from './reviews.js';
+import * as oc from './oncall.js';
 import * as events from './events.js';
 import * as ch from './changes.js';
 import * as slaMod from './sla.js';
@@ -203,6 +204,14 @@ export const OPERATIONS: Op[] = [
   { method: 'put', path: '/api/teams/:id', tag: 'Teams', summary: 'Update a team; deactivating needs its open work reassigned first', body: tm.teamSchema },
   { method: 'delete', path: '/api/teams/:id', tag: 'Teams', summary: 'Remove a team without open work' },
   { method: 'put', path: '/api/teams/:id/members', tag: 'Teams', summary: 'Set the members and leads (administrators, or the team lead)', body: tm.membersSchema },
+  { method: 'get', path: '/api/on-call', tag: 'Teams', summary: 'Who is on call per team (?team=): from PagerDuty or Opsgenie when configured, else the built-in rotation; cached a minute, and a tool that cannot be reached says so' },
+  { method: 'get', path: '/api/teams/:id/paging', tag: 'Teams', summary: "The team's paging target (no secrets), rotation and upcoming overrides" },
+  { method: 'put', path: '/api/teams/:id/paging', tag: 'Teams', summary: 'Set the paging target (PagerDuty, Opsgenie, Grafana OnCall, signed webhook or rotation) and when incidents page it; credentials are write-only (administrators, step-up)', body: oc.targetSchema },
+  { method: 'delete', path: '/api/teams/:id/paging', tag: 'Teams', summary: 'Remove the paging target' },
+  { method: 'put', path: '/api/teams/:id/rotation', tag: 'Teams', summary: 'The built-in weekly rotation: members in turn and the handover (administrators or the team lead)', body: oc.rotationSchema },
+  { method: 'post', path: '/api/teams/:id/rotation/overrides', tag: 'Teams', summary: 'Take a shift (or, as lead, give one)', body: oc.overrideSchema },
+  { method: 'delete', path: '/api/teams/:id/rotation/overrides/:override', tag: 'Teams', summary: 'Remove a shift' },
+  { method: 'post', path: '/api/paging/:id/inbound', tag: 'Teams', summary: "The paging tool's webhook (Bearer token or ?token=): acknowledged by X becomes the incident's first response; resolved is recorded" },
   { method: 'get', path: '/api/teams/:id/queue', tag: 'Teams', summary: "A team's queue: unassigned, mine and at risk of breaching" },
   { method: 'get', path: '/api/articles', tag: 'Knowledge', summary: 'Search knowledge articles (published by default; drafts for roles that write articles)', query: kb.listArticlesSchema },
   { method: 'post', path: '/api/articles', tag: 'Knowledge', summary: 'Draft an article', body: kb.createArticleSchema },
