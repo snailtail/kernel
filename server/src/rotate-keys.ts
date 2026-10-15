@@ -22,6 +22,7 @@ export const SECRET_COLUMNS: [table: string, column: string][] = [
   ['ai_providers', 'api_key'],
   ['notification_settings', 'chat_url'],
   ['users', 'mfa_secret'],
+  ['paging_targets', 'secret'],
 ];
 /** Secrets inside settings documents: [settings key, field]. */
 export const SECRET_SETTINGS: [key: string, field: string][] = [['sso', 'client_secret_enc']];

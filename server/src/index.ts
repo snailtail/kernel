@@ -15,6 +15,7 @@ import { startSlaWorker } from './sla.js';
 import { startNotificationWorker } from './notifications.js';
 import { startConnectorWorker } from './connectors.js';
 import { startMajorIncidentWorker } from './major-incidents.js';
+import { startPagingWorker } from './oncall.js';
 import { moduleEnabled } from './modules.js';
 
 // The schema comes first: building the app already reads settings (modules), which a new database does not have yet.
@@ -38,6 +39,7 @@ asSystem(() => {
   startNotificationWorker(log);
   startConnectorWorker(log);
   startMajorIncidentWorker(log, () => moduleEnabled('incident'));
+  startPagingWorker(log, () => moduleEnabled('incident'));
   startChainVerification((msg) => app.log.error(msg));
   setInterval(() => pruneIdempotencyKeys().catch(() => {}), 3600_000).unref();
   setInterval(() => pruneDeliveries().catch(() => {}), 3600_000).unref();

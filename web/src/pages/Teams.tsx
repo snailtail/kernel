@@ -1,3 +1,4 @@
+import { OnCallLine, PagingCard } from '../components/OnCall';
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
 import { api } from '../api';
@@ -96,6 +97,7 @@ function TeamDetail({ team: t, canEdit, canMembers, onEdit, onMembers }: { team:
           {t.email && <><dt>Email</dt><dd>{t.email}</dd></>}
         </dl>
       </section>
+      <PagingCard team={t} />
       <section className="card flush">
         <div className="tabs queue-tabs" role="tablist">
           {(['unassigned', 'mine', 'at_risk', 'all'] as const).map((k) => (
@@ -221,6 +223,7 @@ export function TeamAndAssignee({ teamId, assigneeId, onTeam, onAssignee, disabl
           <option value="">–</option>
           {teams.filter((t) => t.active || t.id === teamId).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
         </select>
+        <OnCallLine teamId={teamId} />
       </dd>
       <dt>Assignee</dt>
       <dd>

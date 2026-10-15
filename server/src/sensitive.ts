@@ -193,7 +193,7 @@ export const clearSensitivePolicyCache = () => { cached = null; };
 export const UNSCANNED = [
   /^\/api\/auth\//, /^\/api\/tokens/, /^\/api\/setup/, /^\/api\/users(\/|$)/, /^\/api\/live\//,
   /^\/api\/admin\/(ai\/providers|sso|cf-access)/, /^\/api\/webhooks/, /^\/api\/connectors/, /^\/api\/dev-sources/,
-  /^\/api\/event-sources/, /^\/api\/notifications\/settings/, /^\/api\/dev-hooks\//,
+  /^\/api\/event-sources/, /^\/api\/notifications\/settings/, /^\/api\/dev-hooks\//, /^\/api\/teams\/\d+\/paging$/,
   // Text for the AI assistant is redacted on its way to the model (redactForModel) and never stored.
   /^\/api\/ai\//,
   // The check behind the typing warning scans the text itself and stores nothing.
@@ -204,7 +204,7 @@ export const UNSCANNED = [
   /^\/api\/records\/[^/]+\/attachments/,
 ];
 /** Machine ingestion: never refused (an alert must not be lost), always redacted. */
-const MACHINE = [/^\/mcp/, /^\/api\/events$/, /^\/api\/event-hooks\//, /^\/api\/integrations\//, /^\/api\/cis\/upsert/, /^\/api\/cmdb\/ci-batch/, /^\/api\/changes\/register/, /^\/api\/ci-relationships\/sync/];
+const MACHINE = [/^\/mcp/, /^\/api\/events$/, /^\/api\/event-hooks\//, /^\/api\/paging\/\d+\/inbound/, /^\/api\/integrations\//, /^\/api\/cis\/upsert/, /^\/api\/cmdb\/ci-batch/, /^\/api\/changes\/register/, /^\/api\/ci-relationships\/sync/];
 
 const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 

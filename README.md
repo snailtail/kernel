@@ -124,6 +124,18 @@ code, a major incident has stakeholder communication updates and needs a problem
 from an incident in one click; when the problem is resolved, its open incidents can be resolved together. Unlinked
 incidents feed the problem candidates per CI, and reports show MTTA, MTTR, reopen rate and incidents per CI.
 
+**On call**: Kernel pages through the team's own paging tool rather than replacing it. Per team, an administrator
+sets PagerDuty (Events API v2), Opsgenie, Grafana OnCall or a signed webhook (SMS gateways, ntfy…), with write-only
+credentials, and a rule: which priorities (P1 and P2 by default), major incidents, services and business or out of
+hours. A matching incident triggers a page (the incident ref is the dedup key), responding in Kernel acknowledges it
+and resolving resolves it; the tool's webhook reports who acknowledged, which becomes the incident's first response
+for its SLA. Pages go through an outbox delivered outside any transaction, are retried and then reported to the team
+lead, and every page is audited and listed on the incident. Who is on call comes from PagerDuty or Opsgenie (cached a
+minute; a tool that cannot be reached says so) and shows on the team, the incident and the assign field. A team
+without a tool can use a built-in weekly rotation with shifts that people take; it notifies in Kernel and does not
+escalate or phone anyone. API: `/api/on-call`, `/api/teams/:id/paging`, `/api/teams/:id/rotation`,
+`/api/paging/:id/inbound`; MCP: `get_on_call`.
+
 **Major incidents**: declaring one is a single action that names the incident lead (you by default), an optional
 communications lead and the bridge (meeting link or phone). The incident then shows who leads, where to talk, how long
 it has run and when the next stakeholder update is due (every 30 minutes for P1 by default; the lead can change it).

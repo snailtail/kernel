@@ -13,6 +13,7 @@ import * as events from '../src/events.js';
 import * as incidents from '../src/incidents.js';
 import * as knowledge from '../src/knowledge.js';
 import * as major from '../src/major-incidents.js';
+import * as oncall from '../src/oncall.js';
 import * as people from '../src/people.js';
 import * as problems from '../src/problems.js';
 import * as reviews from '../src/reviews.js';
@@ -64,6 +65,12 @@ export async function seedStory(p: People) {
   await teams.setMembers(admin, web!.id, { members: [{ user_id: erik.id, role: 'lead' }, { user_id: sara.id, role: 'member' }] });
   const pay = await teams.saveTeam(admin, null, { name: 'Payments', description: 'Payment gateway and PSP integration', email: '', auto_assign: 'none', active: true, cis: [gateway] });
   await teams.setMembers(admin, pay!.id, { members: [{ user_id: jonas.id, role: 'lead' }] });
+
+  // On call: both teams use the built-in weekly rotation (no paging tool in a demo), so a P1 notifies a person.
+  for (const [team, members] of [[web!.id, [erik.id, sara.id]], [pay!.id, [jonas.id]]] as const) {
+    await oncall.savePaging(admin, team, { kind: 'rotation', config: {}, rule: { priorities: [1, 2], major: true, services: [], hours: 'always', calendar_id: null }, private_allow: [], enabled: true, new_inbound_token: false });
+    await oncall.saveRotation(admin, team, { members: [...members], handover_dow: 1, handover_minute: 540, timezone: 'Europe/Stockholm' });
+  }
 
   // ---- The people who use it: a customer organisation, contacts, a VIP ----
   await people.saveOrganisation(admin, null, { name: 'Webshop customers', kind: 'customer', description: 'Consumers buying online', active: true, services: [webshop] });
@@ -195,5 +202,7 @@ export async function seedStory(p: People) {
   const next = (await changes.createChange(jonas, { title: 'Re-enable TLS 1.2 permanently on pay-gw01', change_type: 'normal', risk: 'medium', cis: [gateway], problem: prb, implementation_plan: 'Set MinProtocol = TLSv1.2 in the gateway config and restart.', backout_plan: 'Revert the config line.', planned_start: new Date(Date.now() + 26 * H * 60_000).toISOString(), planned_end: new Date(Date.now() + 27 * H * 60_000).toISOString() })).ref as string;
   await changes.transitionChange(jonas, next, { to: 'assess' });
   await changes.transitionChange(jonas, next, { to: 'authorize' });
+  // The pages the story queued (the worker is not running while seeding).
+  await oncall.deliverPages();
   return { incident: inc, problem: prb, change: chg, earlier: old };
 }
