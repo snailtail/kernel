@@ -116,6 +116,12 @@ describe('major incidents (#108)', { skip }, () => {
     assert.match(md.headers.get('content-type') ?? '', /text\/markdown/);
     const text = await md.text();
     assert.match(text, /^# Timeline: INC\d+ Webshop down/);
+    // A note with a backslash and a pipe stays inside its cell.
+    const { timelineMarkdown } = await import('../../src/major-incidents.js');
+    const row = timelineMarkdown({ ref: 'INC1', title: 't', is_major: true, declared_at: null, entries: [{ activity_id: 1, at: new Date(0), kind: 'comment', key_moment: false, by: 'x', label: 'Note', body: 'a\\|b' }] } as any).trim().split('\n').at(-1)!;
+    // A pipe separates cells when an even number of backslashes precede it (\\| is an escaped backslash, then a pipe).
+    const separators = [...row].filter((ch, i) => ch === '|' && (row.slice(0, i).match(/\\*$/)![0].length % 2 === 0)).length;
+    assert.equal(separators, 4, `the row keeps its three cells: ${row}`);
     assert.match(text, /Root cause found: full disk on shop-vm01 ★/);
     const audit = (await ownerQuery("SELECT 1 FROM audit_log WHERE action = 'key_moment' AND entity_ref = $1", [major])).rows;
     assert.equal(audit.length, 1, 'marking is audited');
