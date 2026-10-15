@@ -6,13 +6,14 @@
 // (trigger, acknowledge, resolve, with the incident ref as the dedup key) inside its transaction, and a worker
 // delivers it afterwards, so no HTTP call ever runs inside a transaction. The tool's own webhook tells Kernel who
 // acknowledged, which is the incident's first response for its SLA.
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import { audienceOf, BROADEST, mayCopyText } from './audience.js';
 import { audit } from './audit.js';
 import type { User } from './auth.js';
 import { businessMinutes, localDate, zonedToUtc } from './business-time.js';
 import { config as appConfig } from './config.js';
+import { asSystem } from './context.js';
 import { query, tx } from './db.js';
 import { badRequest, forbidden, notFound } from './errors.js';
 import { logIncident } from './incident-log.js';
@@ -42,7 +43,8 @@ const CONFIG: Record<Kind, z.ZodType<Record<string, unknown>>> = {
 };
 /** Secrets per kind: encrypted, write-only. */
 const SECRET: Record<Kind, z.ZodType<Record<string, string>>> = {
-  pagerduty: z.object({ routing_key: z.string().trim().min(20).max(64), api_token: z.string().trim().max(200).optional() }),
+  // webhook_secret: the signing secret of the PagerDuty v3 webhook subscription (X-PagerDuty-Signature).
+  pagerduty: z.object({ routing_key: z.string().trim().min(20).max(64), api_token: z.string().trim().max(200).optional(), webhook_secret: z.string().trim().max(200).optional() }),
   opsgenie: z.object({ api_key: z.string().trim().min(20).max(100) }),
   // The integration URL carries its own token, so it is the secret.
   grafana_oncall: z.object({ url: https }),
@@ -309,10 +311,23 @@ async function matches(db: Db, i: any, rule: z.infer<typeof ruleSchema>) {
 export async function syncPaging(db: Db, incidentId: number, actorId: number | null) {
   const { rows } = await db.query('SELECT id, ref, priority, impact, is_major, status, team_id, responded_at FROM incidents WHERE id = $1', [incidentId]);
   const i = rows[0];
-  if (!i?.team_id) return;
+  if (!i) return;
+  // Moved to another team (or to none): a page still open in the previous team's tool is resolved, so it stops
+  // escalating there.
+  const { rows: stale } = await db.query(
+    `SELECT DISTINCT ON (p.target_id) p.target_id, p.team_id, p.kind, p.action FROM pages p
+     WHERE p.incident_id = $1 AND p.status <> 'failed' AND p.team_id IS DISTINCT FROM $2 ORDER BY p.target_id, p.id DESC`,
+    [i.id, i.team_id],
+  );
+  const { rows: now } = i.team_id ? await db.query('SELECT name FROM teams WHERE id = $1', [i.team_id]) : { rows: [] as any[] };
+  for (const s of stale.filter((x) => x.action !== 'resolve' && x.target_id)) {
+    await db.query('INSERT INTO pages (incident_id, team_id, target_id, kind, action, reason, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+      [i.id, s.team_id, s.target_id, s.kind, 'resolve', now[0] ? `moved to ${now[0].name}` : 'no longer with the team', actorId]);
+  }
+  if (!i.team_id) return kick();
   const { rows: targets } = await db.query('SELECT id, kind, rule FROM paging_targets WHERE team_id = $1 AND enabled', [i.team_id]);
   const t = targets[0];
-  if (!t) return;
+  if (!t) return kick();
   const { rows: history } = await db.query("SELECT action FROM pages WHERE incident_id = $1 AND target_id = $2 AND status <> 'failed' ORDER BY id", [i.id, t.id]);
   const last = history.at(-1)?.action as string | undefined;
   const open = !['resolved', 'closed'].includes(i.status);
@@ -460,33 +475,62 @@ export async function pagesFor(incidentId: number) {
 
 // ---- Inbound: the tool says who acknowledged -----------------------------------------------------
 
-const REF = /\bINC\d{6}\b/i;
-/** What a paging tool's webhook says, in any of the formats Kernel receives: the incident, the action and who. */
-export function parseInbound(body: any): { ref: string; action: 'acknowledge' | 'resolve'; by: string } | null {
-  const text = JSON.stringify(body ?? {});
-  const ref = (body?.ref ?? body?.alert?.alias ?? body?.event?.data?.incident_key ?? body?.alert_uid ?? text.match(REF)?.[0] ?? '').toString().toUpperCase();
-  if (!REF.test(ref)) return null;
-  const kind = String(body?.action ?? body?.event?.event_type ?? body?.event_type ?? body?.state ?? '').toLowerCase();
-  const action = /ack/.test(kind) ? 'acknowledge' : /resolv|close|ok$/.test(kind) ? 'resolve' : null;
+const REF = /\bINC\d{6}\b/gi;
+const ACK = new Set(['incident.acknowledged', 'acknowledge', 'acknowledged', 'ack']);
+const RESOLVE = new Set(['incident.resolved', 'resolve', 'resolved', 'close', 'closed', 'ok']);
+
+/**
+ * What a paging tool's webhook says, in the formats Kernel receives (PagerDuty v3, Opsgenie, Grafana OnCall, the
+ * generic form): the candidate incident refs (explicit fields first), the action and who. The action is matched
+ * against each tool's known values only.
+ */
+export function parseInbound(body: any): { refs: string[]; action: 'acknowledge' | 'resolve'; by: string } | null {
+  const explicit = [body?.ref, body?.alert?.alias, body?.alert_uid, body?.event?.data?.incident_key].filter((x) => typeof x === 'string');
+  const found = [...explicit, ...(JSON.stringify(body ?? {}).match(REF) ?? [])].map((r) => r.toUpperCase()).filter((r) => /^INC\d{6}$/.test(r));
+  const refs = [...new Set(found)];
+  if (!refs.length) return null;
+  const kind = String(body?.event?.event_type ?? body?.action ?? body?.event_type ?? body?.state ?? '').trim().toLowerCase();
+  const action = ACK.has(kind) ? 'acknowledge' : RESOLVE.has(kind) ? 'resolve' : null;
   if (!action) return null;
   const by = String(body?.by ?? body?.alert?.username ?? body?.event?.agent?.summary ?? body?.user?.username ?? body?.acknowledged_by ?? 'the on-call person').slice(0, 100);
-  return { ref: ref.match(REF)![0], action, by };
+  return { refs, action, by };
+}
+
+/** PagerDuty v3 webhooks: X-PagerDuty-Signature carries one or more "v1=<hex HMAC-SHA256 of the body>". */
+export function verifyPagerDutySignature(secret: string, raw: string, header: string | undefined) {
+  if (!header || !secret) return false;
+  const expected = Buffer.from(createHmac('sha256', secret).update(raw).digest('hex'));
+  return header.split(',').map((x) => x.trim()).filter((x) => x.startsWith('v1=')).some((x) => {
+    const given = Buffer.from(x.slice(3));
+    return given.length === expected.length && timingSafeEqual(given, expected);
+  });
 }
 
 /**
  * A paging tool reports an acknowledgement (the first response, which stops the response SLA clock) or a resolution
- * (recorded only: resolving the incident stays a decision in Kernel). Authenticated with the target's inbound token.
+ * (recorded only: resolving the incident stays a decision in Kernel). Authenticated with the target's inbound token in
+ * a header, or for PagerDuty its webhook signature; and a target only speaks for incidents it paged itself.
  */
-export async function receiveInbound(targetId: number, token: string, body: unknown) {
-  const { rows } = await query('SELECT id, team_id, kind, inbound_token_hash FROM paging_targets WHERE id = $1', [targetId]);
+export async function receiveInbound(targetId: number, auth: { token?: string; pagerDutySignature?: string; raw: string }, body: unknown) {
+  const { rows } = await asSystem(() => query('SELECT id, team_id, kind, secret, inbound_token_hash FROM paging_targets WHERE id = $1', [targetId]));
   const t = rows[0];
-  const ok = !!t?.inbound_token_hash && token.length > 0 && timingSafeEqual(Buffer.from(hash(token)), Buffer.from(t.inbound_token_hash));
-  if (!ok) throw forbidden('Unknown paging target or token');
+  const tokenOk = !!t?.inbound_token_hash && !!auth.token && timingSafeEqual(Buffer.from(hash(auth.token)), Buffer.from(t.inbound_token_hash));
+  const pdSecret = t?.kind === 'pagerduty' && t.secret ? JSON.parse(decryptSecret(t.secret)).webhook_secret : undefined;
+  const signatureOk = !!pdSecret && verifyPagerDutySignature(pdSecret, auth.raw, auth.pagerDutySignature);
+  if (!tokenOk && !signatureOk) throw forbidden('Unknown paging target, token or signature');
   const msg = parseInbound(body);
-  if (!msg) return { accepted: false, reason: 'No incident ref or no acknowledge/resolve in the payload' };
-  return tx(async (db) => {
-    const { rows: inc } = await db.query('SELECT id, ref, responded_at FROM incidents WHERE ref = $1 FOR UPDATE', [msg.ref]);
-    if (!inc[0]) return { accepted: false, reason: `${msg.ref} not found` };
+  const refused = { accepted: false, reason: 'No incident this target paged, or no acknowledge/resolve in the payload' };
+  if (!msg) return refused;
+  // The target is the authority from here on: it may see what it paged, restricted incidents included.
+  return asSystem(() => tx(async (db) => {
+    const { rows: inc } = await db.query(
+      `SELECT i.id, i.ref, i.responded_at FROM incidents i
+       WHERE i.ref = ANY($1) AND EXISTS (SELECT 1 FROM pages p WHERE p.incident_id = i.id AND p.target_id = $2 AND p.action = 'trigger' AND p.status = 'sent')
+       ORDER BY array_position($1, i.ref) LIMIT 1 FOR UPDATE OF i`,
+      [msg.refs, t.id],
+    );
+    // Whether the incident exists at all is not told.
+    if (!inc[0]) return refused;
     const via = LABEL[t.kind as Kind];
     if (msg.action === 'acknowledge') {
       await db.query('UPDATE incidents SET responded_at = coalesce(responded_at, now()) WHERE id = $1', [inc[0].id]);
@@ -495,5 +539,5 @@ export async function receiveInbound(targetId: number, token: string, body: unkn
     }
     await logIncident(db, inc[0].id, null, 'update', msg.action === 'acknowledge' ? `Acknowledged in ${via} by ${msg.by}` : `Resolved in ${via} by ${msg.by}; resolve the incident in Kernel when service is restored`, { paging: { inbound: msg.action, via: t.kind, by: msg.by } });
     return { accepted: true, ref: inc[0].ref, action: msg.action, first_response: msg.action === 'acknowledge' && !inc[0].responded_at };
-  });
+  }));
 }

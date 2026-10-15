@@ -211,7 +211,7 @@ export const OPERATIONS: Op[] = [
   { method: 'put', path: '/api/teams/:id/rotation', tag: 'Teams', summary: 'The built-in weekly rotation: members in turn and the handover (administrators or the team lead)', body: oc.rotationSchema },
   { method: 'post', path: '/api/teams/:id/rotation/overrides', tag: 'Teams', summary: 'Take a shift (or, as lead, give one)', body: oc.overrideSchema },
   { method: 'delete', path: '/api/teams/:id/rotation/overrides/:override', tag: 'Teams', summary: 'Remove a shift' },
-  { method: 'post', path: '/api/paging/:id/inbound', tag: 'Teams', summary: "The paging tool's webhook (Bearer token or ?token=): acknowledged by X becomes the incident's first response; resolved is recorded" },
+  { method: 'post', path: '/api/paging/:id/inbound', tag: 'Teams', summary: "The paging tool's webhook (Authorization: Bearer or X-Kernel-Token, or a PagerDuty v3 signature): acknowledged by X becomes the first response of an incident this target paged; resolved is recorded" },
   { method: 'get', path: '/api/teams/:id/queue', tag: 'Teams', summary: "A team's queue: unassigned, mine and at risk of breaching" },
   { method: 'get', path: '/api/articles', tag: 'Knowledge', summary: 'Search knowledge articles (published by default; drafts for roles that write articles)', query: kb.listArticlesSchema },
   { method: 'post', path: '/api/articles', tag: 'Knowledge', summary: 'Draft an article', body: kb.createArticleSchema },

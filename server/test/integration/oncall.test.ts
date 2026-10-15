@@ -22,6 +22,7 @@ function fakeTools(cert: string, key: string) {
     const json = (v: unknown, status = 200) => res.writeHead(status, { 'Content-Type': 'application/json' }).end(JSON.stringify(v));
     if (req.method === 'POST') state.received.push({ path: url.pathname + url.search, headers: req.headers, body: raw ? JSON.parse(raw) : null });
     if (state.fail && req.method === 'POST') return json({ error: 'down' }, 503);
+    if (url.pathname === '/hook') return json({ ok: true });
     if (url.pathname === '/v2/enqueue') return json({ status: 'success', dedup_key: JSON.parse(raw).dedup_key }, 202);
     if (url.pathname === '/oncalls') {
       if (state.oncallDown) return json({}, 500);
@@ -122,10 +123,54 @@ describe('on-call and paging (#111)', { skip }, () => {
     assert.ok(inc.responded_at, 'the first response');
     assert.ok(inc.activity.some((a: any) => a.body === 'Acknowledged in PagerDuty by Nora Network'));
     if (inc.sla) assert.equal(inc.sla.response.state, 'met', 'the response clock stopped');
+    // The token belongs in a header: in the URL it would land in request logs.
+    assert.equal((await fetch(`${k.base}/api/paging/${targetId}/inbound?token=${inboundToken}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ref, action: 'ack' }) })).status, 403);
     // Kernel does not acknowledge it back, and resolving in Kernel resolves the page.
     ok(await analyst.post(`/api/incidents/${ref}/transition`, { to: 'resolved', resolution_code: 'fixed', resolution: 'Replaced the line card' }));
     await deliver();
     assert.deepEqual(tools.state.received.filter((x) => x.path === '/v2/enqueue').map((x) => x.body.event_action), ['trigger', 'resolve']);
+  });
+
+  test("a target only speaks for incidents it paged: team A's token cannot acknowledge team B's incident", async () => {
+    ok(await admin.put(`/api/teams/${dba}/paging`, { kind: 'webhook', config: { url: `${base}/hook`, ca_pem: ca }, secret: { signing_secret: 'whsec_dGVzdC1zaWduaW5nLXNlY3JldC0xMjM0NTY3OA==' }, rule: { priorities: [1], major: true, services: [], hours: 'always' } }));
+    const other = (await analyst.post('/api/incidents', { title: 'DBA disk full', impact: 1, urgency: 1, team_id: dba })).body.ref;
+    await deliver();
+    const res = await fetch(`${k.base}/api/paging/${targetId}/inbound`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${inboundToken}` }, body: JSON.stringify({ ref: other, action: 'acknowledge', by: 'mallory' }) });
+    assert.equal(res.status, 202);
+    assert.equal((await res.json()).accepted, false);
+    const inc = (await analyst.get(`/api/incidents/${other}`)).body;
+    assert.equal(inc.responded_at, null, 'the SLA clock was not touched');
+    assert.equal(inc.activity.some((a: any) => /mallory/.test(a.body)), false);
+    // Also not by mentioning it in the text next to a ref the target did page.
+    const mine = (await ownerQuery("SELECT i.ref FROM incidents i JOIN pages p ON p.incident_id = i.id WHERE p.target_id = $1 AND p.action = 'trigger' ORDER BY i.id DESC LIMIT 1", [targetId])).rows[0].ref;
+    const mixed = await (await fetch(`${k.base}/api/paging/${targetId}/inbound`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${inboundToken}` }, body: JSON.stringify({ note: `${other} and ${mine}`, action: 'ack' }) })).json();
+    assert.equal(mixed.ref, mine, 'only the incident this target paged');
+  });
+
+  test('PagerDuty webhooks are verified by their signature', async () => {
+    const SIGNING = 'pd-webhook-signing-secret';
+    ok(await admin.put(`/api/teams/${network}/paging`, { kind: 'pagerduty', config: { events_url: base, api_url: base, escalation_policy_id: 'PNET', ca_pem: ca }, secret: { routing_key: ROUTING_KEY, api_token: API_TOKEN, webhook_secret: SIGNING }, rule: { priorities: [1, 2], major: true, services: [], hours: 'always' } }));
+    const ref = (await analyst.post('/api/incidents', { title: 'BGP session down', impact: 1, urgency: 1, team_id: network })).body.ref;
+    await deliver();
+    const body = JSON.stringify({ event: { event_type: 'incident.acknowledged', agent: { summary: 'Nora Network' }, data: { title: `${ref}: BGP` } } });
+    const { createHmac } = await import('node:crypto');
+    const post = (sig: string) => fetch(`${k.base}/api/paging/${targetId}/inbound`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-PagerDuty-Signature': sig }, body });
+    assert.equal((await post('v1=' + 'a'.repeat(64))).status, 403, 'a wrong signature');
+    const good = await post(`v1=deadbeef, v1=${createHmac('sha256', SIGNING).update(body).digest('hex')}`);
+    assert.equal(good.status, 202);
+    assert.equal((await good.json()).accepted, true);
+  });
+
+  test('moving an incident to another team resolves the page in the old team\'s tool', async () => {
+    const ref = (await analyst.post('/api/incidents', { title: 'Latency on the WAN', impact: 1, urgency: 1, team_id: network })).body.ref;
+    await deliver();
+    ok(await analyst.patch(`/api/incidents/${ref}`, { team_id: dba }));
+    await deliver();
+    const pd = tools.state.received.filter((x) => x.path === '/v2/enqueue' && x.body.dedup_key === ref).map((x) => x.body.event_action);
+    assert.deepEqual(pd, ['trigger', 'resolve'], 'the old page is resolved');
+    const hook = tools.state.received.filter((x) => x.path === '/hook' && x.body.incident.ref === ref).map((x) => x.body.type);
+    assert.deepEqual(hook, ['page.trigger'], 'and the new team is paged');
+    assert.ok((await analyst.get(`/api/incidents/${ref}`)).body.pages.some((p: any) => p.action === 'resolve' && p.reason === 'moved to DBA'));
   });
 
   test('responding in Kernel acknowledges the page; the rule decides what pages', async () => {
@@ -150,6 +195,9 @@ describe('on-call and paging (#111)', { skip }, () => {
     assert.equal(sent.length, 1);
     assert.equal(JSON.stringify(sent[0].body).includes('firewall'), false);
     assert.match(sent[0].body.payload.summary, /restricted incident/);
+    // The tool's acknowledgement reaches the restricted incident (the target is the authority, not a user).
+    const ack = await (await fetch(`${k.base}/api/paging/${targetId}/inbound`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${inboundToken}` }, body: JSON.stringify({ ref, action: 'acknowledge', by: 'Nora' }) })).json();
+    assert.equal(ack.accepted, true);
   });
 
   test('who is on call: from PagerDuty, from the rotation, and never stale names', async () => {
