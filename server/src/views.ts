@@ -130,15 +130,25 @@ const shape = (user: User, v: any, defaultKey: string | null) => ({
   is_default: defaultKey === String(v.id),
 });
 
-async function defaultFor(userId: number, list: string) {
-  const { rows } = await query('SELECT view_id, builtin FROM list_view_defaults WHERE user_id = $1 AND list = $2', [userId, list]);
-  return rows[0] ? (rows[0].builtin ? `builtin:${rows[0].builtin}` : String(rows[0].view_id)) : null;
+/**
+ * The user's default for a list, if they can still use it: a team view stops being one when they leave the team or
+ * it changes scope, and a built-in view that no longer exists is dropped. The list then opens as usual.
+ */
+async function defaultFor(user: User, list: ListName) {
+  const { rows } = await query(
+    `SELECT d.view_id, d.builtin FROM list_view_defaults d LEFT JOIN list_views v ON v.id = d.view_id
+     WHERE d.user_id = $1 AND d.list = $2 AND (d.builtin IS NOT NULL OR ${visibleSql(user)})`,
+    [user.id, list],
+  );
+  if (!rows[0]) return null;
+  if (rows[0].builtin) return BUILT_IN[list].some((b) => b.key === rows[0].builtin) ? `builtin:${rows[0].builtin}` : null;
+  return String(rows[0].view_id);
 }
 
 /** A list's views: built-in first, then the user's own, the team's and everyone's; and the user's default. */
 export async function listViews(user: User, list: ListName) {
   authorize(user, READ[list]);
-  const defaultKey = await defaultFor(user.id, list);
+  const defaultKey = await defaultFor(user, list);
   const { rows } = await query(
     `${SELECT} WHERE v.list = $2 AND ${visibleSql(user)}
      ORDER BY CASE v.scope WHEN 'personal' THEN 0 WHEN 'team' THEN 1 ELSE 2 END, t.name, lower(v.name)`,
@@ -204,7 +214,7 @@ export async function updateView(user: User, id: number, input: z.infer<typeof u
         }
         await audit(db, { entity_type: 'list_view', entity_ref: String(id), action: 'update', changes });
       }
-      return shape(user, after, await defaultFor(user.id, after.list));
+      return shape(user, after, await defaultFor(user, after.list));
     }),
   );
 }

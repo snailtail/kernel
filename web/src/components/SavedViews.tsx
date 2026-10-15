@@ -4,6 +4,7 @@ import { api } from '../api';
 import { useApi } from '../hooks';
 import { useTeams } from '../pages/Teams';
 import { isManager, useSession } from '../session';
+import { columnStore } from './ListToolkit';
 import { Modal } from './Modal';
 
 export type ListName = 'problems' | 'actions' | 'incidents' | 'changes' | 'alerts' | 'known_errors' | 'knowledge' | 'cis' | 'candidates';
@@ -28,8 +29,9 @@ const SCOPE_HINT: Record<ListView['scope'], string> = {
   everyone: 'Shared with everyone',
 };
 
-/** Same filters, whatever order the parameters are in. */
-const normal = (q: string) => [...new URLSearchParams(q)].map(([k, v]) => `${k}=${v}`).sort().join('&');
+/** Same filters, whatever order the parameters are in. The page's tab is where the list is, not a filter. */
+const normal = (q: string) => [...new URLSearchParams(q)].filter(([k]) => k !== 'tab').map(([k, v]) => `${k}=${v}`).sort().join('&');
+const withoutTab = (params: URLSearchParams) => new URLSearchParams([...params].filter(([k]) => k !== 'tab')).toString();
 
 /**
  * Saved views for a list page (#110): built-in queues, the user's own, their teams' and everyone's. A view is the
@@ -50,7 +52,8 @@ export function SavedViews({ list }: { list: ListName }) {
     if (!data || applied.current) return;
     applied.current = true;
     const pinned = data.views.find((v) => v.key === data.default);
-    if (pinned?.query && params.toString() === '') setParams(new URLSearchParams(pinned.query), { replace: true });
+    if (pinned?.query && withoutTab(params) === '') setParams(new URLSearchParams(pinned.query), { replace: true });
+    if (pinned?.columns.length) columnStore.set(list, pinned.columns);
   }, [data, params, setParams]);
 
   const run = async (action: () => Promise<unknown>) => {
@@ -72,7 +75,7 @@ export function SavedViews({ list }: { list: ListName }) {
     <div className="saved-views">
       {views.map((v) => (
         <span key={v.key} className={`view-chip ${v.scope} ${v === active ? 'on' : ''}`} title={v.team ? `${SCOPE_HINT[v.scope]}: ${v.team}` : SCOPE_HINT[v.scope]}>
-          <button onClick={() => setParams(new URLSearchParams(v.query), { replace: true })} aria-pressed={v === active}>
+          <button onClick={() => { setParams(new URLSearchParams(v.query), { replace: true }); if (v.columns.length) columnStore.set(list, v.columns); }} aria-pressed={v === active}>
             {v.is_default && <span aria-label="Default view">★ </span>}
             {v.name}
             {v.scope === 'team' && <span className="view-scope"> · {v.team}</span>}
@@ -91,7 +94,7 @@ export function SavedViews({ list }: { list: ListName }) {
       {saving && (
         <SaveView
           list={list}
-          query={params.toString()}
+          query={withoutTab(params)}
           onClose={() => setSaving(false)}
           onSaved={() => {
             setSaving(false);
@@ -102,6 +105,10 @@ export function SavedViews({ list }: { list: ListName }) {
     </div>
   );
 }
+
+/** The query as people read it: "status = all · q = printer". */
+export const describeQuery = (query: string) =>
+  [...new URLSearchParams(query)].map(([k, v]) => `${k.replace(/_/g, ' ')} = ${v}`).join(' · ') || 'no filters';
 
 function SaveView({ list, query, onClose, onSaved }: { list: ListName; query: string; onClose: () => void; onSaved: () => void }) {
   const { user } = useSession();
@@ -117,7 +124,7 @@ function SaveView({ list, query, onClose, onSaved }: { list: ListName; query: st
     if (!name.trim()) return;
     const scope = share.startsWith('team:') ? 'team' : share;
     try {
-      await api.post('/api/views', { list, name: name.trim(), query, scope, team_id: scope === 'team' ? Number(share.slice(5)) : null });
+      await api.post('/api/views', { list, name: name.trim(), query, columns: columnStore.get(list), scope, team_id: scope === 'team' ? Number(share.slice(5)) : null });
       onSaved();
     } catch (err) {
       setError((err as Error).message);
@@ -140,7 +147,15 @@ function SaveView({ list, query, onClose, onSaved }: { list: ListName; query: st
             {isManager(user) && <option value="everyone">Everyone</option>}
           </select>
         </label>
-        {share !== 'personal' && <p className="hint full">A shared view belongs to {share === 'everyone' ? 'everyone: problem managers can change it' : "the team: its leads can change it"}.</p>}
+        {share !== 'personal' && (
+          <div className="hint full">
+            <p>
+              {share === 'everyone' ? 'Everyone' : `Everyone in ${shareable.find((t) => `team:${t.id}` === share)?.name ?? 'the team'}`} will see these filters, search text included:
+            </p>
+            <code className="view-query">{describeQuery(query)}</code>
+            <p>A shared view belongs to {share === 'everyone' ? 'everyone: problem managers can change it' : 'the team: its leads can change it'}.</p>
+          </div>
+        )}
         {error && <div className="error full" role="alert">{error}</div>}
         <div className="actions full">
           <button type="button" className="btn" onClick={onClose}>Cancel</button>

@@ -6,6 +6,8 @@ import { Markdown } from '../components/Markdown';
 import { Modal } from '../components/Modal';
 import { richPaste } from '../components/RichPaste';
 import { formatDate, relativeTime } from '../format';
+import { useColumns, useListToolkit, type ColumnKey } from '../components/ListToolkit';
+import { SavedViews } from '../components/SavedViews';
 import { useApi, useOpenOnNew, useSearchText } from '../hooks';
 import { canEdit, isManager, useSession } from '../session';
 
@@ -28,6 +30,11 @@ export function ArticleStatus({ status }: { status: string }) {
   return <span className={`badge ${STATUS_CLASS[status] ?? ''}`}>{status}</span>;
 }
 
+const ARTICLE_COLUMNS: { key: ColumnKey; label: string }[] = [
+  { key: 'type', label: 'Type' }, { key: 'status', label: 'Status' }, { key: 'audience', label: 'Audience' }, { key: 'used', label: 'Used' },
+  { key: 'helpful', label: 'Helpful' }, { key: 'updated', label: 'Updated' },
+];
+
 export function KnowledgePage() {
   const { user } = useSession();
   const [params, setParams] = useSearchParams();
@@ -36,8 +43,10 @@ export function KnowledgePage() {
   useOpenOnNew(() => setCreating(true));
   const navigate = useNavigate();
   const set = (k: string, v: string) => setParams((prev) => { const n = new URLSearchParams(prev); if (v) n.set(k, v); else n.delete(k); return n; }, { replace: true });
-  const { data, loading } = useApi<ArticleRow[]>(`/api/articles?${params}`);
+  const { data, loading, refresh } = useApi<ArticleRow[]>(`/api/articles?${params}`);
   const writer = canEdit(user);
+  const tk = useListToolkit({ list: 'knowledge', rows: data, idOf: (a) => a.ref, hrefOf: (a) => `/knowledge/${a.ref}`, filter: params.toString(), pageSize: 50, onChanged: refresh });
+  const cols = useColumns('knowledge', ARTICLE_COLUMNS);
   return (
     <>
       <header className="page-head">
@@ -45,6 +54,7 @@ export function KnowledgePage() {
           <h1>Knowledge</h1>
           <p className="muted">Workarounds and solutions people can find when they need them. Known errors publish here in one step.</p>
         </div>
+        <SavedViews list="knowledge" />
         <div className="head-actions">{writer && <button className="btn primary page-new" onClick={() => setCreating(true)}>New article</button>}</div>
       </header>
       <div className="filters">
@@ -60,25 +70,27 @@ export function KnowledgePage() {
           {Object.entries(TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
         <label className="check small"><input type="checkbox" checked={params.get('due_for_review') === 'true'} onChange={(e) => set('due_for_review', e.target.checked ? 'true' : '')} /> Due for review</label>
+        {cols.picker}
       </div>
-      <section className={`card flush ${loading ? 'is-loading' : ''}`}>
+      <section className={`card flush ${loading ? 'is-loading' : ''}`} {...cols.container}>
         {data?.length === 0 ? (
           <p className="empty">{params.get('q') ? 'No articles match.' : 'No articles yet. Publish a known error from its problem, or write one here.'}</p>
         ) : (
           <div className="table-wrap">
             <table className="table">
-              <thead><tr><th>Ref</th><th>Title</th><th>Type</th><th>Status</th><th className="hide-sm">Audience</th><th className="hide-sm">Used</th><th className="hide-sm">Helpful</th><th className="hide-sm">Updated</th></tr></thead>
+              <thead><tr>{tk.selectAll && <th className="check-col">{tk.selectAll}</th>}<th>Ref</th><th>Title</th><th data-col="type">Type</th><th data-col="status">Status</th><th className="hide-sm" data-col="audience">Audience</th><th className="hide-sm" data-col="used">Used</th><th className="hide-sm" data-col="helpful">Helpful</th><th className="hide-sm" data-col="updated">Updated</th></tr></thead>
               <tbody>
-                {data?.map((a) => (
-                  <tr key={a.ref}>
+                {data?.map((a, n) => (
+                  <tr key={a.ref} {...tk.rowProps(a, n)}>
+                    {tk.selectAll && <td className="check-col">{tk.select(a, n)}</td>}
                     <td className="mono nowrap"><Link to={`/knowledge/${a.ref}`}>{a.ref}</Link></td>
                     <td className="title-cell"><Link to={`/knowledge/${a.ref}`}>{a.title}</Link>{a.due_for_review && <span className="badge warn-badge" title={`Review was due ${a.review_by}`}>review</span>}</td>
-                    <td className="muted">{TYPE_LABEL[a.article_type]}</td>
-                    <td><ArticleStatus status={a.status} /></td>
-                    <td className="hide-sm muted">{a.audience === 'end_users' ? 'End users' : 'Internal'}</td>
-                    <td className="hide-sm">{a.used_count || '–'}</td>
-                    <td className="hide-sm">{a.helpful + a.not_helpful ? `${Math.round((a.helpful / (a.helpful + a.not_helpful)) * 100)}%` : '–'}</td>
-                    <td className="hide-sm muted nowrap">{relativeTime(a.updated_at)}</td>
+                    <td className="muted" data-col="type">{TYPE_LABEL[a.article_type]}</td>
+                    <td data-col="status"><ArticleStatus status={a.status} /></td>
+                    <td className="hide-sm muted" data-col="audience">{a.audience === 'end_users' ? 'End users' : 'Internal'}</td>
+                    <td className="hide-sm" data-col="used">{a.used_count || '–'}</td>
+                    <td className="hide-sm" data-col="helpful">{a.helpful + a.not_helpful ? `${Math.round((a.helpful / (a.helpful + a.not_helpful)) * 100)}%` : '–'}</td>
+                    <td className="hide-sm muted nowrap" data-col="updated">{relativeTime(a.updated_at)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -86,6 +98,7 @@ export function KnowledgePage() {
           </div>
         )}
       </section>
+      {tk.bar}
       {creating && <ArticleModal onClose={() => setCreating(false)} onDone={(a) => navigate(`/knowledge/${a.ref}`)} />}
     </>
   );

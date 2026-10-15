@@ -5,7 +5,9 @@ import { askReason } from '../components/Ask';
 import { SeverityBadge } from '../components/Badges';
 import { Modal } from '../components/Modal';
 import { formatDate, relativeTime } from '../format';
-import { useApi } from '../hooks';
+import { useApi, useSearchText } from '../hooks';
+import { useColumns, useListToolkit, type ColumnKey } from '../components/ListToolkit';
+import { SavedViews } from '../components/SavedViews';
 import { useSession } from '../session';
 
 const SEVERITIES = ['info', 'warning', 'minor', 'major', 'critical'] as const;
@@ -37,6 +39,7 @@ export function EventsPage() {
           <h1>Events</h1>
           <p className="muted">Alerts from monitoring, deduplicated per CI and check. Rules turn them into incidents; maintenance suppresses them.</p>
         </div>
+        {tab === 'alerts' && <SavedViews list="alerts" />}
       </header>
       <div className="seg-toggle tabs" role="tablist">
         {tabs.map(([id, label]) => (
@@ -51,11 +54,20 @@ export function EventsPage() {
   );
 }
 
+const ALERT_COLUMNS: { key: ColumnKey; label: string }[] = [
+  { key: 'host', label: 'CI / host' }, { key: 'source', label: 'Source' }, { key: 'count', label: 'Count' }, { key: 'seen', label: 'Last seen' }, { key: 'incident', label: 'Incident' },
+];
+
 function AlertsTab() {
   const { user } = useSession();
-  const [filter, setFilter] = useState({ status: 'open', min_severity: '', q: '' });
-  const query = new URLSearchParams(Object.entries(filter).filter(([, v]) => v) as [string, string][]);
+  // The filters live in the address, so alerts can be shared and saved as views (#110).
+  const [params, setParams] = useSearchParams();
+  const [q, setQ] = useSearchText();
+  const set = (k: string, v: string) => setParams((prev) => { const n = new URLSearchParams(prev); if (v) n.set(k, v); else n.delete(k); return n; }, { replace: true });
+  const query = new URLSearchParams([...params].filter(([k]) => k !== 'tab'));
   const { data, reload, loading } = useApi<Alert[]>(`/api/alerts?${query}`);
+  const tk = useListToolkit({ list: 'alerts', rows: data, idOf: (a) => String(a.id), filter: query.toString(), onChanged: reload });
+  const cols = useColumns('alerts', ALERT_COLUMNS);
   const ack = async (id: number) => {
     await api.post(`/api/alerts/${id}/ack`, {});
     reload();
@@ -63,20 +75,25 @@ function AlertsTab() {
   return (
     <>
       <div className="filters">
-        <input className="search" placeholder="Check, host or CI…" value={filter.q} onChange={(e) => setFilter({ ...filter, q: e.target.value })} />
-        <select value={filter.status} onChange={(e) => setFilter({ ...filter, status: e.target.value })}><option value="open">Open</option><option value="closed">Closed</option><option value="all">All</option></select>
-        <select value={filter.min_severity} onChange={(e) => setFilter({ ...filter, min_severity: e.target.value })}>
+        <input className="search" placeholder="Check, host or CI…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <select value={params.get('status') ?? 'open'} onChange={(e) => set('status', e.target.value === 'open' ? '' : e.target.value)}><option value="open">Open</option><option value="closed">Closed</option><option value="all">All</option></select>
+        <select value={params.get('min_severity') ?? ''} onChange={(e) => set('min_severity', e.target.value)}>
           <option value="">Any severity</option>{SEVERITIES.map((s) => <option key={s} value={s}>{s} and above</option>)}
         </select>
+        <label className="check"><input type="checkbox" checked={params.get('suppressed') === 'true'} onChange={(e) => set('suppressed', e.target.checked ? 'true' : '')} /> Suppressed</label>
+        {cols.picker}
       </div>
-      <section className={`card flush ${loading ? 'is-loading' : ''}`}>
+      <section className={`card flush ${loading ? 'is-loading' : ''}`} {...cols.container}>
         {data?.length === 0 ? <p className="empty">No alerts. Configure an event source under Sources to receive them.</p> : (
           <div className="table-wrap">
             <table className="table compact">
-              <thead><tr><th>Severity</th><th>Check</th><th>CI / host</th><th className="hide-sm">Source</th><th className="num">Count</th><th className="hide-sm">Last seen</th><th>Incident</th><th /></tr></thead>
+              <thead><tr>{tk.selectAll && <th className="check-col">{tk.selectAll}</th>}<th>Severity</th><th>Check</th><th data-col="host">CI / host</th><th className="hide-sm" data-col="source">Source</th><th className="num" data-col="count">Count</th><th className="hide-sm" data-col="seen">Last seen</th><th data-col="incident">Incident</th><th /></tr></thead>
               <tbody>
-                {data?.map((a) => (
-                  <tr key={a.id} className={a.status === 'closed' ? 'muted-row' : ''}>
+                {data?.map((a, n) => {
+                  const row = tk.rowProps(a, n);
+                  return (
+                  <tr key={a.id} {...row} className={[row.className, a.status === 'closed' ? 'muted-row' : ''].filter(Boolean).join(' ') || undefined}>
+                    {tk.selectAll && <td className="check-col">{tk.select(a, n)}</td>}
                     <td><SeverityBadge severity={a.status === 'closed' ? 'clear' : a.severity} /></td>
                     <td>
                       {/* Monitoring text is shown as plain text only. */}
@@ -85,22 +102,24 @@ function AlertsTab() {
                       {a.flapping && <span className="tag warn-tag">flapping ×{a.flap_count}</span>}
                       {a.suppressed && <span className="tag" title={a.suppressed}>suppressed</span>}
                     </td>
-                    <td>{a.ci_ref ? <Link to={`/cis/${a.ci_ref}`}>{a.ci_name}</Link> : <span className="muted">{a.ci_hint || '–'}</span>}</td>
-                    <td className="hide-sm small">{a.source_url ? <a href={a.source_url} target="_blank" rel="noreferrer noopener">{a.source} ↗</a> : a.source}</td>
-                    <td className="num">{a.count}</td>
-                    <td className="hide-sm muted nowrap" title={formatDate(a.last_seen)}>{relativeTime(a.last_seen)}</td>
-                    <td className="mono small">{a.incident_ref ? <Link to={`/incidents/${a.incident_ref}`}>{a.incident_ref}</Link> : '–'}</td>
+                    <td data-col="host">{a.ci_ref ? <Link to={`/cis/${a.ci_ref}`}>{a.ci_name}</Link> : <span className="muted">{a.ci_hint || '–'}</span>}</td>
+                    <td className="hide-sm small" data-col="source">{a.source_url ? <a href={a.source_url} target="_blank" rel="noreferrer noopener">{a.source} ↗</a> : a.source}</td>
+                    <td className="num" data-col="count">{a.count}</td>
+                    <td className="hide-sm muted nowrap" data-col="seen" title={formatDate(a.last_seen)}>{relativeTime(a.last_seen)}</td>
+                    <td className="mono small" data-col="incident">{a.incident_ref ? <Link to={`/incidents/${a.incident_ref}`}>{a.incident_ref}</Link> : '–'}</td>
                     <td className="nowrap">
                       {a.acknowledged_by ? <span className="muted small" title={`Acknowledged by ${a.acknowledged_by}`}>✓ {a.acknowledged_by.split(' ')[0]}</span>
                         : a.status === 'open' && user.role !== 'viewer' && <button className="btn small" onClick={() => ack(a.id)}>Ack</button>}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
       </section>
+      {tk.bar}
     </>
   );
 }

@@ -13,6 +13,8 @@ import { formatDate, relativeTime } from '../format';
 import { useLive } from '../live';
 import { Presence } from '../components/Presence';
 import { useApi, useSearchText } from '../hooks';
+import { useColumns, useListToolkit, type ColumnKey } from '../components/ListToolkit';
+import { SavedViews } from '../components/SavedViews';
 import { useSession } from '../session';
 
 export interface CiType { name: string; label: string; class: 'ci' | 'service'; attributes: { key: string; label: string; type: 'string' | 'number' }[]; active: boolean }
@@ -37,6 +39,11 @@ export function CiStatus({ status }: { status: string }) {
   return <span className={`badge ci-status ci-${status}`}>{status}</span>;
 }
 
+const CI_COLUMNS: { key: ColumnKey; label: string }[] = [
+  { key: 'type', label: 'Type' }, { key: 'status', label: 'Status' }, { key: 'env', label: 'Environment' }, { key: 'criticality', label: 'Criticality' },
+  { key: 'team', label: 'Team' }, { key: 'sources', label: 'Sources' }, { key: 'seen', label: 'Last seen' },
+];
+
 export function CmdbListPage() {
   const { user } = useSession();
   const [params, setParams] = useSearchParams();
@@ -47,6 +54,8 @@ export function CmdbListPage() {
   const set = (k: string, v: string) => setParams((prev) => { const n = new URLSearchParams(prev); if (v) n.set(k, v); else n.delete(k); return n; }, { replace: true });
   const { data, loading, refresh } = useApi<Ci[]>(`/api/cis?${params}`);
   useLive(['ci:*'], refresh);
+  const tk = useListToolkit({ list: 'cis', rows: data, idOf: (c) => c.ref, hrefOf: (c) => `/cis/${c.ref}`, filter: params.toString(), onChanged: refresh });
+  const cols = useColumns('cis', CI_COLUMNS);
 
   return (
     <>
@@ -55,6 +64,7 @@ export function CmdbListPage() {
           <h1>Configuration items</h1>
           <p className="muted">What we operate, as pointers to where it really lives. Services are listed first.</p>
         </div>
+        <SavedViews list="cis" />
         <div className="head-actions">
           <Link className="btn" to="/services">Service catalogue</Link>
           <Link className="btn" to="/cis/groups">Groups</Link>
@@ -78,24 +88,26 @@ export function CmdbListPage() {
         <select value={params.get('environment') ?? ''} onChange={(e) => set('environment', e.target.value)}>
           <option value="">Any environment</option>{['prod', 'test', 'dev', 'other'].map((e) => <option key={e}>{e}</option>)}
         </select>
+        {cols.picker}
       </div>
-      <section className={`card flush ${loading ? 'is-loading' : ''}`}>
+      <section className={`card flush ${loading ? 'is-loading' : ''}`} {...cols.container}>
         {data?.length === 0 ? <p className="empty">No configuration items match.</p> : (
           <div className="table-wrap">
             <table className="table">
-              <thead><tr><th>Ref</th><th>Name</th><th>Type</th><th>Status</th><th className="hide-sm">Env</th><th className="hide-sm">Criticality</th><th className="hide-sm">Team</th><th className="hide-sm">Sources</th><th className="hide-sm">Last seen</th></tr></thead>
+              <thead><tr>{tk.selectAll && <th className="check-col">{tk.selectAll}</th>}<th>Ref</th><th>Name</th><th data-col="type">Type</th><th data-col="status">Status</th><th className="hide-sm" data-col="env">Env</th><th className="hide-sm" data-col="criticality">Criticality</th><th className="hide-sm" data-col="team">Team</th><th className="hide-sm" data-col="sources">Sources</th><th className="hide-sm" data-col="seen">Last seen</th></tr></thead>
               <tbody>
-                {data?.map((c) => (
-                  <tr key={c.id}>
+                {data?.map((c, n) => (
+                  <tr key={c.id} {...tk.rowProps(c, n)}>
+                    {tk.selectAll && <td className="check-col">{tk.select(c, n)}</td>}
                     <td className="mono nowrap"><Link to={`/cis/${c.ref}`}>{c.ref}</Link></td>
                     <td className="title-cell"><Link to={`/cis/${c.ref}`}>{c.name}</Link></td>
-                    <td className="muted">{c.type_label}</td>
-                    <td><CiStatus status={c.status} /></td>
-                    <td className="hide-sm">{c.environment}</td>
-                    <td className="hide-sm"><span className={`crit crit-${c.criticality}`}>{CRITICALITY[c.criticality]}</span></td>
-                    <td className="hide-sm muted">{c.team || '–'}</td>
-                    <td className="hide-sm small">{c.source_systems?.join(', ') ?? 'manual'}</td>
-                    <td className="hide-sm muted nowrap">{c.last_seen_at ? relativeTime(c.last_seen_at) : '–'}</td>
+                    <td className="muted" data-col="type">{c.type_label}</td>
+                    <td data-col="status"><CiStatus status={c.status} /></td>
+                    <td className="hide-sm" data-col="env">{c.environment}</td>
+                    <td className="hide-sm" data-col="criticality"><span className={`crit crit-${c.criticality}`}>{CRITICALITY[c.criticality]}</span></td>
+                    <td className="hide-sm muted" data-col="team">{c.team || '–'}</td>
+                    <td className="hide-sm small" data-col="sources">{c.source_systems?.join(', ') ?? 'manual'}</td>
+                    <td className="hide-sm muted nowrap" data-col="seen">{c.last_seen_at ? relativeTime(c.last_seen_at) : '–'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -103,6 +115,7 @@ export function CmdbListPage() {
           </div>
         )}
       </section>
+      {tk.bar}
       {creating && types && <CiModal types={types} onClose={() => setCreating(false)} onDone={(ci) => navigate(`/cis/${ci.ref}`)} />}
     </>
   );

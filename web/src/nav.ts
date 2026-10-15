@@ -113,6 +113,16 @@ export function navFor(user: User, meta: Meta) {
   return NAV.map((g) => ({ ...g, items: g.items.filter((i) => visible(i, user, meta)) })).filter((g) => g.items.length);
 }
 
+/** Keyboard triage on every list (#110); the list toolkit reads these and the shortcut help lists them. */
+export const LIST_KEYS = {
+  down: { key: 'j', label: 'Next row in a list' },
+  up: { key: 'k', label: 'Previous row in a list' },
+  select: { key: 'x', label: 'Select the row (Shift+click selects a range)' },
+  assign: { key: 'a', label: 'Assign the selected rows' },
+  status: { key: 's', label: 'Change the status of the selected rows' },
+  open: { key: 'e', label: 'Open the row' },
+} as const;
+
 /** Every destination with a "g" shortcut, from the same definition. */
 export const SHORTCUTS: Record<string, string> = Object.fromEntries(
   [HOME, ...NAV.flatMap((g) => g.items), ...FOOTER, ...PALETTE_ONLY].filter((i) => i.key).map((i) => [i.key!, i.to]),

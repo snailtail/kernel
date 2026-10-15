@@ -1,22 +1,22 @@
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import type { Problem } from '../api';
 import { PriorityBadge, StatusBadge } from '../components/Badges';
 import { Markdown } from '../components/Markdown';
 import { DECISION_LABEL, EFFECTIVENESS_LABEL, formatDate } from '../format';
-import { useApi } from '../hooks';
+import { useApi, useSearchText } from '../hooks';
+import { useListToolkit } from '../components/ListToolkit';
+import { SavedViews } from '../components/SavedViews';
 
 export function KedbPage() {
-  const [q, setQ] = useState('');
-  const [debounced, setDebounced] = useState('');
-  const [includeResolved, setIncludeResolved] = useState(false);
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(q), 300);
-    return () => clearTimeout(t);
-  }, [q]);
-  const { data, error } = useApi<Problem[]>(
-    `/api/kedb?${new URLSearchParams({ q: debounced, include_resolved: String(includeResolved) })}`,
+  // Search and "include resolved" live in the address, so they can be shared and saved as views (#110).
+  const [params, setParams] = useSearchParams();
+  const [q, setQ] = useSearchText();
+  const includeResolved = params.get('include_resolved') === 'true';
+  const { data, error, refresh } = useApi<Problem[]>(
+    `/api/kedb?${new URLSearchParams({ q: params.get('q') ?? '', include_resolved: String(includeResolved) })}`,
   );
+  // The known error database shows everything that matches, so "select all" is all; bulk acts on the problems.
+  const tk = useListToolkit({ list: 'known_errors', rows: data, idOf: (p) => p.ref, hrefOf: (p) => `/problems/${p.ref}`, filter: params.toString(), pageSize: Infinity, onChanged: refresh });
 
   return (
     <>
@@ -25,20 +25,27 @@ export function KedbPage() {
           <h1>Known Error Database</h1>
           <p className="muted">Problems that have been analysed but not yet resolved, with their root cause and workaround.</p>
         </div>
+        <SavedViews list="known_errors" />
       </header>
       <div className="filters">
         <input className="search" placeholder="Search symptoms, services, workarounds…" value={q} onChange={(e) => setQ(e.target.value)} />
         <label className="check">
-          <input type="checkbox" checked={includeResolved} onChange={(e) => setIncludeResolved(e.target.checked)} />
+          <input
+            type="checkbox"
+            checked={includeResolved}
+            onChange={(e) => setParams((prev) => { const n = new URLSearchParams(prev); if (e.target.checked) n.set('include_resolved', 'true'); else n.delete('include_resolved'); return n; }, { replace: true })}
+          />
           Include resolved
         </label>
+        {tk.selectAll && data && data.length > 0 && <label className="check">{tk.selectAll} Select all</label>}
       </div>
       {error && <div className="error">{error}</div>}
       {data?.length === 0 && <p className="empty">No known errors match.</p>}
       <div className="kedb">
-        {data?.map((p) => (
-          <article key={p.id} className="card kedb-item">
+        {data?.map((p, n) => (
+          <article key={p.id} {...tk.rowProps(p, n)} className={['card kedb-item', tk.rowProps(p, n).className].filter(Boolean).join(' ')}>
             <header>
+              {tk.select(p, n)}
               <Link to={`/problems/${p.ref}`} className="mono">{p.ref}</Link>
               <h3><Link to={`/problems/${p.ref}`}>{p.title}</Link></h3>
               <span className="spacer" />
@@ -67,6 +74,7 @@ export function KedbPage() {
           </article>
         ))}
       </div>
+      {tk.bar}
     </>
   );
 }

@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import type { Problem } from '../api';
-import { ProblemTable } from '../components/ProblemTable';
+import { useColumns, useListToolkit, type ColumnKey } from '../components/ListToolkit';
+import { PROBLEM_COLUMNS, ProblemTable } from '../components/ProblemTable';
 import { PRIORITY_LABEL, STATUS_LABEL } from '../format';
 import { useLive } from '../live';
 import { useApi, useSearchText } from '../hooks';
@@ -30,6 +31,8 @@ export function ProblemsPage() {
   if (!query.get('status')) query.set('status', 'open');
   const { data, error, loading, refresh } = useApi<Problem[]>(`/api/problems?${query}`);
   useLive(['problem:*'], refresh);
+  const tk = useListToolkit({ list: 'problems', rows: data, idOf: (p) => p.ref, hrefOf: (p) => `/problems/${p.ref}`, filter: params.toString(), onChanged: refresh });
+  const cols = useColumns('problems', PROBLEM_COLUMNS);
 
   return (
     <>
@@ -81,11 +84,13 @@ export function ProblemsPage() {
           <option value="updated">Sort: last updated</option>
           <option value="created">Sort: newest</option>
         </select>
+        {cols.picker}
       </div>
       {error && <div className="error">{error}</div>}
-      <section className={`card flush ${loading ? 'is-loading' : ''}`}>
-        {data && <ProblemTable problems={data} />}
+      <section className={`card flush ${loading ? 'is-loading' : ''}`} {...cols.container}>
+        {data && <ProblemTable problems={data} toolkit={tk} />}
       </section>
+      {tk.bar}
     </>
   );
 }
