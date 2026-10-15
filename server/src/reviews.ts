@@ -438,9 +438,11 @@ export async function attentionCount(userId: number) {
 
 export async function listReviews(user: User, f: z.infer<typeof listReviewsSchema>) {
   authorize(user, 'incident.read');
-  const where = [f.tab === 'due' ? "r.status IN ('scheduled', 'draft')" : `r.status = '${f.tab}'`];
+  const where: string[] = [];
   const params: unknown[] = [];
   const add = (sql: string, v: unknown) => { params.push(v); where.push(sql.replaceAll('?', `$${params.length}`)); };
+  if (f.tab === 'due') where.push("r.status IN ('scheduled', 'draft')");
+  else add('r.status = ?', f.tab);
   if (f.owner !== undefined) add('r.owner_id = ?', f.owner === 'me' ? user.id : f.owner);
   if (f.team === 'mine') add('i.team_id IN (SELECT team_id FROM team_members WHERE user_id = ?)', user.id);
   else if (f.team !== undefined) add('i.team_id = ?', f.team);

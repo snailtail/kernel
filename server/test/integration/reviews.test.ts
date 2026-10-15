@@ -207,8 +207,15 @@ describe('post-incident reviews (#109)', { skip }, () => {
     // Published and waived tabs.
     assert.ok((await analyst.get('/api/incident-reviews?tab=published')).body.some((r: any) => r.ref === inc));
     assert.ok((await analyst.get('/api/incident-reviews?tab=waived')).body.length >= 1);
-    const majorWithout = await ownerQuery("SELECT count(*)::int AS n FROM incidents i WHERE is_major AND status IN ('resolved', 'closed') AND NOT EXISTS (SELECT 1 FROM incident_reviews r WHERE r.incident_id = i.id AND r.status = 'published')");
-    assert.equal(count('major incidents resolved without a published review'), majorWithout.rows[0].n);
+    // A resolved major incident whose review was waived does not count as missing one; one still scheduled does.
+    const before = count('major incidents resolved, review not published or waived');
+    const waived = (await pm.post('/api/incidents', { title: 'Major, review waived', impact: 1, urgency: 1 })).body.ref;
+    ok(await pm.post(`/api/incidents/${waived}/major`, {}));
+    ok(await pm.post(`/api/incidents/${waived}/transition`, { to: 'resolved', resolution_code: 'fixed', resolution: 'Restarted' }));
+    const flowCount = async () => (await analyst2.get('/api/flow')).body.nodes.find((n: any) => n.id === 'review').counts.find((c: any) => c.label === 'major incidents resolved, review not published or waived').value;
+    assert.equal(await flowCount(), before + 1, 'positive control: a resolved major incident with a scheduled review counts');
+    ok(await pm.post(`/api/incidents/${waived}/review/waive`, { reason: 'Covered by the change review' }));
+    assert.equal(await flowCount(), before, 'waived: no longer missing a review');
   });
 
   test('agents draft and contribute over MCP', async () => {
