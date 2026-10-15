@@ -496,6 +496,7 @@ export async function linkIncidentToProblem(user: User, ref: string, problemRef:
     }
     // Both ways need the same permissions (checked above); the problem row, not the input, decides which way it goes.
     const problem: { id: number; ref: string } | null = problemRef ? await loadForUpdate(db, problemRef) : null;
+    // codeql[js/user-controlled-bypass] -- both linking and unlinking are authorised above (incident.update + problem.link); problemRef only picks which one
     if (!problem) {
       await db.query('UPDATE incidents SET problem_id = NULL WHERE id = $1', [inc.id]);
       await logIncident(db, inc.id, user.id, 'link', 'Unlinked from its problem', { kind: 'problem', reference: null, action: 'remove' });
