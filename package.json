@@ -13,6 +13,7 @@
     "dev:web": "npm run dev -w web",
     "test": "npm test -w server && npm test -w web",
     "typecheck": "npm run typecheck -w server && npm run typecheck -w web",
-    "test:unit": "npm run test:unit -w server && npm test -w web"
+    "test:unit": "npm run test:unit -w server && npm test -w web",
+    "demo:reset": "npm run demo:reset -w server"
   }
 }

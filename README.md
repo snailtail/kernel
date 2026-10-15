@@ -408,8 +408,17 @@ TEST_DATABASE_URL=postgres://kernel:kernel@localhost:5432/kernel_test npm test  
 
 Layout: `server/` (Fastify, TypeScript, PostgreSQL, MCP SDK) and `web/` (React, Vite). Business rules live in
 `server/src/workflow.ts` and `server/src/problems.ts`, which both the REST API and the MCP server use.
-`npm run seed:demo -w server` fills an **empty** database (from `DATABASE_URL`) with realistic demo users and problems,
-useful for trying Kernel out or demonstrating problem management. Demo users have the password `demo-password`.
+`npm run demo:reset` gives a fresh, current demo: it drops and recreates the database in `DATABASE_URL` (only a name
+ending in `_demo`; anything else is refused), migrates it and seeds it. `npm run seed:demo -w server` seeds an
+**empty** database without dropping it. The demo is one connected story across every practice, the *Webshop*: its
+CIs from service to VM, an SLA, two teams, monitoring events that opened an incident, a change two hours earlier on the
+payment gateway flagged as the likely cause, a major incident with a lead, a bridge, updates (the next one due in ten
+minutes), two related incidents and a status page entry, the problem behind it with a 5 Whys analysis, a known error
+and its article, follow-up actions (one overdue), an earlier major incident with a published post-incident review,
+contacts and organisations, maintenance next week and a change waiting for approval, plus a quarter of everyday
+incidents and changes for the reports. Dates are relative to the time of seeding. Everything goes through the service
+layer, so CI runs the seed against a fresh database and a change that breaks it fails the build. Demo users have the
+password `demo-password` (admin, anna as problem manager, erik, sara and jonas as analysts, lena as viewer).
 
 Schema changes go in a new numbered file in `server/migrations/`.
 

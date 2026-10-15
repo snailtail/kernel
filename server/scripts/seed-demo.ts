@@ -1,7 +1,9 @@
-// Fills an empty Kernel database with realistic demo data: users, problems in every stage,
-// linked incidents/events/changes, work notes and follow-up actions.
+// Fills an empty Kernel database with realistic demo data: users, problems in every stage, and the Webshop story
+// across every practice (CMDB, SLAs, teams, events, a major incident, changes, knowledge, a post-incident review;
+// scripts/demo-story.ts), with dates relative to now.
 //
 //   DATABASE_URL=postgres://... npx tsx scripts/seed-demo.ts
+//   npm run demo:reset -w server     (drops and recreates a *_demo database first)
 //
 // Refuses to run if the database already contains problems. Demo users get the password "demo-password".
 import { hashPassword, type User } from '../src/auth.js';
@@ -9,6 +11,7 @@ import { migrate, pool, query } from '../src/db.js';
 import * as actions from '../src/actions.js';
 import * as analyses from '../src/analyses.js';
 import * as problems from '../src/problems.js';
+import { seedStory } from './demo-story.js';
 
 await migrate(console.log);
 if ((await query('SELECT count(*)::int AS n FROM problems')).rows[0].n > 0) {
@@ -257,6 +260,9 @@ for (const [i, [system, kind, service, summary]] of recent.entries()) {
     [system, kind, kind === 'incident' ? `INC00130${String(i).padStart(2, '0')}` : `ZBX-9${4100 + i}`, service, summary, i],
   );
 }
+
+const story = await seedStory({ admin: users.admin, anna: users.anna, erik: users.erik, sara: users.sara, jonas: users.jonas });
+console.log(`Webshop story: major incident ${story.incident}, problem ${story.problem}, change ${story.change}, reviewed ${story.earlier}`);
 
 await pool.end();
 console.log('Demo users: admin, anna (problem manager), erik, sara, jonas (analysts), lena (viewer) – password "demo-password"');

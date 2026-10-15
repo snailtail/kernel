@@ -41,6 +41,12 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm run typecheck
       - run: npm test
+      # The demo data goes through the service layer, so a schema or API change that breaks it fails here (#115).
+      - name: Demo data seeds a fresh database
+        run: npm run demo:reset
+        env:
+          DATABASE_URL: postgres://kernel:kernel@localhost:5432/kernel_ci_demo
+          LOG_LEVEL: warn
       - run: npm run build
 
   docker:

@@ -10,7 +10,8 @@
     "test": "tsx --test --test-concurrency=1 test/*.test.ts test/integration/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:unit": "tsx --test test/*.test.ts",
-    "seed:demo": "tsx scripts/seed-demo.ts"
+    "seed:demo": "tsx scripts/seed-demo.ts",
+    "demo:reset": "tsx scripts/demo-reset.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "4.0.78",
