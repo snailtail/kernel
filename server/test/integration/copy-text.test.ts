@@ -118,6 +118,29 @@ describe('copying text between records (#117)', { skip }, () => {
       },
     },
     {
+      path: 'bulk: incidents → problem link note (#110)',
+      kind: 'title',
+      run: async (narrow, text) => {
+        const inc = (await pm.post('/api/incidents', { title: text })).body.ref;
+        await narrowTo(inc, narrow);
+        const p = (await pm.post('/api/problems', { title: 'Existing problem' })).body.ref;
+        ok(await pm.post('/api/incidents/bulk', { ids: [inc], operation: { op: 'link_problem', problem: p } }));
+        return { readable: JSON.stringify((await ownerQuery("SELECT l.note FROM problem_links l JOIN problems p ON p.id = l.problem_id WHERE p.ref = $1 AND l.kind = 'incident'", [p])).rows) };
+      },
+    },
+    {
+      path: 'bulk: related to a major incident, resolution copied to the children (#110)',
+      run: async (narrow, text) => {
+        const parent = (await pm.post('/api/incidents', { title: 'Outage', impact: 1, urgency: 1 })).body.ref;
+        ok(await pm.post(`/api/incidents/${parent}/major`, {}));
+        const child = (await pm.post('/api/incidents', { title: 'Reported again' })).body.ref;
+        ok(await pm.post('/api/incidents/bulk', { ids: [child], operation: { op: 'set_parent', parent } }));
+        await narrowTo(parent, narrow);
+        ok(await pm.post(`/api/incidents/${parent}/transition`, { to: 'resolved', resolution_code: 'fixed', resolution: text }));
+        return { readable: JSON.stringify((await ownerQuery("SELECT i.resolution, (SELECT json_agg(a.data) FROM incident_activity a WHERE a.incident_id = i.id AND a.kind = 'status') AS history FROM incidents i WHERE ref = $1", [child])).rows[0]) };
+      },
+    },
+    {
       path: 'post-incident review factor → new problem',
       run: async (narrow, text) => {
         const inc = (await pm.post('/api/incidents', { title: 'Review source' })).body.ref;
