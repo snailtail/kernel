@@ -6,8 +6,8 @@ import type { Meta, User } from './api';
 import { canEdit, isManager } from './session';
 
 export type Module = keyof Meta['modules'];
-export type IconName = 'home' | 'events' | 'incidents' | 'status' | 'candidates' | 'problems' | 'kedb' | 'changes' | 'actions' | 'knowledge' | 'review' | 'dashboard' | 'reports' | 'services' | 'cmdb' | 'teams' | 'people' | 'help' | 'admin';
-export type BadgeKey = 'my_work' | 'events' | 'incidents' | 'kedb' | 'actions';
+export type IconName = 'home' | 'events' | 'incidents' | 'status' | 'candidates' | 'problems' | 'kedb' | 'changes' | 'actions' | 'knowledge' | 'review' | 'pir' | 'dashboard' | 'reports' | 'services' | 'cmdb' | 'teams' | 'people' | 'help' | 'admin';
+export type BadgeKey = 'my_work' | 'events' | 'incidents' | 'kedb' | 'actions' | 'reviews';
 
 export interface NavItem {
   to: string;
@@ -51,7 +51,8 @@ export const NAV: NavGroup[] = [
     id: 'learn', label: 'Learn', purpose: 'share and review',
     items: [
       { to: '/knowledge', label: 'Knowledge', icon: 'knowledge', hint: 'Articles and workarounds', module: 'knowledge', key: 'b' },
-      { to: '/review', label: 'Review board', icon: 'review', hint: 'The problem review meeting', key: 'v' },
+      { to: '/incident-reviews', label: 'Post-incident reviews', icon: 'pir', hint: 'Blameless look-backs on major incidents', module: 'incident', badge: 'reviews', key: 'w', match: ['/incident-reviews'] },
+      { to: '/review', label: 'Problem review board', icon: 'review', hint: 'The problem review meeting', key: 'v' },
       { to: '/dashboard', label: 'Dashboard', icon: 'dashboard', key: 'd' },
       { to: '/reports', label: 'Reports', icon: 'reports', hint: 'KPIs and service reports', key: 'r' },
     ],

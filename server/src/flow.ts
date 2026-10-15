@@ -1,6 +1,7 @@
 // The big picture (#37): the process map event → incident → problem → known error → change → resolution, with live
 // counts from the user's own data, and gentle health tips. Only practices whose module is on, and only what the
 // caller may read, are included – for people in the UI and for agents over MCP.
+import { REVIEW_GUIDE } from './reviews.js';
 import type { User } from './auth.js';
 import { query } from './db.js';
 import { moduleEnabled, type Module } from './modules.js';
@@ -40,6 +41,10 @@ const COUNTS_SQL = `SELECT (SELECT count(*) FROM configuration_items WHERE statu
     (SELECT count(*) FROM problem_actions WHERE status = 'open' AND due_date < current_date)::int AS c17,
     (SELECT count(*) FROM incidents WHERE category_id IS NULL AND status NOT IN ('resolved', 'closed'))::int AS c18,
     (SELECT count(*) FROM incidents i WHERE priority <= 2 AND status NOT IN ('resolved', 'closed') AND NOT EXISTS (SELECT 1 FROM incident_cis x WHERE x.incident_id = i.id))::int AS c19,
+    (SELECT count(*) FROM incident_reviews WHERE status IN ('scheduled', 'draft'))::int AS c21,
+    (SELECT count(*) FROM incident_reviews WHERE status IN ('scheduled', 'draft') AND due < current_date)::int AS c22,
+    (SELECT count(*) FROM incidents i WHERE i.is_major AND i.status IN ('resolved', 'closed')
+       AND NOT EXISTS (SELECT 1 FROM incident_reviews r WHERE r.incident_id = i.id AND r.status = 'published'))::int AS c23,
     (SELECT count(DISTINCT ci_id) FROM ci_sources s JOIN configuration_items c ON c.id = s.ci_id WHERE c.status = 'active' AND s.last_seen_at < now() - interval '30 days')::int AS c20`;
 async function counts(): Promise<Record<string, number>> {
   return (await query(COUNTS_SQL)).rows[0];
@@ -67,11 +72,28 @@ export async function processMap(user: User) {
       id: 'incident', label: 'Incident', module: 'incident',
       purpose: 'Something is broken for someone. Restore service as quickly as possible – a known workaround is often the fastest way.',
       concepts: ['Impact × urgency = priority', 'SLA response and resolution targets', 'Major incidents need a problem'],
-      hands_over: [{ to: 'problem', when: 'It recurs, it is major, or the cause is unknown' }, { to: 'known_error', when: 'A known error on its CI already has a workaround' }],
+      hands_over: [
+        { to: 'review', when: 'A major incident is resolved: it gets a post-incident review' },
+        { to: 'problem', when: 'It recurs, it is major, or the cause is unknown' },
+        { to: 'known_error', when: 'A known error on its CI already has a workaround' },
+      ],
       counts: [
         { label: 'open', value: c.c2, link: '/incidents' },
         { label: 'recurring or major without a problem', value: c.c3, link: '/incidents?status=all' },
         ...(moduleEnabled('sla') ? [{ label: 'breaching or breached', value: c.c4, link: '/incidents?breaching_within=60' }] : []),
+      ],
+    });
+  }
+  if (moduleEnabled('incident') && readable('incident.read')) {
+    nodes.push({
+      id: 'review', label: 'Post-incident review', module: 'incident',
+      purpose: `${REVIEW_GUIDE.purpose.split('. ')[0]}. It starts from the timeline and impact, and its contributing factors become problems.`,
+      concepts: ['Blameless: actions and conditions, not people', 'Contributing factor → problem', 'Follow-up → action'],
+      hands_over: [{ to: 'problem', when: 'A contributing factor needs its root cause found' }],
+      counts: [
+        { label: 'due', value: c.c21, link: '/incident-reviews' },
+        { label: 'overdue', value: c.c22, link: '/incident-reviews' },
+        { label: 'major incidents resolved without a published review', value: c.c23, link: '/incident-reviews' },
       ],
     });
   }

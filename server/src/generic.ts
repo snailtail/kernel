@@ -19,7 +19,7 @@ import { addChangeLink, setChangeCi } from './changes.js';
 const incidentExists = async (ref: string) => (await query('SELECT 1 FROM incidents WHERE ref = $1', [ref.toUpperCase()])).rows.length > 0;
 import { addLink, LINK_KINDS, SELECT_ACTION } from './problems.js';
 import { recordTypes, recordUrl, typeForRef, type SearchHit } from './records.js';
-import { myReviews } from './reviews.js';
+import { attentionCount, myReviews } from './reviews.js';
 
 export const searchSchema = z.object({
   q: z.string().trim().min(1).max(200),
@@ -192,5 +192,6 @@ export async function navCounts(user: User) {
     can(user.role, 'problem.accept_risk') ? n("SELECT count(*) AS n FROM problems WHERE status = 'known_error' AND coalesce(ec_decision, 'pending') = 'pending'") : zero,
     n("SELECT count(*) AS n FROM problem_actions WHERE status = 'open' AND due_date < current_date"),
   ]);
-  return { my_work: myProblems + myIncidents + myActions, events: alerts, incidents: queue, kedb: decisions, actions: overdue };
+  const reviews = can(user.role, 'incident.read') && moduleEnabled('incident') ? await attentionCount(user.id) : 0;
+  return { my_work: myProblems + myIncidents + myActions, events: alerts, incidents: queue, kedb: decisions, actions: overdue, reviews };
 }

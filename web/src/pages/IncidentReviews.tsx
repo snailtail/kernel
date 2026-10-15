@@ -1,0 +1,73 @@
+// All post-incident reviews (#120): what is due (overdue first), what was published and what was waived, by owner
+// and team. The view the weekly incident or problem meeting needs.
+import { Link, useSearchParams } from 'react-router';
+import { useApi } from '../hooks';
+import { useLive } from '../live';
+import { useSession } from '../session';
+import { useTeams } from './Teams';
+import { formatDate, relativeTime } from '../format';
+
+interface Row {
+  ref: string; title: string; is_major: boolean; priority: number; resolved_at: string | null; team: string | null; status: string; owner: string | null; due: string | null;
+  overdue: boolean; published_at: string | null; factors: number; factors_to_problems: number; follow_ups: number; follow_ups_to_actions: number; url: string;
+}
+const TABS = [['due', 'Due'], ['published', 'Published'], ['waived', 'Waived']] as const;
+
+export function IncidentReviewsPage() {
+  const teams = useTeams();
+  const { meta } = useSession();
+  const [params, setParams] = useSearchParams();
+  const tab = params.get('tab') ?? 'due';
+  const set = (k: string, v: string) => setParams((prev) => { const n = new URLSearchParams(prev); if (v) n.set(k, v); else n.delete(k); return n; }, { replace: true });
+  const { data, loading, refresh } = useApi<Row[]>(`/api/incident-reviews?${params}`);
+  useLive(['incident:*'], refresh);
+  return (
+    <>
+      <header className="page-head">
+        <div>
+          <h1>Post-incident reviews</h1>
+          <p className="muted">Short, blameless look-backs on major incidents: contributing factors become problems, follow-ups become actions.</p>
+        </div>
+      </header>
+      <div className="tabs" role="tablist">
+        {TABS.map(([k, label]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => set('tab', k === 'due' ? '' : k)}>{label}</button>)}
+      </div>
+      <div className="filters">
+        <select value={params.get('owner') ?? ''} onChange={(e) => set('owner', e.target.value)} aria-label="Owner">
+          <option value="">Any owner</option><option value="me">Mine</option>
+          {meta.assignees.filter((a) => a.role !== 'viewer').map((a) => <option key={a.id} value={a.id}>{a.display_name}</option>)}
+        </select>
+        {teams.length > 0 && (
+          <select value={params.get('team') ?? ''} onChange={(e) => set('team', e.target.value)} aria-label="Team">
+            <option value="">Any team</option><option value="mine">My teams</option>
+            {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        )}
+      </div>
+      <section className={`card flush ${loading ? 'is-loading' : ''}`}>
+        {data?.length === 0 ? <p className="empty">{tab === 'due' ? 'No reviews are due.' : tab === 'published' ? 'No published reviews yet.' : 'No waived reviews.'}</p> : (
+          <div className="table-wrap">
+            <table className="table">
+              <thead><tr><th>Incident</th><th>Owner</th><th>{tab === 'published' ? 'Published' : 'Due'}</th><th className="hide-sm">Team</th><th className="hide-sm" title="Contributing factors that became problems">Factors → problems</th><th className="hide-sm" title="Follow-ups that became actions">Follow-ups → actions</th></tr></thead>
+              <tbody>
+                {data?.map((r) => (
+                  <tr key={r.ref}>
+                    <td className="title-cell"><Link to={r.url} className="mono">{r.ref}</Link> <Link to={r.url}>{r.title}</Link> {r.is_major && <span className="badge major">Major</span>}</td>
+                    <td className="muted">{r.owner ?? '–'}</td>
+                    <td className="nowrap">
+                      {tab === 'published' ? (r.published_at ? <span title={formatDate(r.published_at)}>{relativeTime(r.published_at)}</span> : '–')
+                        : <>{r.due ?? '–'}{r.overdue ? <span className="badge overdue">Overdue</span> : <span className="muted small"> {r.status}</span>}</>}
+                    </td>
+                    <td className="hide-sm muted">{r.team ?? '–'}</td>
+                    <td className="hide-sm">{r.factors ? `${r.factors_to_problems} of ${r.factors}` : '–'}</td>
+                    <td className="hide-sm">{r.follow_ups ? `${r.follow_ups_to_actions} of ${r.follow_ups}` : '–'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </>
+  );
+}

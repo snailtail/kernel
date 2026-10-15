@@ -413,6 +413,53 @@ export async function reviewMarkdown(user: User, ref: string) {
   ].filter((l) => l !== '').join('\n');
 }
 
+// ---- The list (#120) -------------------------------------------------------------------------
+
+export const listReviewsSchema = z.object({
+  /** due: scheduled and draft, overdue first; published; waived. */
+  tab: z.enum(['due', 'published', 'waived']).default('due'),
+  owner: z.union([z.literal('me'), z.coerce.number().int()]).optional(),
+  /** The incident's team, or "mine" for the teams the user belongs to. */
+  team: z.union([z.literal('mine'), z.coerce.number().int()]).optional(),
+  limit: z.coerce.number().int().min(1).max(500).default(200),
+});
+
+/**
+ * Reviews that need the viewer: overdue, owned by them or by one of their teams (through the incident's team). The
+ * menu badge and the list's "mine" view count the same rows.
+ */
+export const ATTENTION_SQL = `r.status IN ('scheduled', 'draft') AND r.due < current_date
+  AND (r.owner_id = $1 OR i.team_id IN (SELECT team_id FROM team_members WHERE user_id = $1))`;
+
+export async function attentionCount(userId: number) {
+  const { rows } = await query(`SELECT count(*)::int AS n FROM incident_reviews r JOIN incidents i ON i.id = r.incident_id WHERE ${ATTENTION_SQL}`, [userId]);
+  return rows[0].n as number;
+}
+
+export async function listReviews(user: User, f: z.infer<typeof listReviewsSchema>) {
+  authorize(user, 'incident.read');
+  const where = [f.tab === 'due' ? "r.status IN ('scheduled', 'draft')" : `r.status = '${f.tab}'`];
+  const params: unknown[] = [];
+  const add = (sql: string, v: unknown) => { params.push(v); where.push(sql.replaceAll('?', `$${params.length}`)); };
+  if (f.owner !== undefined) add('r.owner_id = ?', f.owner === 'me' ? user.id : f.owner);
+  if (f.team === 'mine') add('i.team_id IN (SELECT team_id FROM team_members WHERE user_id = ?)', user.id);
+  else if (f.team !== undefined) add('i.team_id = ?', f.team);
+  params.push(f.limit);
+  const order = f.tab === 'due' ? 'r.due < current_date DESC, r.due NULLS LAST, r.id' : 'coalesce(r.published_at, r.updated_at) DESC';
+  const { rows } = await query(
+    `SELECT i.ref, i.title, i.is_major, i.priority, i.resolved_at, i.team_id, t.name AS team, r.status, r.owner_id, u.display_name AS owner, r.due::text AS due,
+            (r.status IN ('scheduled', 'draft') AND r.due < current_date) AS overdue, r.published_at,
+            count(x.id) FILTER (WHERE x.kind = 'factor')::int AS factors, count(x.problem_id) FILTER (WHERE x.kind = 'factor')::int AS factors_to_problems,
+            count(x.id) FILTER (WHERE x.kind <> 'factor')::int AS follow_ups, count(x.action_id)::int AS follow_ups_to_actions
+     FROM incident_reviews r JOIN incidents i ON i.id = r.incident_id LEFT JOIN users u ON u.id = r.owner_id LEFT JOIN teams t ON t.id = i.team_id
+     LEFT JOIN incident_review_items x ON x.review_id = r.id
+     WHERE ${where.join(' AND ')}
+     GROUP BY r.id, i.id, u.display_name, t.name ORDER BY ${order} LIMIT $${params.length}`,
+    params,
+  );
+  return rows.map((r) => ({ ...r, url: `/incidents/${r.ref}/review` }));
+}
+
 // ---- Closing rule, My work and reports -------------------------------------------------------------
 
 /** settings major_incident.review_required (default on): a major incident closes once its review is done. */

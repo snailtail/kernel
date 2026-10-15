@@ -11,7 +11,7 @@ import { NotificationBell } from './Notifications';
 type Counts = Partial<Record<BadgeKey, number>>;
 const BADGE_TEXT: Record<BadgeKey, string> = {
   my_work: 'open items assigned to you', events: 'open alerts without an incident', incidents: "unassigned incidents in your teams' queue",
-  kedb: 'known errors awaiting a decision', actions: 'overdue actions',
+  kedb: 'known errors awaiting a decision', actions: 'overdue actions', reviews: 'overdue post-incident reviews for you or your teams',
 };
 
 /** Badge counts (#102): visibility-filtered on the server, refreshed on live changes and every minute. */

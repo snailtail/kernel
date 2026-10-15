@@ -44,7 +44,7 @@ describe('process guidance across practices (#37)', { skip }, () => {
 
   test('the process map counts live data, follows the modules, and is there for agents', async () => {
     const map = (await viewer.get('/api/flow')).body;
-    assert.deepEqual(map.nodes.map((n: any) => n.id), ['event', 'incident', 'problem', 'known_error', 'change', 'resolution']);
+    assert.deepEqual(map.nodes.map((n: any) => n.id), ['event', 'incident', 'review', 'problem', 'known_error', 'change', 'resolution']);
     const ke = map.nodes.find((n: any) => n.id === 'known_error');
     assert.ok(ke.counts.find((c: any) => c.label === 'known errors').value >= 2);
     assert.ok(map.supporting.some((s: any) => s.id === 'cmdb'));

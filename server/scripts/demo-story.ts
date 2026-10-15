@@ -152,6 +152,13 @@ export async function seedStory(p: People) {
   await query(`UPDATE incident_reviews SET created_at = created_at - interval '12 days', updated_at = updated_at - interval '9 days',
                  published_at = published_at - interval '9 days', due = due - 9 WHERE incident_id = (SELECT id FROM incidents WHERE ref = $1)`, [old]);
 
+  // A major incident resolved yesterday: its review is scheduled for tomorrow, so the list and the badge show it (#120).
+  const recent = (await incidents.createIncident(erik, { title: 'Login slow for all customers after the release', impact: 1, urgency: 2, cis: [frontend], team_id: web!.id })).ref as string;
+  await major.declareMajor(anna, recent, { lead_id: sara.id });
+  const tomorrow = new Date(Date.now() + D * 60_000).toISOString().slice(0, 10);
+  await incidents.transitionIncident(sara, recent, { to: 'resolved', resolution_code: 'fixed', resolution: 'Rolled back the session cache change.', pir_owner_id: sara.id, pir_due: tomorrow });
+  await shift(recent, D);
+
   // ---- Background: a quarter of everyday incidents and changes ----
   const everyday: [string, string, number][] = [
     ['VPN drops every hour for remote staff', node, 3], ['Printer queue stuck on floor 3', node, 3], ['Slow product images', frontend, 3], ['Password reset mail delayed', frontend, 3],

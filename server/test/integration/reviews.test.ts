@@ -180,6 +180,37 @@ describe('post-incident reviews (#109)', { skip }, () => {
     assert.equal(addWorkingDays(new Date('2026-12-23T10:00:00Z'), 5), '2026-12-30', 'without a calendar: weekdays only');
   });
 
+  test('the list, the menu badge and the process map count the same reviews (#120)', async () => {
+    // A team, a review owned by someone else in it, and one owned by nobody in it; both overdue.
+    const admin = await k.login('admin');
+    const teamId = (await admin.post('/api/teams', { name: 'Review team', description: '', email: '', auto_assign: 'none', active: true })).body.id;
+    ok(await admin.put(`/api/teams/${teamId}/members`, { members: [{ user_id: await userId('analyst2'), role: 'member' }, { user_id: await userId('pm'), role: 'member' }] }));
+    const mineByTeam = (await analyst.post('/api/incidents', { title: 'Team review', team_id: teamId })).body.ref;
+    ok(await analyst.post(`/api/incidents/${mineByTeam}/review`, { owner_id: await userId('analyst') }));
+    const elsewhere = (await analyst.post('/api/incidents', { title: 'Other review' })).body.ref;
+    ok(await analyst.post(`/api/incidents/${elsewhere}/review`, { owner_id: await userId('analyst') }));
+    await ownerQuery("UPDATE incident_reviews SET due = current_date - 2 WHERE status IN ('scheduled', 'draft')");
+
+    const due = (await analyst2.get('/api/incident-reviews')).body;
+    const map = (await analyst2.get('/api/flow')).body;
+    const node = map.nodes.find((n: any) => n.id === 'review');
+    const count = (label: string) => node.counts.find((c: any) => c.label === label).value;
+    assert.equal(count('due'), due.length, 'process map "due" = the list');
+    assert.equal(count('overdue'), due.filter((r: any) => r.overdue).length, 'process map "overdue" = overdue rows in the list');
+    // analyst2 owns none, but is in the team of one: the badge counts that one.
+    const badge = (await analyst2.get('/api/nav/counts')).body.reviews;
+    const forMe = due.filter((r: any) => r.overdue && r.team_id === teamId).length;
+    assert.equal(badge, forMe, 'the badge = overdue reviews of my teams');
+    assert.equal(badge, 1, 'positive control: exactly the team review');
+    assert.equal((await analyst.get('/api/nav/counts')).body.reviews, due.filter((r: any) => r.overdue && r.owner === 'Analyst').length, 'and for the owner, the ones they own');
+    assert.equal((await analyst2.get('/api/incident-reviews?team=mine')).body.map((r: any) => r.ref).join(), mineByTeam, 'the "my teams" filter shows the same review');
+    // Published and waived tabs.
+    assert.ok((await analyst.get('/api/incident-reviews?tab=published')).body.some((r: any) => r.ref === inc));
+    assert.ok((await analyst.get('/api/incident-reviews?tab=waived')).body.length >= 1);
+    const majorWithout = await ownerQuery("SELECT count(*)::int AS n FROM incidents i WHERE is_major AND status IN ('resolved', 'closed') AND NOT EXISTS (SELECT 1 FROM incident_reviews r WHERE r.incident_id = i.id AND r.status = 'published')");
+    assert.equal(count('major incidents resolved without a published review'), majorWithout.rows[0].n);
+  });
+
   test('agents draft and contribute over MCP', async () => {
     const mcp = new McpClient({ name: 'reviews', version: '1' });
     await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
