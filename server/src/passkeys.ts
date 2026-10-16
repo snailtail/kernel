@@ -17,7 +17,7 @@ import { audit } from './audit.js';
 import { config } from './config.js';
 import { query, tx } from './db.js';
 import { badRequest, HttpError, notFound, unauthorized } from './errors.js';
-import { logger } from './log.js';
+import { securityEvent } from './security-events.js';
 
 type Purpose = 'register' | 'login' | 'second_factor' | 'step_up';
 
@@ -148,7 +148,7 @@ export async function verifyPasskey(purpose: Exclude<Purpose, 'register'>, respo
     });
   } catch (err) {
     const message = (err as Error).message;
-    logger.warn({ event: { dataset: 'kernel.security', action: 'passkey.failed' }, err: message }, 'passkey verification failed');
+    securityEvent({ action: 'auth.passkey_failed', category: 'authentication', outcome: 'failure', message: 'Passkey verification failed', userId: cred.user_id, detail: { error: message.slice(0, 200) } });
     // The library refuses a counter that did not grow; that is the sign of a copied authenticator.
     if (/counter/i.test(message)) return cloneSuspected(cred);
     throw unauthorized('The passkey could not be verified');

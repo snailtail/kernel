@@ -32,7 +32,12 @@ export function AdminPage() {
     <>
       <header className="page-head">
         <h1>Administration</h1>
-        {user.role === 'admin' && <Link className="btn" to="/admin/audit">Audit trail</Link>}
+        {user.role === 'admin' && (
+          <div className="head-actions">
+            <Link className="btn" to="/admin/security-events">Security events</Link>
+            <Link className="btn" to="/admin/audit">Audit trail</Link>
+          </div>
+        )}
       </header>
       {user.role === 'admin' && <ModulesCard />}
       {user.role === 'admin' && <SecurityCard />}

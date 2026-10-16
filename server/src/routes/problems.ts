@@ -16,6 +16,7 @@ import { problemContext } from '../problem-context.js';
 import * as problems from '../problems.js';
 import * as reports from '../reports.js';
 import { problemMarkdown } from '../export.js';
+import { securityEvent } from '../security-events.js';
 import * as review from '../review.js';
 import { CLOSURE_CODES, EC_DECISIONS, ROLES, STATUSES, TRANSITIONS, WORKAROUND_EFFECTIVENESS } from '../workflow.js';
 
@@ -153,7 +154,10 @@ export async function problemRoutes(app: FastifyInstance) {
     const params = reports.reportSchema.parse(req.query);
     reply.header('Content-Type', 'text/csv; charset=utf-8');
     reply.header('Content-Disposition', `attachment; filename="kernel-problems-${params.from}-${params.to}.csv"`);
-    return reports.problemsCsv(params);
+    const csv = await reports.problemsCsv(params);
+    // A bulk read of records is a security event (#64).
+    securityEvent({ action: 'data.export', category: 'data_access', outcome: 'success', message: 'Problems exported as CSV', target: 'problems.csv', detail: { from: params.from, to: params.to, rows: Math.max(0, csv.split('\r\n').filter(Boolean).length - 1) } }, req);
+    return csv;
   });
 
   app.get('/api/review', async (req) => {

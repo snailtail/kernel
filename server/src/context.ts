@@ -9,6 +9,8 @@ export interface RequestContext {
   channel: string;
   tokenPrefix: string;
   ip: string;
+  /** The client's country from a trusted proxy (Cloudflare's CF-IPCountry), or ''. */
+  country?: string;
   userAgent: string;
   requestId: string;
   /** Who the database filters for (row-level security, #53): 'system', '' (nobody) or a user's viewer string. */

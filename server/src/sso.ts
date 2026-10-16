@@ -15,7 +15,7 @@ import { config } from './config.js';
 import { asSystem } from './context.js';
 import { query, tx } from './db.js';
 import { badRequest, forbidden, HttpError, unauthorized } from './errors.js';
-import { logger } from './log.js';
+import { securityEvent } from './security-events.js';
 import { outboundFetch } from './outbound.js';
 import { authorize } from './policy.js';
 import { decryptSecret, encryptSecret } from './secrets.js';
@@ -121,14 +121,14 @@ export async function finishSso(req: FastifyRequest, reply: FastifyReply) {
     const tokens = await client.authorizationCodeGrant(cfg, current, { pkceCodeVerifier: rows[0].code_verifier, expectedState: String(q.state), expectedNonce: rows[0].nonce, idTokenExpected: true });
     claims = (tokens.claims() ?? {}) as Record<string, unknown>;
   } catch (err) {
-    logger.warn({ event: { dataset: 'kernel.security', action: 'sso.failed' }, err: (err as Error).message }, 'SSO sign-in failed');
+    securityEvent({ action: 'auth.sso_failed', category: 'authentication', outcome: 'failure', message: 'Single sign-on failed', detail: { error: (err as Error).message.slice(0, 200) } });
     throw unauthorized('Single sign-on failed. Try again, or ask an administrator.');
   }
   // A step-up counts only if the provider really authenticated the person again after it started.
   if (rows[0].step_up) {
     const authTime = Number(claims.auth_time ?? 0) * 1000;
     if (!authTime || authTime < new Date(rows[0].created_at).getTime() - 5_000) {
-      logger.warn({ event: { dataset: 'kernel.security', action: 'sso.stepup_refused' } }, 'SSO step-up without a fresh authentication');
+      securityEvent({ action: 'auth.sso_step_up_refused', category: 'authentication', outcome: 'failure', message: 'SSO step-up without a fresh authentication' });
       throw unauthorized('Your identity provider did not ask you to sign in again. Confirm with your password instead, or ask an administrator.');
     }
   }
@@ -137,7 +137,7 @@ export async function finishSso(req: FastifyRequest, reply: FastifyReply) {
   const groups = Array.isArray(claims[s.groups_claim]) ? (claims[s.groups_claim] as unknown[]).map(String) : [];
   const role = roleFor(groups, s);
   if (!role) {
-    logger.warn({ event: { dataset: 'kernel.security', action: 'sso.denied' } }, 'SSO user in no mapped group');
+    securityEvent({ action: 'auth.sso_denied', category: 'authorization', outcome: 'denied', message: 'SSO user in no mapped group' });
     throw forbidden('Your account is not in a group that may use Kernel. Ask an administrator.');
   }
   const user = await asSystem(() => provisionUser(String(claims.iss), String(claims.sub), {

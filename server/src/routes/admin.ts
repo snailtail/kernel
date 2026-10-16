@@ -13,6 +13,7 @@ import { query } from '../db.js';
 import { badRequest, conflict, notFound } from '../errors.js';
 import { audit, auditQuerySchema, queryAudit, requireReason, verifyChain } from '../audit.js';
 import { csvCell } from '../reports.js';
+import { querySecurityEvents, securityQuerySchema, securitySummary } from '../security-events.js';
 import { approvalsRequired, setApprovalsRequired } from '../approvals.js';
 import { ROLES } from '../workflow.js';
 
@@ -247,5 +248,15 @@ export async function adminRoutes(app: FastifyInstance) {
   app.get('/api/audit/verify', async (req) => {
     requireUser(req, 'audit.read');
     return verifyChain();
+  });
+
+  // ---- Security events (#64) ---------------------------------------------------------------
+  app.get('/api/security-events', async (req) => {
+    requireUser(req, 'security.read');
+    return querySecurityEvents(securityQuerySchema.parse(req.query));
+  });
+  app.get('/api/security-events/summary', async (req) => {
+    requireUser(req, 'security.read');
+    return securitySummary();
   });
 }

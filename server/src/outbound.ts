@@ -130,10 +130,24 @@ export function checkUrl(url: string, privateAllow?: BlockList): string | null {
   return null;
 }
 
-export async function outboundFetch(
-  url: string,
-  init: { method?: string; headers?: Record<string, string>; body?: string; timeoutMs?: number; maxBytes?: number; privateAllow?: string[]; ca?: string } = {},
-): Promise<OutboundResponse> {
+type OutboundInit = { method?: string; headers?: Record<string, string>; body?: string; timeoutMs?: number; maxBytes?: number; privateAllow?: string[]; ca?: string };
+
+/** Told about every blocked request (security-events.ts records them, #64). */
+let blockedSink: (url: string, reason: string) => void = () => {};
+export const setBlockedSink = (fn: typeof blockedSink) => {
+  blockedSink = fn;
+};
+
+export async function outboundFetch(url: string, init: OutboundInit = {}): Promise<OutboundResponse> {
+  try {
+    return await fetchChecked(url, init);
+  } catch (err) {
+    if (err instanceof OutboundBlockedError) blockedSink(url, err.message);
+    throw err;
+  }
+}
+
+async function fetchChecked(url: string, init: OutboundInit): Promise<OutboundResponse> {
   const maxBytes = init.maxBytes ?? 1_000_000;
   if (init.privateAllow?.length) {
     const problem = validatePrivateAllow(init.privateAllow);

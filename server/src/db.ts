@@ -118,6 +118,8 @@ export async function ensureAppRole(client: pg.PoolClient | pg.Client, user: str
   await client.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${role}`);
   await client.query(`GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ${role}`);
   await client.query(`REVOKE UPDATE, DELETE, TRUNCATE ON audit_log FROM ${role}`);
+  // Security events are added and read; only retention deletes them (#64).
+  await client.query(`REVOKE UPDATE, TRUNCATE ON security_events FROM ${role}`);
   await client.query(`REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON schema_migrations FROM ${role}`);
 }
 

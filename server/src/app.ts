@@ -46,6 +46,7 @@ import { visibilityRoutes } from './routes/visibility.js';
 import { devRoutes } from './routes/dev.js';
 import { aiRoutes } from './routes/ai.js';
 import { problemRoutes } from './routes/problems.js';
+import { originOf, recordResponse } from './security-events.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -66,6 +67,8 @@ export async function buildApp(options: { logLevel?: string; serveWeb?: boolean 
 
   await app.register(cookie);
   await registerSecurity(app);
+  // Denied, unauthenticated and rate-limited requests are security events (#64).
+  app.addHook('onResponse', async (req, reply) => recordResponse(req, reply));
   // Only JSON request bodies: text/plain and form posts are what cross-site forms could send (CSRF).
   app.removeContentTypeParser('text/plain');
 
@@ -80,7 +83,11 @@ export async function buildApp(options: { logLevel?: string; serveWeb?: boolean 
     if (err instanceof ZodError) {
       return reply.code(400).send({ error: err.issues.map((i) => (i.path.length ? `${i.path.join('.')}: ` : '') + i.message).join('; ') });
     }
-    if (err instanceof HttpError) return reply.code(err.statusCode).send({ error: err.message, ...err.details });
+    if (err instanceof HttpError) {
+      // Prompts (confirm it is you, change your password, set up MFA) are not denials (security-events.ts).
+      if (err.details) (req as { prompt?: boolean }).prompt = ['reauth_required', 'must_change_password', 'mfa_enrollment_required', 'step_up_required'].some((k) => k in err.details!);
+      return reply.code(err.statusCode).send({ error: err.message, ...err.details });
+    }
     const status = (err as { statusCode?: number }).statusCode;
     if (status && status < 500) return reply.code(status).send({ error: (err as Error).message });
     req.log.error(err);
@@ -108,6 +115,7 @@ export async function buildApp(options: { logLevel?: string; serveWeb?: boolean 
         channel,
         tokenPrefix: req.tokenPrefix ?? '',
         ip: req.ip,
+        country: originOf(req).country,
         userAgent: String(req.headers['user-agent'] ?? '').slice(0, 300),
         requestId: String(req.id),
       },

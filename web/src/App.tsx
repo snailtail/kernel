@@ -43,6 +43,7 @@ const TeamsPage = lazy(() => import('./pages/Teams').then((m) => ({ default: m.T
 const PeoplePage = lazy(() => import('./pages/People').then((m) => ({ default: m.PeoplePage })));
 const PersonPage = lazy(() => import('./pages/People').then((m) => ({ default: m.PersonPage })));
 const AuditPage = lazy(() => import('./pages/Audit').then((m) => ({ default: m.AuditPage })));
+const SecurityEventsPage = lazy(() => import('./pages/SecurityEvents').then((m) => ({ default: m.SecurityEventsPage })));
 const ProblemPrintPage = lazy(() => import('./pages/ProblemPrint').then((m) => ({ default: m.ProblemPrintPage })));
 const ReportsPage = lazy(() => import('./pages/Reports').then((m) => ({ default: m.ReportsPage })));
 const ReviewPage = lazy(() => import('./pages/Review').then((m) => ({ default: m.ReviewPage })));
@@ -153,6 +154,7 @@ export function App() {
             <Route path="/review" element={<ReviewPage />} />
             <Route path="/admin" element={<AdminPage />} />
             <Route path="/admin/audit" element={<AuditPage />} />
+            <Route path="/admin/security-events" element={<SecurityEventsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/guide" element={<GuidePage />} />
             <Route path="/api-docs" element={<ApiDocsPage />} />

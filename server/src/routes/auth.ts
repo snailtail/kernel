@@ -25,11 +25,11 @@ export async function authRoutes(app: FastifyInstance) {
     // With SSO on and local sign-in kept for administrators only (break-glass), others must use SSO.
     const sso = await ssoSettings();
     if (user && sso.enabled && sso.local_login === 'admins' && user.role !== 'admin') {
-      loginFailed(req.ip, account);
+      loginFailed(req, account, 'sso_required');
       throw new HttpError(403, 'Sign in with single sign-on');
     }
     if (!user) {
-      loginFailed(req.ip, account);
+      loginFailed(req, account, 'password');
       throw new HttpError(401, 'Invalid username or password');
     }
     // A second factor: the authenticator code and/or a passkey (#75).
@@ -51,7 +51,7 @@ export async function authRoutes(app: FastifyInstance) {
     guardLogin(req.ip, account, await mfa.isKnownDevice(req.cookies[mfa.DEVICE_COOKIE], account));
     const userId = await mfa.completeChallenge(challenge, body.code);
     if (!userId) {
-      loginFailed(req.ip, account);
+      loginFailed(req, account, 'second_factor');
       throw new HttpError(401, 'That code is not valid');
     }
     loginSucceeded(account);
