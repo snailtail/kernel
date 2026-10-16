@@ -29,6 +29,9 @@ export const MASKED_FIELDS = new Set([
 ]);
 
 const kindOfRef = (ref: string) => PREFIX[ref.toUpperCase().match(/^[A-Z]+/)?.[0] ?? ''] as Kind | undefined;
+/** A post-incident review (PIR000012) is as confidential as its incident (#35). */
+const isReviewRef = (ref: string) => /^PIR\d{6}$/i.test(ref);
+const maskable = (ref: string) => !!kindOfRef(ref) || isReviewRef(ref);
 
 /**
  * The one read rule for confidential text, as SQL: the user (`u`, null for agents) is the assignee, the creator, in
@@ -63,6 +66,15 @@ export async function maskedRefs(user: { id: number } | null, refs: string[]): P
       `SELECT r.ref, ${mayReadSql('r', '$2', '$3')} AS may_read
        FROM ${TABLE[kind]} r WHERE r.ref = ANY($1) AND r.classification = 'confidential'`,
       [mine, user?.id ?? null, kind],
+    );
+    for (const r of rows) if (!r.may_read) out.add(r.ref);
+  }
+  const reviews = [...new Set(refs.filter(isReviewRef).map((r) => r.toUpperCase()))];
+  if (reviews.length) {
+    const { rows } = await query(
+      `SELECT x.ref, ${mayReadSql('r', '$2', "'incident'")} AS may_read
+       FROM incident_reviews x JOIN incidents r ON r.id = x.incident_id WHERE x.ref = ANY($1) AND r.classification = 'confidential'`,
+      [reviews, user?.id ?? null],
     );
     for (const r of rows) if (!r.may_read) out.add(r.ref);
   }
@@ -133,7 +145,7 @@ function collectRefs(value: unknown, out: Set<string>, depth = 0) {
   if (depth > 40 || !value || typeof value !== 'object') return;
   if (Array.isArray(value)) { for (const v of value) collectRefs(v, out, depth + 1); return; }
   const o = value as Record<string, unknown>;
-  if (typeof o.ref === 'string' && kindOfRef(o.ref)) out.add(o.ref.toUpperCase());
+  if (typeof o.ref === 'string' && maskable(o.ref)) out.add(o.ref.toUpperCase());
   for (const v of Object.values(o)) collectRefs(v, out, depth + 1);
 }
 
@@ -142,7 +154,7 @@ export async function maskForViewer(user: { id: number } | null, value: unknown,
   if (!(await confidentialExists())) return value;
   const refs = new Set<string>();
   collectRefs(value, refs);
-  if (pageRef && kindOfRef(pageRef)) refs.add(pageRef.toUpperCase());
+  if (pageRef && maskable(pageRef)) refs.add(pageRef.toUpperCase());
   const masked = await maskedRefs(user, [...refs]);
   if (!masked.size) return value;
   return maskValue(value, masked, !!pageRef && masked.has(pageRef.toUpperCase()));

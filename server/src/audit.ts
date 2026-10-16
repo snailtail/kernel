@@ -193,7 +193,8 @@ export const auditQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(1000).default(100),
 });
 
-export async function queryAudit(f: z.infer<typeof auditQuerySchema>) {
+/** `entity_refs` (not part of the query schema) matches these refs exactly: the history of one record. */
+export async function queryAudit(f: z.infer<typeof auditQuerySchema> & { entity_refs?: string[] }) {
   const where: string[] = [];
   const params: unknown[] = [];
   const add = (sql: string, v: unknown) => {
@@ -206,6 +207,7 @@ export async function queryAudit(f: z.infer<typeof auditQuerySchema>) {
   if (f.actor_type) add('a.actor_type = ?', f.actor_type);
   if (f.entity_type) add('a.entity_type = ?', f.entity_type);
   if (f.entity_ref) add('a.entity_ref ILIKE ?', `%${f.entity_ref}%`);
+  if (f.entity_refs) add('a.entity_ref = ANY(?)', f.entity_refs);
   if (f.action) add('a.action ILIKE ?', `%${f.action}%`);
   if (f.ip) add("coalesce(nullif(a.ip, ''), x.ip) = ?", f.ip);
   if (f.from) add('a.at >= ?::timestamptz', f.from);

@@ -17,6 +17,7 @@ import { createArticle } from './knowledge.js';
 import { timeline } from './major-incidents.js';
 import { authorize, can } from './policy.js';
 import { createProblemInTx, loadForUpdate, logActivity, registerProblemExtra, type Db } from './problems.js';
+import { recordUrl, registerRecordType, type RecordType, type SearchHit } from './records.js';
 import { loadCalendar } from './sla.js';
 
 export const REVIEW_STATUSES = ['scheduled', 'draft', 'published', 'waived'] as const;
@@ -114,9 +115,21 @@ async function prefill(user: User, ref: string) {
   return { what_happened: story, impact_summary: impact };
 }
 
+/**
+ * A review is addressed by its own ref (PIR000012) or by its incident's (INC000123); everything below works on the
+ * incident's. A review on an incident the viewer cannot see answers like one that does not exist (RLS).
+ */
+export async function incidentRefOf(ref: string) {
+  const up = ref.toUpperCase();
+  if (!/^PIR\d+$/.test(up)) return up;
+  const { rows } = await query('SELECT i.ref FROM incident_reviews r JOIN incidents i ON i.id = r.incident_id WHERE r.ref = $1', [up]);
+  if (!rows[0]) throw notFound(`Post-incident review ${up} not found`);
+  return rows[0].ref as string;
+}
+
 async function loadReview(db: Db, incidentRef: string, lock = false) {
   const { rows } = await db.query(
-    `SELECT r.*, r.due::text AS due, i.ref, i.title AS incident_title, i.is_major, i.major_lead_id, i.problem_id, i.impact, i.urgency, i.category_id, i.status AS incident_status,
+    `SELECT r.*, r.ref AS review_ref, r.due::text AS due, i.ref, i.title AS incident_title, i.is_major, i.major_lead_id, i.problem_id, i.impact, i.urgency, i.category_id, i.status AS incident_status,
             i.restricted, i.restricted_teams, i.classification
      FROM incident_reviews r JOIN incidents i ON i.id = r.incident_id WHERE i.ref = $1 ${lock ? 'FOR UPDATE OF r' : ''}`,
     [incidentRef.toUpperCase()],
@@ -144,16 +157,18 @@ export async function scheduleReviewInTx(db: Db, actorId: number, incident: { id
     `INSERT INTO incident_reviews (incident_id, owner_id, due, created_by) VALUES ($1, $2, $3, $4)
      ON CONFLICT (incident_id) DO UPDATE SET owner_id = CASE WHEN $5 THEN excluded.owner_id ELSE incident_reviews.owner_id END,
        due = CASE WHEN $6 THEN excluded.due ELSE incident_reviews.due END, updated_at = now()
-     RETURNING id, owner_id, due::text AS due, (xmax = 0) AS created`,
+     RETURNING id, ref, owner_id, due::text AS due, (xmax = 0) AS created`,
     [incident.id, owner, due, actorId, input.owner_id !== undefined && input.owner_id !== null, !!input.due],
   );
-  return rows[0] as { id: number; owner_id: number; due: string; created: boolean };
+  const r = rows[0] as { id: number; ref: string; owner_id: number; due: string; created: boolean };
+  await audit(db, { entity_type: 'incident_review', entity_ref: r.ref, action: r.created ? 'create' : 'schedule', changes: { owner_id: r.owner_id, due: r.due } });
+  return r;
 }
 
 /** The review summary the incident page and lists show. */
 export async function reviewSummary(incidentId: number) {
   const { rows } = await query(
-    `SELECT r.status, r.owner_id, u.display_name AS owner, r.due::text AS due, r.published_at,
+    `SELECT r.ref, r.status, r.owner_id, u.display_name AS owner, r.due::text AS due, r.published_at,
             (r.due - current_date) AS due_in_days, (r.status IN ('scheduled', 'draft') AND r.due < current_date) AS overdue
      FROM incident_reviews r LEFT JOIN users u ON u.id = r.owner_id WHERE r.incident_id = $1`,
     [incidentId],
@@ -164,6 +179,7 @@ export async function reviewSummary(incidentId: number) {
 // ---- Reading ---------------------------------------------------------------------------------
 
 export async function getReview(user: User, ref: string) {
+  ref = await incidentRefOf(ref);
   authorize(user, 'incident.read');
   const r = await loadReview({ query } as unknown as Db, ref);
   const [items, owner, t, facts] = await Promise.all([
@@ -179,19 +195,46 @@ export async function getReview(user: User, ref: string) {
     timeline(user, ref),
     impactFacts(user, ref),
   ]);
+  const { rows: comments } = await query(
+    `SELECT a.id, a.body, a.created_at, a.channel, u.display_name AS created_by FROM incident_activity a LEFT JOIN users u ON u.id = a.user_id
+     WHERE a.incident_id = $1 AND a.kind = 'comment' AND a.data->>'review' = $2 ORDER BY a.id`,
+    [r.incident_id, r.review_ref],
+  );
   const name = (id: number | null) => owner.rows.find((u) => u.id === id)?.display_name ?? null;
   const dueIn = r.due ? Math.round((Date.parse(r.due) - Date.parse(new Date().toISOString().slice(0, 10))) / 86400_000) : null;
-  return {
-    ref: r.ref, incident_title: r.incident_title, is_major: r.is_major, incident_status: r.incident_status,
+  const review = {
+    type: 'review', ref: r.review_ref as string, incident_ref: r.ref as string, incident_title: r.incident_title, is_major: r.is_major, incident_status: r.incident_status,
     status: r.status, owner_id: r.owner_id, owner: name(r.owner_id), due: r.due ?? null,
     due_in_days: dueIn, overdue: isOpenReview(r) && dueIn !== null && dueIn < 0,
     attendees: r.attendees, what_happened: r.what_happened, impact_summary: r.impact_summary, went_well: r.went_well, was_hard: r.was_hard, lucky: r.lucky,
     waived_reason: r.waived_reason, published_at: r.published_at, published_by: name(r.published_by),
     items: items.rows,
+    comments,
     may_finish: mayFinish(user, r),
     context: { timeline: t.entries, impact: facts.text, problem_ref: facts.incident.problem_ref ?? null },
     guide: REVIEW_GUIDE,
-    url: `/incidents/${r.ref}/review`,
+    url: recordUrl(REVIEW_TYPE, r.review_ref),
+  };
+  return { ...review, next_steps: reviewGuidance(review) };
+}
+
+/** Guided mode (#37): where the review stands and what is left before it can be published. */
+function reviewGuidance(r: { status: string; what_happened: string; impact_summary: string; items: { kind: string; problem_ref: string | null; action_id: number | null }[]; overdue: boolean; due: string | null }) {
+  const open = isOpenReview(r);
+  const factors = r.items.filter((x) => x.kind === 'factor');
+  const followUps = r.items.filter((x) => x.kind === 'follow_up');
+  const steps = [
+    { id: 'story', label: 'Describe what happened and the impact', hint: 'It starts from the timeline and the impact Kernel recorded; correct and complete it.', done: !!r.what_happened.trim() && !!r.impact_summary.trim() },
+    { id: 'factors', label: 'Record the contributing factors', hint: 'Conditions and decisions that made it possible or worse, in blameless wording.', done: factors.length > 0 },
+    { id: 'problems', label: 'Turn contributing factors into problems', hint: 'Problem management finds and removes the underlying causes.', done: factors.length > 0 && factors.every((x) => x.problem_ref) },
+    { id: 'actions', label: 'Turn follow-ups into actions', hint: 'Each with an owner and a due date, so they get done.', done: followUps.every((x) => x.action_id) },
+    { id: 'publish', label: r.overdue ? 'The review is overdue: publish it' : 'Publish the review', hint: `The owner, the incident lead or a manager publishes it${r.due ? ` (due ${r.due})` : ''}; a manager can waive it with a reason.`, done: !open },
+  ];
+  return {
+    phase: open ? 'Look back' : r.status === 'published' ? 'Published' : 'Waived',
+    purpose: 'Learn from the incident without blame, and turn what was learned into problems, actions and knowledge.',
+    steps,
+    next: open ? (steps.find((x) => !x.done)?.label ?? 'Publish the review') : 'Nothing pending.',
   };
 }
 
@@ -199,6 +242,7 @@ export async function getReview(user: User, ref: string) {
 
 /** A review for any incident (major ones get one when resolved). */
 export async function createReview(user: User, ref: string, input: z.infer<typeof createReviewSchema>) {
+  ref = await incidentRefOf(ref);
   authorize(user, 'incident.update');
   const fill = await prefill(user, ref);
   await tx(async (db) => {
@@ -222,12 +266,14 @@ async function ensureFilled(user: User, ref: string) {
 }
 
 export async function openReview(user: User, ref: string) {
+  ref = await incidentRefOf(ref);
   authorize(user, 'incident.read');
   if (can(user.role, 'incident.update')) await ensureFilled(user, ref);
   return getReview(user, ref);
 }
 
 export async function updateReview(user: User, ref: string, input: z.infer<typeof updateReviewSchema>) {
+  ref = await incidentRefOf(ref);
   authorize(user, 'incident.update');
   await ensureFilled(user, ref);
   await tx(async (db) => {
@@ -245,23 +291,26 @@ export async function updateReview(user: User, ref: string, input: z.infer<typeo
       [r.id, ...changed.map(([, v]) => v)],
     );
     // Who changed which sections, not the text itself.
-    await audit(db, { entity_type: 'incident_review', entity_ref: r.ref, action: 'update', changes: { fields: changed.map(([k]) => k) } });
+    await audit(db, { entity_type: 'incident_review', entity_ref: r.review_ref, action: 'update', changes: { fields: changed.map(([k]) => k) } });
   });
   return getReview(user, ref);
 }
 
 export async function addItem(user: User, ref: string, input: z.infer<typeof itemSchema>) {
+  ref = await incidentRefOf(ref);
   authorize(user, 'incident.update');
   await tx(async (db) => {
     const r = await loadReview(db, ref, true);
     if (!isOpenReview(r)) throw conflict(`The review is ${r.status}: it can no longer be edited`);
-    await db.query('INSERT INTO incident_review_items (review_id, kind, body, created_by) VALUES ($1, $2, $3, $4)', [r.id, input.kind, input.body, user.id]);
+    const { rows } = await db.query('INSERT INTO incident_review_items (review_id, kind, body, created_by) VALUES ($1, $2, $3, $4) RETURNING id', [r.id, input.kind, input.body, user.id]);
+    await audit(db, { entity_type: 'incident_review', entity_ref: r.review_ref, action: 'item_add', changes: { item_id: rows[0].id, kind: input.kind } });
     await db.query("UPDATE incident_reviews SET status = CASE WHEN status = 'scheduled' THEN 'draft' ELSE status END, updated_at = now() WHERE id = $1", [r.id]);
   });
   return getReview(user, ref);
 }
 
 export async function removeItem(user: User, ref: string, itemId: number) {
+  ref = await incidentRefOf(ref);
   authorize(user, 'incident.update');
   await tx(async (db) => {
     const r = await loadReview(db, ref, true);
@@ -269,6 +318,7 @@ export async function removeItem(user: User, ref: string, itemId: number) {
     // A factor that became a problem, or a follow-up that became an action, stays: the link is the trace.
     const { rows } = await db.query('DELETE FROM incident_review_items WHERE id = $1 AND review_id = $2 AND problem_id IS NULL AND action_id IS NULL RETURNING id', [itemId, r.id]);
     if (!rows[0]) throw conflict('Only an item that has not become a problem or an action can be removed');
+    await audit(db, { entity_type: 'incident_review', entity_ref: r.review_ref, action: 'item_remove', changes: { item_id: itemId } });
   });
   return getReview(user, ref);
 }
@@ -279,6 +329,7 @@ export async function removeItem(user: User, ref: string, itemId: number) {
  * not the factor's text.
  */
 export async function itemToProblem(user: User, ref: string, itemId: number, input: z.infer<typeof itemProblemSchema>) {
+  ref = await incidentRefOf(ref);
   authorize(user, 'incident.update');
   authorize(user, 'problem.link');
   await tx(async (db) => {
@@ -323,6 +374,7 @@ export async function itemToProblem(user: User, ref: string, itemId: number, inp
 
 /** Follow-up → action on a problem: the one named, the factor's, or the incident's. */
 export async function itemToAction(user: User, ref: string, itemId: number, input: z.infer<typeof itemActionSchema>) {
+  ref = await incidentRefOf(ref);
   authorize(user, 'incident.update');
   authorize(user, 'action.write');
   await tx(async (db) => {
@@ -356,6 +408,7 @@ export async function itemToAction(user: User, ref: string, itemId: number, inpu
 }
 
 export async function publishReview(user: User, ref: string) {
+  ref = await incidentRefOf(ref);
   authorize(user, 'incident.update');
   await tx(async (db) => {
     const r = await loadReview(db, ref, true);
@@ -365,24 +418,49 @@ export async function publishReview(user: User, ref: string) {
     if (missing.length) throw conflict(`Describe ${missing.join(' and ')} before publishing`);
     await db.query("UPDATE incident_reviews SET status = 'published', published_at = now(), published_by = $2, updated_at = now() WHERE id = $1", [r.id, user.id]);
     await logIncident(db, r.incident_id, user.id, 'update', 'Published the post-incident review', { review: { status: { from: r.status, to: 'published' } } });
+    await audit(db, { entity_type: 'incident_review', entity_ref: r.review_ref, action: 'publish', changes: { status: { from: r.status, to: 'published' } } });
   });
   return getReview(user, ref);
 }
 
 /** Waiving takes a manager and a reason, and is audited (#57). */
 export async function waiveReview(user: User, ref: string, input: z.infer<typeof waiveSchema>) {
+  ref = await incidentRefOf(ref);
   authorize(user, 'incident.flag_major');
   await tx(async (db) => {
     const r = await loadReview(db, ref, true);
     if (!isOpenReview(r)) throw conflict(`The review is already ${r.status}`);
     await db.query("UPDATE incident_reviews SET status = 'waived', waived_reason = $2, updated_at = now() WHERE id = $1", [r.id, input.reason]);
     await logIncident(db, r.incident_id, user.id, 'update', `Waived the post-incident review: ${input.reason}`, { review: { status: { from: r.status, to: 'waived' }, reason: input.reason } });
+    await audit(db, { entity_type: 'incident_review', entity_ref: r.review_ref, action: 'waive', changes: { status: { from: r.status, to: 'waived' } }, reason: input.reason });
+  });
+  return getReview(user, ref);
+}
+
+/** The record-type transition (#35): publish, or waive with a reason. */
+export const transitionReviewSchema = z.object({ to: z.enum(['published', 'waived']), reason: z.string().trim().max(2000).optional() });
+
+export async function transitionReview(user: User, ref: string, input: z.infer<typeof transitionReviewSchema>) {
+  if (input.to === 'published') return publishReview(user, ref);
+  return waiveReview(user, ref, waiveSchema.parse({ reason: input.reason ?? '' }));
+}
+
+/** A work note on the review. It lives in the incident's activity (marked with the review), like its other notes. */
+export async function addReviewComment(user: User, ref: string, body: string) {
+  authorize(user, 'incident.update');
+  ref = await incidentRefOf(ref);
+  if (!body.trim()) throw badRequest('Comment cannot be empty');
+  await tx(async (db) => {
+    const r = await loadReview(db, ref, true);
+    await logIncident(db, r.incident_id, user.id, 'comment', body.trim(), { review: r.review_ref });
+    await audit(db, { entity_type: 'incident_review', entity_ref: r.review_ref, action: 'comment', changes: { body: body.trim() } });
   });
   return getReview(user, ref);
 }
 
 /** The lessons as a draft knowledge article (#47), for a person to edit and publish. */
 export async function reviewToArticle(user: User, ref: string) {
+  ref = await incidentRefOf(ref);
   const refusal = whyNotForEveryone(await audienceOf(null, ref), 'an article');
   if (refusal) throw badRequest(refusal);
   const r = await getReview(user, ref);
@@ -390,21 +468,22 @@ export async function reviewToArticle(user: User, ref: string) {
     ['What happened', r.what_happened], ['What went well', r.went_well], ['What was hard', r.was_hard], ['Where we were lucky', r.lucky],
     ['Contributing factors', r.items.filter((x: any) => x.kind === 'factor').map((x: any) => `- ${x.body}`).join('\n')],
   ].filter(([, v]) => String(v).trim());
-  const body = `Lessons from the post-incident review of ${r.ref}.\n\n${sections.map(([h, v]) => `## ${h}\n\n${v}`).join('\n\n')}`;
-  const { rows } = await query('SELECT id FROM incidents WHERE ref = $1', [r.ref]);
-  return createArticle(user, { title: `Lessons from ${r.ref}: ${r.incident_title}`.slice(0, 200), body, article_type: 'troubleshooting', audience: 'internal' }, { incidentId: rows[0].id });
+  const body = `Lessons from the post-incident review of ${r.incident_ref}.\n\n${sections.map(([h, v]) => `## ${h}\n\n${v}`).join('\n\n')}`;
+  const { rows } = await query('SELECT id FROM incidents WHERE ref = $1', [r.incident_ref]);
+  return createArticle(user, { title: `Lessons from ${r.incident_ref}: ${r.incident_title}`.slice(0, 200), body, article_type: 'troubleshooting', audience: 'internal' }, { incidentId: rows[0].id });
 }
 
 export async function reviewMarkdown(user: User, ref: string) {
+  ref = await incidentRefOf(ref);
   const r = await getReview(user, ref);
-  const masked = (await maskedRefs(currentContext().channel === 'mcp' ? null : user, [r.ref])).has(r.ref);
+  const masked = (await maskedRefs(currentContext().channel === 'mcp' ? null : user, [r.incident_ref])).has(r.incident_ref);
   const section = (h: string, v: string) => `## ${h}\n\n${masked ? '_Confidential._' : v.trim() || '–'}\n`;
   const items = (kind: string, title: string) => {
     const list = r.items.filter((x: any) => x.kind === kind);
     return list.length ? `## ${title}\n\n${list.map((x: any) => `- ${masked ? '_Confidential._' : x.body}${x.problem_ref ? ` → ${x.problem_ref}` : ''}${x.action_id ? ` → action on ${x.action_problem_ref}${x.action_owner ? ` (${x.action_owner}${x.action_due ? `, ${x.action_due}` : ''})` : ''}` : ''}`).join('\n')}\n` : '';
   };
   return [
-    `# Post-incident review: ${r.ref} ${r.incident_title}`, '',
+    `# Post-incident review: ${r.incident_ref} ${r.incident_title}`, '',
     `Status: ${r.status}${r.owner ? ` · Owner: ${r.owner}` : ''}${r.due ? ` · Due: ${r.due}` : ''}${r.published_at ? ` · Published ${new Date(r.published_at).toISOString().slice(0, 10)}${r.published_by ? ` by ${r.published_by}` : ''}` : ''}`, '',
     ...(r.attendees && !masked ? [`Attendees: ${r.attendees}`, ''] : []),
     section('What happened', r.what_happened), section('Impact', r.impact_summary), section('What went well', r.went_well),
@@ -449,7 +528,7 @@ export async function listReviews(user: User, f: z.infer<typeof listReviewsSchem
   params.push(f.limit);
   const order = f.tab === 'due' ? 'r.due < current_date DESC, r.due NULLS LAST, r.id' : 'coalesce(r.published_at, r.updated_at) DESC';
   const { rows } = await query(
-    `SELECT i.ref, i.title, i.is_major, i.priority, i.resolved_at, i.team_id, t.name AS team, r.status, r.owner_id, u.display_name AS owner, r.due::text AS due,
+    `SELECT r.ref, i.ref AS incident_ref, i.title, i.is_major, i.priority, i.resolved_at, i.team_id, t.name AS team, r.status, r.owner_id, u.display_name AS owner, r.due::text AS due,
             (r.status IN ('scheduled', 'draft') AND r.due < current_date) AS overdue, r.published_at,
             count(x.id) FILTER (WHERE x.kind = 'factor')::int AS factors, count(x.problem_id) FILTER (WHERE x.kind = 'factor')::int AS factors_to_problems,
             count(x.id) FILTER (WHERE x.kind <> 'factor')::int AS follow_ups, count(x.action_id)::int AS follow_ups_to_actions
@@ -459,7 +538,7 @@ export async function listReviews(user: User, f: z.infer<typeof listReviewsSchem
      GROUP BY r.id, i.id, u.display_name, t.name ORDER BY ${order} LIMIT $${params.length}`,
     params,
   );
-  return rows.map((r) => ({ ...r, url: `/incidents/${r.ref}/review` }));
+  return rows.map((r) => ({ ...r, type: 'review', url: recordUrl(REVIEW_TYPE, r.ref) }));
 }
 
 // ---- Closing rule, My work and reports -------------------------------------------------------------
@@ -475,7 +554,7 @@ export async function reviewBlocksClosing(db: Db, incidentId: number) {
 
 export async function myReviews(userId: number) {
   const { rows } = await query(
-    `SELECT i.ref, i.title, r.status, r.due::text AS due, (r.due < current_date) AS overdue
+    `SELECT r.ref, i.ref AS incident_ref, i.title, r.status, r.due::text AS due, (r.due < current_date) AS overdue
      FROM incident_reviews r JOIN incidents i ON i.id = r.incident_id
      WHERE r.owner_id = $1 AND r.status IN ('scheduled', 'draft') ORDER BY r.due NULLS LAST LIMIT 30`,
     [userId],
@@ -511,3 +590,42 @@ registerProblemExtra(async (p) => {
   );
   return { from_reviews: rows };
 });
+
+// ---- Registry (#35) ----------------------------------------------------------------------------
+
+/** Reviews by ref, incident ref or title, or by words in their sections; as the viewer, so RLS decides. */
+async function searchReviews(user: User, q: string, limit: number): Promise<SearchHit[]> {
+  authorize(user, 'incident.read');
+  const like = `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+  const { rows } = await query(
+    `SELECT r.ref, i.ref AS incident_ref, i.title, r.status FROM incident_reviews r JOIN incidents i ON i.id = r.incident_id
+     WHERE r.ref ILIKE $1 OR i.ref ILIKE $1 OR i.title ILIKE $1 OR r.what_happened ILIKE $1 OR r.impact_summary ILIKE $1
+        OR r.went_well ILIKE $1 OR r.was_hard ILIKE $1 OR r.lucky ILIKE $1
+     ORDER BY r.updated_at DESC LIMIT $2`,
+    [like, limit],
+  );
+  return rows.map((r) => ({ type: 'review', ref: r.ref, title: r.title, status: r.status, url: recordUrl(REVIEW_TYPE, r.ref), summary: `Post-incident review of ${r.incident_ref}` }));
+}
+
+const REVIEW_TYPE: RecordType = {
+  type: 'review',
+  prefix: 'PIR',
+  pattern: /^PIR\d{6}$/,
+  readAction: 'incident.read',
+  uiPath: (ref) => `/reviews/${ref}`,
+  get: getReview,
+  search: searchReviews,
+  rest: {
+    list: '/api/reviews',
+    create: '/api/reviews',
+    get: '/api/reviews/:ref',
+    update: '/api/reviews/:ref',
+    transition: '/api/reviews/:ref/transition',
+    links: '/api/reviews/:ref/links',
+    comments: '/api/reviews/:ref/comments',
+  },
+  mcp: { list: 'list_incident_reviews', get: 'get_review', create: 'create_review', update: 'update_review', transition: 'transition_review' },
+  // Before #35 a review was audited under its incident's ref.
+  history: { entityType: 'incident_review', refs: (r) => [String(r.ref), String(r.incident_ref)] },
+};
+registerRecordType(REVIEW_TYPE);

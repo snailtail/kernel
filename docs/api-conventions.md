@@ -1,6 +1,6 @@
 # API and MCP conventions
 
-Every practice in Kernel (problem management today; incidents, changes, events, CIs… later) follows the same
+Every practice in Kernel follows the same
 conventions, so people, scripts and AI agents can work with all of it in one predictable way. A parity test
 (`server/test/integration/parity.test.ts`) fails the build when a record type breaks them.
 
@@ -15,7 +15,25 @@ and every change writes the audit trail (`server/src/audit.ts`) in the same tran
 - Every record has a **ref** with a type prefix (`PRB000012`), a **type** (`problem`) and a **url** to the web UI.
 - A new record type registers itself with `registerRecordType()` (`server/src/records.ts`): prefix, read permission,
   UI path, `get`, `search`, and its REST routes and MCP tools.
-- `get` returns the record with `links`, `activity` (history) and `next_steps` (guided mode).
+- `get` returns the **envelope** `ref`, `type`, `status`, `url` and `next_steps` (guided mode), over REST and MCP alike,
+  plus the record's own fields, links and activity.
+
+Registered types:
+
+| Type | Ref | Module | REST | MCP get |
+| --- | --- | --- | --- | --- |
+| problem | `PRB000012` | always on | `/api/problems` | `get_problem` |
+| incident | `INC000123` | incident | `/api/incidents` | `get_incident` |
+| review (post-incident review) | `PIR000004` | incident | `/api/reviews` | `get_review` |
+| change | `CHG000045` | change | `/api/changes` | `get_change` |
+| ci | `CI000012` | cmdb | `/api/cis` | `get_ci` |
+| service | `SVC000003` | cmdb | `/api/cis` | `get_ci` |
+| article | `KB000007` | knowledge | `/api/articles` | `get_article` |
+
+A post-incident review also answers to its incident's ref (`/api/incidents/INC000123/review`, `get_review` with
+`INC000123`), and shares its incident's links: linking from or to a review links the incident. Its comments are kept
+in the incident's activity, marked with the review, and shown on the review. Its visibility and confidentiality are
+the incident's.
 
 ## REST
 
@@ -29,8 +47,9 @@ and every change writes the audit trail (`server/src/audit.ts`) in the same tran
 | Links | `POST /api/<type>s/:ref/links`, `DELETE …/links/:id` |
 | Comments | `POST /api/<type>s/:ref/comments` |
 
-Cross-practice: `GET /api/search?q=`, `GET /api/records/:ref`, `GET /api/records/:ref/next-steps`,
-`POST /api/records/:ref/links`, `GET /api/my-work`.
+Cross-practice, for any ref: `GET /api/search?q=`, `GET /api/records/:ref`, `GET /api/records/:ref/next-steps`,
+`GET /api/records/:ref/history`, `GET /api/records/:ref/impact` (CIs and services; other types give 400),
+`POST /api/records/:ref/links`, `POST /api/records/:ref/comments`, `GET /api/my-work`.
 
 Lists (#110): saved views at `GET/POST /api/views`, `PATCH/DELETE /api/views/:id` and `PUT /api/views/default`. Bulk
 actions at `POST /api/<list>/bulk` with `{ ids | filter, operation, dry_run }`, or `{ items }` (as returned in `undo`).
@@ -61,7 +80,20 @@ clients send large selections in chunks so each request stays well within proxy 
 
 - Per type: `search_<type>s`, `get_<type>`, `create_<type>`, `update_<type>`, `transition_<type>`, plus the
   practice's specific tools.
-- Cross-practice: `search`, `get_record`, `next_steps`, `my_work`, `link_records`, `add_comment`, `get_history`.
+- Cross-practice, for any ref:
+
+  | Tool | Does |
+  | --- | --- |
+  | `search` | All record types you may read, by words or ref |
+  | `get_record` | Any record by ref, in the envelope above |
+  | `next_steps` | The record's process phase and remaining steps |
+  | `get_history` | Who changed what, from the audit trail (the type's read permission and visibility apply) |
+  | `get_impact` | What depends on a CI or service, up to services (`get_ci_impact` under the generic name) |
+  | `link_records` | Link two records, or a record and an external reference |
+  | `add_comment` | A work note on any record |
+  | `my_work` | Your open work across practices |
+
+- Tools are renamed only by adding the new name next to the old one; an old name is never removed.
 - Tool descriptions briefly explain the ITIL purpose so agents follow the process. Tools a role or token scope may
   not use are not listed. Every tool maps to a policy action (`TOOL_ACTIONS` in `mcp.ts`).
 - Every practice also ships **guided flows**: a method guide (`server/src/methods.ts`, UI + MCP resource
@@ -111,9 +143,17 @@ are compared. For these, a dismissal holds until a new alert or change joins the
 
 ## Checklist for a new practice
 
-1. Migration (`1xx_<practice>.sql`), service module, policy actions, audit entries.
-2. REST routes and MCP tools following the tables above; `registerRecordType()`.
-3. OpenAPI entries (the coverage test checks all routes), parity test passes.
-4. Guidance (`next_steps`), MCP prompt(s), webhook events, UI with the shared record layout.
-5. Authorisation matrix rows for the new routes.
-6. Every path that copies text from another record goes through `audience.ts` and gets a row in `copy-text.test.ts`.
+1. Migration (`1xx_<practice>.sql`) with a ref column (`'XYZ' || lpad(nextval(…), 6, '0')`), service module, policy
+   actions, and audit entries with `entity_type` = the type (or set `history.entityType` in the registration).
+2. REST routes and MCP tools following the tables above; `registerRecordType()` with all of them, a `pattern` for the
+   ref, and `get` returning the envelope with `next_steps`.
+3. Teach the generic tools about it where they dispatch per type: `addComment` and `linkRecords` in
+   `server/src/generic.ts`.
+4. OpenAPI entries (the coverage test checks all routes). Add a way to make one to `MAKE` in
+   `test/integration/parity.test.ts`: the test then checks its routes, tools, envelope (REST and MCP), search by ref,
+   comments and history, and fails for a registered type without an entry.
+5. If the practice can be switched off, its policy actions belong to a module (`moduleOfAction` in
+   `server/src/modules.ts`), so its routes answer 404 and its tools are not listed while it is off.
+6. Guidance (`next_steps`), MCP prompt(s), webhook events, UI with the shared record layout.
+7. Authorisation matrix rows for the new routes.
+8. Every path that copies text from another record goes through `audience.ts` and gets a row in `copy-text.test.ts`.

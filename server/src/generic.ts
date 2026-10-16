@@ -7,6 +7,8 @@ import { linkArticleCi } from './knowledge.js';
 import { myTeams } from './teams.js';
 import { assertVisibleRef } from './visibility.js';
 import type { User } from './auth.js';
+import { queryAudit } from './audit.js';
+import { impact, impactSchema } from './cmdb-graph.js';
 import { query } from './db.js';
 import { badRequest } from './errors.js';
 import { authorize, can } from './policy.js';
@@ -19,7 +21,12 @@ import { addChangeLink, setChangeCi } from './changes.js';
 const incidentExists = async (ref: string) => (await query('SELECT 1 FROM incidents WHERE ref = $1', [ref.toUpperCase()])).rows.length > 0;
 import { addLink, LINK_KINDS, SELECT_ACTION } from './problems.js';
 import { recordTypes, recordUrl, typeForRef, type SearchHit } from './records.js';
-import { attentionCount, myReviews } from './reviews.js';
+import { addReviewComment, attentionCount, incidentRefOf, myReviews } from './reviews.js';
+import { addComment as addProblemComment } from './problems.js';
+import { addIncidentComment } from './incidents.js';
+import { addChangeComment } from './changes.js';
+import { addArticleComment } from './knowledge.js';
+import { addCiComment } from './cmdb.js';
 
 export const searchSchema = z.object({
   q: z.string().trim().min(1).max(200),
@@ -42,13 +49,46 @@ export async function getRecord(user: User, ref: string) {
   return t.get(user, ref.toUpperCase());
 }
 
+/**
+ * Who changed what on any record, newest first, from the audit trail. Reading the record first applies the type's
+ * read permission and visibility (RLS): a record you cannot open has no history for you either.
+ */
+export async function recordHistory(user: User, ref: string, limit = 100) {
+  const t = typeForRef(ref);
+  authorize(user, t.readAction);
+  const record = await t.get(user, ref.toUpperCase());
+  const refs = t.history?.refs?.(record) ?? [String(record.ref)];
+  const rows = await queryAudit({ entity_type: t.history?.entityType ?? t.type, entity_refs: refs, limit });
+  return rows.map(({ user_agent, ...e }) => e);
+}
+
+/** What is affected if a CI or service is down (the dependency graph, walking up to services). */
+export async function getImpact(user: User, ref: string, input: z.input<typeof impactSchema> = {}) {
+  const t = typeForRef(ref);
+  if (t.type !== 'ci' && t.type !== 'service') throw badRequest(`Impact is for CIs and services; ${ref.toUpperCase()} is a ${t.type}`);
+  return impact(user, ref, impactSchema.parse({ direction: 'up', ...input }));
+}
+
 export async function nextSteps(user: User, ref: string) {
   const record = await getRecord(user, ref);
   return { ref: record.ref, type: record.type, url: record.url, next_steps: record.next_steps ?? null };
 }
 
+export const linkBodySchema = z.object({ to: z.string().trim().min(1).max(200), kind: z.string().max(20).optional(), system: z.string().max(100).optional(), url: z.string().max(2000).optional(), note: z.string().max(2000).optional() });
+
+/** A work note on any record, through its practice's own rules. */
+export async function addComment(user: User, ref: string, body: string) {
+  const type = typeForRef(ref).type;
+  if (type === 'problem') await addProblemComment(user, ref, body);
+  else if (type === 'incident') await addIncidentComment(user, ref, { body, kind: 'comment' });
+  else if (type === 'change') await addChangeComment(user, ref, body);
+  else if (type === 'article') await addArticleComment(user, ref, body);
+  else if (type === 'review') await addReviewComment(user, ref, body);
+  else await addCiComment(user, ref, body);
+}
+
 /** Links a record to another Kernel record or to an external record. */
-export async function linkRecords(user: User, from: string, to: string, options: { kind?: string; system?: string; url?: string; note?: string }) {
+export async function linkRecords(user: User, from: string, to: string, options: { kind?: string; system?: string; url?: string; note?: string }): Promise<unknown> {
   const source = typeForRef(from);
   if (!options.system || options.system === 'Kernel') await assertVisibleRef(to);
   let kind = options.kind;
@@ -58,6 +98,10 @@ export async function linkRecords(user: User, from: string, to: string, options:
   } catch {
     if (!kind) throw badRequest('Give the kind (incident, event, change, problem) for an external reference');
   }
+  // A post-incident review shares its incident's links (#35): linking from or to a review links its incident.
+  const kernelRef = !options.system || options.system === 'Kernel';
+  if (source.type === 'review') return linkRecords(user, await incidentRefOf(from), to, options);
+  if (kind === 'review' && kernelRef) return linkRecords(user, from, await incidentRefOf(to), { ...options, kind: 'incident' });
   // Knowledge articles (#47) apply to CIs and services.
   if (source.type === 'article') {
     if (kind !== 'ci' && kind !== 'service') throw badRequest('An article links to the CIs and services it applies to');

@@ -141,4 +141,5 @@ export async function saveVisibilitySettings(actor: User, value: { team_scoped: 
 export async function assertVisibleRef(ref: string) {
   const { rows } = await query('SELECT (SELECT kind FROM kernel_record_lookup($1)) AS kind, kernel_ref_hidden($1) AS hidden', [ref.toUpperCase()]);
   if (rows[0].hidden || (/^(PRB|INC|CHG)\d{6}$/i.test(ref) && !rows[0].kind)) throw notFound(`${ref.toUpperCase()} not found`);
+  if (/^PIR\d{6}$/i.test(ref) && !(await query('SELECT 1 FROM incident_reviews WHERE ref = $1', [ref.toUpperCase()])).rows[0]) throw notFound(`${ref.toUpperCase()} not found`);
 }
