@@ -359,7 +359,7 @@ describe('REST API', { skip }, () => {
       const integration = new Client(k.base, token);
       assert.equal((await integration.post('/api/problems', { title: 'x' })).status, 403, 'cannot log problems');
 
-      await pm.put('/api/candidates/rule', { min_records: 3, window_days: 7 });
+      await pm.put('/api/candidates/rules/recurring_records', { settings: { min_records: 3, window_days: 7 } });
       const records = [1, 2, 3].map((n) => ({ system: 'Zabbix', kind: 'event', reference: `ZBX-${n}`, service: 'Payments', summary: `Alert ${n}` }));
       const ingested = await integration.post('/api/integrations/records', { records });
       assert.deepEqual(ingested.body, { stored: 3, linked: 0, errors: [] });
@@ -371,7 +371,7 @@ describe('REST API', { skip }, () => {
       assert.equal(payments.count, 3);
 
       const created = await analyst.post('/api/candidates/create', {
-        record_ids: payments.records.map((r: any) => r.id),
+        record_ids: payments.evidence.records.map((r: any) => r.id),
         problem: { title: 'Recurring payment alerts', detection: 'proactive', affected_service: 'Payments' },
       });
       assert.equal(created.status, 201);

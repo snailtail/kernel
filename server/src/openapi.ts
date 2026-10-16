@@ -30,6 +30,7 @@ import * as hooks from './event-hooks.js';
 import { auditQuerySchema } from './audit.js';
 import { searchSchema } from './generic.js';
 import * as analyses from './analyses.js';
+import * as candidates from './candidates.js';
 import * as integrations from './integrations.js';
 import * as problems from './problems.js';
 import * as reports from './reports.js';
@@ -56,7 +57,7 @@ const user = z.object({
   active: z.boolean().optional(),
   password: z.string().min(10),
 });
-const ids = integrations.candidateIdsSchema;
+const ids = candidates.candidateIdsSchema.extend({ key: z.string().optional() });
 
 const BULK_TAG: Record<bulkMod.Practice, string> = { incidents: 'Incidents', problems: 'Problems', changes: 'Changes', alerts: 'Events', actions: 'Actions', articles: 'Knowledge', cis: 'CMDB' };
 
@@ -369,11 +370,14 @@ export const OPERATIONS: Op[] = [
   { method: 'get', path: '/api/review/agenda.md', tag: 'Reports', summary: 'Review agenda as Markdown', query: review.agendaSchema, produces: 'text/markdown' },
 
   { method: 'post', path: '/api/integrations/records', tag: 'Integrations', summary: 'Report incidents/events from other systems (idempotent; optional problem_ref links them)', body: integrations.ingestSchema },
-  { method: 'get', path: '/api/candidates', tag: 'Integrations', summary: 'Problem candidates: services with recurring unlinked records' },
-  { method: 'put', path: '/api/candidates/rule', tag: 'Integrations', summary: 'Set the candidate rule (problem managers)', body: integrations.ruleSchema },
-  { method: 'post', path: '/api/candidates/create', tag: 'Integrations', summary: 'Log a problem from candidate records', body: ids.extend({ problem: problems.createProblemSchema }) },
-  { method: 'post', path: '/api/candidates/link', tag: 'Integrations', summary: 'Link candidate records to a problem', body: ids.extend({ ref: z.string() }) },
-  { method: 'post', path: '/api/candidates/dismiss', tag: 'Integrations', summary: 'Dismiss candidate records', body: ids },
+  { method: 'get', path: '/api/candidates', tag: 'Problem candidates', summary: 'Problem candidates with their rule, reason and evidence, and the rules', query: candidates.listQuerySchema },
+  { method: 'put', path: '/api/candidates/rules/:rule', tag: 'Problem candidates', summary: 'Turn a rule on or off or change its thresholds (problem managers)', body: candidates.ruleUpdateSchema },
+  { method: 'get', path: '/api/candidates/draft', tag: 'Problem candidates', summary: 'The problem a candidate suggests, prefilled from its evidence', query: z.object({ key: z.string() }) },
+  { method: 'post', path: '/api/candidates/create', tag: 'Problem candidates', summary: 'Log a problem from a candidate (by key, prefilled) or from records', body: ids.extend({ problem: candidates.problemOverridesSchema.optional() }) },
+  { method: 'post', path: '/api/candidates/link', tag: 'Problem candidates', summary: 'Link a candidate or its records to a problem', body: ids.extend({ ref: z.string() }) },
+  { method: 'post', path: '/api/candidates/dismiss', tag: 'Problem candidates', summary: 'Dismiss a candidate, or snooze it with until (reason required)', body: candidates.decisionSchema },
+  { method: 'post', path: '/api/candidates/restore', tag: 'Problem candidates', summary: 'Undo a dismissal or snooze', body: z.object({ key: z.string() }) },
+  { method: 'post', path: '/api/candidates/report', tag: 'Problem candidates', summary: 'Report a candidate from external analysis (idempotent on source + external_key; ingest scope)', body: candidates.reportSchema },
   { method: 'get', path: '/api/systems', tag: 'Integrations', summary: 'External systems and their URL templates' },
   { method: 'post', path: '/api/systems', tag: 'Integrations', summary: 'Add an external system (problem managers)', body: integrations.systemSchema },
   { method: 'put', path: '/api/systems/:id', tag: 'Integrations', summary: 'Update an external system', body: integrations.systemSchema },

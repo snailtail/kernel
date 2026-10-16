@@ -114,12 +114,12 @@ describe('incident management (#28)', { skip }, () => {
   });
 
   test('unlinked incidents become problem candidates, grouped by CI', async () => {
-    await pm.put('/api/candidates/rule', { min_records: 3, window_days: 7 });
+    await pm.put('/api/candidates/rules/recurring_records', { settings: { min_records: 3, window_days: 7 } });
     const db = (await pm.post('/api/cis', { name: 'orders-db', ci_type: 'database' })).body.ref;
     const refs = [];
     for (let n = 0; n < 3; n++) refs.push((await create({ title: `Orders slow ${n}`, cis: [db] })).ref);
     const cand = (await analyst.get('/api/candidates')).body.candidates.find((c: any) => c.ci_ref === db);
-    assert.deepEqual(cand.records.map((r: any) => r.incident_ref).sort(), refs.sort());
+    assert.deepEqual(cand.evidence.records.map((r: any) => r.incident_ref).sort(), refs.sort());
     const created = await analyst.post('/api/candidates/create', { incident_refs: refs, problem: { title: 'Orders database slow', detection: 'proactive' } });
     assert.equal(created.status, 201, JSON.stringify(created.body));
     assert.equal(created.body.incidents.length, 3);

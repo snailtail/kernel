@@ -6,6 +6,7 @@ import type { User } from '../src/auth.js';
 import { query } from '../src/db.js';
 import * as actions from '../src/actions.js';
 import * as analyses from '../src/analyses.js';
+import * as candidates from '../src/candidates.js';
 import * as changes from '../src/changes.js';
 import * as cmdb from '../src/cmdb.js';
 import * as graph from '../src/cmdb-graph.js';
@@ -202,6 +203,32 @@ export async function seedStory(p: People) {
   const next = (await changes.createChange(jonas, { title: 'Re-enable TLS 1.2 permanently on pay-gw01', change_type: 'normal', risk: 'medium', cis: [gateway], problem: prb, implementation_plan: 'Set MinProtocol = TLSv1.2 in the gateway config and restart.', backout_plan: 'Revert the config line.', planned_start: new Date(Date.now() + 26 * H * 60_000).toISOString(), planned_end: new Date(Date.now() + 27 * H * 60_000).toISOString() })).ref as string;
   await changes.transitionChange(jonas, next, { to: 'assess' });
   await changes.transitionChange(jonas, next, { to: 'authorize' });
+  // ---- Problem candidates (#31): something for every rule ----
+  // shop-web pods keep restarting: five this week, each handled with a restart (recurring records; same category and resolution).
+  const { rows: infra } = await query("SELECT id FROM categories WHERE name = 'Infrastructure'");
+  for (let d = 0; d < 5; d++) {
+    const who = [erik, sara][d % 2];
+    const r = (await incidents.createIncident(who, { title: 'shop-web pods restarting (OOMKilled)', impact: 3, urgency: 2, cis: [workload], category_id: infra[0]?.id ?? null, team_id: web!.id })).ref as string;
+    await incidents.transitionIncident(who, r, { to: 'resolved', resolution_code: 'workaround', resolution: 'Restarted the deployment; memory back to normal.' });
+    await shift(r, (d + 1) * D - 3 * H);
+  }
+  // The front end runs on shop-web and is slow too: incidents on two CIs that share one dependency.
+  for (const [title, ago] of [['Product pages slow to load', 2], ['Cart page times out now and then', 4]] as const) {
+    await shift((await incidents.createIncident(sara, { title, impact: 3, urgency: 3, cis: [frontend] })).ref as string, ago * D);
+  }
+  // A log-analysis agent noticed the memory growth behind the restarts.
+  await candidates.reportCandidate(admin, {
+    source: 'log-agent', external_key: 'shop-web-heap-growth', title: 'shop-web heap grows until the pods are killed',
+    reason: 'Heap usage on shop-web grows about 300 MB a day since release 4.12 and the pods are OOM-killed every night', ci_ref: workload, service: '',
+    evidence: {
+      incident_refs: [], alert_ids: [], ci_refs: [frontend],
+      items: [
+        { reference: 'Grafana: shop-web memory', summary: 'Working set climbs from 1.1 GB to 2 GB (limit) in about three days', url: 'https://grafana.example.com/d/shop-web-memory' },
+        { reference: 'kubectl describe pod shop-web-7c9f', summary: 'Last state: Terminated, reason OOMKilled, exit code 137' },
+      ],
+      notes: 'The growth started with release 4.12 of shop-frontend. A heap dump would show which cache keeps growing.',
+    },
+  });
   // The pages the story queued (the worker is not running while seeding).
   await oncall.deliverPages();
   return { incident: inc, problem: prb, change: chg, earlier: old };

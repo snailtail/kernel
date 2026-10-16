@@ -196,12 +196,12 @@ describe('event management (#30)', { skip }, () => {
   });
 
   test('alerts nobody turned into an incident become problem candidates', async () => {
-    await pm.put('/api/candidates/rule', { min_records: 3, window_days: 7 });
+    await pm.put('/api/candidates/rules/recurring_records', { settings: { min_records: 3, window_days: 7 } });
     const ci = (await pm.post('/api/cis', { name: 'queue-01', ci_type: 'application' })).body.ref;
     await report(['q1', 'q2', 'q3'].map((check) => ({ ci, check, severity: 'warning' })), 'quiet');
     const cand = (await analyst.get('/api/candidates')).body.candidates.find((c: any) => c.ci_ref === ci);
     assert.equal(cand.events, 3);
-    const created = await analyst.post('/api/candidates/create', { alert_ids: cand.records.map((r: any) => r.alert_id), problem: { title: 'Queue keeps warning', detection: 'proactive' } });
+    const created = await analyst.post('/api/candidates/create', { alert_ids: cand.evidence.records.map((r: any) => r.alert_id), problem: { title: 'Queue keeps warning', detection: 'proactive' } });
     assert.equal(created.status, 201, JSON.stringify(created.body));
     assert.equal(created.body.links.filter((l: any) => l.kind === 'event').length, 3);
     assert.deepEqual(created.body.affected_cis.map((c: any) => c.ref), [ci]);

@@ -93,6 +93,16 @@ read by everyone. `server/src/audience.ts` holds the one rule:
 `test/integration/copy-text.test.ts` runs every path with a restricted and a confidential source and an ordinary one
 as positive control, and counts where records are created: a new path fails it until it has a row.
 
+## Problem candidates
+
+Candidates (`server/src/candidates.ts`, #31) are computed on read by rules, as the viewer, so row-level security decides
+which records count. Each has a stable `key` (rule + subject, e.g. `common_upstream:ci:CI000012`), a `rule`, a readable
+`reason` and `evidence` (records with keys such as `i:INC000123`, CIs with their role). Only rule settings
+(`candidate_rules`), decisions (`candidate_decisions`: a dismissal covers the evidence it was made on, a snooze a time)
+and reported candidates (`reported_candidates`, idempotent on source + external key) are stored. Act on a candidate by
+key: the server prefills the problem from the evidence under the copy rules above and links every record. A new rule
+is a function returning candidates with a `finish(records)` that gives the reason or null, plus a row in `RULES`.
+
 ## Checklist for a new practice
 
 1. Migration (`1xx_<practice>.sql`), service module, policy actions, audit entries.

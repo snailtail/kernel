@@ -50,7 +50,7 @@ describe('problems and known errors on CIs (#26)', { skip }, () => {
     const bot = new Client(k.base);
     await bot.post('/api/auth/login', { username: 'mon', password: 'four quiet harbour lamps' });
     const mon = new Client(k.base, (await bot.post('/api/tokens', { name: 'mon' })).body.token);
-    await pm.put('/api/candidates/rule', { min_records: 3, window_days: 7 });
+    await pm.put('/api/candidates/rules/recurring_records', { settings: { min_records: 3, window_days: 7 } });
     const sent = await mon.post('/api/integrations/records', {
       records: [
         { system: 'OP5', kind: 'event', reference: 'E1', ci: app, summary: 'HTTP 500' },
@@ -65,7 +65,7 @@ describe('problems and known errors on CIs (#26)', { skip }, () => {
     assert.match(byPerson.body.errors[0].error, /Unknown CI CI999999/);
     const cand = (await analyst.get('/api/candidates')).body.candidates.find((c: any) => c.ci_ref === app);
     assert.equal(cand.count, 3, 'by ref and by unique name');
-    const created = await analyst.post('/api/candidates/create', { record_ids: cand.records.map((r: any) => r.id), problem: { title: 'Payroll app errors', detection: 'proactive' } });
+    const created = await analyst.post('/api/candidates/create', { record_ids: cand.evidence.records.map((r: any) => r.id), problem: { title: 'Payroll app errors', detection: 'proactive' } });
     assert.deepEqual(created.body.affected_cis.map((c: any) => c.ref), [app]);
     const report = (await viewer.get(`/api/reports?from=2000-01-01&to=2100-01-01`)).body;
     const row = report.hotspots.cis.find((c: any) => c.ref === app);

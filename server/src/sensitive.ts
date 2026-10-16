@@ -204,7 +204,7 @@ export const UNSCANNED = [
   /^\/api\/records\/[^/]+\/attachments/,
 ];
 /** Machine ingestion: never refused (an alert must not be lost), always redacted. */
-const MACHINE = [/^\/mcp/, /^\/api\/events$/, /^\/api\/event-hooks\//, /^\/api\/paging\/\d+\/inbound/, /^\/api\/integrations\//, /^\/api\/cis\/upsert/, /^\/api\/cmdb\/ci-batch/, /^\/api\/changes\/register/, /^\/api\/ci-relationships\/sync/];
+const MACHINE = [/^\/mcp/, /^\/api\/events$/, /^\/api\/event-hooks\//, /^\/api\/paging\/\d+\/inbound/, /^\/api\/integrations\//, /^\/api\/cis\/upsert/, /^\/api\/cmdb\/ci-batch/, /^\/api\/changes\/register/, /^\/api\/ci-relationships\/sync/, /^\/api\/candidates\/report$/];
 
 const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
