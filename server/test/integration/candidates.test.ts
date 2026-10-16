@@ -279,6 +279,35 @@ describe('problem candidates (#31)', { skip }, () => {
     await mcp.close();
   });
 
+  test('detection: reactive when incidents happened, proactive for events only and external analysis; major incidents first', async () => {
+    ok(await pm.post('/api/integrations/records', { records: [1, 2, 3].map((i) => ({ system: 'Zabbix', kind: 'event', reference: `DET-${i}`, service: 'Detect svc', summary: 'Disk 85%' })) }));
+    // One open candidate per rule.
+    const host = await ci('det-host', 'virtual_machine'), a = await ci('det-a'), b = await ci('det-b');
+    for (const x of [a, b]) ok(await pm.post(`/api/cis/${x}/relationships`, { type: 'runs_on', target: host }));
+    for (const x of [a, a, b]) await incident({ cis: [x] });
+    const major = await incident({ title: 'Everything down', impact: 1, urgency: 1 });
+    ok(await pm.post(`/api/incidents/${major}/major`, {}));
+    await resolve(major);
+    const cat = (await pm.post('/api/categories', { name: `Detect ${++n}` })).body.id;
+    for (let i = 0; i < 4; i++) await resolve(await incident({ category_id: cat }), 'fixed');
+    const pd = await analyst.post('/api/candidates/report', { source: 'agent', external_key: 'pd', title: 'Mail bounces for one customer', reason: 'Bounces for anna.svensson@example.com since Monday' });
+    ok(pd);
+    const { candidates } = await list(pm);
+    const expected: Record<string, string> = { recurring_records: 'reactive', common_upstream: 'reactive', major_without_problem: 'reactive', recurring_resolution: 'reactive', reported: 'proactive' };
+    const seen = new Set<string>();
+    for (const c of candidates) {
+      const draft = (await pm.get(`/api/candidates/draft?key=${encodeURIComponent(c.key)}`)).body;
+      const want = c.key === 'recurring_records:service:detect svc' ? 'proactive' : expected[c.rule];
+      assert.equal(draft.detection, want, c.key);
+      seen.add(c.rule);
+    }
+    assert.ok(candidates.some((c: any) => c.key === 'recurring_records:service:detect svc'), 'the events-only candidate is there');
+    assert.deepEqual([...seen].sort(), Object.keys(expected).sort(), 'every rule was checked');
+    const majors = candidates.filter((c: any) => c.rule === 'major_without_problem').length;
+    assert.ok(majors > 0 && candidates.slice(0, majors).every((c: any) => c.rule === 'major_without_problem'), 'major incidents without a problem come first');
+    assert.equal(candidates.find((c: any) => c.key === pd.body.key).contains_personal_data, true, 'personal data is shown');
+  });
+
   test('a disabled rule finds nothing', async () => {
     const app = await ci('wiki');
     for (let i = 0; i < 3; i++) await incident({ cis: [app] });

@@ -13,7 +13,7 @@ interface EvidenceRecord {
 }
 interface Candidate {
   key: string; rule: RuleId; rule_label: string; reason: string; subject: { type: string; ref: string | null; name: string };
-  service: string; ci_ref: string | null; source?: string; count: number; incidents: number; events: number; first_at: string | null; last_at: string | null;
+  service: string; ci_ref: string | null; source?: string; contains_personal_data?: boolean; count: number; incidents: number; events: number; first_at: string | null; last_at: string | null;
   evidence: { records: EvidenceRecord[]; total_records: number; cis: { ref: string; name: string; role: 'subject' | 'upstream' | 'affected'; depth?: number }[]; notes?: string };
   decision?: { decision: 'dismissed' | 'snoozed'; until: string | null; reason: string; by: string | null; at: string };
 }
@@ -114,6 +114,7 @@ function CandidateCard({ c, editable, onCreate, onLink, onDecide, onRestore }: {
           </h2>
           <span className="badge neutral">{c.rule_label}</span>
           {c.source && <span className="muted small"> from {c.source}</span>}
+          {c.contains_personal_data && <span className="badge" title="The report holds personal data (personal identity numbers or email addresses). It is kept, and counts for AI handling.">Personal data</span>}
         </div>
         <span className="candidate-count" title={`${c.count} records`}>{c.count}</span>
       </header>
