@@ -25,13 +25,14 @@ export const RULES = {
   recurring_records: {
     label: 'Recurring records on a CI or service',
     description: 'At least min_records incidents or events on the same CI or service within window_days days, none of them linked to a problem.',
-    detection: 'proactive',
+    // Reactive when incidents have happened; proactive when only events point at it (#31, ITIL 4).
+    detection: 'reactive',
     settings: z.object({ min_records: count(5), window_days: days(7) }),
   },
   common_upstream: {
     label: 'Incidents sharing an underlying CI',
     description: 'At least min_records unlinked incidents on min_cis or more different CIs within window_days days that all depend on the same CI, up to max_depth steps down the dependency graph.',
-    detection: 'proactive',
+    detection: 'reactive',
     settings: z.object({ min_records: count(3), min_cis: z.number().int().min(2).max(50).default(2), window_days: days(7), max_depth: z.number().int().min(1).max(5).default(3) }),
   },
   major_without_problem: {
@@ -43,7 +44,7 @@ export const RULES = {
   recurring_resolution: {
     label: 'Same category and resolution',
     description: 'At least min_records incidents in the same category resolved with the same resolution code within window_days days, none linked to a problem. A workaround that keeps being applied is the classic sign.',
-    detection: 'proactive',
+    detection: 'reactive',
     settings: z.object({ min_records: count(4), window_days: days(30) }),
   },
   reported: {
@@ -126,6 +127,7 @@ interface Raw {
   cis: EvidenceCi[];
   notes?: string;
   source?: string;
+  contains_personal_data?: boolean;
   /** A title for the problem; from Kernel text only where it may be copied (checked in draft()). */
   title: (records: EvidenceRecord[]) => string;
   /** The reason for these records, or null when they no longer meet the rule (after a dismissal took some away). */
@@ -325,7 +327,7 @@ async function recurringResolution(db: Db, s: Settings<'recurring_resolution'>):
 
 async function reportedCandidates(db: Db): Promise<Raw[]> {
   const { rows } = await db.query(
-    `SELECT rc.id, rc.source, rc.title, rc.reason, rc.service, rc.evidence, rc.first_reported_at, rc.last_reported_at, c.ref AS ci_ref, c.name AS ci_name, c.class AS ci_class
+    `SELECT rc.id, rc.source, rc.title, rc.reason, rc.service, rc.evidence, rc.contains_personal_data, rc.first_reported_at, rc.last_reported_at, c.ref AS ci_ref, c.name AS ci_name, c.class AS ci_class
      FROM reported_candidates rc LEFT JOIN configuration_items c ON c.id = rc.ci_id
      WHERE rc.problem_ref IS NULL ORDER BY rc.last_reported_at DESC LIMIT ${LIMIT}`,
   );
@@ -379,6 +381,7 @@ async function reportedCandidates(db: Db): Promise<Raw[]> {
       ],
       notes: r.evidence.notes || undefined,
       source: r.source,
+      contains_personal_data: !!r.contains_personal_data,
       title: () => r.title,
       // A dismissal covers the report itself; the reporter sends a new key for a new finding.
       finish: (rs: EvidenceRecord[]) => (rs.some((x) => x.key === own.key) ? r.reason : null),
@@ -407,6 +410,7 @@ function present(raw: Raw, records: EvidenceRecord[], reason: string, decision?:
     ci_ref: raw.ci_ref,
     ci_class: raw.ci_class,
     source: raw.source,
+    ...(raw.contains_personal_data ? { contains_personal_data: true } : {}),
     count: records.length,
     incidents: records.filter((r) => r.kind === 'incident').length,
     events: records.filter((r) => r.kind === 'event').length,
@@ -468,7 +472,8 @@ export async function listCandidates(opts: Partial<z.infer<typeof listQuerySchem
   const counts = Object.fromEntries(RULE_IDS.map((r) => [r, all.filter((c) => c.raw.rule === r && !c.hidden).length]));
   const candidates = all
     .filter((c) => (show === 'hidden' ? c.hidden : !c.hidden) && (!opts.rule || c.raw.rule === opts.rule))
-    .sort((a, b) => b.records.length - a.records.length)
+    // A major incident without a problem comes first, whatever its size; then the most evidence.
+    .sort((a, b) => Number(b.raw.rule === 'major_without_problem') - Number(a.raw.rule === 'major_without_problem') || b.records.length - a.records.length)
     .map((c) => present(c.raw, c.records, c.reason, c.decision));
   return {
     rules: rules.map((r) => ({ ...r, count: counts[r.rule] })),
@@ -656,9 +661,15 @@ async function draft(db: Db, c: Resolved, creating: boolean) {
     title: title.slice(0, 300),
     description: description.slice(0, 20000),
     affected_service: c.raw.subject.type === 'service' || (c.raw.service && !c.raw.ci_ref) ? c.raw.service.slice(0, 200) : '',
-    detection: RULES[c.raw.rule].detection as 'reactive' | 'proactive',
+    detection: detectionOf(c.raw.rule, c.records),
     ci_refs: c.raw.cis.map((x) => x.ref),
   };
+}
+
+/** Problems found from incidents that already happened are reactive; only events, or external analysis, proactive. */
+export function detectionOf(rule: RuleId, records: EvidenceRecord[]): 'reactive' | 'proactive' {
+  if (rule === 'recurring_records') return records.some((r) => r.kind === 'incident') ? 'reactive' : 'proactive';
+  return RULES[rule].detection;
 }
 
 /** The prefilled problem for a candidate, as the form shows it before anything is created. */
