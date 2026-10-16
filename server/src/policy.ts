@@ -18,12 +18,12 @@ export const ACTIONS = [
   // Administration
   'user.manage', 'webhook.manage', 'audit.read', 'security.read', 'mfa.policy', 'team.manage', 'record.break_glass',
   // Integrations
-  'record.ingest', 'ci.ingest',
+  'record.ingest', 'ci.ingest', 'candidate.report',
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 
 const READ: Action[] = ['meta.read', 'problem.read', 'kedb.read', 'report.read', 'review.read', 'candidate.read', 'system.read', 'ci.read', 'incident.read', 'event.read', 'change.read', 'person.read', 'article.read', 'team.read'];
-const WORK: Action[] = ['problem.create', 'problem.update', 'problem.transition', 'problem.comment', 'problem.link', 'problem.watch', 'problem.assess', 'action.write', 'analysis.write', 'candidate.act', 'record.ingest', 'ci.annotate', 'incident.create', 'incident.update', 'event.ack', 'event.ingest', 'change.create', 'change.update', 'change.register', 'person.write', 'person.contact', 'attachment.add', 'article.write', 'article.publish', 'record.restrict', 'status.set'];
+const WORK: Action[] = ['problem.create', 'problem.update', 'problem.transition', 'problem.comment', 'problem.link', 'problem.watch', 'problem.assess', 'action.write', 'analysis.write', 'candidate.act', 'candidate.report', 'record.ingest', 'ci.annotate', 'incident.create', 'incident.update', 'event.ack', 'event.ingest', 'change.create', 'change.update', 'change.register', 'person.write', 'person.contact', 'attachment.add', 'article.write', 'article.publish', 'record.restrict', 'status.set'];
 const MANAGE: Action[] = ['view.share', 'problem.close', 'problem.reopen_closed', 'problem.flag_major', 'problem.accept_risk', 'problem.mark_duplicate', 'candidate.rule', 'category.manage', 'system.manage', 'backup.read', 'ci.manage', 'ci.ingest', 'incident.flag_major', 'event.manage', 'change.approve', 'change.manage', 'sla.manage', 'organisation.manage', 'article.publish_public', 'status.publish', 'record.redact'];
 const ADMIN: Action[] = ['user.manage', 'webhook.manage', 'audit.read', 'security.read', 'mfa.policy', 'team.manage', 'record.break_glass'];
 
@@ -33,7 +33,7 @@ export const PERMISSIONS: Record<Role, ReadonlySet<Action>> = {
   problem_manager: new Set([...READ, ...WORK, ...MANAGE]),
   admin: new Set([...READ, ...WORK, ...MANAGE, ...ADMIN]),
   // Integration accounts report records; they cannot read the rest of Kernel.
-  integration: new Set(['meta.read', 'record.ingest', 'ci.ingest', 'event.ingest', 'change.register']),
+  integration: new Set(['meta.read', 'record.ingest', 'ci.ingest', 'event.ingest', 'change.register', 'candidate.report']),
 };
 
 const MESSAGES: Partial<Record<Action, string>> = {

@@ -150,12 +150,12 @@ export const GUIDES: MethodGuide[] = [
   {
     id: 'review_candidates',
     title: 'Reviewing problem candidates',
-    purpose: 'Proactive problem management: decide for each cluster of recurring incidents/events whether it is a problem.',
+    purpose: 'Proactive problem management: decide for each candidate (found by a rule or reported by external analysis) whether it is a problem.',
     when: 'Regularly, e.g. weekly, or before the problem review meeting.',
     steps: [
-      'Go through the candidates (services with recurring unlinked records).',
+      'Go through the candidates; each says which rule found it, why, and the evidence (records, CIs).',
       'For each, look for an existing problem or known error that explains them.',
-      'Propose: link to an existing problem, log a new proactive problem, or dismiss (with the reason).',
+      'Propose: link to an existing problem, log a new problem (prefilled from the evidence), or dismiss or snooze it with the reason.',
     ],
     stop: 'Every candidate has been linked, logged or dismissed.',
     pitfalls: ['Logging a new problem when an existing one already covers the symptoms.', 'Dismissing without a reason.'],

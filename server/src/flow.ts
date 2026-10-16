@@ -6,7 +6,7 @@ import type { User } from './auth.js';
 import { query } from './db.js';
 import { moduleEnabled, type Module } from './modules.js';
 import { can, type Action } from './policy.js';
-import { listCandidates } from './integrations.js';
+import { listCandidates } from './candidates.js';
 
 interface Count { label: string; value: number; link: string }
 interface Node {

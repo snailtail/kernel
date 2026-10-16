@@ -25,6 +25,7 @@ import { registerSecurity } from './security.js';
 import { adminRoutes } from './routes/admin.js';
 import { authRoutes } from './routes/auth.js';
 import { integrationRoutes } from './routes/integrations.js';
+import { candidateRoutes } from './routes/candidates.js';
 import { cmdbRoutes } from './routes/cmdb.js';
 import { incidentRoutes } from './routes/incidents.js';
 import { eventRoutes } from './routes/events.js';
@@ -124,6 +125,7 @@ export async function buildApp(options: { logLevel?: string; serveWeb?: boolean 
   await app.register(problemRoutes);
   await app.register(adminRoutes);
   await app.register(integrationRoutes);
+  await app.register(candidateRoutes);
   await app.register(cmdbRoutes);
   await app.register(incidentRoutes);
   await app.register(eventRoutes);

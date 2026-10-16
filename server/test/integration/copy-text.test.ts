@@ -118,6 +118,20 @@ describe('copying text between records (#117)', { skip }, () => {
       },
     },
     {
+      path: 'problem candidate → new problem (the evidence listed in its description, #31)',
+      kind: 'title',
+      run: async (narrow, text) => {
+        ok(await pm.put('/api/candidates/rules/recurring_records', { settings: { min_records: 3, window_days: 7 } }));
+        const ci = (await pm.post('/api/cis', { name: `cand-${secret()}`, ci_type: 'application' })).body.ref;
+        const incs = [];
+        for (const title of [text, 'Slow page', 'Slow page again']) incs.push((await pm.post('/api/incidents', { title, cis: [ci] })).body.ref);
+        await narrowTo(incs[0], narrow);
+        const created = await pm.post('/api/candidates/create', { key: `recurring_records:ci:${ci}` });
+        ok(created);
+        return { target: created.body.ref, readable: await dumpProblem(created.body.ref) };
+      },
+    },
+    {
       path: 'bulk: incidents → problem link note (#110)',
       kind: 'title',
       run: async (narrow, text) => {
@@ -236,7 +250,7 @@ describe('copying text between records (#117)', { skip }, () => {
     // Where records are created. A new call site fails this test: decide whether it copies text from another record
     // (then use copyText / startNarrow from audience.ts and add a row above), and update the counts.
     const expected: Record<string, number> = {
-      'actions.ts': 1, 'changes.ts': 1, 'events.ts': 1, 'incidents.ts': 2, 'integrations.ts': 1, 'knowledge.ts': 1, 'mcp.ts': 3, 'problems.ts': 1, 'reviews.ts': 3, 'setup.ts': 2,
+      'actions.ts': 1, 'candidates.ts': 1, 'changes.ts': 1, 'events.ts': 1, 'incidents.ts': 2, 'knowledge.ts': 1, 'mcp.ts': 3, 'problems.ts': 1, 'reviews.ts': 3, 'setup.ts': 2,
     };
     const dir = new URL('../../src/', import.meta.url);
     const found: Record<string, number> = {};
@@ -247,7 +261,7 @@ describe('copying text between records (#117)', { skip }, () => {
     }
     assert.deepEqual(found, expected);
     // The files that copy between records use the shared rule.
-    for (const f of ['changes.ts', 'incidents.ts', 'knowledge.ts', 'major-incidents.ts', 'reviews.ts']) {
+    for (const f of ['candidates.ts', 'changes.ts', 'incidents.ts', 'knowledge.ts', 'major-incidents.ts', 'reviews.ts']) {
       assert.match(readFileSync(new URL(f, dir), 'utf8'), /from '\.\/audience\.js'/, `${f} copies between records without audience.ts`);
     }
   });

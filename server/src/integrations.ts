@@ -1,4 +1,4 @@
-// External systems (link URL templates), inbound incident/event records, and problem candidates.
+// External systems (link URL templates) and inbound incident/event records. Problem candidates are in candidates.ts.
 import { z } from 'zod';
 import type { User } from './auth.js';
 import { linkRecordCis } from './problem-cis.js';
@@ -66,7 +66,7 @@ export const recordSchema = z.object({
 export const ingestSchema = z.object({ records: z.array(recordSchema).min(1).max(500) });
 
 
-async function linkRecord(db: Db, user: User, problem: { id: number; ref: string }, r: { kind: string; reference: string; system: string; summary?: string }) {
+export async function linkRecord(db: Db, user: User, problem: { id: number; ref: string }, r: { kind: string; reference: string; system: string; summary?: string }) {
   const { rowCount } = await db.query(
     `INSERT INTO problem_links (problem_id, kind, reference, system, note, created_by) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT DO NOTHING`,
     [problem.id, r.kind, r.reference, r.system, r.summary ?? '', user.id],
@@ -137,119 +137,4 @@ export async function ingestRecords(user: User, input: z.infer<typeof ingestSche
     }
   });
   return { stored: unique.length, linked, errors };
-}
-
-// ---- Problem candidates ---------------------------------------------------------------------
-
-export const ruleSchema = z.object({ min_records: z.number().int().min(2).max(1000), window_days: z.number().int().min(1).max(365) });
-
-export async function getRule(): Promise<z.infer<typeof ruleSchema>> {
-  const { rows } = await query("SELECT value FROM settings WHERE key = 'candidate_rule'");
-  return rows[0]?.value ?? { min_records: 5, window_days: 7 };
-}
-
-export async function setRule(user: User, rule: z.infer<typeof ruleSchema>) {
-  authorize(user, 'candidate.rule');
-  const before = await getRule();
-  await query("INSERT INTO settings (key, value) VALUES ('candidate_rule', $1) ON CONFLICT (key) DO UPDATE SET value = excluded.value", [rule]);
-  await audit(null, { entity_type: 'setting', entity_ref: 'candidate_rule', action: 'update', changes: { rule: { from: before, to: rule } } });
-  return rule;
-}
-
-/**
- * CIs and services with at least min_records unlinked, undismissed records within the last window_days: incidents and
- * events reported from other tools, and native incidents (#28), in one pipeline.
- */
-export async function listCandidates() {
-  const rule = await getRule();
-  const { rows } = await query(
-    `WITH recs AS (
-       SELECT r.id, NULL::text AS incident_ref, NULL::bigint AS alert_id, r.system, r.kind, r.reference, r.summary, r.category, r.occurred_at, r.service, r.ci_id
-       FROM external_records r
-       WHERE r.problem_id IS NULL AND NOT r.dismissed AND r.occurred_at > now() - $1 * interval '1 day'
-       UNION ALL
-       SELECT NULL, i.ref, NULL, 'Kernel', 'incident', i.ref, i.title, coalesce(cat.name, ''), i.created_at, '',
-              (SELECT x.ci_id FROM incident_cis x JOIN configuration_items c ON c.id = x.ci_id WHERE x.incident_id = i.id ORDER BY c.criticality, c.id LIMIT 1)
-       FROM incidents i LEFT JOIN categories cat ON cat.id = i.category_id
-       WHERE i.problem_id IS NULL AND NOT i.candidate_dismissed AND i.created_at > now() - $1 * interval '1 day'
-         AND i.resolution_code IS DISTINCT FROM 'duplicate' AND i.resolution_code IS DISTINCT FROM 'cancelled'
-       UNION ALL
-       -- Alerts from monitoring (#30) that did not become an incident and no problem explains yet.
-       SELECT NULL, NULL, a.id, a.source, 'event', a.check_key, a.message, '', a.first_seen, a.ci_hint, a.ci_id
-       FROM alerts a
-       WHERE a.problem_id IS NULL AND a.incident_id IS NULL AND NOT a.candidate_dismissed AND a.suppressed = ''
-         AND a.first_seen > now() - $1 * interval '1 day'
-     )
-     SELECT coalesce(c.name, nullif(r.service, ''), 'Unspecified') AS service, c.ref AS ci_ref, c.class AS ci_class, count(*)::int AS count,
-       count(*) FILTER (WHERE r.kind = 'incident')::int AS incidents, count(*) FILTER (WHERE r.kind = 'event')::int AS events,
-       min(r.occurred_at) AS first_at, max(r.occurred_at) AS last_at,
-       json_agg(json_build_object('id', r.id, 'incident_ref', r.incident_ref, 'alert_id', r.alert_id, 'system', r.system, 'kind', r.kind, 'reference', r.reference,
-                                  'summary', r.summary, 'category', r.category, 'occurred_at', r.occurred_at) ORDER BY r.occurred_at DESC) AS records
-     FROM recs r LEFT JOIN configuration_items c ON c.id = r.ci_id
-     GROUP BY 1, 2, 3 HAVING count(*) >= $2 ORDER BY count(*) DESC`,
-    [rule.window_days, rule.min_records],
-  );
-  return { rule, candidates: rows };
-}
-
-export const candidateIdsSchema = z.object({
-  record_ids: z.array(z.number().int()).max(1000).default([]),
-  /** Native incidents (INC…) in the candidate. */
-  incident_refs: z.array(z.string().max(20)).max(1000).default([]),
-  /** Monitoring alerts in the candidate. */
-  alert_ids: z.array(z.number().int()).max(1000).default([]),
-});
-export const candidateActionSchema = candidateIdsSchema.refine((v) => v.record_ids.length + v.incident_refs.length + v.alert_ids.length > 0, 'Give record_ids, incident_refs or alert_ids');
-
-async function recordsById(db: Db, ids: number[]) {
-  if (!ids.length) return [];
-  const { rows } = await db.query('SELECT * FROM external_records WHERE id = ANY($1) AND problem_id IS NULL', [ids]);
-  return rows;
-}
-
-export async function createFromCandidate(user: User, input: { record_ids: number[]; incident_refs?: string[]; alert_ids?: number[]; problem: z.infer<typeof createProblemSchema> }) {
-  const created = await createProblem(user, input.problem);
-  await linkCandidate(user, created.ref, input.record_ids, input.incident_refs ?? [], input.alert_ids ?? []);
-  return getProblem(created.ref);
-}
-
-export async function linkCandidate(user: User, ref: string, recordIds: number[], incidentRefs: string[] = [], alertIds: number[] = []) {
-  authorize(user, 'candidate.act');
-  let linked = 0;
-  await tx(async (db) => {
-    const problem = await loadForUpdate(db, ref);
-    for (const r of await recordsById(db, recordIds)) {
-      await linkRecord(db, user, problem, r);
-      linked++;
-    }
-    // Alerts: the problem lists them as linked events, and their CIs become affected CIs.
-    const { rows: alerts } = await db.query(
-      `UPDATE alerts a SET problem_id = $2 FROM (SELECT id FROM alerts WHERE id = ANY($1) AND problem_id IS NULL FOR UPDATE) x
-       WHERE a.id = x.id RETURNING a.id, a.source, a.check_key, a.ci_id, a.ci_hint, (SELECT ref FROM configuration_items WHERE id = a.ci_id) AS ci_ref`,
-      [alertIds, problem.id],
-    );
-    for (const a of alerts) {
-      const reference = `${a.check_key} @ ${a.ci_ref ?? (a.ci_hint || 'unknown')}`.slice(0, 200);
-      const { rowCount } = await db.query(
-        `INSERT INTO problem_links (problem_id, kind, reference, system, note, created_by) VALUES ($1, 'event', $2, $3, $4, $5) ON CONFLICT DO NOTHING`,
-        [problem.id, reference, a.source, `Alert ${a.id}`, user.id],
-      );
-      if (rowCount) await logActivity(db, problem.id, user.id, 'link', `Linked event ${reference}`, { kind: 'event', reference, system: a.source, alert_id: a.id, action: 'add' });
-      if (a.ci_id) await db.query('INSERT INTO problem_cis (problem_id, ci_id, added_by) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [problem.id, a.ci_id, user.id]);
-      linked++;
-    }
-  });
-  const { rows: open } = await query('SELECT ref FROM incidents WHERE ref = ANY($1) AND problem_id IS NULL', [incidentRefs.map((r) => r.toUpperCase())]);
-  for (const i of open) await linkIncidentToProblem(user, i.ref, ref);
-  if (!linked && !open.length) throw badRequest('None of the records are unlinked any more');
-  return getProblem(ref);
-}
-
-export async function dismissRecords(user: User, recordIds: number[], incidentRefs: string[] = [], alertIds: number[] = []) {
-  authorize(user, 'candidate.act');
-  await query('UPDATE alerts SET candidate_dismissed = true WHERE id = ANY($1) AND problem_id IS NULL', [alertIds]);
-  const { rowCount } = await query('UPDATE external_records SET dismissed = true WHERE id = ANY($1) AND problem_id IS NULL', [recordIds]);
-  const { rowCount: incidents } = await query('UPDATE incidents SET candidate_dismissed = true WHERE ref = ANY($1) AND problem_id IS NULL', [incidentRefs.map((r) => r.toUpperCase())]);
-  await audit(null, { entity_type: 'external_record', action: 'dismiss', changes: { record_ids: recordIds, incident_refs: incidentRefs, dismissed: (rowCount ?? 0) + (incidents ?? 0) } });
-  return { dismissed: (rowCount ?? 0) + (incidents ?? 0) };
 }
