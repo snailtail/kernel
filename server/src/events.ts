@@ -259,6 +259,14 @@ async function groupKeyFor(rule: Rule, alert: { dedupe_ci: string }, ci: CiFacts
   return top ? `service:${top.ref}` : alert.dedupe_ci;
 }
 
+/** The team a rule sends incidents to: its team, or the active team named by its assignment group. */
+async function securityTeam(db: Db, rule: Pick<Rule, 'team_id' | 'assignment_group'>): Promise<number | null> {
+  if (rule.team_id) return rule.team_id;
+  if (!rule.assignment_group.trim()) return null;
+  const { rows } = await db.query('SELECT id FROM teams WHERE lower(name) = lower($1) AND active', [rule.assignment_group.trim()]);
+  return rows[0]?.id ?? null;
+}
+
 /** Opens or groups an incident for the alert under the rule; serialised per rule so concurrent alerts agree. */
 async function applyRule(db: Db, rule: Rule, alert: any, ci: CiFacts | null) {
   const groupKey = await groupKeyFor(rule, alert, ci);
@@ -271,6 +279,12 @@ async function applyRule(db: Db, rule: Rule, alert: any, ci: CiFacts | null) {
   };
   const security = alert.source === SECURITY_SOURCE;
   const label = security ? alert.check_key : `${alert.check_key} on ${ci?.name ?? (alert.ci_hint || 'unknown host')}`;
+  // A security incident is restricted to its team: without one nobody could open it, so it stays an alert (and the
+  // administrators' notice) until the rule has a team.
+  if (security && !(await securityTeam(db, rule))) {
+    await db.query('UPDATE alerts SET rule_id = $2 WHERE id = $1', [alert.id, rule.id]);
+    return { incident: null, action: 'no_security_team' as const };
+  }
   // 1. An open incident for the same group: group into it.
   const { rows: open } = await db.query(
     `SELECT id, ref FROM incidents WHERE event_rule_id = $1 AND event_group_key = $2 AND status NOT IN ('resolved', 'closed') ORDER BY created_at DESC LIMIT 1`,
@@ -442,7 +456,10 @@ async function processOne(db: Db, source: string, ciSourceSystem: string, e: Nor
     if (rule) {
       const applied = await applyRule(db, rule, alert, ci);
       incident = applied.incident;
-      outcome = applied.action === 'created' ? 'incident_created' : applied.action === 'rate_limited' ? 'rate_limited' : `incident_${applied.action}`;
+      // A repeat of a security alert that cannot open an incident is just that: a repeat (no new notice).
+      if (applied.action !== 'no_security_team' || fresh) {
+        outcome = applied.action === 'created' ? 'incident_created' : applied.action === 'rate_limited' || applied.action === 'no_security_team' ? applied.action : `incident_${applied.action}`;
+      }
     }
   }
   await record(alert.id, outcome, !!alert.suppressed);

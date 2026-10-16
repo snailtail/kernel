@@ -70,9 +70,14 @@ its subject is back under the threshold; the others stay open until someone clos
 - **Incidents.** The event rule **Security alerts** (added by the migration, first in order) turns minor and worse
   alerts into an incident, all grouped into one open incident per four hours, at most three an hour. A security
   incident is always in the **Security** category and **restricted** (ADR 0002) to the rule's team, whatever the rule
-  says. Give the rule a team under Events → Rules; without one only administrators can open it, with break-glass.
+  says. **Choose the team** under Events → Rules (its team, or an active team named as its group). Until then no
+  incident is opened, since a restricted incident without a team would be visible to no one; the alerts and the
+  administrators' notices still come, and the security status and the Security events page say so.
   Security alerts only ever match rules that name their source, never a catch-all rule.
 - **Notifications.** Every new or reopened security alert notifies all administrators (event `security_alert`, in
   the app and by email and chat if they have them).
 - **Who sees them.** Security alerts name accounts and addresses, so they are left out of the alert list, bulk actions
   and problem candidates for everyone without `security.read` (administrators).
+- **How long they stay.** Closed security alerts and their raw events follow `security_event_days`, not the event
+  retention. An alert grouped into a security incident stays with that restricted incident. Erasing a user replaces
+  the account's name in security alerts with "deleted user #id"; IP addresses in them stay until retention.
