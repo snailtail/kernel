@@ -2,6 +2,7 @@ import { buildApp } from './app.js';
 import { logger } from './log.js';
 import { pruneDeliveries } from './dev.js';
 import { startChainVerification } from './audit.js';
+import { purgeSecurityEvents } from './security-events.js';
 import { asSystem } from './context.js';
 import { pruneIdempotencyKeys } from './idempotency.js';
 import { checkConfiguration } from './security.js';
@@ -32,6 +33,8 @@ await recordActiveKey();
 setInterval(() => query('DELETE FROM sessions WHERE expires_at < now()').catch(() => {}), 3600_000).unref();
 // IP addresses and user agents of audit entries are kept for a limited time (settings.privacy.audit_context_days).
 setInterval(() => query("DELETE FROM audit_context WHERE created_at < now() - coalesce((SELECT (value->>'audit_context_days')::int FROM settings WHERE key = 'privacy'), 365) * interval '1 day'").catch(() => {}), 86400_000).unref();
+// Security events and the addresses tokens were used from, likewise (settings.privacy.security_event_days, #64).
+setInterval(() => purgeSecurityEvents().catch(() => {}), 86400_000).unref();
 asSystem(() => {
   startWorker(log);
   startEventWorker(log);

@@ -6,12 +6,10 @@ import { config } from './config.js';
 import { pool, query } from './db.js';
 import { forbidden, HttpError } from './errors.js';
 import { audit } from './audit.js';
-import { logger } from './log.js';
 import { mfaRequiredFor } from './mfapolicy.js';
 import { authorize, type Action } from './policy.js';
 import { checkSameOrigin } from './security.js';
-
-const securityLog = logger.child({ event: { dataset: 'kernel.security' } });
+import { originOf, securityEvent } from './security-events.js';
 import type { Role } from './workflow.js';
 
 export interface User {
@@ -133,6 +131,7 @@ export async function listSessions(user: User, req: FastifyRequest) {
 export async function revokeSession(user: User, id: string) {
   const { rowCount } = await query('DELETE FROM sessions WHERE user_id = $1 AND left(token_hash, 16) = $2', [user.id, id]);
   if (!rowCount) throw new HttpError(404, 'Session not found');
+  securityEvent({ action: 'auth.session_revoked', category: 'authentication', outcome: 'success', message: 'Session signed out remotely', target: `#${user.id}` });
 }
 
 // ---- Brute force protection ------------------------------------------------------------------
@@ -157,7 +156,9 @@ export function guardLogin(ip: string, account: string, knownDevice = false) {
   }
 }
 
-export function loginFailed(ip: string, account: string) {
+export function loginFailed(req: FastifyRequest, account: string, reason: 'password' | 'second_factor' | 'sso_required') {
+  const ip = req.ip;
+  securityEvent({ action: 'auth.login_failed', category: 'authentication', outcome: 'failure', message: reason === 'second_factor' ? 'Invalid second factor' : reason === 'sso_required' ? 'Local sign-in refused: single sign-on required' : 'Invalid username or password', account, detail: { reason } }, req);
   for (const key of [`ip:${ip}`, `acct:${account}`]) {
     const e = failures.get(key);
     if (!e || e.until <= Date.now()) failures.set(key, { count: 1, until: Date.now() + WINDOW_MS });
@@ -172,7 +173,6 @@ export function loginFailed(ip: string, account: string) {
       const { rows: admins } = await query("SELECT id FROM users WHERE role = 'admin' AND active");
       await notify(pool, { users: [rows[0].id, ...admins.map((a) => a.id)], event: 'account_security', ref: '', title: 'Account locked', summary: `Sign-in to ${account} was locked for 15 minutes after repeated failed attempts.`, path: '/settings', dedupe: `locked:${account}:${Math.floor(Date.now() / 900_000)}` });
     })().catch(() => {});
-    securityLog.warn({ event: { action: 'auth.account_locked', category: ['authentication'] }, user: { name: account }, source: { ip } }, 'Account temporarily locked after failed logins');
   }
   if (failures.size > 50_000) for (const [k, v] of failures) if (v.until <= Date.now()) failures.delete(k);
 }
@@ -181,14 +181,33 @@ export function loginSucceeded(account: string) {
   failures.delete(`acct:${account}`);
 }
 
-async function userFromApiToken(token: string, ip: string): Promise<(User & { scopes: TokenScope[]; token_prefix: string }) | null> {
+async function userFromApiToken(req: FastifyRequest, token: string): Promise<(User & { scopes: TokenScope[]; token_prefix: string }) | null> {
+  const ip = req.ip;
   const { rows } = await query(
-    `UPDATE api_tokens t SET last_used_at = now(), last_used_ip = $2 FROM users u
-     WHERE u.id = t.user_id AND t.token_hash = $1 AND u.active AND t.revoked_at IS NULL AND (t.expires_at IS NULL OR t.expires_at > now())
-     RETURNING ${USER_COLUMNS}, t.scopes, t.prefix AS token_prefix`,
+    `UPDATE api_tokens t SET last_used_at = now(), last_used_ip = $2 FROM users u, api_tokens old
+     WHERE old.id = t.id AND u.id = t.user_id AND t.token_hash = $1 AND u.active AND t.revoked_at IS NULL AND (t.expires_at IS NULL OR t.expires_at > now())
+     RETURNING ${USER_COLUMNS}, t.scopes, t.prefix AS token_prefix, t.id AS token_id, old.last_used_ip AS previous_ip`,
     [sha256(token), ip],
   );
-  return rows[0] ?? null;
+  if (!rows[0]) return null;
+  const { token_id, previous_ip, ...found } = rows[0];
+  await noteTokenAddress(req, token_id, found.id, found.token_prefix, previous_ip);
+  return found;
+}
+
+// Addresses already known per token, so a busy token costs no extra write per request.
+const seenAddresses = new Set<string>();
+/** The first use of a token from an address it was never used from is a security event (#64). */
+async function noteTokenAddress(req: FastifyRequest, tokenId: number, userId: number, prefix: string, previousIp: string) {
+  const key = `${tokenId}|${req.ip}`;
+  if (seenAddresses.has(key)) return;
+  const { rows } = await query('INSERT INTO api_token_ips (token_id, ip) VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING ip', [tokenId, req.ip]);
+  if (seenAddresses.size > 50_000) seenAddresses.clear();
+  seenAddresses.add(key);
+  // The very first use (no earlier address) is expected; a further address is worth a look.
+  if (rows[0] && previousIp && previousIp !== req.ip) {
+    securityEvent({ action: 'auth.token_new_address', category: 'authentication', outcome: 'info', severity: 'warning', message: `API token ${prefix}… used from a new address`, userId, target: prefix, detail: { previous_ip: previousIp } }, req, { ...originOf(req), userId, tokenPrefix: prefix });
+  }
 }
 
 /**
@@ -215,7 +234,7 @@ export function checkTokenScope(req: FastifyRequest) {
 export async function authenticate(req: FastifyRequest) {
   const bearer = req.headers.authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
   if (bearer) {
-    const found = await userFromApiToken(bearer, req.ip);
+    const found = await userFromApiToken(req, bearer);
     if (found) {
       const { scopes, token_prefix, ...user } = found;
       req.user = user;

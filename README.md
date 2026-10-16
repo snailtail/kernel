@@ -304,6 +304,10 @@ To deploy to the test server, push your commits and run `scripts/deploy.sh`. It 
   The table is append-only (triggers, and the runtime role has no UPDATE/DELETE and does not own it), entries are
   hash-chained and verified hourly, and each entry's id and hash go to the `kernel.audit` log stream as an external
   anchor. Administration → Audit trail searches and exports it; MCP has `get_history` and `query_audit_log`.
+- **Security events** (sign-ins and failures, lock-outs, denied requests, invalid tokens, a token used from a new
+  address, role and credential changes, exports and reveals, CSP reports, rate limits, invalid webhook signatures,
+  blocked outbound requests): one line each in the `kernel.security` log stream and a row kept for a year.
+  Administration → Security events; MCP `query_security_events`. See [docs/security-events.md](docs/security-events.md).
 - With `KERNEL_APP_DB_PASSWORD` the app runs as a least-privilege PostgreSQL role without DDL rights.
 - Containers run with a read-only filesystem, no Linux capabilities beyond what PostgreSQL needs,
   `no-new-privileges` and memory/PID limits. PostgreSQL is not published on the host.

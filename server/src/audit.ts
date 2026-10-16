@@ -7,6 +7,7 @@ import { currentContext } from './context.js';
 import { afterCommit, query, tx } from './db.js';
 import { badRequest } from './errors.js';
 import { logger } from './log.js';
+import { fromAudit, originOf } from './security-events.js';
 
 type Db = { query: (sql: string, params?: unknown[]) => Promise<{ rows: any[] }> };
 
@@ -20,7 +21,8 @@ export interface AuditEntry {
   actor?: { id: number; name: string };
 }
 
-const auditLogger = logger.child({ event: { dataset: 'kernel.audit' } });
+// The dataset sits in each line's event object: a child logger binding `event` would give the line two event keys.
+const auditLogger = logger;
 
 /** Receives each committed entry's id and hash (tests replace it to observe anchors). */
 export let anchorSink: (a: { id: number; hash: string }) => void = () => {};
@@ -162,8 +164,11 @@ export async function audit(db: Db | null, entry: AuditEntry) {
     // Emitted only after commit, so a rolled-back change leaves no anchor.
     const anchor = { id: Number(inserted[0].id), hash };
     afterCommit(client, () => anchorSink(anchor));
+    // Sign-ins, role and credential changes, exports and reveals are also security events (#64).
+    const origin = { ...originOf(), userId: ctx.userId, actorType: ctx.actorType };
+    afterCommit(client, () => fromAudit({ ...entry, entity_ref: entityRef }, origin));
     afterCommit(client, () => auditLogger.info(
-      { event: { kind: 'event', category: ['configuration'], action: `${entry.entity_type}.${entry.action}` }, audit: { id: Number(inserted[0].id), hash }, user: { id: ctx.userId }, actor_type: ctx.actorType, entity: { type: entry.entity_type, ref: entry.entity_ref }, fields: Object.keys(entry.changes ?? {}), reason: entry.reason || undefined },
+      { event: { dataset: 'kernel.audit', kind: 'event', category: ['configuration'], action: `${entry.entity_type}.${entry.action}` }, audit: { id: Number(inserted[0].id), hash }, user: { id: ctx.userId }, actor_type: ctx.actorType, entity: { type: entry.entity_type, ref: entry.entity_ref }, fields: Object.keys(entry.changes ?? {}), reason: entry.reason || undefined },
       `${entry.entity_type}.${entry.action}`,
     ));
   };

@@ -46,6 +46,7 @@ import * as reports from './reports.js';
 import { traceTool } from './metrics.js';
 import { idempotent } from './idempotency.js';
 import { can, type Action } from './policy.js';
+import { querySecurityEvents, SECURITY_CATEGORIES, SECURITY_OUTCOMES, securityEvent, securityQuerySchema } from './security-events.js';
 import { audit, auditQuerySchema, queryAudit } from './audit.js';
 import { approvalsRequired, requestApproval, type ApprovalKind } from './approvals.js';
 import { problemMarkdown } from './export.js';
@@ -170,7 +171,7 @@ function buildServer(user: User, scopes?: string[]) {
     search_problems: 'problem.read', get_problem: 'problem.read', get_history: 'meta.read', get_impact: 'ci.read', find_similar_problems: 'problem.read',
     export_problem: 'problem.read', list_actions: 'problem.read', get_dashboard: 'problem.read',
     search_known_errors: 'kedb.read', get_report: 'report.read', get_review_agenda: 'review.read',
-    list_problem_candidates: 'candidate.read', query_audit_log: 'audit.read',
+    list_problem_candidates: 'candidate.read', query_audit_log: 'audit.read', query_security_events: 'security.read',
     create_problem: 'problem.create', update_problem: 'problem.update', transition_problem: 'problem.transition',
     assess_known_error: 'problem.assess', add_comment: 'problem.comment', link_record: 'problem.link', unlink_record: 'problem.link',
     watch_problem: 'problem.watch', mark_duplicate: 'problem.mark_duplicate',
@@ -196,12 +197,18 @@ function buildServer(user: User, scopes?: string[]) {
       name,
       { description, inputSchema, annotations: { readOnlyHint: readOnly, destructiveHint: !!options.destructive, idempotentHint: readOnly } },
       (async (args: any) => {
+        // Every call is a security event (#64): the tool, who and which record, never the content. Reads go to the
+        // log stream only; writes and failures are also stored.
+        const target = typeof args?.ref === 'string' ? args.ref.slice(0, 40) : '';
         try {
           // Agents never read a confidential record's free text (#61).
-          return json(await maskForViewer(null, await traceTool(name, () => run(args))));
+          const result = json(await maskForViewer(null, await traceTool(name, () => run(args))));
+          securityEvent({ action: 'mcp.tool_call', category: 'api', outcome: 'success', message: `MCP ${name}`, target, detail: { tool: name, read_only: readOnly }, store: !readOnly });
+          return result;
         } catch (err) {
           const message =
             err instanceof z.ZodError ? err.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ') : (err as Error).message;
+          securityEvent({ action: 'mcp.tool_call', category: 'api', outcome: 'failure', message: `MCP ${name} failed`, target, detail: { tool: name, read_only: readOnly, error: message.slice(0, 200) } });
           return { isError: true, content: [{ type: 'text' as const, text: message }] };
         }
       }) as any,
@@ -1078,6 +1085,25 @@ function buildServer(user: User, scopes?: string[]) {
       },
       true,
       async (args) => queryAudit(auditQuerySchema.parse({ ...args, limit: args.limit ?? 100 })),
+    );
+    tool(
+      'query_security_events',
+      'Search security events (admins): sign-ins and failed sign-ins, lock-outs, denied requests, invalid tokens, token use from a new address, role and credential changes, exports and reveals, CSP reports, rate limits, invalid webhook signatures and blocked outbound requests. Filter by action, category, outcome, minimum severity, user, IP, token prefix, target or date range.',
+      {
+        action: z.string().optional().describe('e.g. auth.login_failed, authz.denied, user.update'),
+        category: z.enum(SECURITY_CATEGORIES).optional(),
+        outcome: z.enum(SECURITY_OUTCOMES).optional(),
+        min_severity: z.enum(['info', 'warning', 'minor', 'major', 'critical']).optional(),
+        user: z.string().optional(),
+        ip: z.string().optional(),
+        token_prefix: z.string().optional(),
+        target: z.string().optional(),
+        from: z.string().optional().describe('YYYY-MM-DD'),
+        to: z.string().optional().describe('YYYY-MM-DD'),
+        limit: z.number().int().min(1).max(500).optional(),
+      },
+      true,
+      async (args) => querySecurityEvents(securityQuerySchema.parse({ ...args, limit: args.limit ?? 100 })),
     );
   }
 

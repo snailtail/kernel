@@ -7,7 +7,7 @@ import { backupStatus } from './backups.js';
 import { config } from './config.js';
 import { query } from './db.js';
 import { forbidden, HttpError } from './errors.js';
-import { logger } from './log.js';
+import { securityEvent } from './security-events.js';
 import { rateLimit } from './ratelimit.js';
 import { lastChainVerification } from './audit.js';
 import { storageUse } from './attachments.js';
@@ -15,7 +15,6 @@ import { secretsConfigured } from './secrets.js';
 import { activeKey, keyring } from './keys.js';
 import { keyUsage } from './rotate-keys.js';
 
-const securityLog = logger.child({ event: { dataset: 'kernel.security' } });
 
 // Applied to the root instance (not as an encapsulated plugin) so headers and hooks cover every route.
 export async function registerSecurity(app: FastifyInstance<any, any, any, any>) {
@@ -83,18 +82,17 @@ export async function registerSecurity(app: FastifyInstance<any, any, any, any>)
       return undefined;
     };
     // Only the key fields, truncated: reports are attacker-controllable input.
-    securityLog.warn(
-      {
-        event: { action: 'csp.violation', category: ['web'] },
-        csp: {
-          directive: pick('effective-directive', 'effectiveDirective', 'violated-directive'),
-          blocked: pick('blocked-uri', 'blockedURL'),
-          document: pick('document-uri', 'documentURL'),
-        },
-        source: { ip: req.ip },
+    securityEvent({
+      action: 'web.csp_violation',
+      category: 'web',
+      outcome: 'blocked',
+      message: 'Content Security Policy violation',
+      detail: {
+        directive: pick('effective-directive', 'effectiveDirective', 'violated-directive'),
+        blocked: pick('blocked-uri', 'blockedURL'),
+        document: pick('document-uri', 'documentURL'),
       },
-      'Content Security Policy violation',
-    );
+    }, req);
     reply.code(204);
   });
 }
