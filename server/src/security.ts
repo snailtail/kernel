@@ -128,7 +128,7 @@ export interface SecurityCheck {
 
 /** A checklist of the security-relevant configuration, for the admin Security page. */
 export async function securityStatus(): Promise<{ checks: SecurityCheck[] }> {
-  const [admins, mustChange, neverExpiring, backups, mfaAdmins, dbRole, legacyAudit, attachmentUse, breakGlass] = await Promise.all([
+  const [admins, mustChange, neverExpiring, backups, mfaAdmins, dbRole, legacyAudit, attachmentUse, breakGlass, securityTeam] = await Promise.all([
     query("SELECT count(*)::int AS n FROM users WHERE role = 'admin' AND active"),
     query('SELECT count(*)::int AS n FROM users WHERE must_change_password AND active'),
     query('SELECT count(*)::int AS n FROM api_tokens WHERE expires_at IS NULL'),
@@ -139,6 +139,9 @@ export async function securityStatus(): Promise<{ checks: SecurityCheck[] }> {
     query("SELECT count(*)::int AS n FROM audit_log WHERE actor_name <> '' OR ip <> ''"),
     storageUse(),
     query('SELECT count(*)::int AS n FROM visibility_breakglass WHERE expires_at > now()'),
+    // An enabled rule for Kernel's security alerts with a team (by id, or an active team named as its group).
+    query(`SELECT count(*)::int AS n FROM event_rules r WHERE r.enabled AND r.conditions->'sources' ? 'Kernel security'
+             AND (r.team_id IS NOT NULL OR EXISTS (SELECT 1 FROM teams t WHERE t.active AND r.assignment_group <> '' AND lower(t.name) = lower(trim(r.assignment_group))))`),
   ]);
   const usedPct = Math.round((attachmentUse.bytes / attachmentUse.quota_bytes) * 100);
   // Key rotation (#63): which keys are in use, and whether any is missing from the keyring.
@@ -209,6 +212,14 @@ export async function securityStatus(): Promise<{ checks: SecurityCheck[] }> {
           role.me !== role.owner && !role.superuser
             ? `Kernel runs as "${role.me}", which cannot change the schema or the audit trail.`
             : `Kernel runs as the table owner "${role.me}"${role.superuser ? ' (a superuser)' : ''}; set KERNEL_APP_DB_PASSWORD so it uses a restricted role.`,
+      },
+      {
+        id: 'security_team',
+        label: 'Security incidents',
+        ok: securityTeam.rows[0].n > 0,
+        detail: securityTeam.rows[0].n
+          ? 'Security alerts of severity minor and worse open a restricted incident for the team on the "Security alerts" event rule.'
+          : 'Choose the team that handles security incidents on the "Security alerts" event rule (Events → Rules). Until then security alerts only notify administrators.',
       },
       { id: 'admins', label: 'Administrators', ok: admins.rows[0].n >= 1 && admins.rows[0].n <= 3, detail: `${admins.rows[0].n} active administrator(s); keep it small but more than one person able to recover.` },
       { id: 'tokens', label: 'API tokens expire', ok: neverExpiring.rows[0].n === 0, detail: neverExpiring.rows[0].n ? `${neverExpiring.rows[0].n} token(s) never expire; revoke and recreate them with an expiry.` : 'All tokens have an expiry date.' },

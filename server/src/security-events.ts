@@ -357,4 +357,8 @@ export async function purgeSecurityEvents() {
   const days = "coalesce((SELECT (value->>'security_event_days')::int FROM settings WHERE key = 'privacy'), 365) * interval '1 day'";
   await query(`DELETE FROM security_events WHERE at < now() - ${days}`);
   await query(`DELETE FROM api_token_ips WHERE first_seen < now() - ${days}`);
+  // Kernel's own security alerts name accounts and addresses: they follow this retention, not the alerts' own
+  // (closed ones only; an open alert, or one an incident still points to, is kept).
+  await query(`DELETE FROM events WHERE source = 'Kernel security' AND received_at < now() - ${days}`);
+  await query(`DELETE FROM alerts WHERE source = 'Kernel security' AND status = 'closed' AND incident_id IS NULL AND last_seen < now() - ${days}`);
 }

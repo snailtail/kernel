@@ -200,7 +200,7 @@ interface Alerting {
 interface AlertingStatus {
   settings: Alerting;
   source: string;
-  rules: { id: number; name: string; enabled: boolean; min_severity: string | null; team_id: number | null; team_name: string | null; assignment_group: string }[];
+  rules: { id: number; name: string; enabled: boolean; min_severity: string | null; team_id: number | null; team_name: string | null }[];
   open_alerts: { id: number; check_key: string; severity: string; message: string; count: number; last_seen: string; incident_ref: string | null }[];
 }
 interface Privacy { audit_context_days: number; security_event_days: number }
@@ -264,7 +264,7 @@ function SecurityAlerting() {
         {rule ? (
           <>Minor and worse alerts open a restricted security incident through the event rule <Link to="/events?tab=rules">{rule.name}</Link>
             {!rule.enabled && <strong> (turned off)</strong>}
-            {rule.team_name ? <>, for the team {rule.team_name}.</> : <>. <strong>It has no team</strong>, so only administrators can open those incidents, with break-glass.</>}
+            {rule.team_name ? <>, for the team {rule.team_name}.</> : <>. <strong>Choose the team that handles security incidents</strong> on that rule: until then security alerts open no incident.</>}
             {' '}Every new alert also notifies administrators.</>
         ) : <>No event rule names the source “{data.source}”, so security alerts never open incidents; administrators are still notified.</>}
       </p>

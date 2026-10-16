@@ -4,7 +4,7 @@ import { Client, ownerQuery, skip, startKernel, type Harness } from './harness.j
 
 describe('security alerting (#64, part 2)', { skip }, () => {
   let k: Harness;
-  let admin: Client, analyst: Client;
+  let admin: Client, analyst: Client, analyst2: Client;
   let sec: typeof import('../../src/security-events.js');
   let run: () => Promise<any[]>;
 
@@ -21,7 +21,7 @@ describe('security alerting (#64, part 2)', { skip }, () => {
 
   before(async () => {
     k = await startKernel();
-    [admin, analyst] = await Promise.all([k.login('admin'), k.login('analyst')]);
+    [admin, analyst, analyst2] = await Promise.all([k.login('admin'), k.login('analyst'), k.login('analyst2')]);
     sec = await import('../../src/security-events.js');
     ({ runSecurityAlerting: run } = await import('../../src/security-alerts.js'));
   });
@@ -34,7 +34,7 @@ describe('security alerting (#64, part 2)', { skip }, () => {
     assert.deepEqual(rows[0], { rows: sec.PER_MINUTE + 1, weight: 40, suppressed: 40 - sec.PER_MINUTE - 1 });
   });
 
-  test('a password spray from one address is counted in full, opens a restricted security incident and tells administrators', async () => {
+  test('a password spray from one address is counted in full; without a security team it stays an alert and tells administrators', async () => {
     // 60 failures against 60 names: past the cap of 30 rows, and past five times the threshold of 10.
     failures('203.0.113.7', 60, (i) => `sprayed-${i}`);
     await settle();
@@ -42,14 +42,14 @@ describe('security alerting (#64, part 2)', { skip }, () => {
     const check = 'Failed sign-ins from 203.0.113.7';
     const hit = results.find((r) => r.check === check);
     assert.ok(hit, 'the address crossed the threshold');
-    assert.equal(hit.outcome, 'incident_created');
+    assert.equal(hit.outcome, 'no_security_team', 'a restricted incident without a team would be visible to no one');
+    assert.equal(hit.incident ?? null, null);
     const a = await alert(check);
     assert.equal(a.severity, 'major', 'counted in full: 60 is five times the threshold, though only 31 rows were stored');
     assert.match(a.message, /60 failed sign-ins/);
-
-    const { rows: [inc] } = await ownerQuery('SELECT i.restricted, i.source, c.name AS category FROM incidents i LEFT JOIN categories c ON c.id = i.category_id WHERE i.ref = $1', [hit.incident]);
-    assert.deepEqual(inc, { restricted: true, source: 'event', category: 'Security' });
-    assert.equal((await analyst.get(`/api/incidents/${hit.incident}`)).status, 404, 'restricted: not even its existence shows');
+    const status = (await admin.get('/api/admin/security')).body.checks.find((c: any) => c.id === 'security_team');
+    assert.equal(status.ok, false);
+    assert.match(status.detail, /Choose the team that handles security incidents/);
 
     const { rows: notes } = await ownerQuery("SELECT u.role FROM notifications n JOIN users u ON u.id = n.user_id WHERE n.event = 'security_alert' AND n.title = $1", [check]);
     assert.ok(notes.length >= 1 && notes.every((n) => n.role === 'admin'), 'administrators, and only they, are notified');
@@ -70,6 +70,23 @@ describe('security alerting (#64, part 2)', { skip }, () => {
     await ownerQuery("UPDATE security_events SET at = at - interval '1 hour' WHERE ip = '203.0.113.7'");
     assert.equal((await run()).find((r) => r.check === check)?.outcome, 'cleared');
     assert.equal((await alert(check)).status, 'closed');
+  });
+
+  test('with a team, a security incident in the Security category that only the team can open', async () => {
+    const { rows: [team] } = await ownerQuery("INSERT INTO teams (name) VALUES ('Security team') RETURNING id");
+    await ownerQuery("INSERT INTO team_members (team_id, user_id) SELECT $1, id FROM users WHERE username = 'analyst2'", [team.id]);
+    await ownerQuery("UPDATE event_rules SET team_id = $1 WHERE name = 'Security alerts'", [team.id]);
+    assert.equal((await admin.get('/api/admin/security')).body.checks.find((c: any) => c.id === 'security_team').ok, true);
+    assert.equal((await admin.get('/api/admin/security-alerting')).body.rules[0].team_name, 'Security team');
+
+    failures('203.0.113.8', 12, (i) => `team-${i}`);
+    await settle();
+    const hit = (await run()).find((r) => r.check === 'Failed sign-ins from 203.0.113.8');
+    assert.equal(hit?.outcome, 'incident_created');
+    const { rows: [inc] } = await ownerQuery('SELECT i.restricted, i.restricted_teams, i.source, c.name AS category FROM incidents i LEFT JOIN categories c ON c.id = i.category_id WHERE i.ref = $1', [hit.incident]);
+    assert.deepEqual(inc, { restricted: true, restricted_teams: [team.id], source: 'event', category: 'Security' });
+    assert.equal((await analyst2.get(`/api/incidents/${hit.incident}`)).status, 200, 'the security team opens it');
+    assert.equal((await analyst.get(`/api/incidents/${hit.incident}`)).status, 404, 'anyone else: not even its existence shows');
   });
 
   test('failed sign-ins for one account, and erasure removes its name from the alert', async () => {

@@ -228,7 +228,7 @@ async function stillOverThreshold(cfg: Alerting, checks: string[]) {
   return over;
 }
 
-const FRESH = new Set(['opened', 'reopened', 'incident_created', 'incident_grouped', 'incident_reopened', 'rate_limited']);
+const FRESH = new Set(['opened', 'reopened', 'incident_created', 'incident_grouped', 'incident_reopened', 'rate_limited', 'no_security_team']);
 
 async function notifyAdmins(hits: Detection[], results: EventResult[]) {
   const fresh = results.map((r, n) => ({ r, h: hits[n] })).filter(({ r, h }) => h && FRESH.has(r.outcome));
@@ -268,8 +268,10 @@ export async function alertingStatus() {
   const [settings, rules, open] = await Promise.all([
     alertingSettings(),
     query(
-      `SELECT r.id, r.name, r.enabled, r.conditions->>'min_severity' AS min_severity, r.team_id, t.name AS team_name, r.assignment_group
-       FROM event_rules r LEFT JOIN teams t ON t.id = r.team_id WHERE r.conditions->'sources' ? $1 ORDER BY r.position, r.id`,
+      `SELECT r.id, r.name, r.enabled, r.conditions->>'min_severity' AS min_severity, coalesce(t.id, g.id) AS team_id, coalesce(t.name, g.name) AS team_name
+       FROM event_rules r LEFT JOIN teams t ON t.id = r.team_id
+       LEFT JOIN teams g ON r.team_id IS NULL AND r.assignment_group <> '' AND lower(g.name) = lower(trim(r.assignment_group)) AND g.active
+       WHERE r.conditions->'sources' ? $1 ORDER BY r.position, r.id`,
       [SECURITY_SOURCE],
     ),
     query(
