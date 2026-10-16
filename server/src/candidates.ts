@@ -7,7 +7,7 @@
 import { z } from 'zod';
 import type { User } from './auth.js';
 import { audit, requireReason } from './audit.js';
-import { BROADEST, copyText, mayCopyText, type Audience } from './audience.js';
+import { audienceOf, BROADEST, copyText, mayCopyText, titleAudience, type Audience } from './audience.js';
 import { query, tx } from './db.js';
 import { badRequest, conflict, notFound } from './errors.js';
 import { attachToProblem } from './incidents.js';
@@ -15,6 +15,7 @@ import { linkRecord } from './integrations.js';
 import { authorize } from './policy.js';
 import { createProblemInTx, createProblemSchema, getProblem, loadForUpdate, logActivity, problemFields, type Db } from './problems.js';
 import { redact, scan } from './sensitive.js';
+import { capacityWarnings, changeCorrelation, flapping, risingWarnings, selfClearing, TREND_RULES } from './candidate-trends.js';
 
 // ---- Rules ------------------------------------------------------------------------------------------------------
 
@@ -27,32 +28,39 @@ export const RULES = {
     description: 'At least min_records incidents or events on the same CI or service within window_days days, none of them linked to a problem.',
     // Reactive when incidents have happened; proactive when only events point at it (#31, ITIL 4).
     detection: 'reactive',
+    proactive: false,
     settings: z.object({ min_records: count(5), window_days: days(7) }),
   },
   common_upstream: {
     label: 'Incidents sharing an underlying CI',
     description: 'At least min_records unlinked incidents on min_cis or more different CIs within window_days days that all depend on the same CI, up to max_depth steps down the dependency graph.',
     detection: 'reactive',
+    proactive: false,
     settings: z.object({ min_records: count(3), min_cis: z.number().int().min(2).max(50).default(2), window_days: days(7), max_depth: z.number().int().min(1).max(5).default(3) }),
   },
   major_without_problem: {
     label: 'Major incident resolved without a problem',
     description: 'A major incident resolved within the last window_days days that no problem explains yet. Its underlying cause is not being managed.',
     detection: 'reactive',
+    proactive: false,
     settings: z.object({ window_days: days(30) }),
   },
   recurring_resolution: {
     label: 'Same category and resolution',
     description: 'At least min_records incidents in the same category resolved with the same resolution code within window_days days, none linked to a problem. A workaround that keeps being applied is the classic sign.',
     detection: 'reactive',
+    proactive: false,
     settings: z.object({ min_records: count(4), window_days: days(30) }),
   },
   reported: {
     label: 'Reported by external analysis',
     description: 'Candidates reported through REST or MCP (report_problem_candidate), for example by an agent analysing logs or a monitoring tool’s own trend analysis.',
     detection: 'proactive',
+    proactive: true,
     settings: z.object({}),
   },
+  // Trends before they hurt (part 2 of #31): candidate-trends.ts.
+  ...TREND_RULES,
 } as const;
 export type RuleId = keyof typeof RULES;
 export const RULE_IDS = Object.keys(RULES) as [RuleId, ...RuleId[]];
@@ -98,10 +106,10 @@ export async function setRule(user: User, rule: string, input: z.infer<typeof ru
 
 // ---- Candidates -------------------------------------------------------------------------------------------------
 
-/** One piece of evidence. key identifies it across rules: r:<external record id>, i:<incident ref>, a:<alert id>, x:<reported id>. */
+/** One piece of evidence. key identifies it across rules: r:<external record id>, i:<incident ref>, a:<alert id>, c:<change ref>, x:<reported id>. */
 export interface EvidenceRecord {
   key: string;
-  kind: 'incident' | 'event' | 'external';
+  kind: 'incident' | 'event' | 'external' | 'change';
   id: number | null;
   incident_ref: string | null;
   alert_id: number | null;
@@ -113,13 +121,20 @@ export interface EvidenceRecord {
   ci_ref: string | null;
   resolution_code?: string | null;
   url?: string | null;
+  change_ref?: string | null;
+  /** A short fact about this record for this rule: "rolled back", "7 reopenings". */
+  note?: string | null;
+  /** Counts against the subject (a change that failed or was followed by an incident). */
+  bad?: boolean;
 }
-interface EvidenceCi { ref: string; name: string; role: 'subject' | 'upstream' | 'affected'; depth?: number }
+/** A value per day, oldest first; split marks where the current window starts when two windows are compared. */
+export interface Series { label: string; unit: string; points: { day: string; value: number }[]; split?: string }
+export interface EvidenceCi { ref: string; name: string; role: 'subject' | 'upstream' | 'affected'; depth?: number }
 
-interface Raw {
+export interface Raw {
   key: string;
   rule: RuleId;
-  subject: { type: 'ci' | 'service' | 'incident' | 'category' | 'reported'; ref: string | null; name: string };
+  subject: { type: 'ci' | 'service' | 'incident' | 'category' | 'reported' | 'check'; ref: string | null; name: string };
   service: string;
   ci_ref: string | null;
   ci_class: string | null;
@@ -128,6 +143,7 @@ interface Raw {
   notes?: string;
   source?: string;
   contains_personal_data?: boolean;
+  series?: Series[];
   /** A title for the problem; from Kernel text only where it may be copied (checked in draft()). */
   title: (records: EvidenceRecord[]) => string;
   /** The reason for these records, or null when they no longer meet the rule (after a dismissal took some away). */
@@ -392,6 +408,7 @@ async function reportedCandidates(db: Db): Promise<Raw[]> {
 const COMPUTE: Record<RuleId, (db: Db, settings: any) => Promise<Raw[]>> = {
   recurring_records: recurringRecords, common_upstream: commonUpstream, major_without_problem: majorWithoutProblem,
   recurring_resolution: recurringResolution, reported: (db) => reportedCandidates(db),
+  flapping, rising_warnings: risingWarnings, capacity_warnings: capacityWarnings, self_clearing: selfClearing, change_correlation: changeCorrelation,
 };
 
 interface Decision { key: string; rule: string; decision: 'dismissed' | 'snoozed'; until: string | null; evidence: string[]; reason: string; decided_by_name: string | null; decided_at: string }
@@ -399,11 +416,14 @@ interface Decision { key: string; rule: string; decision: 'dismissed' | 'snoozed
 export type Candidate = ReturnType<typeof present>;
 
 function present(raw: Raw, records: EvidenceRecord[], reason: string, decision?: Decision) {
-  const times = records.map((r) => r.occurred_at).filter(Boolean).sort() as string[];
+  // As ISO strings, whether the database gave a Date or a string, so they sort in time order.
+  const times = records.map((r) => r.occurred_at).filter(Boolean).map((t) => new Date(t!).toISOString()).sort();
   return {
     key: raw.key,
     rule: raw.rule,
     rule_label: RULES[raw.rule].label,
+    /** Before it hurts: a trend or an outside finding rather than incidents that already happened. */
+    proactive: RULES[raw.rule].proactive,
     reason,
     subject: raw.subject,
     service: raw.service,
@@ -414,12 +434,14 @@ function present(raw: Raw, records: EvidenceRecord[], reason: string, decision?:
     count: records.length,
     incidents: records.filter((r) => r.kind === 'incident').length,
     events: records.filter((r) => r.kind === 'event').length,
+    changes: records.filter((r) => r.kind === 'change').length,
     first_at: times[0] ?? null,
     last_at: times[times.length - 1] ?? null,
     evidence: {
       records: records.slice(0, EVIDENCE_SHOWN),
       total_records: records.length,
       cis: raw.cis,
+      ...(raw.series ? { series: raw.series } : {}),
       ...(raw.notes ? { notes: raw.notes } : {}),
     },
     ...(decision ? { decision: { decision: decision.decision, until: decision.until, reason: decision.reason, by: decision.decided_by_name, at: decision.decided_at } } : {}),
@@ -615,9 +637,14 @@ export async function reportCandidate(user: User, input: z.infer<typeof reportSc
 
 // ---- From candidate to problem ----------------------------------------------------------------------------------
 
-/** Audiences of the Kernel incidents in the evidence, in one query; one the reader cannot see counts as the narrowest. */
-async function incidentAudiences(db: Db, refs: string[]) {
-  const { rows } = await db.query('SELECT ref, restricted, restricted_teams, classification FROM incidents WHERE ref = ANY($1)', [refs]);
+/** Audiences of the Kernel incidents and changes in the evidence; one the reader cannot see counts as the narrowest. */
+async function recordAudiences(db: Db, records: EvidenceRecord[]) {
+  const inc = records.filter((r) => r.incident_ref).map((r) => r.incident_ref!), chg = records.filter((r) => r.change_ref).map((r) => r.change_ref!);
+  const { rows } = await db.query(
+    `SELECT ref, restricted, restricted_teams, classification FROM incidents WHERE ref = ANY($1)
+     UNION ALL SELECT ref, restricted, restricted_teams, classification FROM changes WHERE ref = ANY($2)`,
+    [inc, chg],
+  );
   const by = new Map<string, Audience>(rows.map((r) => [r.ref, { ref: r.ref, restricted: !!r.restricted, restricted_teams: r.restricted_teams ?? [], classification: r.classification ?? 'normal' }]));
   return (ref: string): Audience => by.get(ref) ?? { ref, restricted: true, restricted_teams: [], classification: 'confidential' };
 }
@@ -628,17 +655,18 @@ async function incidentAudiences(db: Db, refs: string[]) {
  * otherwise the line keeps just the ref. With a db that is creating the problem, withheld text is audited.
  */
 async function draft(db: Db, c: Resolved, creating: boolean) {
-  const audienceOf = await incidentAudiences(db, c.records.filter((r) => r.incident_ref).map((r) => r.incident_ref!));
+  const audience = await recordAudiences(db, c.records);
   const titleOf = async (r: EvidenceRecord) => {
-    if (!r.incident_ref) return r.summary;
-    const from = audienceOf(r.incident_ref);
+    const ref = r.incident_ref ?? r.change_ref;
+    if (!ref) return r.summary;
+    const from = audience(ref);
     return creating ? copyText(db, from, BROADEST, r.summary, '', 'problem candidate → new problem', 'title') : (mayCopyText(from, BROADEST, 'title') ? r.summary : '');
   };
   const lines: string[] = [];
   for (const r of c.records.slice(0, 100)) {
     const text = (await titleOf(r)).replace(/\s+/g, ' ').slice(0, 200);
     const when = r.occurred_at ? ` (${String(r.occurred_at).slice(0, 10)})` : '';
-    lines.push(`- ${r.reference}${r.ci_ref ? ` on ${r.ci_ref}` : ''}${text ? `: ${text}` : ''}${when}${r.url ? ` ${r.url}` : ''}`);
+    lines.push(`- ${r.reference}${r.ci_ref ? ` on ${r.ci_ref}` : ''}${text ? `: ${text}` : ''}${r.note ? ` [${r.note}]` : ''}${when}${r.url ? ` ${r.url}` : ''}`);
   }
   if (c.records.length > 100) lines.push(`- and ${c.records.length - 100} more`);
   let title = c.raw.title(c.records);
@@ -668,7 +696,7 @@ async function draft(db: Db, c: Resolved, creating: boolean) {
 
 /** Problems found from incidents that already happened are reactive; only events, or external analysis, proactive. */
 export function detectionOf(rule: RuleId, records: EvidenceRecord[]): 'reactive' | 'proactive' {
-  if (rule === 'recurring_records') return records.some((r) => r.kind === 'incident') ? 'reactive' : 'proactive';
+  if (rule === 'recurring_records' || rule === 'change_correlation') return records.some((r) => r.kind === 'incident') ? 'reactive' : 'proactive';
   return RULES[rule].detection;
 }
 
@@ -687,16 +715,19 @@ export const candidateIdsSchema = z.object({
   incident_refs: z.array(z.string().max(20)).max(1000).default([]),
   /** Monitoring alerts in the candidate. */
   alert_ids: z.array(z.number().int()).max(1000).default([]),
+  /** Changes in the candidate (change correlation). */
+  change_refs: z.array(z.string().max(20)).max(1000).default([]),
 });
 /** A candidate by key (preferred: Kernel takes its evidence), or its records by id. */
 export const candidateActionSchema = candidateIdsSchema.extend({ key: keySchema.optional() })
-  .refine((v) => v.key || v.record_ids.length + v.incident_refs.length + v.alert_ids.length > 0, 'Give the candidate key, or record_ids, incident_refs or alert_ids');
+  .refine((v) => v.key || v.record_ids.length + v.incident_refs.length + v.alert_ids.length + v.change_refs.length > 0, 'Give the candidate key, or record_ids, incident_refs, alert_ids or change_refs');
 type Ids = z.infer<typeof candidateIdsSchema>;
 
 const idsOf = (records: EvidenceRecord[]): Ids => ({
   record_ids: records.filter((r) => r.id !== null).map((r) => r.id!),
   incident_refs: records.filter((r) => r.incident_ref).map((r) => r.incident_ref!),
   alert_ids: records.filter((r) => r.alert_id !== null).map((r) => Number(r.alert_id)),
+  change_refs: records.filter((r) => r.change_ref).map((r) => r.change_ref!),
 });
 
 /** Links records to a problem in the caller's transaction: external records, alerts and Kernel incidents (with related incidents). */
@@ -738,6 +769,19 @@ async function linkEvidence(db: Db, user: User, problem: { id: number; ref: stri
       await attachToProblem(db, user.id, ch, problem);
       attached.add(ch.id);
     }
+  }
+  // Changes: a link on the problem (with the change's title where the copy rules allow), and their CIs.
+  const { rows: chgs } = await db.query('SELECT id, ref, title FROM changes WHERE ref = ANY($1) ORDER BY id', [ids.change_refs.map((r) => r.toUpperCase())]);
+  const target = titleAudience(await audienceOf(db, problem.ref));
+  for (const ch of chgs) {
+    const note = await copyText(db, await audienceOf(db, ch.ref), target, ch.title.slice(0, 2000), '', 'problem candidate → change link note', 'title');
+    const { rowCount } = await db.query(
+      `INSERT INTO problem_links (problem_id, kind, reference, system, note, created_by) VALUES ($1, 'change', $2, 'Kernel', $3, $4) ON CONFLICT DO NOTHING`,
+      [problem.id, ch.ref, note, user.id],
+    );
+    if (rowCount) await logActivity(db, problem.id, user.id, 'link', `Linked change ${ch.ref}`, { kind: 'change', reference: ch.ref, system: 'Kernel', action: 'add' });
+    await db.query('INSERT INTO problem_cis (problem_id, ci_id, added_by) SELECT $1, ci_id, $2 FROM change_cis WHERE change_id = $3 ON CONFLICT DO NOTHING', [problem.id, user.id, ch.id]);
+    linked++;
   }
   return linked;
 }

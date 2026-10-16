@@ -6,15 +6,17 @@ import { formatDate, LEVEL_LABEL, relativeTime } from '../format';
 import { useApi } from '../hooks';
 import { canEdit, isManager, useSession } from '../session';
 
-type RuleId = 'recurring_records' | 'common_upstream' | 'major_without_problem' | 'recurring_resolution' | 'reported';
+type RuleId = 'recurring_records' | 'common_upstream' | 'major_without_problem' | 'recurring_resolution' | 'reported'
+  | 'flapping' | 'rising_warnings' | 'capacity_warnings' | 'self_clearing' | 'change_correlation';
 interface EvidenceRecord {
-  key: string; kind: 'incident' | 'event' | 'external'; id: number | null; incident_ref: string | null; alert_id: number | null; system: string; reference: string;
-  summary: string; category: string; occurred_at: string | null; ci_ref: string | null; resolution_code?: string | null; url?: string | null;
+  key: string; kind: 'incident' | 'event' | 'external' | 'change'; id: number | null; incident_ref: string | null; alert_id: number | null; change_ref?: string | null; system: string; reference: string;
+  summary: string; category: string; occurred_at: string | null; ci_ref: string | null; resolution_code?: string | null; url?: string | null; note?: string | null;
 }
+interface Series { label: string; unit: string; points: { day: string; value: number }[]; split?: string }
 interface Candidate {
-  key: string; rule: RuleId; rule_label: string; reason: string; subject: { type: string; ref: string | null; name: string };
+  key: string; rule: RuleId; rule_label: string; proactive: boolean; reason: string; subject: { type: string; ref: string | null; name: string };
   service: string; ci_ref: string | null; source?: string; contains_personal_data?: boolean; count: number; incidents: number; events: number; first_at: string | null; last_at: string | null;
-  evidence: { records: EvidenceRecord[]; total_records: number; cis: { ref: string; name: string; role: 'subject' | 'upstream' | 'affected'; depth?: number }[]; notes?: string };
+  evidence: { records: EvidenceRecord[]; total_records: number; series?: Series[]; cis: { ref: string; name: string; role: 'subject' | 'upstream' | 'affected'; depth?: number }[]; notes?: string };
   decision?: { decision: 'dismissed' | 'snoozed'; until: string | null; reason: string; by: string | null; at: string };
 }
 interface Rule { rule: RuleId; label: string; description: string; enabled: boolean; settings: Record<string, number>; count: number }
@@ -22,9 +24,11 @@ interface Candidates { rules: Rule[]; hidden: { dismissed: number; snoozed: numb
 
 const SETTING_LABEL: Record<string, string> = {
   min_records: 'At least (records)', min_cis: 'On at least (CIs)', window_days: 'Within (days)', max_depth: 'Dependency steps',
+  min_flaps: 'At least (reopenings)', min_events: 'At least (events)', factor_percent: 'Growth (%)', min_firings: 'At least (firings)',
+  max_minutes: 'Cleared within (min)', min_changes: 'At least (changes)', min_percent: 'Bad (%)', within_hours: 'Incident within (hours)',
 };
 /** The rule's description with its current values filled in, for people who cannot change it. */
-const describe = (r: Rule) => r.description.replace(/\b(min_records|min_cis|window_days|max_depth)\b/g, (k) => String(r.settings[k] ?? k));
+const describe = (r: Rule) => r.description.replace(/\b[a-z]+_[a-z_]+\b/g, (k) => (k in r.settings ? String(r.settings[k]) : k));
 
 export function CandidatesPage() {
   const { user } = useSession();
@@ -87,12 +91,26 @@ export function CandidatesPage() {
           </p>
         </section>
       )}
-      <div className="candidates">
-        {data?.candidates.map((c) => (
-          <CandidateCard key={c.key} c={c} editable={editable}
-            onCreate={() => setCreating(c)} onLink={() => setLinking(c)} onDecide={() => setDeciding(c)} onRestore={() => restore(c)} />
-        ))}
-      </div>
+      {data && [false, true].map((proactive) => {
+        const list = data.candidates.filter((c) => c.proactive === proactive);
+        if (!list.length) return null;
+        return (
+          <section key={String(proactive)} className="candidate-section">
+            {proactive && (
+              <header className="section-head">
+                <h2>Before it hurts</h2>
+                <p className="muted small">Trends in monitoring and changes, and findings from external analysis: problems waiting to happen.</p>
+              </header>
+            )}
+            <div className="candidates">
+              {list.map((c) => (
+                <CandidateCard key={c.key} c={c} editable={editable}
+                  onCreate={() => setCreating(c)} onLink={() => setLinking(c)} onDecide={() => setDeciding(c)} onRestore={() => restore(c)} />
+              ))}
+            </div>
+          </section>
+        );
+      })}
       {data && <RulesCard rules={data.rules} editable={isManager(user)} onSaved={reload} />}
       {creating && <CreateModal candidate={creating} onClose={() => setCreating(null)} />}
       {linking && <LinkModal candidate={linking} onClose={() => setLinking(null)} />}
@@ -119,6 +137,7 @@ function CandidateCard({ c, editable, onCreate, onLink, onDecide, onRestore }: {
         <span className="candidate-count" title={`${c.count} records`}>{c.count}</span>
       </header>
       <p className="candidate-reason">{c.reason}.</p>
+      {ev.series?.map((s) => <DailyBars key={s.label} series={s} />)}
       {c.decision && (
         <p className="hint">
           {c.decision.decision === 'snoozed' ? `Snoozed until ${formatDate(c.decision.until!)}` : 'Dismissed'} by {c.decision.by ?? 'someone'} {relativeTime(c.decision.at)}: {c.decision.reason}
@@ -145,9 +164,10 @@ function CandidateCard({ c, editable, onCreate, onLink, onDecide, onRestore }: {
             <li key={r.key}>
               <span className={`kind kind-${r.kind}`}>{r.kind === 'external' ? 'finding' : r.kind}</span>
               {r.incident_ref ? <Link to={`/incidents/${r.incident_ref}`} className="mono">{r.reference}</Link>
+                : r.change_ref ? <Link to={`/changes/${r.change_ref}`} className="mono">{r.reference}</Link>
                 : r.url ? <a href={r.url} target="_blank" rel="noopener noreferrer" className="mono">{r.reference}</a>
                 : <span className="mono">{r.reference}</span>}
-              <span className="record-summary">{r.summary}</span>
+              <span className="record-summary">{r.summary}{r.note && <span className="muted"> · {r.note}</span>}</span>
               {r.occurred_at ? <time className="muted small" title={formatDate(r.occurred_at)}>{relativeTime(r.occurred_at)}</time> : <span />}
             </li>
           ))}
@@ -167,6 +187,39 @@ function CandidateCard({ c, editable, onCreate, onLink, onDecide, onRestore }: {
         </div>
       )}
     </article>
+  );
+}
+
+/**
+ * One value per day as thin bars, oldest first. Where two windows are compared, the earlier one is muted and the
+ * current one carries the accent. Each bar has its value on hover; the summary is there for screen readers.
+ */
+function DailyBars({ series: s }: { series: Series }) {
+  const max = Math.max(1, ...s.points.map((p) => p.value));
+  const splitAt = s.split ? s.points.findIndex((p) => p.day === s.split) : -1;
+  const sum = (from: number, to: number) => s.points.slice(from, to).reduce((t, p) => t + p.value, 0);
+  const summary = splitAt > 0
+    ? `${s.label}: ${sum(splitAt, s.points.length)} ${s.unit} in the last ${s.points.length - splitAt} days, ${sum(0, splitAt)} in the ${splitAt} days before`
+    : `${s.label}: ${sum(0, s.points.length)} ${s.unit} in ${s.points.length} days, at most ${max} a day`;
+  const W = 6, GAP = 2, H = 40;
+  return (
+    <figure className="daily-bars">
+      <svg viewBox={`0 0 ${s.points.length * (W + GAP)} ${H}`} preserveAspectRatio="none" role="img" aria-label={summary}>
+        {s.points.map((p, i) => {
+          const h = p.value ? Math.max(2, (p.value / max) * (H - 2)) : 0;
+          return (
+            <g key={p.day} className={splitAt > 0 && i < splitAt ? 'before' : 'now'}>
+              <rect className="hit" x={i * (W + GAP)} y={0} width={W + GAP} height={H}><title>{`${p.day}: ${p.value} ${s.unit}`}</title></rect>
+              {h > 0 && <rect className="bar" x={i * (W + GAP)} y={H - h} width={W} height={h} rx={1.5}><title>{`${p.day}: ${p.value} ${s.unit}`}</title></rect>}
+            </g>
+          );
+        })}
+        <line className="baseline" x1={0} x2={s.points.length * (W + GAP)} y1={H - 0.5} y2={H - 0.5} />
+      </svg>
+      <figcaption className="muted small">
+        {s.label}, {s.points[0].day} – {s.points[s.points.length - 1].day}{splitAt > 0 && <> · <span className="legend-before">before</span> <span className="legend-now">last {s.points.length - splitAt} days</span></>}
+      </figcaption>
+    </figure>
   );
 }
 

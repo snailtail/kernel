@@ -132,6 +132,24 @@ describe('copying text between records (#117)', { skip }, () => {
       },
     },
     {
+      path: 'problem candidate (changes that fail) → new problem: change titles in the link notes and description (#31)',
+      kind: 'title',
+      run: async (narrow, text) => {
+        const ci = (await pm.post('/api/cis', { name: `chg-${secret()}`, ci_type: 'application' })).body.ref;
+        const refs = [];
+        for (const title of [text, 'Patch the app', 'Patch the app again']) {
+          const c = (await pm.post('/api/changes', { title, cis: [ci] })).body.ref;
+          // Straight to a recorded outcome: the workflow is not what this row is about.
+          await ownerQuery("UPDATE changes SET status = 'review', outcome = 'rolled_back', actual_start = now(), actual_end = now() WHERE ref = $1", [c]);
+          refs.push(c);
+        }
+        await narrowTo(refs[0], narrow);
+        const created = await pm.post('/api/candidates/create', { key: `change_correlation:ci:${ci}` });
+        ok(created);
+        return { target: created.body.ref, readable: await dumpProblem(created.body.ref) };
+      },
+    },
+    {
       path: 'bulk: incidents → problem link note (#110)',
       kind: 'title',
       run: async (narrow, text) => {

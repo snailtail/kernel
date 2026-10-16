@@ -552,6 +552,22 @@ a.stat:hover { border-color: var(--accent); text-decoration: none; }
 .candidate-notes { margin: 10px 0 0 !important; font-size: 13px; white-space: pre-wrap; color: var(--text-2); }
 .candidate .actions { flex-wrap: wrap; margin-top: 12px; }
 .candidate .actions .spacer-right { margin-right: auto; }
+.candidate-section + .candidate-section { margin-top: 24px; }
+.candidate-section .section-head { display: block; margin-bottom: 10px; }
+.candidate-section .section-head p { margin: 2px 0 0; }
+.candidate-section .section-head h2 { margin: 0; font-size: 17px; }
+.daily-bars { margin: 0 0 10px; max-width: 420px; }
+.daily-bars svg { display: block; width: 100%; height: 40px; }
+.daily-bars .bar { fill: var(--accent); }
+.daily-bars .before .bar { fill: var(--text-3); opacity: .55; }
+.daily-bars .hit { fill: transparent; }
+.daily-bars g:hover .bar { opacity: 1; filter: brightness(1.15); }
+.daily-bars .baseline { stroke: var(--border-strong); stroke-width: 1; }
+.daily-bars figcaption { margin-top: 4px; }
+.daily-bars .legend-before::before, .daily-bars .legend-now::before { content: ''; display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+.daily-bars .legend-before::before { background: var(--text-3); opacity: .55; }
+.daily-bars .legend-now::before { background: var(--accent); }
+.kind-change { color: var(--accent); }
 .candidate-rules { margin-top: 16px; }
 .candidate-rules summary { cursor: pointer; }
 .candidate-rules summary h2 { display: inline; font-size: 15px; }
