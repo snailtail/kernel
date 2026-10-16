@@ -18,7 +18,7 @@ export const TREND_RULES = {
   },
   rising_warnings: {
     label: 'Rising warnings on a CI',
-    description: 'At least min_events warning or minor events on a CI in the last window_days days, and at least factor_percent % of the window before.',
+    description: 'At least min_events warning or minor events on a CI in the last window_days days, and at least factor_percent % of the window before. Events during maintenance windows do not count.',
     detection: 'proactive',
     proactive: true,
     settings: z.object({ min_events: count(10), factor_percent: z.number().int().min(110).max(10000).default(200), window_days: days(7) }),
@@ -125,7 +125,7 @@ export async function flapping(db: Db, s: Settings<'flapping'>): Promise<Raw[]> 
 export async function risingWarnings(db: Db, s: Settings<'rising_warnings'>): Promise<Raw[]> {
   const { rows } = await db.query(
     `WITH d AS (
-       SELECT ci_id, day, sum(count)::int AS n FROM event_daily
+       SELECT ci_id, day, sum(count - suppressed)::int AS n FROM event_daily
        WHERE ci_id <> 0 AND severity IN ('warning', 'minor') AND day > current_date - 2 * $1 GROUP BY 1, 2
      )
      SELECT c.id, c.ref AS ci_ref, c.name AS ci_name, c.class AS ci_class,

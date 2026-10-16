@@ -36,7 +36,7 @@ describe('problem candidates (#31)', { skip }, () => {
   test('the rules are listed with their settings, and changing one is audited', async () => {
     const body = await list(viewer);
     assert.deepEqual(body.rules.map((r: any) => r.rule), ['recurring_records', 'common_upstream', 'major_without_problem', 'recurring_resolution', 'reported',
-      'flapping', 'rising_warnings', 'capacity_warnings', 'self_clearing', 'change_correlation']);
+      'flapping', 'rising_warnings', 'capacity_warnings', 'self_clearing', 'change_correlation', 'repeatedly_missing', 'eol_versions', 'single_point_of_failure']);
     assert.deepEqual(body.rules[0].settings, { min_records: 5, window_days: 7 }, 'the old single rule became recurring_records, defaults kept');
     assert.equal((await analyst.put('/api/candidates/rules/common_upstream', { enabled: false })).status, 403);
     assert.equal((await pm.put('/api/candidates/rules/nonsense', { enabled: false })).status, 404);

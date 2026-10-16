@@ -86,6 +86,22 @@ describe('proactive problem candidates (#31)', { skip }, () => {
     assert.equal(await byCi('rising_warnings', explained), undefined, 'no candidate without evidence');
     assert.equal((await candidates('rising_warnings')).some((x) => !x.reason || x.count === 0), false, 'never an empty candidate');
 
+    // A snooze that ran out on a candidate whose evidence no longer meets the rule shows nothing, open or hidden.
+    const snoozedAway = await ci('snoozed-away');
+    await warn(snoozedAway, 12, 2, 'new');
+    const sk = (await byCi('rising_warnings', snoozedAway)).key;
+    ok(await analyst.post('/api/candidates/dismiss', { key: sk, reason: 'Look after the release', until: at(60) }));
+    const prb2 = (await analyst.post('/api/problems', { title: 'Latency on snoozed-away' })).body.ref;
+    await ownerQuery('UPDATE alerts SET problem_id = (SELECT id FROM problems WHERE ref = $1) WHERE ci_id = (SELECT id FROM configuration_items WHERE ref = $2)', [prb2, snoozedAway]);
+    await ownerQuery("UPDATE candidate_decisions SET until = now() - interval '1 minute' WHERE key = $1", [sk]);
+    assert.equal(await byCi('rising_warnings', snoozedAway), undefined, 'not open');
+    assert.equal((await analyst.get('/api/candidates?show=hidden')).body.candidates.some((x: any) => x.key === sk), false, 'not hidden either');
+
+    // Warnings during a maintenance window do not make a trend.
+    const maintained = await ci('maintained');
+    await send('mon', Array.from({ length: 12 }, (_, i) => ({ ci: maintained, check: `m-${i}`, severity: 'warning', maintenance: true, occurred_at: at(-2 * D - i) })));
+    assert.equal(await byCi('rising_warnings', maintained), undefined, 'suppressed events are left out');
+
     // Dismissed: hidden until a new alert joins the trend.
     await dismiss(c.key);
     assert.equal(await byCi('rising_warnings', hit), undefined);

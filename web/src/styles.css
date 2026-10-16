@@ -568,6 +568,11 @@ a.stat:hover { border-color: var(--accent); text-decoration: none; }
 .daily-bars .legend-before::before { background: var(--text-3); opacity: .55; }
 .daily-bars .legend-now::before { background: var(--accent); }
 .kind-change { color: var(--accent); }
+.eol-table { margin-top: 8px; overflow-x: auto; }
+.eol-table table { font-size: 13px; margin-bottom: 8px; }
+.eol-table .table th, .eol-table .table td { padding: 4px 10px; }
+.eol-table .eol-passed { color: var(--danger); font-weight: 550; }
+.rule-form input:not([type='number']):not([type='checkbox']) { min-width: 0; width: 140px; flex: none; }
 .candidate-rules { margin-top: 16px; }
 .candidate-rules summary { cursor: pointer; }
 .candidate-rules summary h2 { display: inline; font-size: 15px; }

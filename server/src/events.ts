@@ -337,14 +337,15 @@ async function processOne(db: Db, source: string, ciSourceSystem: string, e: Nor
   const hint = ci ? '' : (e.host ?? '').toLowerCase().slice(0, 255);
   const identity = [source, ci ? `ci:${ci.id}` : hint ? `host:${hint}` : '-', e.check];
   const message = e.message.slice(0, 2000);
-  const record = async (alertId: number | null, outcome: string) => {
+  const record = async (alertId: number | null, outcome: string, suppressed = false) => {
     await db.query('INSERT INTO events (alert_id, source, source_event_id, severity, message, occurred_at, outcome) VALUES ($1, $2, $3, $4, $5, $6, $7)', [
       alertId, source, e.source_event_id ?? '', e.severity, message, at, outcome,
     ]);
     await db.query(
-      `INSERT INTO event_daily (day, source, ci_id, severity, count) VALUES ($1::timestamptz::date, $2, $3, $4, 1)
-       ON CONFLICT (day, source, ci_id, severity) DO UPDATE SET count = event_daily.count + 1`,
-      [at, source, ci?.id ?? 0, e.severity],
+      // Suppressed (maintenance) events are also counted apart, so trends can leave planned work out (#31).
+      `INSERT INTO event_daily (day, source, ci_id, severity, count, suppressed) VALUES ($1::timestamptz::date, $2, $3, $4, 1, $5)
+       ON CONFLICT (day, source, ci_id, severity) DO UPDATE SET count = event_daily.count + 1, suppressed = event_daily.suppressed + excluded.suppressed`,
+      [at, source, ci?.id ?? 0, e.severity, suppressed ? 1 : 0],
     );
   };
 
@@ -431,7 +432,7 @@ async function processOne(db: Db, source: string, ciSourceSystem: string, e: Nor
       outcome = applied.action === 'created' ? 'incident_created' : applied.action === 'rate_limited' ? 'rate_limited' : `incident_${applied.action}`;
     }
   }
-  await record(alert.id, outcome);
+  await record(alert.id, outcome, !!alert.suppressed);
   return { check: e.check, outcome, alert_id: Number(alert.id), incident };
 }
 

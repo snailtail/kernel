@@ -31,6 +31,7 @@ import { auditQuerySchema } from './audit.js';
 import { searchSchema } from './generic.js';
 import * as analyses from './analyses.js';
 import * as candidates from './candidates.js';
+import * as config from './candidate-config.js';
 import * as integrations from './integrations.js';
 import * as problems from './problems.js';
 import * as reports from './reports.js';
@@ -377,6 +378,10 @@ export const OPERATIONS: Op[] = [
   { method: 'post', path: '/api/candidates/link', tag: 'Problem candidates', summary: 'Link a candidate or its records to a problem', body: ids.extend({ ref: z.string() }) },
   { method: 'post', path: '/api/candidates/dismiss', tag: 'Problem candidates', summary: 'Dismiss a candidate, or snooze it with until (reason required)', body: candidates.decisionSchema },
   { method: 'post', path: '/api/candidates/restore', tag: 'Problem candidates', summary: 'Undo a dismissal or snooze', body: z.object({ key: z.string() }) },
+  { method: 'get', path: '/api/candidates/eol', tag: 'Problem candidates', summary: 'The end-of-life table (product + version → date) behind the eol_versions rule' },
+  { method: 'post', path: '/api/candidates/eol', tag: 'Problem candidates', summary: 'Add an end-of-life row (problem managers)', body: config.eolSchema },
+  { method: 'put', path: '/api/candidates/eol/:id', tag: 'Problem candidates', summary: 'Change an end-of-life row (problem managers)', body: config.eolSchema },
+  { method: 'delete', path: '/api/candidates/eol/:id', tag: 'Problem candidates', summary: 'Remove an end-of-life row (problem managers)' },
   { method: 'post', path: '/api/candidates/report', tag: 'Problem candidates', summary: 'Report a candidate from external analysis (idempotent on source + external_key; ingest scope)', body: candidates.reportSchema },
   { method: 'get', path: '/api/systems', tag: 'Integrations', summary: 'External systems and their URL templates' },
   { method: 'post', path: '/api/systems', tag: 'Integrations', summary: 'Add an external system (problem managers)', body: integrations.systemSchema },

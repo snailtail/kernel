@@ -6,7 +6,7 @@ import type { User } from './auth.js';
 import { query } from './db.js';
 import { moduleEnabled, type Module } from './modules.js';
 import { can, type Action } from './policy.js';
-import { listCandidates } from './candidates.js';
+import { listCandidates, RULES } from './candidates.js';
 
 interface Count { label: string; value: number; link: string }
 interface Node {
@@ -17,6 +17,8 @@ interface Node {
   concepts: string[];
   hands_over: { to: string; when: string }[];
   counts: Count[];
+  /** How problems are found (#31): each candidate rule that is on, with its open candidates. */
+  found_by?: { rule: string; label: string; proactive: boolean; count: number; link: string }[];
 }
 
 /** All counts in one round trip (each is a small indexed count). */
@@ -52,7 +54,8 @@ async function counts(): Promise<Record<string, number>> {
 
 export async function processMap(user: User) {
   const c = await counts();
-  const candidates = (await listCandidates()).candidates.length;
+  const found = await listCandidates();
+  const candidates = found.candidates.length;
   const readable = (a: Action) => can(user.role, a);
   const nodes: Node[] = [];
   if (moduleEnabled('event') && readable('event.read')) {
@@ -60,7 +63,7 @@ export async function processMap(user: User) {
       id: 'event', label: 'Event', module: 'event',
       purpose: 'Monitoring notices something: a check fails, a threshold is crossed. Most events need no one; some become incidents.',
       concepts: ['Alerts are deduplicated per CI and check', 'Rules open incidents', 'Maintenance suppresses alerts'],
-      hands_over: [{ to: 'incident', when: 'An event rule matches, or someone opens an incident from an alert' }, { to: 'problem', when: 'Alerts keep recurring without an incident (problem candidates)' }],
+      hands_over: [{ to: 'incident', when: 'An event rule matches, or someone opens an incident from an alert' }, { to: 'problem', when: 'Alerts recur, flap, rise, fill up or clear themselves (problem candidates)' }],
       counts: [
         { label: 'open alerts', value: c.c0, link: '/events' },
         { label: 'without an incident', value: c.c1, link: '/events' },
@@ -107,6 +110,7 @@ export async function processMap(user: User) {
       { label: 'under analysis', value: c.c6, link: '/problems?status=analysis' },
       { label: 'problem candidates', value: candidates, link: '/candidates' },
     ],
+    found_by: found.rules.filter((r) => r.enabled).map((r) => ({ rule: r.rule, label: r.label, proactive: RULES[r.rule].proactive, count: r.count, link: `/candidates?rule=${r.rule}` })),
   });
   nodes.push({
     id: 'known_error', label: 'Known error', module: null,
@@ -126,7 +130,7 @@ export async function processMap(user: User) {
       id: 'change', label: 'Change', module: 'change',
       purpose: 'Implement the fix safely: assess the risk, authorise, schedule without collisions or freezes, and review.',
       concepts: ['Standard, normal and emergency changes', 'Change authority', 'Backout plan'],
-      hands_over: [{ to: 'resolution', when: 'The change succeeded' }, { to: 'incident', when: 'Incidents follow it (possibly change-related)' }],
+      hands_over: [{ to: 'resolution', when: 'The change succeeded' }, { to: 'incident', when: 'Incidents follow it (possibly change-related)' }, { to: 'problem', when: 'Changes on a CI keep failing or are followed by incidents (problem candidates)' }],
       counts: [
         { label: 'waiting for authorisation', value: c.c11, link: '/changes?status=authorize' },
         { label: 'scheduled', value: c.c12, link: '/changes?tab=schedule' },

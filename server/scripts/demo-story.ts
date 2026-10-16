@@ -9,6 +9,7 @@ import * as analyses from '../src/analyses.js';
 import * as candidates from '../src/candidates.js';
 import * as changes from '../src/changes.js';
 import * as cmdb from '../src/cmdb.js';
+import * as connectors from '../src/connectors.js';
 import * as graph from '../src/cmdb-graph.js';
 import * as events from '../src/events.js';
 import * as incidents from '../src/incidents.js';
@@ -262,6 +263,25 @@ export async function seedStory(p: People) {
     await changes.transitionChange(jonas, c, { to: 'closed', ...(outcome === 'failed' ? { review: 'The new heap size made garbage collection pauses longer; reverted.' } : {}) });
     await shift(c, days * D);
   }
+  // ---- Configuration risk (#31, part 3) ----
+  // Two more services use shop-db, which has no replica in the CMDB: a single point of failure for three services.
+  for (const [service, app] of [['Order API', 'order-api'], ['Back office', 'admin-console']] as const) {
+    const svc = await ci(service, 'business_service', { criticality: 2 });
+    const comp = await ci(app, 'application', { criticality: 2 });
+    await graph.addRelationship(admin, comp, { type: 'member_of', target: svc, direction: 'outgoing' });
+    await graph.addRelationship(admin, comp, { type: 'uses_database', target: db, direction: 'outgoing' });
+  }
+  // A reporting database on a PostgreSQL version past its end of life (in the EOL table).
+  await ci('reporting-db', 'database', { criticality: 3, attributes: { engine: 'PostgreSQL', version: '13.9' } });
+  // vCenter keeps losing sight of the batch server (Windows Server 2012 R2, also past end of life): missing twice.
+  const vms = [['vm-101', 'batch01', 'Windows Server 2012 R2'], ['vm-102', 'file01', 'Windows Server 2022'], ['vm-103', 'print01', 'Windows Server 2022']].map(([source_id, name, os]) => ({ source_id, name, ci_type: 'virtual_machine', attributes: { os } }));
+  const vcenter = (cis: typeof vms) => connectors.ciBatch(admin, { source_system: 'vCenter', cis, relationships: [], full_sync: true, incomplete_prefixes: [] } as any);
+  await vcenter(vms);
+  for (let round = 0; round < 2; round++) {
+    for (let miss = 0; miss < 3; miss++) await vcenter(vms.slice(1));
+    if (round === 0) await vcenter(vms);
+  }
+  await query("UPDATE ci_activity SET created_at = created_at - interval '20 days' WHERE id = (SELECT min(id) FROM ci_activity WHERE data->>'to' = 'missing')");
   // The pages the story queued (the worker is not running while seeding).
   await oncall.deliverPages();
   return { incident: inc, problem: prb, change: chg, earlier: old };
