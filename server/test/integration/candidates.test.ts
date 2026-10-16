@@ -234,7 +234,7 @@ describe('problem candidates (#31)', { skip }, () => {
     ok(created, 201);
     assert.equal(created.body.title, 'Ledger runs out of memory nightly');
     assert.match(created.body.description, /Heap grows 200 MB per day/);
-    assert.match(created.body.description, /https:\/\/grafana\.example\.com\/d\/ledger/);
+    assert.ok(created.body.description.includes('https://grafana.example.com/d/ledger'), 'the finding links come along');
     assert.ok(created.body.incidents.some((i: any) => i.ref === inc));
     assert.equal(await find(c.key), undefined, 'handled');
     const { rows } = await ownerQuery('SELECT problem_ref FROM reported_candidates WHERE id = $1', [Number(c.key.slice(9))]);
