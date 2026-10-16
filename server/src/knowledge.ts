@@ -90,8 +90,9 @@ export async function listArticles(user: User, f: z.infer<typeof listArticlesSch
   if (f.due_for_review) where.push("a.status = 'published' AND a.review_by < current_date");
   let order = 'a.updated_at DESC';
   if (f.q) {
-    add("a.search @@ websearch_to_tsquery('simple', ?)", f.q);
-    order = `ts_rank(a.search, websearch_to_tsquery('simple', $${params.length})) DESC, a.used_count DESC`;
+    // By its words, or by its ref (KB000012) like every record.
+    add("(a.search @@ websearch_to_tsquery('simple', ?) OR a.ref = upper(?))", f.q);
+    order = `a.ref = upper($${params.length}) DESC, ts_rank(a.search, websearch_to_tsquery('simple', $${params.length})) DESC, a.used_count DESC`;
   }
   params.push(f.limit);
   const { rows } = await query(`${SELECT} ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY ${order} LIMIT $${params.length}`, params);
@@ -113,7 +114,24 @@ export async function getArticle(user: User, ref: string) {
     query('SELECT helpful FROM article_feedback WHERE article_id = $1 AND user_id = $2', [a.id, user.id]),
     query('SELECT i.ref, i.title, x.used_at FROM incident_articles x JOIN incidents i ON i.id = x.incident_id WHERE x.article_id = $1 ORDER BY x.used_at DESC LIMIT 20', [a.id]),
   ]);
-  return withUrl({ ...a, cis: cis.rows, activity: activity.rows, my_feedback: mine.rows[0]?.helpful ?? null, used_in: incidents.rows });
+  const article = { ...a, cis: cis.rows, activity: activity.rows, my_feedback: mine.rows[0]?.helpful ?? null, used_in: incidents.rows };
+  return withUrl({ ...article, next_steps: articleGuidance(article) });
+}
+
+/** Guided mode (#37) for an article: write, scope it to CIs, publish, keep it current. */
+function articleGuidance(a: { status: string; body: string; cis: unknown[]; review_by: string | null; due_for_review: boolean }) {
+  const steps = [
+    { id: 'write', label: 'Write the steps', hint: 'Short, concrete steps someone can follow under pressure. No secrets or personal data.', done: !!a.body?.trim() },
+    { id: 'cis', label: 'Link the CIs and services it applies to', hint: 'Kernel then suggests it on incidents for those CIs.', done: a.cis.length > 0 },
+    { id: 'publish', label: 'Publish it', hint: 'Drafts are only seen by people who write articles.', done: a.status !== 'draft' },
+    ...(a.status === 'published' ? [{ id: 'review', label: a.due_for_review ? 'The article is due for review' : 'Review it now and then', hint: a.review_by ? `Review by ${a.review_by}; retire it when it no longer applies.` : 'Set a review date so it stays correct.', done: !!a.review_by && !a.due_for_review }] : []),
+  ];
+  return {
+    phase: a.status === 'draft' ? 'Draft' : a.status === 'published' ? 'Published' : 'Retired',
+    purpose: 'Make what was learned easy to find and reuse, so incidents are resolved faster.',
+    steps,
+    next: a.status === 'retired' ? 'Nothing pending.' : (steps.find((x) => !x.done)?.label ?? 'Nothing pending.'),
+  };
 }
 
 async function setCis(db: Db, articleId: number, refs: string[]) {

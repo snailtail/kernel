@@ -30,6 +30,11 @@ export interface RecordType {
   rest: { list: string; create: string; get: string; update: string; transition: string; links: string; comments: string };
   /** MCP tools every record type must provide. */
   mcp: { list: string; get: string; create: string; update: string; transition: string };
+  /**
+   * Where its history lives in the audit trail: the entity type (default: the type) and the refs it was audited
+   * under (default: the record's ref), given the record as `get` returned it.
+   */
+  history?: { entityType: string; refs?: (record: Record<string, unknown>) => string[] };
 }
 
 const registry = new Map<string, RecordType>();

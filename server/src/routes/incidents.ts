@@ -3,6 +3,8 @@ import { requireUser } from '../auth.js';
 import * as inc from '../incidents.js';
 import * as major from '../major-incidents.js';
 import * as reviews from '../reviews.js';
+import * as generic from '../generic.js';
+import { z } from 'zod';
 
 type RefParams = { Params: { ref: string } };
 
@@ -50,6 +52,24 @@ export async function incidentRoutes(app: FastifyInstance) {
   );
   // Post-incident reviews (#109, #120).
   app.get('/api/incident-reviews', async (req) => reviews.listReviews(requireUser(req), reviews.listReviewsSchema.parse(req.query)));
+  // The same reviews as a record type (#35), by their own ref; the incident paths below take either ref.
+  app.get('/api/reviews', async (req) => reviews.listReviews(requireUser(req), reviews.listReviewsSchema.parse(req.query)));
+  app.post('/api/reviews', { config: { idempotent: 'incident.update' } }, async (req, reply) => {
+    const { incident, ...input } = reviews.createReviewSchema.extend({ incident: z.string().trim().min(1).max(20) }).parse(req.body);
+    const created = await reviews.createReview(requireUser(req), incident, input);
+    reply.code(201);
+    return created;
+  });
+  app.get<RefParams>('/api/reviews/:ref', async (req) => reviews.openReview(requireUser(req), req.params.ref));
+  app.patch<RefParams>('/api/reviews/:ref', async (req) => reviews.updateReview(requireUser(req), req.params.ref, reviews.updateReviewSchema.parse(req.body)));
+  app.post<RefParams>('/api/reviews/:ref/transition', async (req) => reviews.transitionReview(requireUser(req), req.params.ref, reviews.transitionReviewSchema.parse(req.body)));
+  app.post<RefParams>('/api/reviews/:ref/links', { config: { idempotent: 'incident.update' } }, async (req) => {
+    const body = generic.linkBodySchema.parse(req.body);
+    return generic.linkRecords(requireUser(req), req.params.ref, body.to, body);
+  });
+  app.post<RefParams>('/api/reviews/:ref/comments', { config: { idempotent: 'incident.update' } }, async (req) =>
+    reviews.addReviewComment(requireUser(req), req.params.ref, z.object({ body: z.string().max(20000) }).parse(req.body).body),
+  );
   type ItemParams = { Params: { ref: string; id: string } };
   app.get<RefParams>('/api/incidents/:ref/review', async (req) => reviews.openReview(requireUser(req), req.params.ref));
   app.post<RefParams>('/api/incidents/:ref/review', async (req, reply) => {

@@ -8,7 +8,7 @@ import { useTeams } from './Teams';
 import { formatDate, relativeTime } from '../format';
 
 interface Row {
-  ref: string; title: string; is_major: boolean; priority: number; resolved_at: string | null; team: string | null; status: string; owner: string | null; due: string | null;
+  ref: string; incident_ref: string; title: string; is_major: boolean; priority: number; resolved_at: string | null; team: string | null; status: string; owner: string | null; due: string | null;
   overdue: boolean; published_at: string | null; factors: number; factors_to_problems: number; follow_ups: number; follow_ups_to_actions: number; url: string;
 }
 const TABS = [['due', 'Due'], ['published', 'Published'], ['waived', 'Waived']] as const;
@@ -52,7 +52,7 @@ export function IncidentReviewsPage() {
               <tbody>
                 {data?.map((r) => (
                   <tr key={r.ref}>
-                    <td className="title-cell"><Link to={r.url} className="mono">{r.ref}</Link> <Link to={r.url}>{r.title}</Link> {r.is_major && <span className="badge major">Major</span>}</td>
+                    <td className="title-cell"><Link to={`/incidents/${r.incident_ref}/review`} className="mono">{r.incident_ref}</Link> <Link to={`/incidents/${r.incident_ref}/review`}>{r.title}</Link> {r.is_major && <span className="badge major">Major</span>}</td>
                     <td className="muted">{r.owner ?? '–'}</td>
                     <td className="nowrap">
                       {tab === 'published' ? (r.published_at ? <span title={formatDate(r.published_at)}>{relativeTime(r.published_at)}</span> : '–')

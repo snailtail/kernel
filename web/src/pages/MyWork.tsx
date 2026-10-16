@@ -12,7 +12,7 @@ import { useSession } from '../session';
 interface MyWork {
   problems: { ref: string; title: string; status: Status; priority: number; updated_at: string; url: string }[];
   incidents: { ref: string; title: string; status: string; priority: number; is_major: boolean; created_at: string; update_overdue?: boolean }[];
-  reviews?: { ref: string; title: string; status: string; due: string | null; overdue: boolean }[];
+  reviews?: { ref: string; incident_ref: string; title: string; status: string; due: string | null; overdue: boolean }[];
   major_updates?: { ref: string; title: string; priority: number; next_update_at: string | null; update_overdue: boolean; role: string }[];
   teams?: { id: number; name: string; role: string; unassigned: number }[];
   team_queue?: { ref: string; title: string; status: string; priority: number; is_major: boolean; created_at: string; team: string }[];
@@ -129,7 +129,7 @@ export function MyWorkPage() {
           <ul className="work-list">
             {data.reviews.map((r) => (
               <li key={r.ref}>
-                <div><Link to={`/incidents/${r.ref}/review`} className="mono">{r.ref}</Link> <Link to={`/incidents/${r.ref}/review`} className="work-title">{r.title}</Link></div>
+                <div><Link to={`/incidents/${r.incident_ref}/review`} className="mono">{r.incident_ref}</Link> <Link to={`/incidents/${r.incident_ref}/review`} className="work-title">{r.title}</Link></div>
                 <span className="work-meta">{r.overdue ? <span className="badge overdue">Overdue</span> : r.due && <span className="muted small">due {r.due}</span>}<span className="muted small">{r.status}</span></span>
               </li>
             ))}

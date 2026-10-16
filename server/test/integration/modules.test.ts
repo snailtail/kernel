@@ -60,6 +60,8 @@ describe('modules and first-run setup (#36)', { skip }, () => {
     assert.match(gone.body.error, /Incidents module is turned off/);
     assert.equal((await analyst.get(`/api/incidents/${inc.ref}`)).status, 404);
     assert.equal((await analyst.get(`/api/records/${inc.ref}`)).status, 404);
+    assert.equal((await analyst.get(`/api/records/${inc.ref}/history`)).status, 404);
+    assert.equal((await analyst.get('/api/reviews')).status, 404, 'post-incident reviews belong to the incidents module');
     assert.ok(!(await analyst.get('/api/search?q=switching')).body.some((h: any) => h.type === 'incident'));
     const openapi = (await analyst.get('/api/openapi.json')).body;
     assert.equal(openapi.paths['/api/incidents'], undefined);
@@ -70,6 +72,7 @@ describe('modules and first-run setup (#36)', { skip }, () => {
     await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
     const tools = (await mcp.listTools()).tools.map((t) => t.name);
     assert.ok(!tools.includes('create_incident') && !tools.includes('list_incidents'));
+    assert.ok(!tools.includes('get_review') && !tools.includes('transition_review'));
     assert.ok(tools.includes('create_problem'));
     assert.ok(!(await mcp.listPrompts()).prompts.some((p) => p.name === 'triage_incident'));
     await mcp.close();

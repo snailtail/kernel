@@ -173,8 +173,15 @@ export async function problemRoutes(app: FastifyInstance) {
   app.get('/api/search', async (req) => generic.search(requireUser(req, 'meta.read'), generic.searchSchema.parse(req.query)));
   app.get<RefParams>('/api/records/:ref', async (req) => generic.getRecord(requireUser(req), req.params.ref));
   app.get<RefParams>('/api/records/:ref/next-steps', async (req) => generic.nextSteps(requireUser(req), req.params.ref));
+  app.get<RefParams>('/api/records/:ref/history', async (req) =>
+    generic.recordHistory(requireUser(req), req.params.ref, z.object({ limit: z.coerce.number().int().min(1).max(500).default(100) }).parse(req.query).limit));
+  app.get<RefParams>('/api/records/:ref/impact', async (req) => generic.getImpact(requireUser(req), req.params.ref, z.object({ max_depth: z.coerce.number().int().optional() }).parse(req.query)));
+  app.post<RefParams>('/api/records/:ref/comments', { config: { idempotent: 'problem.comment' } }, async (req, reply) => {
+    await generic.addComment(requireUser(req), req.params.ref, z.object({ body: z.string().max(20000) }).parse(req.body).body);
+    return reply.code(201).send({ ok: true });
+  });
   app.post<RefParams>('/api/records/:ref/links', { config: { idempotent: 'problem.link' } }, async (req) => {
-    const body = z.object({ to: z.string().trim().min(1).max(200), kind: z.string().max(20).optional(), system: z.string().max(100).optional(), url: z.string().max(2000).optional(), note: z.string().max(2000).optional() }).parse(req.body);
+    const body = generic.linkBodySchema.parse(req.body);
     return generic.linkRecords(requireUser(req), req.params.ref, body.to, body);
   });
   app.get('/api/flow', async (req) => flow.processMap(requireUser(req, 'meta.read')));

@@ -16,9 +16,9 @@ interface Item {
   action_id: number | null; action_title: string | null; action_status: string | null; action_due: string | null; action_owner: string | null; action_problem_ref: string | null;
 }
 interface Review {
-  ref: string; incident_title: string; is_major: boolean; status: 'scheduled' | 'draft' | 'published' | 'waived'; owner_id: number | null; owner: string | null;
+  ref: string; incident_ref: string; incident_title: string; is_major: boolean; status: 'scheduled' | 'draft' | 'published' | 'waived'; owner_id: number | null; owner: string | null;
   due: string | null; due_in_days: number | null; overdue: boolean; attendees: string; waived_reason: string; published_at: string | null; published_by: string | null;
-  items: Item[]; may_finish: boolean; confidential_masked?: boolean;
+  items: Item[]; comments: { id: number; body: string; created_at: string; created_by: string | null }[]; may_finish: boolean; confidential_masked?: boolean;
   context: { timeline: { at: string; label: string; body: string; key_moment: boolean }[]; impact: string; problem_ref: string | null };
   guide: { purpose: string; wording: string; sections: Record<Section, string> };
 }
@@ -36,15 +36,16 @@ export function IncidentReviewPage() {
   const { ref } = useParams();
   const { user, meta } = useSession();
   const ai = useAiStatus();
-  const { data: r, setData, error } = useApi<ReviewData>(`/api/incidents/${ref}/review`);
+  const { data: r, setData, error } = useApi<ReviewData>(`/api/reviews/${ref}`);
   const [draft, setDraft] = useState<Partial<Record<Section | 'attendees', string>>>({});
   const [newItem, setNewItem] = useState<Record<string, string>>({});
   const [actionError, setActionError] = useState<string | null>(null);
   const [hint, setHint] = useState<{ text: string; model: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState('');
   if (error) return <p className="error">{error}</p>;
   if (!r) return null;
-  const path = `/api/incidents/${r.ref}/review`;
+  const path = `/api/incidents/${r.incident_ref}/review`;
   const editable = user.role !== 'viewer' && (r.status === 'scheduled' || r.status === 'draft');
   const manager = user.role === 'admin' || user.role === 'problem_manager';
   const dirty = Object.keys(draft).length > 0;
@@ -58,7 +59,7 @@ export function IncidentReviewPage() {
   return (
     <>
       <header className="problem-head">
-        <div className="crumbs"><Link to="/incidents">Incidents</Link> / <Link to={`/incidents/${r.ref}`} className="mono">{r.ref}</Link> / Review</div>
+        <div className="crumbs"><Link to="/incidents">Incidents</Link> / <Link to={`/incidents/${r.incident_ref}`} className="mono">{r.incident_ref}</Link> / Review <span className="mono">{r.ref}</span></div>
         <h1>Post-incident review: {r.incident_title}</h1>
         <div className="badges">
           <span className={`badge review-${r.status}`}>{STATUS_LABEL[r.status]}</span>
@@ -91,7 +92,7 @@ export function IncidentReviewPage() {
                 <>
                   <button className="btn small" disabled={busy} onClick={async () => {
                     setBusy(true); setActionError(null);
-                    try { setHint(await api.post('/api/ai/review-wording', { ref: r.ref })); } catch (err) { setActionError((err as Error).message); } finally { setBusy(false); }
+                    try { setHint(await api.post('/api/ai/review-wording', { ref: r.incident_ref })); } catch (err) { setActionError((err as Error).message); } finally { setBusy(false); }
                   }}>{busy ? 'Checking…' : '✨ Check the wording with AI'}</button>
                   {hint && <div className="ai-output"><p className="muted small">AI hint ({hint.model}): only a suggestion, nothing was changed.</p><Markdown text={hint.text} /></div>}
                 </>
@@ -154,7 +155,21 @@ export function IncidentReviewPage() {
                 <li key={n}><time>{formatDate(e.at)}</time><div><strong>{e.label}</strong>{e.key_moment && ' ★'}</div></li>
               ))}
             </ol>
-            <Link to={`/incidents/${r.ref}`} className="small">The incident</Link>
+            <Link to={`/incidents/${r.incident_ref}`} className="small">The incident</Link>
+          </section>
+          <section className="card">
+            <h2>Notes <span className="count">{r.comments.length}</span></h2>
+            {r.comments.length > 0 && (
+              <ul className="activity compact">
+                {r.comments.map((c) => <li key={c.id}><div className="muted small">{c.created_by ?? 'Someone'} · {formatDate(c.created_at)}</div><Markdown text={c.body} /></li>)}
+              </ul>
+            )}
+            {user.role !== 'viewer' && (
+              <form className="no-print" onSubmit={(e) => { e.preventDefault(); if (note.trim()) void run(() => api.post(`/api/reviews/${r.ref}/comments`, { body: note.trim() })).then((ok) => ok && setNote('')); }}>
+                <textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="A note for the people on the review" aria-label="Note" />
+                <button className="btn small" disabled={!note.trim()}>Add note</button>
+              </form>
+            )}
           </section>
         </aside>
       </div>

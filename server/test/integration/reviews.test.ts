@@ -80,7 +80,7 @@ describe('post-incident reviews (#109)', { skip }, () => {
   test('My work shows my open reviews, overdue first; publishing takes the owner, lead or a manager', async () => {
     await ownerQuery("UPDATE incident_reviews SET due = current_date - 1 WHERE incident_id = (SELECT id FROM incidents WHERE ref = $1)", [inc]);
     const mine = (await analyst.get('/api/my-work')).body.reviews;
-    assert.deepEqual(mine.map((x: any) => [x.ref, x.overdue]), [[inc, true]]);
+    assert.deepEqual(mine.map((x: any) => [x.incident_ref, x.overdue]), [[inc, true]]);
     assert.deepEqual((await analyst2.get('/api/my-work')).body.reviews, [], 'positive control: only the owner');
     assert.equal((await analyst2.post(`/api/incidents/${inc}/review/publish`, {})).status, 403);
     ok(await analyst.patch(`/api/incidents/${inc}/review`, { went_well: 'Failover worked within minutes.', attendees: 'Analyst, Pm' }));
@@ -203,9 +203,9 @@ describe('post-incident reviews (#109)', { skip }, () => {
     assert.equal(badge, forMe, 'the badge = overdue reviews of my teams');
     assert.equal(badge, 1, 'positive control: exactly the team review');
     assert.equal((await analyst.get('/api/nav/counts')).body.reviews, due.filter((r: any) => r.overdue && r.owner === 'Analyst').length, 'and for the owner, the ones they own');
-    assert.equal((await analyst2.get('/api/incident-reviews?team=mine')).body.map((r: any) => r.ref).join(), mineByTeam, 'the "my teams" filter shows the same review');
+    assert.equal((await analyst2.get('/api/incident-reviews?team=mine')).body.map((r: any) => r.incident_ref).join(), mineByTeam, 'the "my teams" filter shows the same review');
     // Published and waived tabs.
-    assert.ok((await analyst.get('/api/incident-reviews?tab=published')).body.some((r: any) => r.ref === inc));
+    assert.ok((await analyst.get('/api/incident-reviews?tab=published')).body.some((r: any) => r.incident_ref === inc));
     assert.ok((await analyst.get('/api/incident-reviews?tab=waived')).body.length >= 1);
     // A resolved major incident whose review was waived does not count as missing one; one still scheduled does.
     const before = count('major incidents resolved, review not published or waived');

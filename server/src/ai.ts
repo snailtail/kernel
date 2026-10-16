@@ -241,7 +241,7 @@ export async function analyzeLog(user: User, attachmentId: number) {
 export async function reviewWording(user: User, ref: string) {
   const { getReview } = await import('./reviews.js');
   const r = await getReview(user, ref); // read access and visibility apply
-  const { rows } = await query('SELECT restricted, classification FROM incidents WHERE ref = $1', [r.ref]);
+  const { rows } = await query('SELECT restricted, classification FROM incidents WHERE ref = $1', [r.incident_ref]);
   const { provider, model } = await route('review_wording');
   const sections = [['What happened', r.what_happened], ['What went well', r.went_well], ['What was hard', r.was_hard], ['Where we were lucky', r.lucky], ['Contributing factors', r.items.map((x: any) => `- ${x.body}`).join('\n')]]
     .filter(([, v]) => String(v).trim()).map(([h, v]) => `## ${h}\n${v}`).join('\n\n');

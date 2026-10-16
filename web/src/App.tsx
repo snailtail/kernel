@@ -136,6 +136,7 @@ export function App() {
             <Route path="/incidents" element={<IncidentsPage />} />
             <Route path="/incidents/:ref" element={<IncidentPage />} />
             <Route path="/incidents/:ref/review" element={<IncidentReviewPage />} />
+            <Route path="/reviews/:ref" element={<IncidentReviewPage />} />
             <Route path="/incident-reviews" element={<IncidentReviewsPage />} />
             <Route path="/cis" element={<CmdbListPage />} />
             <Route path="/cis/groups" element={<CiGroupsPage />} />
