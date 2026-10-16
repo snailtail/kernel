@@ -20,7 +20,7 @@ interface Candidate {
   evidence: { records: EvidenceRecord[]; total_records: number; series?: Series[]; cis: { ref: string; name: string; role: 'subject' | 'upstream' | 'affected'; depth?: number }[]; notes?: string };
   decision?: { decision: 'dismissed' | 'snoozed'; until: string | null; reason: string; by: string | null; at: string };
 }
-interface Rule { rule: RuleId; label: string; description: string; enabled: boolean; settings: Record<string, number>; count: number }
+interface Rule { rule: RuleId; label: string; description: string; enabled: boolean; settings: Record<string, number>; count: number; error?: string }
 interface Candidates { rules: Rule[]; hidden: { dismissed: number; snoozed: number }; candidates: Candidate[] }
 
 const SETTING_LABEL: Record<string, string> = {
@@ -84,6 +84,11 @@ export function CandidatesPage() {
         </div>
       )}
       {error && <div className="error">{error}</div>}
+      {data?.rules.some((r) => r.error) && (
+        <div className="hint-box candidate-rule-errors" role="status">
+          This rule could not run, so its candidates are missing for now: {data.rules.filter((r) => r.error).map((r) => `${r.label} (${r.error!.toLowerCase()})`).join(', ')}. The other rules are listed as usual.
+        </div>
+      )}
       {data?.candidates.length === 0 && (
         <section className="card">
           <p className="empty">
@@ -255,6 +260,7 @@ function RuleRow({ rule, editable, onSaved }: { rule: Rule; editable: boolean; o
   return (
     <li className={rule.enabled ? '' : 'inactive'}>
       <strong>{rule.label}</strong>{!rule.enabled && <span className="muted small"> (off)</span>}
+      {rule.error && <span className="error small"> · {rule.error}</span>}
       <p className="muted small">{describe(rule)}</p>
       {editable && (
         <form className="inline-form rule-form" onSubmit={save}>
