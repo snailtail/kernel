@@ -229,6 +229,39 @@ export async function seedStory(p: People) {
       notes: 'The growth started with release 4.12 of shop-frontend. A heap dump would show which cache keeps growing.',
     },
   });
+  // ---- Before it hurts (#31, part 2): trends in monitoring and in changes ----
+  const kuma = (evs: object[]) => events.processEvents('Uptime Kuma', 'Uptime Kuma', evs.map((e) => ({ message: '', ...e })) as any);
+  const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+  // The search health check flaps: it clears and fires again six times in the last quarter hour.
+  for (let i = 0; i < 6; i++) {
+    await kuma([{ host: 'shop-search', check: 'HTTP GET /search/health', severity: 'warning', message: 'Slow response (2.4 s)', occurred_at: ago(13 - 2 * i) }]);
+    await kuma([{ host: 'shop-search', check: 'HTTP GET /search/health', severity: 'clear', occurred_at: ago(12.5 - 2 * i) }]);
+  }
+  // Replication lag warnings on shop-db: a few last week, many this week.
+  for (const [day, times] of [[12, 1], [10, 1], [8, 1], [6, 2], [5, 2], [4, 3], [3, 3], [2, 4], [1, 4]] as const) {
+    for (let t = 0; t < times; t++) await kuma([{ host: 'shop-db', check: 'Replication lag', severity: 'warning', message: `Replica ${20 + day * 3 + t} s behind`, occurred_at: ago(day * D - t * 90) }]);
+  }
+  // The node's disk keeps filling up and being cleaned by hand.
+  for (const day of [25, 15, 6, 1]) {
+    await kuma([{ host: 'aks-node-07', check: 'Disk usage /var/lib/containerd', severity: 'major', message: 'Disk 93% full', occurred_at: ago(day * D) }]);
+    await kuma([{ host: 'aks-node-07', check: 'Disk usage /var/lib/containerd', severity: 'clear', occurred_at: ago(day * D - 4 * H) }]);
+  }
+  // Packet loss to the payment gateway that clears itself within minutes, every day or two, and nobody looks.
+  for (const day of [11, 9, 7, 5, 3, 2]) {
+    await kuma([{ host: 'pay-gw01', check: 'Ping loss', severity: 'minor', message: 'Packet loss 12%', occurred_at: ago(day * D + 3 * H) }]);
+    await kuma([{ host: 'pay-gw01', check: 'Ping loss', severity: 'clear', occurred_at: ago(day * D + 3 * H - 4) }]);
+  }
+  // Two more gateway changes: with the rolled-back certificate change, two of three went wrong.
+  for (const [title, outcome, days] of [['Update the gateway firewall rules', 'successful', 50], ['Tune the gateway JVM heap', 'failed', 20]] as const) {
+    const c = (await changes.createChange(jonas, { title, change_type: 'normal', risk: 'low', cis: [gateway], implementation_plan: 'Follow the runbook.', backout_plan: 'Restore the previous version.', planned_start: new Date(Date.now() + H * 60_000).toISOString(), planned_end: new Date(Date.now() + 2 * H * 60_000).toISOString() })).ref as string;
+    await changes.transitionChange(jonas, c, { to: 'assess' });
+    await changes.transitionChange(jonas, c, { to: 'authorize' });
+    await changes.voteOnChange(anna, c, { decision: 'approve', comment: '' });
+    await changes.transitionChange(jonas, c, { to: 'implementing' });
+    await changes.transitionChange(jonas, c, { to: 'review', outcome });
+    await changes.transitionChange(jonas, c, { to: 'closed', ...(outcome === 'failed' ? { review: 'The new heap size made garbage collection pauses longer; reverted.' } : {}) });
+    await shift(c, days * D);
+  }
   // The pages the story queued (the worker is not running while seeding).
   await oncall.deliverPages();
   return { incident: inc, problem: prb, change: chg, earlier: old };

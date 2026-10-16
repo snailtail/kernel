@@ -42,6 +42,8 @@ clients send large selections in chunks so each request stays well within proxy 
   team, and a request that would page a team more than once is refused with 409 unless it carries `confirm_paging: true`.
 - Bulk is an explicit mass change: it does not take `base`, so it does not detect a concurrent edit, and an `undo`
   sets the values from before the bulk change even if someone has changed the record since.
+- Notifications during a bulk request are held back and sent as one summary per person when it finishes (#125). They
+  are held in memory, so a crash mid-request loses those notices; the changes themselves are committed and audited.
 
 - Errors are `{ "error": "message" }` plus optional details (e.g. `conflicts` on 409). Status codes: 400 invalid
   input, 401 not signed in, 403 not allowed (or a missing step-up / token scope), 404 not found, 409 conflicts with
@@ -102,6 +104,10 @@ which records count. Each has a stable `key` (rule + subject, e.g. `common_upstr
 and reported candidates (`reported_candidates`, idempotent on source + external key) are stored. Act on a candidate by
 key: the server prefills the problem from the evidence under the copy rules above and links every record. A new rule
 is a function returning candidates with a `finish(records)` that gives the reason or null, plus a row in `RULES`.
+Rules marked `proactive` (trends in events and changes, `server/src/candidate-trends.ts`, and reported findings) show
+under "Before it hurts" and carry `evidence.series`: one value per day, oldest first, with `split` where two windows
+are compared. For these, a dismissal holds until a new alert or change joins the trend; snooze for a time-boxed pause.
+`detection` on the prefilled problem is reactive when incidents in the evidence already happened, proactive otherwise.
 
 ## Checklist for a new practice
 
