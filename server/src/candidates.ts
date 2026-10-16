@@ -479,7 +479,11 @@ async function compute(db: Db, only?: RuleId): Promise<Resolved[]> {
       else out.push({ raw, records: raw.records, reason: raw.finish(raw.records) ?? '', decision: d, hidden: true });
       continue;
     }
-    out.push({ raw, records: raw.records, reason: raw.finish(raw.records) ?? '', decision: snoozed ? d : undefined, hidden: snoozed });
+    const reason = raw.finish(raw.records);
+    // A rule's threshold may come from elsewhere than its evidence (rising warnings count event_daily): with no
+    // evidence left that meets the rule, there is no candidate.
+    if (!reason && !d) continue;
+    out.push({ raw, records: raw.records, reason: reason ?? '', decision: snoozed ? d : undefined, hidden: snoozed });
   }
   return out;
 }
