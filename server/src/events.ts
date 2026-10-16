@@ -14,9 +14,15 @@ import { slaOnTransition } from './sla.js';
 import type { Db } from './problems.js';
 import { logger } from './log.js';
 import { moduleEnabled } from './modules.js';
-import { authorize } from './policy.js';
+import { authorize, can } from './policy.js';
 
 export const SEVERITIES = ['info', 'warning', 'minor', 'major', 'critical'] as const;
+/**
+ * Kernel's own security alerts (#64). The name is reserved: only the detection rules report under it, its alerts
+ * match only rules that name it, and the incidents they open are security incidents, restricted from the start.
+ */
+export const SECURITY_SOURCE = 'Kernel security';
+export const isReservedSource = (name: string) => name.trim().toLowerCase() === SECURITY_SOURCE.toLowerCase();
 export type Severity = (typeof SEVERITIES)[number];
 const RANK: Record<string, number> = { clear: 0, info: 1, warning: 2, minor: 3, major: 4, critical: 5 };
 
@@ -263,7 +269,8 @@ async function applyRule(db: Db, rule: Rule, alert: any, ci: CiFacts | null) {
     await logIncident(db, inc.id, null, 'link', note, { kind: 'event', alert_id: alert.id, check: alert.check_key, ci: ci?.ref ?? null });
     return { incident: inc.ref, action: 'grouped' as const };
   };
-  const label = `${alert.check_key} on ${ci?.name ?? (alert.ci_hint || 'unknown host')}`;
+  const security = alert.source === SECURITY_SOURCE;
+  const label = security ? alert.check_key : `${alert.check_key} on ${ci?.name ?? (alert.ci_hint || 'unknown host')}`;
   // 1. An open incident for the same group: group into it.
   const { rows: open } = await db.query(
     `SELECT id, ref FROM incidents WHERE event_rule_id = $1 AND event_group_key = $2 AND status NOT IN ('resolved', 'closed') ORDER BY created_at DESC LIMIT 1`,
@@ -294,6 +301,8 @@ async function applyRule(db: Db, rule: Rule, alert: any, ci: CiFacts | null) {
     return { incident: null, action: 'rate_limited' as const };
   }
   // 4. A new incident. Title and description come from monitoring data: stored as data like any user text.
+  // A security incident is in the Security category and restricted to its team (ADR 0002) whatever the rule says.
+  const securityCategory = security ? (await db.query("SELECT id FROM categories WHERE name = 'Security'")).rows[0]?.id : undefined;
   const created = await insertIncident(
     db,
     null,
@@ -303,11 +312,13 @@ async function applyRule(db: Db, rule: Rule, alert: any, ci: CiFacts | null) {
       impact: rule.impact,
       urgency: rule.urgency,
       ...(rule.team_id ? { team_id: rule.team_id } : { assignment_group: rule.assignment_group }),
+      ...(securityCategory ? { category_id: securityCategory } : {}),
     },
     ci ? [ci.id] : [],
     'event',
-    { event_rule_id: rule.id, event_group_key: groupKey },
+    { event_rule_id: rule.id, event_group_key: groupKey, ...(security ? { restricted: true } : {}) },
   );
+  if (security) await db.query("UPDATE incidents SET restricted_teams = CASE WHEN team_id IS NULL THEN '{}' ELSE ARRAY[team_id] END WHERE id = $1", [created.id]);
   await db.query('UPDATE alerts SET incident_id = $2, rule_id = $3 WHERE id = $1', [alert.id, created.id, rule.id]);
   return { incident: created.ref, action: 'created' as const };
 }
@@ -315,7 +326,8 @@ async function applyRule(db: Db, rule: Rule, alert: any, ci: CiFacts | null) {
 export interface EventResult { check: string; outcome: string; alert_id?: number; incident?: string | null }
 
 /** Processes normalised events from one source; each event in its own transaction. */
-export async function processEvents(source: string, ciSourceSystem: string, events: NormalisedEvent[]): Promise<EventResult[]> {
+export async function processEvents(source: string, ciSourceSystem: string, events: NormalisedEvent[], internal = false): Promise<EventResult[]> {
+  if (isReservedSource(source) && !internal) return events.map((e) => ({ check: e.check, outcome: 'error', error: `"${SECURITY_SOURCE}" is reserved for Kernel's own security alerts` }) as EventResult);
   const settings = await retention();
   const { rows: rules } = await query('SELECT * FROM event_rules WHERE enabled ORDER BY position, id');
   const results: EventResult[] = [];
@@ -425,7 +437,8 @@ async function processOne(db: Db, source: string, ciSourceSystem: string, e: Nor
   // Rules only open incidents while the incident module is on (#36); alerts are still recorded.
   if (!alert.suppressed && !hasIncident && moduleEnabled('incident')) {
     const facts: AlertFacts = { severity: alert.severity, source, check_key: e.check, count: alert.count, ci };
-    const rule = rules.find((r) => ruleMatches(r.conditions, facts));
+    // Security alerts never fall into a catch-all rule: only a rule that names their source may open an incident.
+    const rule = rules.find((r) => ruleMatches(r.conditions, facts) && (source !== SECURITY_SOURCE || !!r.conditions.sources?.includes(SECURITY_SOURCE)));
     if (rule) {
       const applied = await applyRule(db, rule, alert, ci);
       incident = applied.incident;
@@ -498,6 +511,8 @@ export async function listAlerts(user: User, f: z.infer<typeof listAlertsSchema>
     where.push(sql.replaceAll('?', `$${params.length}`));
   };
   if (f.id) add('a.id = ?', f.id);
+  // Security alerts name accounts and addresses: administrators only (#64).
+  if (!can(user.role, 'security.read')) add('a.source <> ?', SECURITY_SOURCE);
   if (f.status !== 'all') add('a.status = ?', f.status);
   if (f.min_severity) add(`a.severity = ANY(?)`, SEVERITIES.slice(SEVERITIES.indexOf(f.min_severity)));
   if (f.source) add('a.source = ?', f.source);
@@ -530,7 +545,7 @@ export async function getAlert(user: User, id: number) {
 
 export async function acknowledgeAlert(user: User, id: number) {
   authorize(user, 'event.ack');
-  const { rows } = await query('UPDATE alerts SET acknowledged_by = $2, acknowledged_at = now() WHERE id = $1 AND acknowledged_at IS NULL RETURNING id, check_key', [id, user.id]);
+  const { rows } = await query('UPDATE alerts SET acknowledged_by = $2, acknowledged_at = now() WHERE id = $1 AND acknowledged_at IS NULL AND (source <> $3 OR $4) RETURNING id, check_key', [id, user.id, SECURITY_SOURCE, can(user.role, 'security.read')]);
   if (!rows[0]) throw conflict('Alert not found or already acknowledged');
   await audit(null, { entity_type: 'alert', entity_ref: String(id), action: 'acknowledge', changes: { check: rows[0].check_key } });
   return { ok: true };
@@ -539,7 +554,7 @@ export async function acknowledgeAlert(user: User, id: number) {
 /** Closes an alert by hand (the source said nothing more, or it was noise); a new event for it opens it again. */
 export async function closeAlert(user: User, id: number) {
   authorize(user, 'event.ack');
-  const { rows } = await query("UPDATE alerts SET status = 'closed', cleared_at = now(), state_at = now() WHERE id = $1 AND status <> 'closed' RETURNING id, check_key", [id]);
+  const { rows } = await query("UPDATE alerts SET status = 'closed', cleared_at = now(), state_at = now() WHERE id = $1 AND status <> 'closed' AND (source <> $2 OR $3) RETURNING id, check_key", [id, SECURITY_SOURCE, can(user.role, 'security.read')]);
   if (!rows[0]) throw conflict('Alert not found or already closed');
   await audit(null, { entity_type: 'alert', entity_ref: String(id), action: 'close', changes: { check: rows[0].check_key } });
   return { ok: true };
@@ -547,6 +562,7 @@ export async function closeAlert(user: User, id: number) {
 
 export async function reportEvents(user: User, input: z.infer<typeof reportEventsSchema>) {
   authorize(user, 'event.ingest');
+  if (isReservedSource(input.source)) throw badRequest(`"${SECURITY_SOURCE}" is reserved for Kernel's own security alerts`);
   const results = await processEvents(input.source, '', input.events);
   return { accepted: results.filter((r) => r.outcome !== 'error').length, results };
 }

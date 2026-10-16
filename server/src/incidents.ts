@@ -299,7 +299,7 @@ export async function insertIncident(
   fields: Omit<z.infer<typeof createIncidentSchema>, 'cis'>,
   ciIds: number[],
   source: 'user' | 'api' | 'mcp' | 'event',
-  extra: { event_rule_id?: number; event_group_key?: string } = {},
+  extra: { event_rule_id?: number; event_group_key?: string; restricted?: boolean } = {},
 ) {
   const values: Record<string, unknown> = { ...fields, ...extra, source, created_by: actorId };
   if (await restrictedByCategory(fields.category_id)) values.restricted = true; // e.g. security incidents (#53)

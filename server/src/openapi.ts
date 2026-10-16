@@ -27,7 +27,8 @@ import * as st from './status.js';
 import * as srMod from './service-report.js';
 import * as ssoMod from './sso.js';
 import * as hooks from './event-hooks.js';
-import { securityQuerySchema } from './security-events.js';
+import { privacySchema, securityQuerySchema } from './security-events.js';
+import { alertingSchema } from './security-alerts.js';
 import { auditQuerySchema } from './audit.js';
 import { searchSchema } from './generic.js';
 import * as analyses from './analyses.js';
@@ -410,6 +411,10 @@ export const OPERATIONS: Op[] = [
   { method: 'get', path: '/api/audit/verify', tag: 'Administration', summary: 'Verify the audit trail hash chain' },
   { method: 'get', path: '/api/security-events', tag: 'Administration', summary: 'Security events: sign-ins, failures, denials, token use from new addresses, admin changes, exports (admins)', query: securityQuerySchema },
   { method: 'get', path: '/api/security-events/summary', tag: 'Administration', summary: 'Security events of the last 24 hours, by outcome and most frequent non-success actions' },
+  { method: 'get', path: '/api/admin/security-alerting', tag: 'Administration', summary: 'Security alerting: detection rules and thresholds, the event rule for security incidents, open security alerts' },
+  { method: 'put', path: '/api/admin/security-alerting', tag: 'Administration', summary: 'Change the detection rules and thresholds (step-up and a reason)', body: alertingSchema.extend({ reason: z.string() }) },
+  { method: 'get', path: '/api/admin/privacy', tag: 'Administration', summary: 'Retention of network context in the audit trail and of security events' },
+  { method: 'put', path: '/api/admin/privacy', tag: 'Administration', summary: 'Set the retention of audit context and security events (30 to 3650 days; step-up and a reason)', body: privacySchema.extend({ reason: z.string() }) },
   { method: 'get', path: '/api/admin/backups', tag: 'Administration', summary: 'Backup health and dumps' },
   { method: 'get', path: '/api/webhooks', tag: 'Administration', summary: 'Webhooks, available events and formats (admins)' },
   { method: 'post', path: '/api/webhooks', tag: 'Administration', summary: 'Create a webhook (secret returned once)', body: webhooks.webhookSchema },

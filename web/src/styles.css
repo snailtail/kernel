@@ -1350,3 +1350,11 @@ ol.timeline.compact li { grid-template-columns: 8rem 1fr; padding: 5px 0; font-s
   .candidate .record-list .record-summary { grid-column: 1 / -1; grid-row: 2; }
   .candidate .record-list time { grid-column: 3; grid-row: 1; }
 }
+.security-alerting { margin-bottom: 16px; }
+.security-alerting h2 { margin: 0; font-size: 16px; }
+.security-alerts { display: flex; flex-direction: column; gap: 8px; }
+.alerting-rules input[type='number'] { width: 80px; }
+.security-alerting .retention { display: flex; flex-direction: column; gap: 8px; }
+.security-alerting .retention h3 { margin: 0; font-size: 14px; }
+.security-alerting .retention input { width: 90px; margin: 0 6px; }
+.security-alerting .retention label { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 0; }

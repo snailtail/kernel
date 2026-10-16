@@ -21,6 +21,7 @@ import { formatBody } from './webhooks.js';
 export const EVENTS = {
   assigned: { label: 'Something is assigned to me', email: true, chat: true },
   account_security: { label: 'My account was locked or signed in from a new device', email: true, chat: false },
+  security_alert: { label: 'A security alert: failed sign-ins, probing, a new administrator, changed credentials (administrators)', email: true, chat: true },
   team_queue: { label: "New work in my team's queue (no one assigned yet)", email: false, chat: true },
   approval_needed: { label: 'Something waits for my approval', email: true, chat: true },
   decision: { label: 'A decision on something I requested', email: true, chat: false },

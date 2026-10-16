@@ -5,7 +5,7 @@
 // and a sign-in name that matches no account only as a keyed digest (ADR 0001).
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { digestOf } from './audit.js';
+import { audit, digestOf } from './audit.js';
 import { config } from './config.js';
 import { currentContext } from './context.js';
 import { query } from './db.js';
@@ -63,25 +63,43 @@ export function originOf(req?: FastifyRequest): Origin {
 }
 
 // A flood (a scanner, a script hammering a denied route) must not fill the table: per action and caller, at most
-// this many rows a minute. The log line is still written, so the SIEM sees the full volume.
-const PER_MINUTE = 30;
-const recent = new Map<string, { n: number; until: number }>();
-function admit(key: string) {
+// this many rows a minute. The log line is still written, so the SIEM sees the full volume, and the rest is not lost
+// to the detection rules either: when the minute is over, one summary row carries the count (detail.suppressed).
+export const PER_MINUTE = 30;
+interface Window { n: number; until: number; last?: () => Promise<unknown> }
+const recent = new Map<string, Window>();
+function admit(key: string): Window | true {
   const now = Date.now();
   const e = recent.get(key);
   if (!e || e.until <= now) {
-    if (recent.size > 20_000) for (const [k, v] of recent) if (v.until <= now) recent.delete(k);
+    if (e) closeWindow(key, e);
+    if (recent.size > 20_000) for (const [k, v] of recent) if (v.until <= now) closeWindow(k, v);
     recent.set(key, { n: 1, until: now + 60_000 });
     return true;
   }
-  return ++e.n <= PER_MINUTE;
+  return ++e.n <= PER_MINUTE ? true : e;
 }
+function closeWindow(key: string, e: Window) {
+  recent.delete(key);
+  if (e.last) track(e.last());
+}
+/** Writes the summary rows of minutes that are over (or all of them, when flushing). */
+function closeWindows(all = false) {
+  const now = Date.now();
+  for (const [k, v] of recent) if (all || v.until <= now) closeWindow(k, v);
+}
+setInterval(() => closeWindows(), 15_000).unref();
 
 const pending = new Set<Promise<unknown>>();
 /** Waits for queued writes (tests, and shutdown). */
 export const flushSecurityEvents = async () => {
+  closeWindows(true);
   while (pending.size) await Promise.allSettled([...pending]);
 };
+function track(write: Promise<unknown>) {
+  const p = write.finally(() => pending.delete(p));
+  pending.add(p);
+}
 
 /**
  * Records a security event. It never throws and never delays the request: the row is written in the background,
@@ -104,8 +122,9 @@ export function securityEvent(e: SecurityEvent, req?: FastifyRequest, origin: Or
     },
     e.message,
   );
-  if (e.store === false || !admit(`${e.action}|${userId ?? origin.ip}`)) return;
-  const write = (async () => {
+  if (e.store === false) return;
+  const window = admit(`${e.action}|${userId ?? origin.ip}`);
+  const write = (suppressed = 0) => (async () => {
     let account = '';
     let uid = userId;
     if (e.account) {
@@ -114,17 +133,22 @@ export function securityEvent(e: SecurityEvent, req?: FastifyRequest, origin: Or
       if (rows[0]) uid = uid ?? rows[0].id;
       else account = (digestOf(name) as { digest?: string }).digest ?? 'unknown account';
     }
+    const message = suppressed ? `${e.message} (and ${suppressed} more like it this minute, not stored one by one)` : e.message;
     await query(
       `INSERT INTO security_events (action, category, outcome, severity, user_id, account, actor_type, channel, token_prefix, ip, country, user_agent, request_id, target, detail, message)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, nullif($10, ''), $11, $12, $13, $14, $15, $16)`,
       [e.action, e.category, e.outcome, severity, uid, account, origin.actorType, origin.channel, origin.tokenPrefix, origin.ip, origin.country,
-        origin.userAgent, origin.requestId, (e.target ?? '').slice(0, 300), JSON.stringify(detail), e.message.slice(0, 500)],
+        origin.userAgent, origin.requestId, (e.target ?? '').slice(0, 300), JSON.stringify(suppressed ? { ...detail, suppressed } : detail), message.slice(0, 500)],
     );
-  })()
-    .catch((err) => securityLog.error({ event: { dataset: 'kernel.security', action: e.action }, err: (err as Error).message }, 'security event not stored'))
-    .finally(() => pending.delete(write));
-  pending.add(write);
+  })().catch((err) => securityLog.error({ event: { dataset: 'kernel.security', action: e.action }, err: (err as Error).message }, 'security event not stored'));
+  if (window === true) return track(write());
+  // Over the cap: the latest such event is stored once the minute is over, standing for itself and the rest.
+  const over = window.n - PER_MINUTE;
+  window.last = () => write(over - 1);
 }
+
+/** How many events a row stands for: itself, plus those it summarises (see PER_MINUTE). */
+export const WEIGHT_SQL = "(1 + coalesce((detail->>'suppressed')::int, 0))";
 
 // ---- Events derived from the audit trail ---------------------------------------------------------
 
@@ -305,6 +329,27 @@ export async function securitySummary() {
     ),
   ]);
   return { since: new Date(Date.now() - 86400_000).toISOString(), outcomes: Object.fromEntries(outcomes.rows.map((r) => [r.outcome, r.n])), top: actions.rows };
+}
+
+// ---- Retention ----------------------------------------------------------------------------------
+
+/**
+ * How long the network context of the audit trail (audit_context: IP and user agent) and security events are kept.
+ * Both are kept under legitimate interest (ADR 0001), also for an erased user, so never shorter than 30 days.
+ */
+export const privacySchema = z.object({
+  audit_context_days: z.number().int().min(30).max(3650),
+  security_event_days: z.number().int().min(30).max(3650),
+});
+export async function privacySettings(): Promise<z.infer<typeof privacySchema>> {
+  const { rows } = await query("SELECT value FROM settings WHERE key = 'privacy'");
+  return { audit_context_days: 365, security_event_days: 365, ...(rows[0]?.value ?? {}) };
+}
+export async function savePrivacySettings(value: z.infer<typeof privacySchema>, reason: string) {
+  const before = await privacySettings();
+  await query("INSERT INTO settings (key, value) VALUES ('privacy', $1) ON CONFLICT (key) DO UPDATE SET value = settings.value || excluded.value", [JSON.stringify(value)]);
+  await audit(null, { entity_type: 'setting', entity_ref: 'privacy', action: 'update', changes: { from: before, to: value }, reason });
+  return privacySettings();
 }
 
 /** Retention: events, and the addresses tokens were seen from, are kept for privacy.security_event_days (365). */

@@ -33,6 +33,10 @@ From migration 114 on, new audit entries:
   in `problem_activity`, `incident_activity`, `change_activity` and `ci_activity`, and on the records themselves;
 - store **IP address and user agent** in `audit_context`, outside the chain, deleted after
   `settings.privacy.audit_context_days` (365 by default; security under legitimate interest).
+- keep **security events** (`security_events`, #64) under the same legitimate interest: the user id, IP address,
+  user agent and country of sign-ins, denials and admin changes, deleted after `settings.privacy.security_event_days`
+  (365 by default). A sign-in name that matches no account is stored only as a digest. Both retention periods are set
+  in **Administration → Security events** (30 to 3650 days, with step-up and a reason, audited).
 
 Kept as is: the **reason** for sensitive actions (written by staff to justify an action) and the actor id. Reasons
 must not carry personal details: the dialog says so, and the server refuses reasons containing an email address or a
@@ -40,7 +44,9 @@ Swedish personal identity number (the #61 scanner will widen this).
 
 **Erasure** of a user (`POST /api/users/:id/erase`, administrators, with a reason) anonymises the account (username,
 name, email, credentials, settings) and ends sessions and tokens. The chain stays valid because it never contained
-the name. Erasure of personal data in records (#53) redacts the record fields and histories; the audit digests then
+the name. What erasure does not remove is the network context in `audit_context` and `security_events` (IP address and
+user agent): it stays under legitimate interest until its retention period ends, and the erase dialog says so. The
+account's name is removed from Kernel's own security alerts. Erasure of personal data in records (#53) redacts the record fields and histories; the audit digests then
 no longer match any stored text, which is the intended outcome.
 
 ## Existing entries

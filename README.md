@@ -307,7 +307,9 @@ To deploy to the test server, push your commits and run `scripts/deploy.sh`. It 
 - **Security events** (sign-ins and failures, lock-outs, denied requests, invalid tokens, a token used from a new
   address, role and credential changes, exports and reveals, CSP reports, rate limits, invalid webhook signatures,
   blocked outbound requests): one line each in the `kernel.security` log stream and a row kept for a year.
-  Administration → Security events; MCP `query_security_events`. See [docs/security-events.md](docs/security-events.md).
+  Administration → Security events; MCP `query_security_events`. Detection rules (many failed sign-ins or denials,
+  bulk exports, a sign-in from a new country, a new administrator, changed credentials) raise alerts in Kernel's own
+  event management, open a restricted security incident and notify administrators. See [docs/security-events.md](docs/security-events.md).
 - With `KERNEL_APP_DB_PASSWORD` the app runs as a least-privilege PostgreSQL role without DDL rights.
 - Containers run with a read-only filesystem, no Linux capabilities beyond what PostgreSQL needs,
   `no-new-privileges` and memory/PID limits. PostgreSQL is not published on the host.
