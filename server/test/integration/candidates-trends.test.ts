@@ -78,6 +78,14 @@ describe('proactive problem candidates (#31)', { skip }, () => {
     assert.equal(await byCi('rising_warnings', flat), undefined, '120 % is not rising enough');
     assert.equal(await byCi('rising_warnings', few), undefined, 'five warnings are below the minimum');
 
+    // Negative: the threshold is met in the daily counts, but every warning alert is already explained by a problem.
+    const explained = await ci('explained');
+    await warn(explained, 12, 2, 'new');
+    const prb = (await analyst.post('/api/problems', { title: 'Latency on explained' })).body.ref;
+    await ownerQuery('UPDATE alerts SET problem_id = (SELECT id FROM problems WHERE ref = $1) WHERE ci_id = (SELECT id FROM configuration_items WHERE ref = $2)', [prb, explained]);
+    assert.equal(await byCi('rising_warnings', explained), undefined, 'no candidate without evidence');
+    assert.equal((await candidates('rising_warnings')).some((x) => !x.reason || x.count === 0), false, 'never an empty candidate');
+
     // Dismissed: hidden until a new alert joins the trend.
     await dismiss(c.key);
     assert.equal(await byCi('rising_warnings', hit), undefined);

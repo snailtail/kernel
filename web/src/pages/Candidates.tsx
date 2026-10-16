@@ -269,6 +269,9 @@ function RuleRow({ rule, editable, onSaved }: { rule: Rule; editable: boolean; o
   );
 }
 
+/** Trend rules: what has to join before a dismissed candidate comes back. */
+const TREND_JOINS: Partial<Record<RuleId, string>> = { flapping: 'alert', rising_warnings: 'alert', capacity_warnings: 'alert', self_clearing: 'alert', change_correlation: 'change' };
+
 const SNOOZE: [label: string, days: number][] = [['1 day', 1], ['1 week', 7], ['30 days', 30]];
 
 function DecisionModal({ candidate: c, onClose, onDone }: { candidate: Candidate; onClose: () => void; onDone: () => void }) {
@@ -294,7 +297,9 @@ function DecisionModal({ candidate: c, onClose, onDone }: { candidate: Candidate
         <p className="hint full">
           {snooze
             ? 'The candidate is hidden until then, whatever arrives meanwhile.'
-            : `Dismissing covers the ${c.count} records it has now. It comes back only if new records are enough for the rule on their own.`}
+            : TREND_JOINS[c.rule]
+              ? `Dismissed until a new ${TREND_JOINS[c.rule]} joins; use Snooze to look again later.`
+              : `Dismissing covers the ${c.count} records it has now. It comes back only if new records are enough for the rule on their own.`}
         </p>
         <label className="full">Reason<textarea required rows={3} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Why is this not a problem (yet)?" /></label>
         {error && <div className="error full">{error}</div>}
