@@ -7,9 +7,10 @@ import { useApi } from '../hooks';
 import { canEdit, isManager, useSession } from '../session';
 
 type RuleId = 'recurring_records' | 'common_upstream' | 'major_without_problem' | 'recurring_resolution' | 'reported'
-  | 'flapping' | 'rising_warnings' | 'capacity_warnings' | 'self_clearing' | 'change_correlation';
+  | 'flapping' | 'rising_warnings' | 'capacity_warnings' | 'self_clearing' | 'change_correlation'
+  | 'repeatedly_missing' | 'eol_versions' | 'single_point_of_failure';
 interface EvidenceRecord {
-  key: string; kind: 'incident' | 'event' | 'external' | 'change'; id: number | null; incident_ref: string | null; alert_id: number | null; change_ref?: string | null; system: string; reference: string;
+  key: string; kind: 'incident' | 'event' | 'external' | 'change' | 'ci' | 'sync'; id: number | null; incident_ref: string | null; alert_id: number | null; change_ref?: string | null; system: string; reference: string;
   summary: string; category: string; occurred_at: string | null; ci_ref: string | null; resolution_code?: string | null; url?: string | null; note?: string | null;
 }
 interface Series { label: string; unit: string; points: { day: string; value: number }[]; split?: string }
@@ -25,6 +26,7 @@ interface Candidates { rules: Rule[]; hidden: { dismissed: number; snoozed: numb
 const SETTING_LABEL: Record<string, string> = {
   min_records: 'At least (records)', min_cis: 'On at least (CIs)', window_days: 'Within (days)', max_depth: 'Dependency steps',
   min_flaps: 'At least (reopenings)', min_events: 'At least (events)', factor_percent: 'Growth (%)', min_firings: 'At least (firings)',
+  min_times: 'At least (times)', warn_days: 'Warn ahead (days)', min_services: 'At least (services)',
   max_minutes: 'Cleared within (min)', min_changes: 'At least (changes)', min_percent: 'Bad (%)', within_hours: 'Incident within (hours)',
 };
 /** The rule's description with its current values filled in, for people who cannot change it. */
@@ -162,9 +164,10 @@ function CandidateCard({ c, editable, onCreate, onLink, onDecide, onRestore }: {
         <ul className="record-list">
           {ev.records.map((r) => (
             <li key={r.key}>
-              <span className={`kind kind-${r.kind}`}>{r.kind === 'external' ? 'finding' : r.kind}</span>
+              <span className={`kind kind-${r.kind}`}>{KIND_LABEL[r.kind] ?? r.kind}</span>
               {r.incident_ref ? <Link to={`/incidents/${r.incident_ref}`} className="mono">{r.reference}</Link>
                 : r.change_ref ? <Link to={`/changes/${r.change_ref}`} className="mono">{r.reference}</Link>
+                : r.kind === 'ci' ? <Link to={`/cis/${r.reference}`} className="mono">{r.reference}</Link>
                 : r.url ? <a href={r.url} target="_blank" rel="noopener noreferrer" className="mono">{r.reference}</a>
                 : <span className="mono">{r.reference}</span>}
               <span className="record-summary">{r.summary}{r.note && <span className="muted"> · {r.note}</span>}</span>
@@ -265,12 +268,73 @@ function RuleRow({ rule, editable, onSaved }: { rule: Rule; editable: boolean; o
           {error && <span className="error small">{error}</span>}
         </form>
       )}
+      {rule.rule === 'eol_versions' && <EolTable editable={editable} onSaved={onSaved} />}
     </li>
   );
 }
 
+const KIND_LABEL: Partial<Record<EvidenceRecord['kind'], string>> = { external: 'finding', ci: 'CI', sync: 'sync' };
+
 /** Trend rules: what has to join before a dismissed candidate comes back. */
-const TREND_JOINS: Partial<Record<RuleId, string>> = { flapping: 'alert', rising_warnings: 'alert', capacity_warnings: 'alert', self_clearing: 'alert', change_correlation: 'change' };
+const TREND_JOINS: Partial<Record<RuleId, string>> = { flapping: 'alert', rising_warnings: 'alert', capacity_warnings: 'alert', self_clearing: 'alert', change_correlation: 'change', eol_versions: 'CI on that version' };
+
+interface Eol { id: number; product: string; version: string; eol_date: string; note: string }
+
+/** The end-of-life table behind the rule: product + version → date, kept by hand (no outside service). */
+function EolTable({ editable, onSaved }: { editable: boolean; onSaved: () => void }) {
+  const { data, reload } = useApi<Eol[]>('/api/candidates/eol');
+  const blank = { product: '', version: '', eol_date: '', note: '' };
+  const [form, setForm] = useState(blank);
+  const [error, setError] = useState<string | null>(null);
+  const done = () => { setError(null); reload(); onSaved(); };
+  const add = async (e: FormEvent) => {
+    e.preventDefault();
+    try {
+      await api.post('/api/candidates/eol', form);
+      setForm(blank);
+      done();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+  const remove = async (row: Eol) => {
+    if (!confirm(`Remove ${row.product} ${row.version} from the table?`)) return;
+    try {
+      await api.del(`/api/candidates/eol/${row.id}`);
+      done();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+  const today = new Date().toISOString().slice(0, 10);
+  return (
+    <div className="eol-table">
+      <table className="table compact">
+        <thead><tr><th>Product</th><th>Version</th><th>End of life</th><th>Note</th>{editable && <th />}</tr></thead>
+        <tbody>
+          {data?.map((r) => (
+            <tr key={r.id}>
+              <td>{r.product}</td><td>{r.version}</td>
+              <td className={r.eol_date < today ? 'eol-passed' : ''}>{r.eol_date}</td>
+              <td className="muted">{r.note}</td>
+              {editable && <td><button className="btn-link small" onClick={() => remove(r)} aria-label={`Remove ${r.product} ${r.version}`}>Remove</button></td>}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {editable && (
+        <form className="inline-form rule-form" onSubmit={add}>
+          <label>Product<input required value={form.product} onChange={(e) => setForm({ ...form, product: e.target.value })} placeholder="Ubuntu" /></label>
+          <label>Version<input required value={form.version} onChange={(e) => setForm({ ...form, version: e.target.value })} placeholder="20.04" /></label>
+          <label>End of life<input required type="date" value={form.eol_date} onChange={(e) => setForm({ ...form, eol_date: e.target.value })} /></label>
+          <label>Note<input value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} placeholder="End of standard support" /></label>
+          <button className="btn small primary">Add</button>
+          {error && <span className="error small">{error}</span>}
+        </form>
+      )}
+    </div>
+  );
+}
 
 const SNOOZE: [label: string, days: number][] = [['1 day', 1], ['1 week', 7], ['30 days', 30]];
 

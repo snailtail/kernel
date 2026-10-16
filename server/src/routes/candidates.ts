@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireUser } from '../auth.js';
 import * as candidates from '../candidates.js';
+import * as config from '../candidate-config.js';
 
 export async function candidateRoutes(app: FastifyInstance) {
   app.get('/api/candidates', async (req) => {
@@ -30,4 +31,16 @@ export async function candidateRoutes(app: FastifyInstance) {
     reply.code(result.created ? 201 : 200);
     return result;
   });
+  // The end-of-life table behind the eol_versions rule (#31): read with the candidates, kept by problem managers.
+  app.get('/api/candidates/eol', async (req) => {
+    requireUser(req, 'candidate.read');
+    return config.listEol();
+  });
+  app.post('/api/candidates/eol', async (req, reply) => {
+    const row = await config.saveEol(requireUser(req), null, config.eolSchema.parse(req.body));
+    reply.code(201);
+    return row;
+  });
+  app.put<{ Params: { id: string } }>('/api/candidates/eol/:id', async (req) => config.saveEol(requireUser(req), Number(req.params.id) || 0, config.eolSchema.parse(req.body)));
+  app.delete<{ Params: { id: string } }>('/api/candidates/eol/:id', async (req) => config.deleteEol(requireUser(req), Number(req.params.id) || 0));
 }

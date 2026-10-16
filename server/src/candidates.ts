@@ -16,6 +16,7 @@ import { authorize } from './policy.js';
 import { createProblemInTx, createProblemSchema, getProblem, loadForUpdate, logActivity, problemFields, type Db } from './problems.js';
 import { redact, scan } from './sensitive.js';
 import { capacityWarnings, changeCorrelation, flapping, risingWarnings, selfClearing, TREND_RULES } from './candidate-trends.js';
+import { CONFIG_RULES, eolVersions, repeatedlyMissing, singlePointOfFailure } from './candidate-config.js';
 
 // ---- Rules ------------------------------------------------------------------------------------------------------
 
@@ -61,6 +62,8 @@ export const RULES = {
   },
   // Trends before they hurt (part 2 of #31): candidate-trends.ts.
   ...TREND_RULES,
+  // Configuration risk (part 3 of #31): candidate-config.ts.
+  ...CONFIG_RULES,
 } as const;
 export type RuleId = keyof typeof RULES;
 export const RULE_IDS = Object.keys(RULES) as [RuleId, ...RuleId[]];
@@ -106,10 +109,13 @@ export async function setRule(user: User, rule: string, input: z.infer<typeof ru
 
 // ---- Candidates -------------------------------------------------------------------------------------------------
 
-/** One piece of evidence. key identifies it across rules: r:<external record id>, i:<incident ref>, a:<alert id>, c:<change ref>, x:<reported id>. */
+/**
+ * One piece of evidence. key identifies it across rules: r:<external record id>, i:<incident ref>, a:<alert id>, c:<change ref>, x:<reported id>,
+ * ci:<CI ref> (configuration risk), m:<CI activity id> (a sync marking it missing).
+ */
 export interface EvidenceRecord {
   key: string;
-  kind: 'incident' | 'event' | 'external' | 'change';
+  kind: 'incident' | 'event' | 'external' | 'change' | 'ci' | 'sync';
   id: number | null;
   incident_ref: string | null;
   alert_id: number | null;
@@ -409,6 +415,7 @@ const COMPUTE: Record<RuleId, (db: Db, settings: any) => Promise<Raw[]>> = {
   recurring_records: recurringRecords, common_upstream: commonUpstream, major_without_problem: majorWithoutProblem,
   recurring_resolution: recurringResolution, reported: (db) => reportedCandidates(db),
   flapping, rising_warnings: risingWarnings, capacity_warnings: capacityWarnings, self_clearing: selfClearing, change_correlation: changeCorrelation,
+  repeatedly_missing: repeatedlyMissing, eol_versions: eolVersions, single_point_of_failure: singlePointOfFailure,
 };
 
 interface Decision { key: string; rule: string; decision: 'dismissed' | 'snoozed'; until: string | null; evidence: string[]; reason: string; decided_by_name: string | null; decided_at: string }
@@ -476,13 +483,13 @@ async function compute(db: Db, only?: RuleId): Promise<Resolved[]> {
       const rest = raw.records.filter((r) => !d.evidence.includes(r.key));
       const reason = raw.finish(rest);
       if (reason) out.push({ raw, records: rest, reason, hidden: false });
-      else out.push({ raw, records: raw.records, reason: raw.finish(raw.records) ?? '', decision: d, hidden: true });
+      else if (raw.finish(raw.records)) out.push({ raw, records: raw.records, reason: raw.finish(raw.records)!, decision: d, hidden: true });
       continue;
     }
     const reason = raw.finish(raw.records);
     // A rule's threshold may come from elsewhere than its evidence (rising warnings count event_daily): with no
     // evidence left that meets the rule, there is no candidate.
-    if (!reason && !d) continue;
+    if (!reason && !snoozed) continue;
     out.push({ raw, records: raw.records, reason: reason ?? '', decision: snoozed ? d : undefined, hidden: snoozed });
   }
   return out;
@@ -839,10 +846,12 @@ export async function linkCandidate(user: User, ref: string, input: z.infer<type
   authorize(user, 'problem.link');
   await tx(async (db) => {
     const problem = await loadForUpdate(db, ref);
-    const ids = input.key ? idsOf((await findCandidate(db, input.key)).records) : input;
-    const linked = await linkEvidence(db, user, problem, ids);
-    // A report may name nothing in Kernel; linking it records that the problem covers the finding.
-    if (!linked && !input.key?.startsWith('reported:')) throw badRequest('None of the records are unlinked any more');
+    const c = input.key ? await findCandidate(db, input.key) : null;
+    const linked = await linkEvidence(db, user, problem, c ? idsOf(c.records) : input);
+    // A candidate's CIs become the problem's affected CIs (configuration risk has nothing else to link).
+    if (c?.raw.cis.length) await db.query('INSERT INTO problem_cis (problem_id, ci_id, added_by) SELECT $1, id, $2 FROM configuration_items WHERE ref = ANY($3) ON CONFLICT DO NOTHING', [problem.id, user.id, c.raw.cis.map((x) => x.ref)]);
+    // By key, linking records that the problem covers the candidate even when nothing in it was linkable.
+    if (!linked && !c) throw badRequest('None of the records are unlinked any more');
     await settle(db, user, input.key, problem);
   });
   return getProblem(ref);

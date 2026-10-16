@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { Link } from 'react-router';
 import { useApi } from '../hooks';
 
-interface Node { id: string; label: string; purpose: string; concepts: string[]; hands_over: { to: string; when: string }[]; counts: { label: string; value: number; link: string }[] }
+interface Node { id: string; label: string; purpose: string; concepts: string[]; hands_over: { to: string; when: string }[]; counts: { label: string; value: number; link: string }[];
+  found_by?: { rule: string; label: string; proactive: boolean; count: number; link: string }[] }
 interface Map { nodes: Node[]; supporting: { id: string; label: string; purpose: string; link: string }[] }
 
 /** The flow event → incident → problem → known error → change → resolved, with live counts from your data. */
@@ -34,6 +35,21 @@ export function ProcessMap() {
             <h3>{node.label}</h3>
             <p>{node.purpose}</p>
             <ul className="flow-concepts">{node.concepts.map((c) => <li key={c}>{c}</li>)}</ul>
+            {node.found_by && node.found_by.length > 0 && (
+              <>
+                <h4>How problems are found</h4>
+                {[false, true].map((proactive) => (
+                  <div key={String(proactive)}>
+                    <span className="muted small">{proactive ? 'Before it hurts' : 'From incidents'}</span>
+                    <ul className="plain-list">
+                      {node.found_by!.filter((r) => r.proactive === proactive).map((r) => (
+                        <li key={r.rule}><Link to={r.link}>{r.label}</Link>{r.count > 0 && <span className="muted small"> · {r.count}</span>}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </>
+            )}
           </div>
           <div>
             <h4>In your Kernel now</h4>

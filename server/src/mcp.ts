@@ -39,6 +39,7 @@ import { typeForRef } from './records.js';
 import { GUIDES, guideMarkdown } from './methods.js';
 import { problemContext } from './problem-context.js';
 import * as candidates from './candidates.js';
+import * as config from './candidate-config.js';
 import * as integrations from './integrations.js';
 import * as problems from './problems.js';
 import * as reports from './reports.js';
@@ -174,7 +175,7 @@ function buildServer(user: User, scopes?: string[]) {
     assess_known_error: 'problem.assess', add_comment: 'problem.comment', link_record: 'problem.link', unlink_record: 'problem.link',
     watch_problem: 'problem.watch', mark_duplicate: 'problem.mark_duplicate',
     add_action: 'action.write', update_action: 'action.write', start_analysis: 'analysis.write', update_analysis: 'analysis.write',
-    create_problem_from_candidate: 'candidate.act', link_candidate_records: 'candidate.act', dismiss_problem_candidate: 'candidate.act', report_problem_candidate: 'candidate.report', report_records: 'record.ingest',
+    create_problem_from_candidate: 'candidate.act', link_candidate_records: 'candidate.act', dismiss_problem_candidate: 'candidate.act', list_eol_versions: 'candidate.read', save_eol_version: 'candidate.rule', report_problem_candidate: 'candidate.report', report_records: 'record.ingest',
   };
 
   const tool = <S extends z.ZodRawShape>(
@@ -1123,6 +1124,16 @@ function buildServer(user: User, scopes?: string[]) {
     { key: z.string().max(300), reason: z.string().max(1000), until: z.string().optional().describe('ISO time to snooze until, instead of dismissing') },
     false,
     (args) => candidates.decideCandidate(user, candidates.decisionSchema.parse(args)),
+  );
+
+  tool('list_eol_versions', 'The end-of-life table behind the "versions at end of life" candidate rule: product, version and date.', {}, true, () => config.listEol());
+
+  tool(
+    'save_eol_version',
+    'Add or change a row in the end-of-life table (problem managers). CIs whose os, or engine/product and version, match it become candidates near or after the date.',
+    { id: z.number().int().optional().describe('Row to change; omit to add'), ...config.eolSchema.shape },
+    false,
+    async ({ id, ...row }) => config.saveEol(user, id ?? null, config.eolSchema.parse(row)),
   );
 
   tool(
