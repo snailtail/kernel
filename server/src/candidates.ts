@@ -9,7 +9,8 @@ import type { User } from './auth.js';
 import { audit, requireReason } from './audit.js';
 import { audienceOf, BROADEST, copyText, mayCopyText, titleAudience, type Audience } from './audience.js';
 import { query, tx } from './db.js';
-import { badRequest, conflict, notFound } from './errors.js';
+import { badRequest, conflict, HttpError, notFound } from './errors.js';
+import { logger } from './log.js';
 import { attachToProblem } from './incidents.js';
 import { linkRecord } from './integrations.js';
 import { authorize } from './policy.js';
@@ -140,7 +141,7 @@ export interface EvidenceCi { ref: string; name: string; role: 'subject' | 'upst
 export interface Raw {
   key: string;
   rule: RuleId;
-  subject: { type: 'ci' | 'service' | 'incident' | 'category' | 'reported' | 'check'; ref: string | null; name: string };
+  subject: { type: 'ci' | 'service' | 'incident' | 'category' | 'reported' | 'check' | 'version'; ref: string | null; name: string };
   service: string;
   ci_ref: string | null;
   ci_class: string | null;
@@ -212,8 +213,8 @@ async function recurringRecords(db: Db, s: Settings<'recurring_records'>): Promi
 
 /**
  * Incidents on different CIs that depend on the same CI. The walk goes down the dependency graph (the way an outage
- * does not travel: from each incident's CI to what it runs on, uses or connects to), with a depth limit and a path
- * check against cycles. An incident on the shared CI itself counts too. When several shared CIs explain exactly the
+ * does not travel: from each incident's CI to what it runs on, uses or connects to) over nodes, not paths, so a dense
+ * graph costs nodes × depth rather than every path, and the depth limit ends cycles. An incident on the shared CI itself counts too. When several shared CIs explain exactly the
  * same incidents, only the closest is kept: the database under three apps, not the data centre under everything.
  */
 async function commonUpstream(db: Db, s: Settings<'common_upstream'>): Promise<Raw[]> {
@@ -235,11 +236,12 @@ async function commonUpstream(db: Db, s: Settings<'common_upstream'>): Promise<R
        WHERE r.kind = 'incident' AND r.ci_id IS NOT NULL AND r.problem_id IS NULL AND NOT r.dismissed AND r.occurred_at > now() - $1 * interval '1 day'
      ),
      starts AS (SELECT DISTINCT ci_id FROM recs),
-     walk (start, upstream, depth, path) AS (
-       SELECT s.ci_id, e.dependency, 1, ARRAY[s.ci_id, e.dependency] FROM starts s JOIN edges e ON e.dependent = s.ci_id
-       UNION ALL
-       SELECT w.start, e.dependency, w.depth + 1, w.path || e.dependency FROM walk w JOIN edges e ON e.dependent = w.upstream
-       WHERE w.depth < $3 AND e.dependency <> ALL (w.path)
+     -- Over nodes, not paths: UNION drops repeated (start, upstream, depth) rows, and the depth limit ends cycles.
+     walk (start, upstream, depth) AS (
+       SELECT s.ci_id, e.dependency, 1 FROM starts s JOIN edges e ON e.dependent = s.ci_id
+       UNION
+       SELECT w.start, e.dependency, w.depth + 1 FROM walk w JOIN edges e ON e.dependent = w.upstream
+       WHERE w.depth < $3 AND e.dependency <> w.start
      ),
      reach AS (SELECT start, upstream, min(depth) AS depth FROM walk GROUP BY 1, 2 UNION ALL SELECT ci_id, ci_id, 0 FROM starts),
      hits AS (
@@ -463,12 +465,23 @@ interface Resolved { raw: Raw; records: EvidenceRecord[]; reason: string; decisi
  * request (#65), and applies the decisions: a snooze hides a candidate until its time; a dismissal takes away the
  * evidence it was made on, and the candidate comes back only if the rest is enough for the rule on its own.
  */
-async function compute(db: Db, only?: RuleId): Promise<Resolved[]> {
+async function compute(db: Db, only?: RuleId, errors = new Map<RuleId, string>()): Promise<Resolved[]> {
   await db.query("SET LOCAL statement_timeout = '10s'");
   const rules = (await getRules(db)).filter((r) => r.enabled && (!only || r.rule === only));
-  // One after another: they share the transaction's connection.
+  // One after another: they share the transaction's connection. Each under its own savepoint, so a rule that fails or
+  // times out is reported as such and the others are still listed.
   const raws: Raw[] = [];
-  for (const r of rules) raws.push(...(await COMPUTE[r.rule](db, r.settings)));
+  for (const r of rules) {
+    await db.query('SAVEPOINT candidate_rule');
+    try {
+      raws.push(...(await COMPUTE[r.rule](db, r.settings)));
+      await db.query('RELEASE SAVEPOINT candidate_rule');
+    } catch (err) {
+      await db.query('ROLLBACK TO SAVEPOINT candidate_rule');
+      logger.error({ err, rule: r.rule }, 'problem candidate rule failed');
+      errors.set(r.rule, (err as { code?: string }).code === '57014' ? 'This rule timed out' : 'This rule could not run');
+    }
+  }
   const { rows: decisions } = await db.query<Decision>(
     `SELECT d.key, d.rule, d.decision, d.until, d.evidence, d.reason, u.display_name AS decided_by_name, d.decided_at
      FROM candidate_decisions d LEFT JOIN users u ON u.id = d.decided_by WHERE d.key = ANY($1)`,
@@ -500,7 +513,8 @@ export const listQuerySchema = z.object({ rule: z.enum(RULE_IDS).optional(), sho
 /** The candidates the viewer can see, with each rule's settings and how many are dismissed or snoozed. */
 export async function listCandidates(opts: Partial<z.infer<typeof listQuerySchema>> = {}) {
   const show = opts.show ?? 'open';
-  const all = await tx((db) => compute(db));
+  const errors = new Map<RuleId, string>();
+  const all = await tx((db) => compute(db, undefined, errors));
   const rules = await getRules();
   const counts = Object.fromEntries(RULE_IDS.map((r) => [r, all.filter((c) => c.raw.rule === r && !c.hidden).length]));
   const candidates = all
@@ -509,7 +523,7 @@ export async function listCandidates(opts: Partial<z.infer<typeof listQuerySchem
     .sort((a, b) => Number(b.raw.rule === 'major_without_problem') - Number(a.raw.rule === 'major_without_problem') || b.records.length - a.records.length)
     .map((c) => present(c.raw, c.records, c.reason, c.decision));
   return {
-    rules: rules.map((r) => ({ ...r, count: counts[r.rule] })),
+    rules: rules.map((r) => ({ ...r, count: counts[r.rule], ...(errors.has(r.rule) ? { error: errors.get(r.rule) } : {}) })),
     hidden: { dismissed: all.filter((c) => c.hidden && c.decision?.decision === 'dismissed').length, snoozed: all.filter((c) => c.hidden && c.decision?.decision === 'snoozed').length },
     candidates,
   };
@@ -523,7 +537,9 @@ const ruleOfKey = (key: string) => {
 };
 
 async function findCandidate(db: Db, key: string, includeHidden = false) {
-  const found = (await compute(db, ruleOfKey(key))).find((c) => c.raw.key === key && (includeHidden || !c.hidden));
+  const errors = new Map<RuleId, string>();
+  const found = (await compute(db, ruleOfKey(key), errors)).find((c) => c.raw.key === key && (includeHidden || !c.hidden));
+  if (errors.size) throw new HttpError(503, `${[...errors.values()][0]}; try again later`);
   if (!found) throw notFound(`No candidate ${key}: it may have been handled, dismissed, or no longer meets its rule`);
   return found;
 }

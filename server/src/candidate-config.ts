@@ -105,7 +105,7 @@ export async function eolVersions(db: Db, s: Settings<'eol_versions'>): Promise<
     return {
       key: `eol_versions:eol:${e.eol_id}`,
       rule: 'eol_versions' as const,
-      subject: { type: 'category' as const, ref: null, name: what },
+      subject: { type: 'version' as const, ref: null, name: what },
       service: '', ci_ref: null, ci_class: null,
       records: cis.map((c) => ciRecord({ ref: c.ref, name: c.name, note: c.label })),
       cis: cis.map((c): EvidenceCi => ({ ref: c.ref, name: c.name, role: 'affected' })),
@@ -129,12 +129,13 @@ export async function singlePointOfFailure(db: Db, s: Settings<'single_point_of_
               CASE WHEN t.propagation = 'forward' THEN r.to_ci ELSE r.from_ci END AS dependency, r.type
        FROM ci_relationships r JOIN ci_relationship_types t ON t.name = r.type
      ),
-     down (service, node, depth, path) AS (
-       SELECT s.id, e.dependency, 1, ARRAY[s.id, e.dependency] FROM configuration_items s JOIN edges e ON e.dependent = s.id
+     -- Over nodes, not paths: UNION drops repeated (service, node, depth) rows, and the depth limit ends cycles.
+     down (service, node, depth) AS (
+       SELECT s.id, e.dependency, 1 FROM configuration_items s JOIN edges e ON e.dependent = s.id
        WHERE s.class = 'service' AND s.status NOT IN ('retired', 'planned')
-       UNION ALL
-       SELECT d.service, e.dependency, d.depth + 1, d.path || e.dependency FROM down d JOIN edges e ON e.dependent = d.node
-       WHERE d.depth < $2 AND e.dependency <> ALL (d.path)
+       UNION
+       SELECT d.service, e.dependency, d.depth + 1 FROM down d JOIN edges e ON e.dependent = d.node
+       WHERE d.depth < $2 AND e.dependency <> d.service
      ),
      behind AS (SELECT node, array_agg(DISTINCT service) AS services FROM down GROUP BY node HAVING count(DISTINCT service) >= $1),
      -- Something relies on the CI directly with no other CI of the same type, related the same way.

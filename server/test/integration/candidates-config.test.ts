@@ -118,6 +118,45 @@ describe('configuration risk candidates (#31)', { skip }, () => {
     assert.equal(await find(c.key), undefined);
   });
 
+  test('single points of failure through a diamond: each service counted once; the redundant middle is not one', async () => {
+    // Three services, each with an app that relies on two middle tiers of the same type, which both use one database.
+    const db = await ci('diamond-db', 'database'), left = await ci('mid-left'), right = await ci('mid-right');
+    await rel(left, 'uses_database', db);
+    await rel(right, 'uses_database', db);
+    const services = [];
+    for (let i = 0; i < 3; i++) {
+      const svc = await ci('diamond-svc', 'business_service'), app = await ci(`diamond-app${i}`);
+      await rel(app, 'member_of', svc);
+      await rel(app, 'depends_on', left);
+      await rel(app, 'depends_on', right);
+      services.push(svc);
+    }
+    const c = await find(`single_point_of_failure:ci:${db}`);
+    assert.deepEqual(c.evidence.records.map((r: any) => r.reference).sort(), [...services].sort(), 'each service once, though two paths reach the database');
+    assert.match(c.reason, /^3 services depend on/);
+    for (const mid of [left, right]) assert.equal(await find(`single_point_of_failure:ci:${mid}`), undefined, 'two of the same type side by side');
+  });
+
+  test('a rule that cannot run is reported, and the other rules are still listed', async () => {
+    const before = (await analyst.get('/api/candidates')).body;
+    const other = before.candidates.find((c: any) => c.rule === 'single_point_of_failure');
+    const eol = before.candidates.find((c: any) => c.rule === 'eol_versions');
+    assert.ok(other && eol);
+    await ownerQuery('ALTER TABLE eol_versions RENAME TO eol_versions_away');
+    try {
+      const res = await analyst.get('/api/candidates');
+      ok(res);
+      assert.equal(res.body.rules.find((r: any) => r.rule === 'eol_versions').error, 'This rule could not run');
+      assert.equal(res.body.rules.find((r: any) => r.rule === 'single_point_of_failure').error, undefined);
+      assert.ok(res.body.candidates.some((c: any) => c.key === other.key), 'the other rules still list theirs');
+      assert.equal(res.body.candidates.some((c: any) => c.rule === 'eol_versions'), false);
+      assert.equal((await analyst.get(`/api/candidates/draft?key=${encodeURIComponent(eol.key)}`)).status, 503);
+      ok(await analyst.get('/api/flow')); // the process map too
+    } finally {
+      await ownerQuery('ALTER TABLE eol_versions_away RENAME TO eol_versions');
+    }
+  });
+
   test('every rule shows in the process map, with its open candidates', async () => {
     const map = (await analyst.get('/api/flow')).body;
     const problem = map.nodes.find((x: any) => x.id === 'problem');

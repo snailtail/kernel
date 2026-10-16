@@ -552,6 +552,7 @@ a.stat:hover { border-color: var(--accent); text-decoration: none; }
 .candidate-notes { margin: 10px 0 0 !important; font-size: 13px; white-space: pre-wrap; color: var(--text-2); }
 .candidate .actions { flex-wrap: wrap; margin-top: 12px; }
 .candidate .actions .spacer-right { margin-right: auto; }
+.candidate-rule-errors { margin-bottom: 12px; }
 .candidate-section + .candidate-section { margin-top: 24px; }
 .candidate-section .section-head { display: block; margin-bottom: 10px; }
 .candidate-section .section-head p { margin: 2px 0 0; }
