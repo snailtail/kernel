@@ -39,6 +39,40 @@ raised to severity `minor` or `warning`. Other changes record which fields chang
 - No credentials, cookies, request bodies or field values. A sign-in name that matches no account (often a password
   typed in the wrong box) is stored only as a keyed digest, as in the audit trail (ADR 0001).
 - IP address, user agent and, behind a trusted proxy, Cloudflare's country code are kept with each event for
-  `settings.privacy.security_event_days` (365 days), like the audit trail's `audit_context`.
-- At most 30 rows a minute per action and caller are stored; beyond that only the log line is written, so a scanner
-  cannot fill the table while the SIEM still sees the full volume.
+  `settings.privacy.security_event_days` (365 days by default), like the audit trail's `audit_context`. Both periods
+  are set under **Retention** on the Security events page or `PUT /api/admin/privacy` (30 to 3650 days, step-up and a
+  reason, audited).
+- **Erasing a user** does not remove these: IP addresses and user agents stay, under legitimate interest (ADR 0001),
+  until retention removes them. The erase dialog says so. The account's name is removed from security alerts.
+- At most 30 rows a minute per action and caller are stored. The rest of that minute becomes **one summary row**
+  (the latest event, with `detail.suppressed` = how many more it stands for), so a scanner cannot fill the table, the
+  SIEM still sees every line, and the detection rules still count the full volume.
+
+## Alerting
+
+Every minute, built-in detection rules read the new security events and report what they find to Kernel's own event
+management under the reserved source **`Kernel security`** (no event source, connector or API caller may use that
+name). Counts weigh summary rows by `detail.suppressed`.
+
+| Rule | Alerts when | Severity |
+|---|---|---|
+| Failed sign-ins | ≥ 10 failed sign-ins (password, second factor, passkey, SSO, step-up) in 10 minutes for one account, or from one address (with the number of accounts: password spraying) | minor, major at 5× |
+| Denied requests | ≥ 20 denied requests or invalid tokens in 10 minutes from one token, user or address | minor, major at 5× |
+| Exports | ≥ 5 exports in 60 minutes by one person, or one export of ≥ 1000 rows | minor |
+| New country | a sign-in from a country the account has not signed in from before (needs Cloudflare's country header behind a trusted proxy; an account's first known country is not "new") | minor |
+| New administrator | someone gets the admin role | minor |
+| Credentials changed | keys, SSO, AI providers, connectors, webhooks, event or dev sources change | warning |
+
+Thresholds, windows and switches are set on the Security events page (`GET/PUT /api/admin/security-alerting`, MCP
+`get_security_alerting`; changes need step-up and a reason and are audited). A counting alert clears by itself once
+its subject is back under the threshold; the others stay open until someone closes them.
+
+- **Incidents.** The event rule **Security alerts** (added by the migration, first in order) turns minor and worse
+  alerts into an incident, all grouped into one open incident per four hours, at most three an hour. A security
+  incident is always in the **Security** category and **restricted** (ADR 0002) to the rule's team, whatever the rule
+  says. Give the rule a team under Events → Rules; without one only administrators can open it, with break-glass.
+  Security alerts only ever match rules that name their source, never a catch-all rule.
+- **Notifications.** Every new or reopened security alert notifies all administrators (event `security_alert`, in
+  the app and by email and chat if they have them).
+- **Who sees them.** Security alerts name accounts and addresses, so they are left out of the alert list, bulk actions
+  and problem candidates for everyone without `security.read` (administrators).

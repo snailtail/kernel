@@ -184,7 +184,7 @@ const RECORDS_SQL = `
   -- Alerts from monitoring that did not become an incident and no problem explains yet.
   SELECT 'a:' || a.id, NULL, NULL, a.id, a.source, 'event', a.check_key, a.message, '', a.first_seen, a.ci_hint, a.ci_id
   FROM alerts a
-  WHERE a.problem_id IS NULL AND a.incident_id IS NULL AND NOT a.candidate_dismissed AND a.suppressed = ''
+  WHERE a.problem_id IS NULL AND a.incident_id IS NULL AND NOT a.candidate_dismissed AND a.suppressed = '' AND a.source <> 'Kernel security'
     AND a.first_seen > now() - $1 * interval '1 day'`;
 
 const RECORD_JSON = (r: string, ci: string) => `json_build_object('key', ${r}.key, 'kind', ${r}.kind, 'id', ${r}.id, 'incident_ref', ${r}.incident_ref, 'alert_id', ${r}.alert_id,

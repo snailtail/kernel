@@ -73,7 +73,8 @@ const where = (g: { ci_name: string | null; ci_ref: string | null; hint: string 
 const ALERT_JSON = `json_build_object('key', 'a:' || a.id, 'kind', 'event', 'id', NULL, 'incident_ref', NULL, 'alert_id', a.id, 'system', a.source,
   'reference', a.check_key, 'summary', a.message, 'category', '', 'occurred_at', a.first_seen, 'ci_ref', c.ref, 'note', NOTE)`;
 /** Alerts that may count: not explained by a problem, not dismissed the old way, not suppressed (maintenance). */
-const ALERT_OK = "a.problem_id IS NULL AND NOT a.candidate_dismissed AND a.suppressed = ''";
+// Kernel's own security alerts (#64) are for administrators and a security incident, not problem candidates.
+const ALERT_OK = "a.problem_id IS NULL AND NOT a.candidate_dismissed AND a.suppressed = '' AND a.source <> 'Kernel security'";
 
 const alertSubject = (g: any) => ({
   service: g.ci_name ?? '', ci_ref: g.ci_ref as string | null, ci_class: g.ci_class as string | null,

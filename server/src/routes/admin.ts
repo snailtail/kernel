@@ -13,7 +13,9 @@ import { query } from '../db.js';
 import { badRequest, conflict, notFound } from '../errors.js';
 import { audit, auditQuerySchema, queryAudit, requireReason, verifyChain } from '../audit.js';
 import { csvCell } from '../reports.js';
-import { querySecurityEvents, securityQuerySchema, securitySummary } from '../security-events.js';
+import { privacySchema, privacySettings, querySecurityEvents, savePrivacySettings, securityQuerySchema, securitySummary } from '../security-events.js';
+import { SECURITY_SOURCE } from '../events.js';
+import { alertingSchema, alertingStatus, saveAlertingSettings } from '../security-alerts.js';
 import { approvalsRequired, setApprovalsRequired } from '../approvals.js';
 import { ROLES } from '../workflow.js';
 
@@ -92,13 +94,16 @@ export async function adminRoutes(app: FastifyInstance) {
   });
 
   // Erasure (GDPR): the account is anonymised, sessions and tokens end. Records keep the user's id, so the audit
-  // trail stays intact and shows "deleted user #id"; personal data is no longer stored anywhere in Kernel.
+  // trail stays intact and shows "deleted user #id". What remains, under legitimate interest (ADR 0001), is the
+  // network context – IP address and user agent – in audit_context and security_events, until their retention
+  // (privacy.audit_context_days and security_event_days) removes it.
   app.post<{ Params: { id: string } }>('/api/users/:id/erase', async (req) => {
     const admin = requireUser(req, 'user.manage');
     await requireStepUp(req);
     const id = Number(req.params.id);
     const reason = requireReason(z.object({ reason: z.string().max(1000).optional() }).parse(req.body ?? {}).reason);
     if (id === admin.id) throw badRequest('You cannot erase your own account');
+    const { rows: old } = await query('SELECT username FROM users WHERE id = $1', [id]);
     const { rows } = await query(
       `UPDATE users SET username = 'deleted-' || id, display_name = 'Deleted user #' || id, email = '', active = false, erased_at = now(),
               password_hash = $2, mfa_secret = NULL, mfa_enabled_at = NULL, preferences = '{}', ci_source_systems = '{}', change_templates = '{}'
@@ -110,6 +115,13 @@ export async function adminRoutes(app: FastifyInstance) {
     await query('UPDATE api_tokens SET revoked_at = coalesce(revoked_at, now()) WHERE user_id = $1', [id]);
     await query('DELETE FROM notification_settings WHERE user_id = $1', [id]);
     await query('DELETE FROM known_devices WHERE user_id = $1', [id]).catch(() => {});
+    // Security alerts name the account they are about (#64): the name goes, the alert stays.
+    const name = `(?<![\\w.@-])${old[0].username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w.@-])`;
+    await query(
+      `UPDATE alerts SET check_key = regexp_replace(check_key, $2, $3, 'g'), message = regexp_replace(message, $2, $3, 'g') WHERE source = $1 AND (check_key ~ $2 OR message ~ $2)`,
+      [SECURITY_SOURCE, name, `deleted user #${id}`],
+    );
+    await query("UPDATE events SET message = regexp_replace(message, $2, $3, 'g') WHERE source = $1 AND message ~ $2", [SECURITY_SOURCE, name, `deleted user #${id}`]);
     await audit(null, { entity_type: 'user', entity_ref: `#${id}`, action: 'erase', reason });
     return { ok: true };
   });
@@ -258,5 +270,26 @@ export async function adminRoutes(app: FastifyInstance) {
   app.get('/api/security-events/summary', async (req) => {
     requireUser(req, 'security.read');
     return securitySummary();
+  });
+  // Detection rules and their thresholds (part 2): changing them weakens or strengthens monitoring, so step-up and a reason.
+  app.get('/api/admin/security-alerting', async (req) => {
+    requireUser(req, 'security.read');
+    return alertingStatus();
+  });
+  app.put('/api/admin/security-alerting', async (req) => {
+    requireUser(req, 'mfa.policy');
+    await requireStepUp(req);
+    const { reason, ...value } = alertingSchema.extend({ reason: z.string().max(1000).optional() }).parse(req.body);
+    return saveAlertingSettings(alertingSchema.parse(value), requireReason(reason));
+  });
+  app.get('/api/admin/privacy', async (req) => {
+    requireUser(req, 'security.read');
+    return privacySettings();
+  });
+  app.put('/api/admin/privacy', async (req) => {
+    requireUser(req, 'mfa.policy');
+    await requireStepUp(req);
+    const { reason, ...value } = privacySchema.extend({ reason: z.string().max(1000).optional() }).parse(req.body);
+    return savePrivacySettings(value, requireReason(reason));
   });
 }

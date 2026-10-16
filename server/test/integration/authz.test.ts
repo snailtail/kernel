@@ -67,6 +67,8 @@ const MATRIX: [string, string, unknown, RoleName[]][] = [
   ['GET', '/api/audit', undefined, ADMINS],
   ['GET', '/api/audit/verify', undefined, ADMINS],
   ['GET', '/api/admin/security', undefined, ADMINS],
+  ['GET', '/api/admin/security-alerting', undefined, ADMINS],
+  ['GET', '/api/admin/privacy', undefined, ADMINS],
   ['GET', '/api/admin/mfa-policy', undefined, ADMINS],
 ];
 

@@ -163,7 +163,9 @@ function UserModal({ user, self, roles, onClose, onDone }: { user: AdminUser | n
         {user && !self && (
           <div className="full danger-zone">
             <button type="button" className="btn danger small" onClick={async () => {
-              const reason = await askReason(`Erase ${user.username}`, 'The account is anonymised and signed out everywhere; records keep a reference to "deleted user". Audit entries from before personal data was kept out of the trail may still name the user until they are re-based (see the security status).', { danger: true, confirmLabel: 'Erase user' });
+              const kept = await api.get<{ audit_context_days: number; security_event_days: number }>('/api/admin/privacy').catch(() => null);
+              const retention = kept ? ` IP addresses and browsers in security events and the audit trail are kept for security (legitimate interest) until their retention ends: ${kept.security_event_days} and ${kept.audit_context_days} days.` : '';
+              const reason = await askReason(`Erase ${user.username}`, `The account is anonymised and signed out everywhere; records keep a reference to "deleted user".${retention} Audit entries from before personal data was kept out of the trail may still name the user until they are re-based (see the security status).`, { danger: true, confirmLabel: 'Erase user' });
               if (!reason) return;
               try {
                 await api.post(`/api/users/${user.id}/erase`, { reason });

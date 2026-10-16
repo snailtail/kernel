@@ -8,7 +8,7 @@ import type { User } from './auth.js';
 import { audit } from './audit.js';
 import { query } from './db.js';
 import { badRequest, forbidden, HttpError, notFound, unauthorized } from './errors.js';
-import { eventSchema, processEvents, type NormalisedEvent } from './events.js';
+import { eventSchema, isReservedSource, processEvents, SECURITY_SOURCE, type NormalisedEvent } from './events.js';
 import { authorize } from './policy.js';
 import { logger } from './log.js';
 import { moduleEnabled } from './modules.js';
@@ -202,6 +202,7 @@ export async function listSources(user: User) {
 
 export async function createSource(user: User, input: z.infer<typeof sourceSchema>) {
   authorize(user, 'webhook.manage');
+  if (isReservedSource(input.name)) throw badRequest(`"${SECURITY_SOURCE}" is reserved for Kernel's own security alerts`);
   if (input.signed && input.kind !== 'generic') throw badRequest('Signing is supported for the generic kind; other tools authenticate with the token');
   const token = newToken();
   const secret = input.signed ? `whsec_${randomBytes(32).toString('base64')}` : null;

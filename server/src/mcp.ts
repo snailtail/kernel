@@ -47,6 +47,7 @@ import { traceTool } from './metrics.js';
 import { idempotent } from './idempotency.js';
 import { can, type Action } from './policy.js';
 import { querySecurityEvents, SECURITY_CATEGORIES, SECURITY_OUTCOMES, securityEvent, securityQuerySchema } from './security-events.js';
+import { alertingStatus } from './security-alerts.js';
 import { audit, auditQuerySchema, queryAudit } from './audit.js';
 import { approvalsRequired, requestApproval, type ApprovalKind } from './approvals.js';
 import { problemMarkdown } from './export.js';
@@ -171,7 +172,7 @@ function buildServer(user: User, scopes?: string[]) {
     search_problems: 'problem.read', get_problem: 'problem.read', get_history: 'meta.read', get_impact: 'ci.read', find_similar_problems: 'problem.read',
     export_problem: 'problem.read', list_actions: 'problem.read', get_dashboard: 'problem.read',
     search_known_errors: 'kedb.read', get_report: 'report.read', get_review_agenda: 'review.read',
-    list_problem_candidates: 'candidate.read', query_audit_log: 'audit.read', query_security_events: 'security.read',
+    list_problem_candidates: 'candidate.read', query_audit_log: 'audit.read', query_security_events: 'security.read', get_security_alerting: 'security.read',
     create_problem: 'problem.create', update_problem: 'problem.update', transition_problem: 'problem.transition',
     assess_known_error: 'problem.assess', add_comment: 'problem.comment', link_record: 'problem.link', unlink_record: 'problem.link',
     watch_problem: 'problem.watch', mark_duplicate: 'problem.mark_duplicate',
@@ -1104,6 +1105,13 @@ function buildServer(user: User, scopes?: string[]) {
       },
       true,
       async (args) => querySecurityEvents(securityQuerySchema.parse({ ...args, limit: args.limit ?? 100 })),
+    );
+    tool(
+      'get_security_alerting',
+      `Security alerting (admins): the detection rules over security events (failed sign-ins, denied requests, bulk exports, a sign-in from a new country, a new administrator, changed credentials) with their thresholds, the event rule that turns them into restricted security incidents, and the open security alerts (source "${events.SECURITY_SOURCE}").`,
+      {},
+      true,
+      () => alertingStatus(),
     );
   }
 

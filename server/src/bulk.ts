@@ -168,7 +168,7 @@ const DEFS: Record<Practice, PracticeDef> = {
   alerts: {
     read: 'event.read',
     rows: async (ids) =>
-      (await query("SELECT id::text AS id, coalesce(nullif(message, ''), check_key) AS title, status, acknowledged_at FROM alerts WHERE id = ANY($1::int[])", [ids.filter((i) => /^\d+$/.test(i)).map(Number)])).rows,
+      (await query("SELECT id::text AS id, coalesce(nullif(message, ''), check_key) AS title, status, acknowledged_at FROM alerts WHERE id = ANY($1::int[]) AND source <> 'Kernel security'", [ids.filter((i) => /^\d+$/.test(i)).map(Number)])).rows,
     select: async (user, f, limit) => (await events.listAlerts(user, events.listAlertsSchema.parse(params(f, limit)))).map((r: any) => String(r.id)),
     ops: {
       acknowledge: { action: 'event.ack', noop: (row) => !!row.acknowledged_at, apply: (u, r) => events.acknowledgeAlert(u, Number(r.id)) },

@@ -12,6 +12,7 @@ import { config } from './config.js';
 import { migrate, pool, query, waitForDb } from './db.js';
 import { encryptLegacySecrets, startWorker } from './webhooks.js';
 import { startEventWorker } from './events.js';
+import { startSecurityAlertWorker } from './security-alerts.js';
 import { startSlaWorker } from './sla.js';
 import { startNotificationWorker } from './notifications.js';
 import { startConnectorWorker } from './connectors.js';
@@ -38,6 +39,7 @@ setInterval(() => purgeSecurityEvents().catch(() => {}), 86400_000).unref();
 asSystem(() => {
   startWorker(log);
   startEventWorker(log);
+  startSecurityAlertWorker(log);
   startSlaWorker(log);
   startNotificationWorker(log);
   startConnectorWorker(log);
