@@ -315,24 +315,29 @@ const duration = (ms: number) => (ms >= 60_000 ? `${Math.round(ms / 60_000)} min
 export async function runConnector(id: number, trigger: 'schedule' | 'manual', actor?: User, timeoutMs = RUN_TIMEOUT_MS) {
   if (actor) authorize(actor, 'user.manage');
   if (!moduleEnabled('cmdb')) throw forbidden('The CMDB module is turned off');
+  // A scheduled run also claims only a connector that is still due: another tick (or replica) may have listed it
+  // too, run it and released the lease already, which moved next_run_at on. Checked in the same statement as the lease.
   const { rows } = await query(
     `UPDATE connectors SET running_until = now() + interval '30 minutes', next_run_at = now() + schedule_minutes * interval '1 minute'
-     WHERE id = $1 AND (running_until IS NULL OR running_until < now()) RETURNING *`,
-    [id],
+     WHERE id = $1 AND (running_until IS NULL OR running_until < now()) AND ($2 = 'manual' OR (enabled AND next_run_at <= now())) RETURNING *`,
+    [id, trigger],
   );
   const c = rows[0];
-  if (!c) throw conflict('The connector is already running');
+  if (!c) throw conflict(trigger === 'manual' ? 'The connector is already running' : 'The connector is running or no longer due');
   const { rows: run } = await query('INSERT INTO connector_runs (connector_id, trigger) VALUES ($1, $2) RETURNING id', [c.id, trigger]);
   const finish = (status: string, counts: object, errors: unknown[], message: string) =>
     query('UPDATE connector_runs SET status = $2, counts = $3, errors = $4, message = $5, finished_at = now() WHERE id = $1', [run[0].id, status, counts, JSON.stringify(errors.slice(0, 100)), message.slice(0, 1000)]);
+  const abort = new AbortController();
+  let fetching: Promise<unknown> | undefined;
   try {
     const { rows: owner } = await query('SELECT id, username, display_name, email, role, preferences, must_change_password, true AS mfa_enabled FROM users WHERE id = $1', [c.created_by]);
     if (!owner[0]) throw new Error('The connector has no owner; save it again as an administrator');
     const user = owner[0] as User;
-    const abort = new AbortController();
     const timer = setTimeout(() => abort.abort(new Error(`${c.name}: no complete answer within ${duration(timeoutMs)}; the run was stopped`)), timeoutMs);
     const stopped = new Promise<never>((_, reject) => abort.signal.addEventListener('abort', () => reject(abort.signal.reason), { once: true }));
-    const fetched = await Promise.race([CONNECTOR_TYPES[c.type].fetch(contextFor(c, abort.signal)), stopped]).finally(() => clearTimeout(timer));
+    const work = CONNECTOR_TYPES[c.type].fetch(contextFor(c, abort.signal));
+    fetching = work;
+    const fetched = await Promise.race([work, stopped]).finally(() => clearTimeout(timer));
     // What could not be read completely is never marked missing: only its prefix, or the whole snapshot when the
     // type cannot say which part is affected.
     const partial = fetched.partial ?? [];
@@ -369,7 +374,14 @@ export async function runConnector(id: number, trigger: 'schedule' | 'manual', a
     await finish('failed', {}, [], (err as Error).message);
     return { status: 'failed', message: (err as Error).message };
   } finally {
-    await query('UPDATE connectors SET running_until = NULL WHERE id = $1', [c.id]);
+    const release = () => query('UPDATE connectors SET running_until = NULL WHERE id = $1', [c.id]);
+    if (abort.signal.aborted && fetching) {
+      // A fetch that does not honour the signal everywhere may still be talking to the source: the lease stands until
+      // it settles (or expires after 30 minutes), so the next tick never starts a second fetch beside it.
+      const released = fetching.then(release, release);
+      released.catch((err) => logger.warn({ connector: c.name, err: (err as Error).message }, 'connector lease not released'));
+      await Promise.race([released, new Promise((r) => setTimeout(r, 1000).unref())]);
+    } else await release();
   }
 }
 

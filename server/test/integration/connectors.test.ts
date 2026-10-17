@@ -221,7 +221,8 @@ describe('connector framework and push contract (#18)', { skip }, () => {
       assert.match(unconfirmed.content[0].text, /is a decision/);
       const done = await call('retire_cis', { refs: [ref], human_confirmation: 'Yes, retire it' });
       assert.equal(JSON.parse(done.content[0].text).retired, 1);
-      assert.ok((await db.query("SELECT 1 FROM audit_log WHERE entity_type = 'ci' AND action = 'mcp_human_confirmation' AND reason = 'Yes, retire it'")).rows[0]);
+      const { rows: quoted } = await db.query("SELECT entity_ref FROM audit_log WHERE entity_type = 'ci' AND action = 'mcp_human_confirmation' AND reason = 'Yes, retire it'");
+      assert.deepEqual(quoted.map((r: any) => r.entity_ref), [ref], 'the quote lands on the CI itself, so its history shows it');
     } finally {
       await mcp.close();
     }
@@ -260,6 +261,43 @@ describe('connector framework and push contract (#18)', { skip }, () => {
       assert.equal(a + b, 8);
       assert.equal((await db.query('SELECT count(*)::int AS n FROM connector_runs WHERE connector_id = ANY($1)', [ids])).rows[0].n - before, 8);
       assert.equal(fleet.state.maxPerConnector, 1);
+    } finally {
+      fleet.server.closeAllConnections();
+      fleet.server.close();
+    }
+  });
+
+  test('a scheduled run claims only a connector that is still due; a stopped fetch keeps the lease until it settles', async () => {
+    const fleet = mockFleet();
+    const fleetPort = await fleet.listen();
+    const connectors = await import('../../src/connectors.js');
+    await db.query('UPDATE connectors SET enabled = false');
+    const c = (await admin.post('/api/connectors', { type: 'op5', name: 'Due once', source_system: 'Due once', private_allow: [],
+      config: { base_url: `http://127.0.0.1:${fleetPort}/due`, insecure_http: true }, secret: { username: 'kernel', password: 'pw' } })).body;
+    try {
+      await db.query("UPDATE connectors SET next_run_at = now() - interval '1 minute' WHERE id = $1", [c.id]);
+      // Two ticks listed it; the first runs it and releases the lease. The second, with the same stale list, must not.
+      assert.equal((await connectors.runConnector(c.id, 'schedule')).status, 'succeeded');
+      await assert.rejects(connectors.runConnector(c.id, 'schedule'), /no longer due/);
+      assert.equal((await connectors.runConnector(c.id, 'manual')).status, 'succeeded', 'Run now is not bound to the schedule');
+
+      // A fetch that ignores the signal: the run fails at the timeout, but the lease holds until the fetch is done.
+      const op5 = connectors.CONNECTOR_TYPES.op5;
+      const original = op5.fetch;
+      let finish!: () => void;
+      op5.fetch = () => new Promise((resolve) => { finish = () => resolve({ cis: [] }); });
+      try {
+        await db.query("UPDATE connectors SET next_run_at = now() - interval '1 minute' WHERE id = $1", [c.id]);
+        assert.equal((await connectors.runConnector(c.id, 'schedule', undefined, 200)).status, 'failed');
+        const lease = async () => (await db.query('SELECT running_until IS NOT NULL AS held FROM connectors WHERE id = $1', [c.id])).rows[0].held;
+        assert.equal(await lease(), true, 'still fetching: no second run beside it');
+        await assert.rejects(connectors.runConnector(c.id, 'manual'), /already running/);
+        finish();
+        for (let i = 0; i < 50 && (await lease()); i++) await new Promise((r) => setTimeout(r, 20));
+        assert.equal(await lease(), false, 'released once the fetch settled');
+      } finally {
+        op5.fetch = original;
+      }
     } finally {
       fleet.server.closeAllConnections();
       fleet.server.close();

@@ -426,7 +426,8 @@ function buildServer(user: User, scopes?: string[]) {
     false,
     async ({ human_confirmation, ...args }) => {
       const parsed = retire.retireSchema.parse(args);
-      await requireConfirmation(parsed.refs.join(', ').slice(0, 200), 'retire_cis', human_confirmation, 'ci');
+      // One confirmation per CI, so the person's quote shows in the history of each CI it retires.
+      for (const ref of parsed.refs) await requireConfirmation(ref, 'retire_cis', human_confirmation, 'ci');
       return retire.retireCis(user, parsed);
     },
   );
