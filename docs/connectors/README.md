@@ -16,8 +16,10 @@ up the others. Each run takes a lease on its connector row first, which means:
 - a tick waits for the previous one, so the limit of three holds even when runs take longer than a minute.
 
 A run whose fetch has no complete answer within **10 minutes** is stopped and logged as failed ("no complete answer
-within 10 minutes"); its lease is released and the other connectors carry on. A failed run never marks anything
-missing. The run log under **Administration → Connectors** shows counts, errors and the duration of each run.
+within 10 minutes") and the other connectors carry on. A failed run never marks anything missing. A connector
+type's `fetch` must honour `ctx.signal` (pass it to every request and check it in long loops): the lease is released
+only once the stopped fetch has actually settled, or after 30 minutes, so a fetch that ignores the signal keeps its
+connector from running again until then. The run log under **Administration → Connectors** shows counts, errors and the duration of each run.
 
 ## Lifecycle: active → missing → proposed → retired
 
