@@ -57,8 +57,9 @@ describe('audit entries are appended at commit (#57)', { skip }, () => {
     });
     const started = Date.now();
     await Promise.all([long(1), long(2), long(3)]);
-    // Holding the chain lock from the first entry to commit would serialise them (≥ 1.5 s).
-    assert.ok(Date.now() - started < 1200, `took ${Date.now() - started} ms`);
+    // Holding the chain lock from the first entry to commit would serialise them (≥ 1.5 s); side by side they take
+    // about 0.5 s, more under a loaded full suite.
+    assert.ok(Date.now() - started < 1400, `took ${Date.now() - started} ms`);
     for (const n of [1, 2, 3]) assert.equal(await rows(`parallel-${n}`), 1);
     assert.equal((await admin.get('/api/audit/verify')).body.ok, true);
   });

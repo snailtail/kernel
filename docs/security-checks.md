@@ -34,7 +34,9 @@ Sigstore keyless signing (cosign). No key is stored anywhere: the certificate na
 `scripts/deploy.sh` no longer builds on the server. On the host it pulls the image for the commit it deploys, then
 `cosign verify` must confirm that the digest was signed by `.github/workflows/ci.yml` on `refs/heads/main` of this
 repository **for that exact commit**. Only then is the digest tagged `kernel:latest` and started. A missing image
-(CI not finished) or a failed verification stops the deploy and leaves the running version alone.
+(CI not finished) or a failed verification stops the deploy and leaves the running version alone. Before that, on
+the machine running the script, every check run on the commit must have passed (`gh api …/check-runs`), so a red
+Security workflow (Trivy, ZAP), which the publish job does not wait for, also blocks the deploy.
 `scripts/deploy.sh --build <branch>` still builds on the server, unsigned, for trying a branch.
 
 To check an image by hand:
@@ -44,6 +46,9 @@ cosign verify ghcr.io/snailtail/kernel:sha-<commit> \
   --certificate-identity https://github.com/snailtail/kernel/.github/workflows/ci.yml@refs/heads/main \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com --certificate-github-workflow-sha <commit>
 ```
+
+Keyless signing records the certificate (repository name, workflow, commit SHA) in Sigstore's public transparency log
+(Rekor). That stays true if the repository becomes private: no code is published, but those names are.
 
 If the package or the repository is private, log in on the host once with a token that can only read packages:
 `docker login ghcr.io -u <user>` (a classic token with `read:packages` only). The deploy passes the login to cosign.
