@@ -272,6 +272,8 @@ export const OPERATIONS: Op[] = [
   { method: 'put', path: '/api/notifications/settings', tag: 'Notifications', summary: 'Update my notification settings', body: notif.settingsSchema },
   { method: 'get', path: '/api/notifications/unsubscribe', tag: 'Notifications', summary: 'One-click unsubscribe from a signed email link (no login)' },
   { method: 'post', path: '/api/notifications/unsubscribe', tag: 'Notifications', summary: 'One-click unsubscribe (RFC 8058 List-Unsubscribe-Post)' },
+  { method: 'get', path: '/api/public/approval-links', tag: 'Notifications', summary: 'The page behind an approval link from email or chat: shows the request and a form, changes nothing (no login; the token is the credential)', public: true },
+  { method: 'post', path: '/api/public/approval-links', tag: 'Notifications', summary: 'Approve or reject through an approval link: single use, as the approver, from the form on that page', public: true },
   { method: 'get', path: '/api/slas', tag: 'Service levels', summary: 'SLAs with targets per priority' },
   { method: 'post', path: '/api/slas', tag: 'Service levels', summary: 'Create an SLA (problem managers)', body: slaMod.slaSchema },
   { method: 'put', path: '/api/slas/:id', tag: 'Service levels', summary: 'Update an SLA', body: slaMod.slaSchema },

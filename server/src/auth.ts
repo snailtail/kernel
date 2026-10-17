@@ -43,7 +43,7 @@ declare module 'fastify' {
 }
 
 export const SESSION_COOKIE = 'kernel_session';
-const USER_COLUMNS = 'u.id, u.username, u.display_name, u.email, u.role, u.preferences, u.must_change_password, u.mfa_enabled_at IS NOT NULL AS mfa_enabled';
+export const USER_COLUMNS = 'u.id, u.username, u.display_name, u.email, u.role, u.preferences, u.must_change_password, u.mfa_enabled_at IS NOT NULL AS mfa_enabled';
 
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
 

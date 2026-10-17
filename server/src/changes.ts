@@ -97,11 +97,18 @@ export const registerSchema = z.object({
 
 // ---- Policy ------------------------------------------------------------------------------------
 
-interface Policy { approvals: Record<Risk, number>; related_hours: number; allow_self_approval?: boolean }
+interface Policy {
+  approvals: Record<Risk, number>;
+  related_hours: number;
+  allow_self_approval?: boolean;
+  /** The highest risk an approver may decide on from an email or chat link (#48); above it, and for emergency changes, they sign in. */
+  link_max_risk: Risk | 'none';
+}
 async function policy(): Promise<Policy> {
   const { rows } = await query("SELECT value FROM settings WHERE key = 'change_policy'");
-  return { approvals: { low: 1, medium: 1, high: 2 }, related_hours: 24, ...(rows[0]?.value ?? {}) };
+  return { approvals: { low: 1, medium: 1, high: 2 }, related_hours: 24, link_max_risk: 'medium', ...(rows[0]?.value ?? {}) };
 }
+export const changePolicy = policy;
 
 const sourceOf = (): 'user' | 'api' | 'mcp' => ({ mcp: 'mcp' as const, api: 'api' as const })[currentContext().channel as 'mcp' | 'api'] ?? 'user';
 
@@ -463,6 +470,8 @@ export async function transitionChangeLean(user: User, ref: string, input: z.inf
     );
     // Going back (rework or re-scheduling) invalidates earlier votes: the authority decides on what is in front of them.
     if (back) await db.query('DELETE FROM change_votes WHERE change_id = $1', [c.id]);
+    // Approval links sent for this round of authorisation stop working once it is over (#48).
+    if (from === 'authorize') await db.query('UPDATE approval_links SET revoked_at = now() WHERE change_id = $1 AND used_at IS NULL AND revoked_at IS NULL', [c.id]);
     await logChange(db, c.id, user.id, 'status', input.comment ?? input.cancel_reason ?? '', {
       from, to: input.to, ...(input.outcome ? { outcome: input.outcome } : {}), ...(input.override_freeze_reason ? { override_freeze_reason: input.override_freeze_reason } : {}),
     });

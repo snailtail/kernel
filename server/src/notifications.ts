@@ -2,6 +2,7 @@
 // daily digest) and a personal chat webhook are opt-in per event with quiet defaults. Each event reaches each person
 // once (dedupe key), the actor is never notified of their own action, and content is minimal: ref, title, one line,
 // a link. Deliveries are an outbox processed after commit, with retries.
+import type { ApprovalLinks } from './approval-links.js';
 import { activeKey, keyring } from './keys.js';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import nodemailer, { type Transporter } from 'nodemailer';
@@ -48,6 +49,8 @@ export interface Notice {
   dedupe: string;
   /** Who caused it; never notified about their own action. */
   actorId?: number | null;
+  /** For approval_needed from an MCP request: the request, so email and chat can carry approval links. */
+  approvalId?: number;
 }
 
 /** Records notifications (in the caller's transaction) and queues their deliveries. */
@@ -62,13 +65,13 @@ export async function notify(db: Db, n: Notice) {
   }
   // Only people who may see the record hear about it (#53): a restricted record's title never reaches others.
   const { rows } = await db.query(
-    `INSERT INTO notifications (user_id, event, ref, title, summary, url, dedupe_key)
-     SELECT u, $2, $3, $4, $5, $6, $7 FROM unnest($1::int[]) AS u
+    `INSERT INTO notifications (user_id, event, ref, title, summary, url, dedupe_key, approval_id)
+     SELECT u, $2, $3, $4, $5, $6, $7, $8 FROM unnest($1::int[]) AS u
      JOIN users ON users.id = u AND users.active
      WHERE kernel_user_can_see(u, $3)
      ON CONFLICT (user_id, dedupe_key) DO NOTHING
      RETURNING id, user_id`,
-    [users, n.event, n.ref, clip(n.title, 200), clip(n.summary, 200), n.path, n.dedupe],
+    [users, n.event, n.ref, clip(n.title, 200), clip(n.summary, 200), n.path, n.dedupe, n.approvalId ?? null],
   );
   if (!rows.length) return 0;
   const { rows: settings } = await db.query(
@@ -262,6 +265,23 @@ async function sendEmail(userId: number, to: string, subject: string, lines: str
   });
 }
 
+/** How long an approval link works at most (approval-links.ts). */
+export const APPROVAL_LINK_HOURS = 72;
+
+/** The approval part of an email: links to decide, or why the approver has to sign in. */
+function approvalLines(links: ApprovalLinks | 'sign_in' | null) {
+  if (!links) return [];
+  if (links === 'sign_in') return ['This needs you to sign in to decide:'];
+  return [
+    `Approve: ${links.approve}`,
+    `Reject: ${links.reject}`,
+    '',
+    `The links are for you only, work once and expire within ${APPROVAL_LINK_HOURS} hours. Opening one changes nothing until you confirm on the page.`,
+    '',
+    'Or open it in Kernel:',
+  ];
+}
+
 const BACKOFF_MINUTES = [1, 5, 30, 120];
 
 /** Sends due deliveries; claimed with a lease so replicas never send the same one twice. */
@@ -294,11 +314,15 @@ export async function processNotificationDeliveries(limit = 20) {
         const { rows: ns } = await query('SELECT * FROM notifications WHERE id = $1', [d.notification_id]);
         const n = ns[0];
         if (!n) throw new Error('Notification is gone');
+        // Something to approve: links to decide from the message itself, minted per delivery (#48).
+        // Loaded lazily: approval-links depends on changes and approvals, which depend on this module.
+        const links = n.event === 'approval_needed' ? await (await import('./approval-links.js')).mintApprovalLink(n, user.id, d.channel, d.id) : null;
         if (d.channel === 'email') {
-          await sendEmail(user.id, user.email, `[Kernel] ${n.ref ? `${n.ref}: ` : ''}${n.title}`, [n.summary, '', absolute(n.url)], n.event);
+          await sendEmail(user.id, user.email, `[Kernel] ${n.ref ? `${n.ref}: ` : ''}${n.title}`, [n.summary, '', ...approvalLines(links), absolute(n.url)], n.event);
         } else {
           if (!user.chat_url) throw new Error('No chat webhook');
-          const body = JSON.stringify(formatBody(user.chat_format, { event: n.event, summary: n.summary, problem: { ref: n.ref, title: n.title, url: absolute(n.url) } }));
+          const actions = links && links !== 'sign_in' ? [{ title: 'Approve', url: links.approve }, { title: 'Reject', url: links.reject }] : undefined;
+          const body = JSON.stringify(formatBody(user.chat_format, { event: n.event, summary: n.summary, problem: { ref: n.ref, title: n.title, url: absolute(n.url) }, actions }));
           const res = await outboundFetch(decryptSecret(user.chat_url), { method: 'POST', headers: { 'Content-Type': 'application/json', 'User-Agent': 'Kernel-Notifications/1' }, body, maxBytes: 16_384 });
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
         }

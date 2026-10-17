@@ -9,6 +9,9 @@ Kernel uses one secret key for several things. Each use derives its own key from
 
 The key never comes from the database, so a dump or a backup alone reveals nothing.
 
+Approval links in email and chat ([approval-links.md](approval-links.md)) do not use this key. Their tokens are random,
+and only an unkeyed SHA-256 of each is stored, so a rotation leaves links that were already sent working.
+
 ## Configuration
 
 | Variable | Meaning |
