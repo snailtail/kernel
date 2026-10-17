@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
-# Prints the pinned image (tag@digest) of a tool stage in .github/tools/Dockerfile, e.g. `scripts/tool-image.sh trivy`.
+# Prints the pinned image (tag@digest) of a tool stage in tools/Dockerfile, e.g. `scripts/tool-image.sh trivy`.
 set -eu
-file="$(dirname "$0")/../.github/tools/Dockerfile"
+file="$(dirname "$0")/../tools/Dockerfile"
 image=$(awk -v stage="$1" '$1 == "FROM" && $3 == "AS" && $4 == stage { print $2 }' "$file")
 case "$image" in
   *@sha256:*) echo "$image" ;;

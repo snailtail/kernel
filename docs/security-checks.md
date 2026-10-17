@@ -19,7 +19,7 @@ Supply chain:
 - Third-party GitHub Actions are pinned by commit SHA, and workflows get read-only permissions unless a job needs more.
 - The Node base image is pinned by digest. The runtime image contains no npm, npx or corepack, because Kernel needs only `node`.
 - `npm ci --ignore-scripts` installs from the committed lockfile without running package install scripts.
-- Scanner, ZAP and cosign images are pinned by tag and digest in `.github/tools/Dockerfile` (read with
+- Scanner, ZAP and cosign images are pinned by tag and digest in `tools/Dockerfile` (read with
   `scripts/tool-image.sh`), so Dependabot updates them like the base image.
 - Dependabot opens grouped weekly updates for npm, the base image, the tool images and the actions.
 - `main` is protected: the CI, Security and CodeQL checks must pass before a merge, history stays linear, and force
