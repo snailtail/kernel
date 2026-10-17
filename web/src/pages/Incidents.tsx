@@ -25,6 +25,7 @@ import { useApi, useOpenOnNew, useSearchText } from '../hooks';
 import { useSession } from '../session';
 import { Term } from '../components/Glossary';
 import { SeverityBadge, SlaBadge } from '../components/Badges';
+import { HistoryPanel } from '../components/History';
 
 type IncidentStatus = 'new' | 'in_progress' | 'on_hold' | 'resolved' | 'closed';
 interface IncidentRow {
@@ -407,6 +408,7 @@ export function IncidentPage() {
           <VisibilityPanel record={i as any} onChange={reload} />
           <DevLinksPanel recordRef={i.ref} editable={editable} />
           <AttachmentsPanel recordRef={i.ref} editable={editable} canDelete={(a) => a.uploaded_by === user.id || manager} />
+          <HistoryPanel recordRef={i.ref} version={i} />
           {meta.modules?.cmdb !== false && <AffectedCisPanel record={i} basePath={path} editable={editable} onChange={setData} />}
           <section className="card">
             <h2>Problem</h2>

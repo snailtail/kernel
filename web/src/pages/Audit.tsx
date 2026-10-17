@@ -3,53 +3,13 @@ import { Link, useSearchParams } from 'react-router';
 import { api } from '../api';
 import { formatDate, relativeTime } from '../format';
 import { useSession } from '../session';
+import { ChangeList, recordPath, type AuditEntry } from '../components/History';
 
-interface Entry {
-  id: number;
-  at: string;
-  actor_name: string;
-  actor_type: string;
-  channel: string;
-  token_prefix: string;
-  ip: string;
-  user_agent: string;
-  request_id: string;
-  entity_type: string;
-  entity_ref: string;
-  action: string;
-  changes: Record<string, unknown>;
-  reason: string;
-}
+type Entry = AuditEntry;
 
-const FILTERS = ['actor', 'actor_type', 'entity_type', 'entity_ref', 'action', 'from', 'to', 'ip'] as const;
+const FILTERS = ['actor', 'actor_id', 'token_prefix', 'actor_type', 'entity_type', 'entity_ref', 'action', 'from', 'to', 'ip'] as const;
 const ACTOR_TYPES = ['user', 'api_token', 'mcp', 'integration', 'system', 'anonymous'];
 const ENTITY_TYPES = ['problem', 'user', 'session', 'api_token', 'webhook', 'setting', 'category', 'external_system', 'external_record', 'audit_log', 'ci', 'service', 'ci_type'];
-
-const isChange = (v: unknown): v is { from: unknown; to: unknown } => !!v && typeof v === 'object' && 'from' in (v as object) && 'to' in (v as object);
-const show = (v: unknown) => (v === null || v === undefined || v === '' ? '–' : typeof v === 'object' ? JSON.stringify(v) : String(v));
-
-function ChangeList({ changes }: { changes: Record<string, unknown> }) {
-  const entries = Object.entries(changes ?? {});
-  if (!entries.length) return <span className="muted">–</span>;
-  return (
-    <dl className="audit-changes">
-      {entries.map(([k, v]) => (
-        <div key={k}>
-          <dt>{k}</dt>
-          <dd>
-            {isChange(v) ? (
-              <>
-                <span className="before">{show(v.from)}</span> → <span className="after">{show(v.to)}</span>
-              </>
-            ) : (
-              show(v)
-            )}
-          </dd>
-        </div>
-      ))}
-    </dl>
-  );
-}
 
 export function AuditPage() {
   const { user } = useSession();
@@ -119,6 +79,8 @@ export function AuditPage() {
         <input type="date" value={draft.from} onChange={(e) => setDraft({ ...draft, from: e.target.value })} aria-label="From" />
         <input type="date" value={draft.to} onChange={(e) => setDraft({ ...draft, to: e.target.value })} aria-label="To" />
         <input placeholder="IP" value={draft.ip} onChange={(e) => setDraft({ ...draft, ip: e.target.value })} />
+        <input placeholder="Token prefix" value={draft.token_prefix} onChange={(e) => setDraft({ ...draft, token_prefix: e.target.value })} />
+        {draft.actor_id && <span className="tag">User #{draft.actor_id}</span>}
         <button className="btn primary">Filter</button>
         {params.toString() && <button type="button" className="btn-link" onClick={() => { setDraft(Object.fromEntries(FILTERS.map((f) => [f, '']))); setParams({}, { replace: true }); }}>Clear</button>}
       </form>
@@ -136,7 +98,7 @@ export function AuditPage() {
                     <td className="small">{e.channel}{e.token_prefix && <div className="mono muted">{e.token_prefix}…</div>}{open === e.id && <div className="muted">{e.ip}<br />{e.user_agent}<br />req {e.request_id}</div>}</td>
                     <td>
                       <span className="tag">{e.entity_type}</span>{' '}
-                      {e.entity_type === 'problem' ? <Link to={`/problems/${e.entity_ref}`} className="mono" onClick={(ev) => ev.stopPropagation()}>{e.entity_ref}</Link> : <span className="mono">{e.entity_ref}</span>}
+                      {recordPath(e.entity_ref) ? <Link to={recordPath(e.entity_ref)!} className="mono" onClick={(ev) => ev.stopPropagation()}>{e.entity_ref}</Link> : <span className="mono">{e.entity_ref}</span>}
                       <div><strong>{e.action}</strong></div>
                     </td>
                     <td className="audit-changes-cell">{open === e.id ? <ChangeList changes={e.changes} /> : <span className="muted small">{Object.keys(e.changes ?? {}).join(', ') || '–'}</span>}</td>

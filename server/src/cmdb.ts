@@ -605,8 +605,15 @@ const search = (cls: 'ci' | 'service') => async (user: User, q: string, limit: n
     summary: [c.type_label, c.environment, c.team].filter(Boolean).join(' · '),
   }));
 
-const CI_TYPE: RecordType = { type: 'ci', prefix: 'CI', readAction: 'ci.read', uiPath: (ref) => `/cis/${ref}`, get: getCi, search: search('ci'), rest: routes, mcp };
-const SERVICE_TYPE: RecordType = { type: 'service', prefix: 'SVC', readAction: 'ci.read', uiPath: (ref) => `/cis/${ref}`, get: getCi, search: search('service'), rest: routes, mcp };
+// A CI's history includes the sync batches that created or updated it (one audit entry per batch, see upsertCis).
+const history: RecordType['history'] = {
+  mentions: (ci) => [
+    { entity_type: 'ci_upsert', changes: { created_refs: [{ ref: ci.ref }] } },
+    { entity_type: 'ci_upsert', changes: { updated_refs: [ci.id] } },
+  ],
+};
+const CI_TYPE: RecordType = { type: 'ci', prefix: 'CI', readAction: 'ci.read', uiPath: (ref) => `/cis/${ref}`, get: getCi, search: search('ci'), rest: routes, mcp, history };
+const SERVICE_TYPE: RecordType = { type: 'service', prefix: 'SVC', readAction: 'ci.read', uiPath: (ref) => `/cis/${ref}`, get: getCi, search: search('service'), rest: routes, mcp, history };
 registerRecordType(CI_TYPE);
 registerRecordType(SERVICE_TYPE);
 

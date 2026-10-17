@@ -4,7 +4,7 @@ import { activeKey, derive, keyById } from './keys.js';
 import { createHash, createHmac } from 'node:crypto';
 import { z } from 'zod';
 import { currentContext } from './context.js';
-import { afterCommit, query, tx } from './db.js';
+import { afterCommit, beforeCommit, query, tx } from './db.js';
 import { badRequest } from './errors.js';
 import { logger } from './log.js';
 import { fromAudit, originOf } from './security-events.js';
@@ -126,6 +126,11 @@ export async function audit(db: Db | null, entry: AuditEntry) {
       const d = digestOf(entityRef);
       entityRef = u[0] ? `#${u[0].id}` : ((d as { digest?: string }).digest ?? 'unknown account');
     }
+    // Inside a transaction the entry is appended just before COMMIT, so the chain lock below is held for the append
+    // only and not through the rest of a long transaction. It still commits, or rolls back, with the change.
+    if (!beforeCommit(client, () => append(client, entityRef))) await append(client, entityRef);
+  };
+  const append = async (client: Db, entityRef: string) => {
     // Serialise appends so the hash chain has a single order.
     await client.query('SELECT pg_advisory_xact_lock(4713)');
     const { rows: last } = await client.query('SELECT hash FROM audit_log ORDER BY id DESC LIMIT 1');
@@ -187,6 +192,8 @@ export function requireReason(reason: string | undefined): string {
 
 export const auditQuerySchema = z.object({
   actor: z.string().max(100).optional(),
+  actor_id: z.coerce.number().int().optional(),
+  token_prefix: z.string().max(20).optional(),
   actor_type: z.string().max(20).optional(),
   entity_type: z.string().max(50).optional(),
   entity_ref: z.string().max(100).optional(),
@@ -198,8 +205,10 @@ export const auditQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(1000).default(100),
 });
 
-/** `entity_refs` (not part of the query schema) matches these refs exactly: the history of one record. */
-export async function queryAudit(f: z.infer<typeof auditQuerySchema> & { entity_refs?: string[] }) {
+/** `record` (not part of the query schema) is the history of one record: its own entries and the ones that name it. */
+type RecordScope = { entity_type: string; refs: string[]; mentions: { entity_type: string; changes: unknown }[] };
+
+export async function queryAudit(f: Partial<z.infer<typeof auditQuerySchema>> & { limit: number; record?: RecordScope }) {
   const where: string[] = [];
   const params: unknown[] = [];
   const add = (sql: string, v: unknown) => {
@@ -212,7 +221,14 @@ export async function queryAudit(f: z.infer<typeof auditQuerySchema> & { entity_
   if (f.actor_type) add('a.actor_type = ?', f.actor_type);
   if (f.entity_type) add('a.entity_type = ?', f.entity_type);
   if (f.entity_ref) add('a.entity_ref ILIKE ?', `%${f.entity_ref}%`);
-  if (f.entity_refs) add('a.entity_ref = ANY(?)', f.entity_refs);
+  if (f.actor_id) add('a.actor_user_id = ?', f.actor_id);
+  if (f.token_prefix) add('a.token_prefix = ?', f.token_prefix);
+  if (f.record) {
+    // A record's own entries, and entries elsewhere that name it (a sync batch listing the CIs it created).
+    const own = [`a.entity_type = $${params.push(f.record.entity_type)}`, `a.entity_ref = ANY($${params.push(f.record.refs)})`].join(' AND ');
+    const mentions = f.record.mentions.map((m) => `(a.entity_type = $${params.push(m.entity_type)} AND a.changes @> $${params.push(JSON.stringify(m.changes))}::jsonb)`);
+    where.push(`((${own})${mentions.map((m) => ` OR ${m}`).join('')})`);
+  }
   if (f.action) add('a.action ILIKE ?', `%${f.action}%`);
   if (f.ip) add("coalesce(nullif(a.ip, ''), x.ip) = ?", f.ip);
   if (f.from) add('a.at >= ?::timestamptz', f.from);

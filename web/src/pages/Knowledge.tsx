@@ -10,6 +10,7 @@ import { useColumns, useListToolkit, type ColumnKey } from '../components/ListTo
 import { SavedViews } from '../components/SavedViews';
 import { useApi, useOpenOnNew, useSearchText } from '../hooks';
 import { canEdit, isManager, useSession } from '../session';
+import { HistoryPanel } from '../components/History';
 
 export interface ArticleRow {
   ref: string; title: string; article_type: ArticleType; audience: 'internal' | 'end_users'; status: 'draft' | 'published' | 'retired';
@@ -208,6 +209,7 @@ export function ArticlePage() {
             </section>
           )}
           <AttachmentsPanel recordRef={a.ref} editable={writer && !a.synced_with_problem} canDelete={() => isManager(user)} />
+          <HistoryPanel recordRef={a.ref} version={a} />
         </aside>
       </div>
       {editing && <ArticleModal article={a} onClose={() => setEditing(false)} onDone={(x) => { setData(x as Article); setEditing(false); }} />}

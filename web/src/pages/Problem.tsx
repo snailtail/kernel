@@ -23,6 +23,7 @@ import { useLive } from '../live';
 import { Presence } from '../components/Presence';
 import { useApi } from '../hooks';
 import { canEdit, isManager, useSession } from '../session';
+import { HistoryPanel } from '../components/History';
 
 const LIFECYCLE: Status[] = ['new', 'analysis', 'known_error', 'resolved', 'closed'];
 
@@ -166,6 +167,7 @@ export function ProblemPage() {
           <VisibilityPanel record={p as any} onChange={reload} />
           <DevLinksPanel recordRef={p.ref} editable={editable} />
           <AttachmentsPanel recordRef={p.ref} editable={editable} canDelete={(a) => a.uploaded_by === user.id || user.role === 'admin' || user.role === 'problem_manager'} />
+          <HistoryPanel recordRef={p.ref} version={p} />
           {meta.modules?.cmdb !== false && <AffectedCisPanel record={p} basePath={`/api/problems/${p.ref}`} editable={canEdit(user)} onChange={setData} />}
           {meta.modules?.change !== false && <ProblemChanges problem={p} editable={canEdit(user) && !['resolved', 'closed'].includes(p.status)} />}
           {meta.modules?.incident !== false && <ProblemIncidents problem={p} editable={canEdit(user)} onChange={setData} />}

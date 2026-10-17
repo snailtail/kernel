@@ -57,7 +57,8 @@ export const pool = {
 } as unknown as pg.Pool & pg.PoolClient;
 
 const AFTER_COMMIT = Symbol('afterCommit');
-type Hooked = { [AFTER_COMMIT]?: (() => void)[] };
+const BEFORE_COMMIT = Symbol('beforeCommit');
+type Hooked = { [AFTER_COMMIT]?: (() => void)[]; [BEFORE_COMMIT]?: (() => Promise<void>)[] };
 
 /** Runs fn after the surrounding transaction commits (immediately when not in a transaction). */
 export function afterCommit(db: unknown, fn: () => void) {
@@ -66,15 +67,52 @@ export function afterCommit(db: unknown, fn: () => void) {
   else fn();
 }
 
+/**
+ * Queues fn to run inside the surrounding transaction just before it commits; false when not in a transaction.
+ * Lets short critical sections (the audit chain lock) be taken at the end instead of held through the whole work.
+ */
+export function beforeCommit(db: unknown, fn: () => Promise<void>): boolean {
+  const hooks = (db as Hooked)[BEFORE_COMMIT];
+  if (!hooks) return false;
+  hooks.push(fn);
+  return true;
+}
+
+/**
+ * Runs fn under a savepoint. When it fails the savepoint is rolled back together with the before- and after-commit
+ * work it queued, so a rolled-back audit entry is neither appended nor anchored.
+ */
+export async function savepoint<T>(db: pg.PoolClient, name: string, fn: () => Promise<T>): Promise<T> {
+  const hooked = db as Hooked;
+  const before = hooked[BEFORE_COMMIT]?.length ?? 0;
+  const after = hooked[AFTER_COMMIT]?.length ?? 0;
+  await db.query(`SAVEPOINT ${name}`);
+  try {
+    const result = await fn();
+    await db.query(`RELEASE SAVEPOINT ${name}`);
+    return result;
+  } catch (err) {
+    await db.query(`ROLLBACK TO SAVEPOINT ${name}`);
+    hooked[BEFORE_COMMIT]?.splice(before);
+    hooked[AFTER_COMMIT]?.splice(after);
+    throw err;
+  }
+}
+
 export async function tx<T>(fn: (client: pg.PoolClient) => Promise<T>): Promise<T> {
   const client = await borrow();
   const hooks: (() => void)[] = [];
+  const pending: (() => Promise<void>)[] = [];
   (client as Hooked)[AFTER_COMMIT] = hooks;
+  (client as Hooked)[BEFORE_COMMIT] = pending;
   try {
     await client.query('BEGIN');
     const result = await fn(client);
+    // In order; a hook may queue more.
+    for (let i = 0; i < pending.length; i++) await pending[i]();
     await client.query('COMMIT');
     delete (client as Hooked)[AFTER_COMMIT];
+    delete (client as Hooked)[BEFORE_COMMIT];
     for (const hook of hooks) {
       try {
         hook();
@@ -85,6 +123,7 @@ export async function tx<T>(fn: (client: pg.PoolClient) => Promise<T>): Promise<
     return result;
   } catch (err) {
     delete (client as Hooked)[AFTER_COMMIT];
+    delete (client as Hooked)[BEFORE_COMMIT];
     await client.query('ROLLBACK');
     throw err;
   } finally {

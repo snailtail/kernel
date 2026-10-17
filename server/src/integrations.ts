@@ -5,7 +5,7 @@ import { linkRecordCis } from './problem-cis.js';
 import { linkIncidentToProblem } from './incidents.js';
 import { audit } from './audit.js';
 import { authorize } from './policy.js';
-import { query, tx } from './db.js';
+import { query, savepoint, tx } from './db.js';
 import { badRequest, conflict, notFound } from './errors.js';
 import { createProblem, createProblemSchema, getProblem, LINK_KINDS, loadForUpdate, logActivity, type Db } from './problems.js';
 
@@ -125,13 +125,10 @@ export async function ingestRecords(user: User, input: z.infer<typeof ingestSche
     );
     for (const r of unique.filter((r) => r.problem_ref)) {
       // A savepoint per link, so one bad problem_ref does not undo the batch.
-      await db.query('SAVEPOINT link');
       try {
-        const problem = await loadForUpdate(db, r.problem_ref!);
-        if (await linkRecord(db, user, problem, r)) linked++;
-        await db.query('RELEASE SAVEPOINT link');
+        const ok = await savepoint(db, 'link', async () => linkRecord(db, user, await loadForUpdate(db, r.problem_ref!), r));
+        if (ok) linked++;
       } catch (err) {
-        await db.query('ROLLBACK TO SAVEPOINT link');
         errors.push({ reference: r.reference, error: (err as Error).message });
       }
     }

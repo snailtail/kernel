@@ -16,6 +16,7 @@ import { useApi, useSearchText } from '../hooks';
 import { useColumns, useListToolkit, type ColumnKey } from '../components/ListToolkit';
 import { SavedViews } from '../components/SavedViews';
 import { useSession } from '../session';
+import { HistoryPanel } from '../components/History';
 
 export interface CiType { name: string; label: string; class: 'ci' | 'service'; attributes: { key: string; label: string; type: 'string' | 'number' }[]; active: boolean }
 interface Source { id: number; source_system: string; source_id: string; source_url: string; first_seen_at: string; last_seen_at: string }
@@ -257,6 +258,7 @@ export function CiPage() {
         </div>
         <aside className="problem-side">
           <AttachmentsPanel recordRef={ci.ref} editable={annotate} canDelete={(a) => a.uploaded_by === user.id || user.role === 'admin' || user.role === 'problem_manager'} />
+          <HistoryPanel recordRef={ci.ref} version={ci} />
           <section className="card">
             <h2>Where it lives</h2>
             {ci.sources.length === 0 ? <p className="placeholder">Added manually; no source system.</p> : (
