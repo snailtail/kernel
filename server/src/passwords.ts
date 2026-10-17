@@ -18,6 +18,7 @@ const COMMON = new Set(
 
 async function breached(password: string): Promise<boolean> {
   if (process.env.KERNEL_HIBP_CHECK !== 'true') return false;
+  // codeql[js/insufficient-password-hash] -- the HIBP range API is defined on SHA-1; only its first 5 hex digits leave Kernel and nothing is stored
   const sha1 = createHash('sha1').update(password).digest('hex').toUpperCase();
   try {
     const res = await outboundFetch(`https://api.pwnedpasswords.com/range/${sha1.slice(0, 5)}`, { headers: { 'Add-Padding': 'true' }, timeoutMs: 4000, maxBytes: 2_000_000 });

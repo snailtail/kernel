@@ -40,6 +40,7 @@ export class Client {
         ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
         ...headers,
       },
+      // codeql[js/file-access-to-http] -- test client: fixture files are sent to the local test server on purpose
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
     for (const c of res.headers.getSetCookie()) {
