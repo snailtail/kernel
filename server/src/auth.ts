@@ -232,7 +232,7 @@ export function checkTokenScope(req: FastifyRequest) {
  * mutations must carry the X-Kernel-Request header, which a cross-site form cannot send.
  */
 export async function authenticate(req: FastifyRequest) {
-  const bearer = req.headers.authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
+  const bearer = req.headers.authorization?.match(/^Bearer\s+(\S+)\s*$/i)?.[1]; // disjoint classes: linear time on any header
   if (bearer) {
     const found = await userFromApiToken(req, bearer);
     if (found) {
