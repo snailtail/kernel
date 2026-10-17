@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { requireUser } from '../auth.js';
 import * as inc from '../incidents.js';
+import * as inbound from '../inbound-mail.js';
 import * as major from '../major-incidents.js';
 import * as reviews from '../reviews.js';
 import * as generic from '../generic.js';
@@ -9,6 +10,11 @@ import { z } from 'zod';
 type RefParams = { Params: { ref: string } };
 
 export async function incidentRoutes(app: FastifyInstance) {
+  // Inbound email held for a person (#48): replies that could not be added on their own.
+  app.get('/api/inbound-mail', async (req) => inbound.listInboundMail(requireUser(req)));
+  app.post<{ Params: { id: string } }>('/api/inbound-mail/:id/decide', async (req) =>
+    inbound.decideInboundMail(requireUser(req), z.coerce.number().int().parse(req.params.id), inbound.inboundDecisionSchema.parse(req.body)),
+  );
   app.get('/api/incidents', async (req) => inc.listIncidents(requireUser(req), inc.listIncidentsSchema.parse(req.query)));
   app.post('/api/incidents', { config: { idempotent: 'incident.create' } }, async (req, reply) => {
     const created = await inc.createIncident(requireUser(req), inc.createIncidentSchema.parse(req.body));

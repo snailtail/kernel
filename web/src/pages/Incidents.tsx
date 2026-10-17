@@ -9,6 +9,7 @@ import { PagesCard } from '../components/OnCall';
 import { SummaryButton } from '../components/Ai';
 import { useColumns, useListToolkit, type ColumnKey } from '../components/ListToolkit';
 import { SavedViews } from '../components/SavedViews';
+import { InboundReview } from '../components/InboundReview';
 import { TeamAndAssignee, useTeams } from './Teams';
 import { ArticleSuggestions, IncidentKnowledgePanel, type ArticleRow } from './Knowledge';
 import { AttachmentsPanel } from '../components/Attachments';
@@ -110,6 +111,7 @@ export function IncidentsPage() {
         <label className="check"><input type="checkbox" checked={params.get('major') === 'true'} onChange={(e) => set('major', e.target.checked ? 'true' : '')} /> Major only</label>
         {cols.picker}
       </div>
+      {user.role !== 'viewer' && <InboundReview />}
       {tk.scope}
       <section className={`card flush ${loading ? 'is-loading' : ''}`} {...cols.container}>
         {data?.length === 0 ? <p className="empty">No incidents match.</p> : (

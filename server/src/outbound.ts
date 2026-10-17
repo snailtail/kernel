@@ -30,7 +30,7 @@ function allowList() {
   return parseList((process.env.KERNEL_OUTBOUND_ALLOW ?? '').split(','));
 }
 
-function parseList(entries: string[]) {
+export function parseList(entries: string[]) {
   const list = new BlockList();
   for (const entry of entries.map((s) => s.trim()).filter(Boolean)) {
     const [addr, bits] = entry.split('/');
