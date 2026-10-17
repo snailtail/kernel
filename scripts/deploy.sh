@@ -25,15 +25,28 @@ git fetch -q origin "$branch"
 if [ -n "$(git rev-list "origin/$branch..$branch" 2>/dev/null)" ]; then
   echo "warning: local $branch has commits that are not pushed to origin; they will not be deployed" >&2
 fi
+commit=$(git rev-parse "origin/$branch")
 
-ssh "$host" bash -s -- "$dir" "$branch" "$mode" "$repo" <<'REMOTE'
+# A signed image is deployed only once every check on its commit passed, including the Security workflow (Trivy,
+# ZAP), which the publish job does not wait for. Dependabot's own update jobs also report on the commit and are skipped.
+if [ "$mode" = signed ]; then
+  runs=$(gh api --paginate "repos/$repo/commits/$commit/check-runs" --jq '.check_runs[] | select(.app.slug == "github-actions" and .name != "Dependabot") | "\(.name)\t\(.status)\t\(.conclusion)"')
+  bad=$(printf '%s\n' "$runs" | awk -F'\t' 'NF && ($2 != "completed" || ($3 != "success" && $3 != "skipped" && $3 != "neutral"))')
+  if [ -z "$runs" ] || [ -n "$bad" ]; then
+    echo "Checks for ${commit:0:7} are not all green yet:" >&2
+    printf '%s\n' "${bad:-no check runs found}" | sed 's/^/  /' >&2
+    exit 1
+  fi
+fi
+
+ssh "$host" bash -s -- "$dir" "$branch" "$mode" "$repo" "$commit" <<'REMOTE'
 set -euo pipefail
 cd "$1"
-branch=$2 mode=$3 repo=$4
+branch=$2 mode=$3 repo=$4 commit=$5
 git fetch -q origin "$branch"
 git checkout -q "$branch"
-git merge -q --ff-only "origin/$branch"
-commit=$(git rev-parse HEAD)
+git merge -q --ff-only "$commit"
+[ "$(git rev-parse HEAD)" = "$commit" ] || { echo "The host is ahead of ${commit:0:7}; refusing to deploy" >&2; exit 1; }
 echo "Deploying $(git log -1 --format='%h %s')"
 
 if [ "$mode" = build ]; then
