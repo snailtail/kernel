@@ -6,6 +6,9 @@ Both go through the same sync, so they share reconciliation, missing detection a
 only fetches and maps; scheduling, credentials, reconciliation and the run log belong to the framework
 (`server/src/connectors.ts`).
 
+Support mailboxes (IMAP, Microsoft 365) are connectors too: they create incidents instead of CIs, and use the same
+credentials, schedule, lease and run log. See [inbound email](../inbound-email.md).
+
 ## The scheduler
 
 Every minute, the server runs **every** connector that is due, at most three at a time, so one slow source never holds

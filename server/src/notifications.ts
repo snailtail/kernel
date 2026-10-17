@@ -4,7 +4,7 @@
 // a link. Deliveries are an outbox processed after commit, with retries.
 import type { ApprovalLinks } from './approval-links.js';
 import { activeKey, keyring } from './keys.js';
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import nodemailer, { type Transporter } from 'nodemailer';
 import { z } from 'zod';
 import type { User } from './auth.js';
@@ -238,27 +238,38 @@ export async function unsubscribe(userId: number, event: string, token: string) 
 // ---- Delivery ----------------------------------------------------------------------------------
 
 /** Mail sent through the "capture:" transport, for tests and local development. */
-export const capturedMail: { to: string; subject: string; text: string; headers: Record<string, string> }[] = [];
+export const capturedMail: { to: string; subject: string; text: string; headers: Record<string, string>; messageId?: string }[] = [];
 let transporter: Transporter | null = null;
 function mailer() {
   const url = process.env.SMTP_URL;
   if (!url) return null;
   if (url === 'capture:') {
-    return { sendMail: async (m: any) => { capturedMail.push({ to: m.to, subject: m.subject, text: m.text, headers: m.headers }); return {}; } } as unknown as Transporter;
+    return { sendMail: async (m: any) => { capturedMail.push({ to: m.to, subject: m.subject, text: m.text, headers: m.headers, messageId: m.messageId }); return {}; } } as unknown as Transporter;
   }
   transporter ??= nodemailer.createTransport(url);
   return transporter;
 }
 
+/** Kernel's own sender address and Message-ID domain, so its own mail (and loops through it) is never handled. */
+export function ownMail() {
+  const from = (process.env.KERNEL_MAIL_FROM ?? 'Kernel <kernel@localhost>').match(/<([^>]+)>/)?.[1] ?? process.env.KERNEL_MAIL_FROM ?? '';
+  let host = 'kernel.localhost';
+  try {
+    if (config.publicUrl) host = new URL(config.publicUrl).hostname;
+  } catch { /* the default */ }
+  return { address: from.toLowerCase(), messageIdDomain: host.toLowerCase() };
+}
+
 const absolute = (path: string) => `${(config.publicUrl ?? '').replace(/\/$/, '')}${path}`;
 
-async function sendEmail(userId: number, to: string, subject: string, lines: string[], event: string) {
+async function sendEmail(userId: number, to: string, subject: string, lines: string[], event: string, messageId?: string) {
   const m = mailer();
   if (!m) throw new Error('Email is not configured (SMTP_URL)');
   const unsub = unsubscribeUrl(userId, event);
   await m.sendMail({
     from: process.env.KERNEL_MAIL_FROM ?? 'Kernel <kernel@localhost>',
     to,
+    ...(messageId ? { messageId } : {}),
     subject: clip(subject, 200),
     text: [...lines, '', '—', `Notification settings: ${absolute('/settings')}`, `Unsubscribe: ${unsub}`].join('\n'),
     headers: { 'List-Unsubscribe': `<${unsub}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click', 'Auto-Submitted': 'auto-generated' },
@@ -318,7 +329,10 @@ export async function processNotificationDeliveries(limit = 20) {
         // Loaded lazily: approval-links depends on changes and approvals, which depend on this module.
         const links = n.event === 'approval_needed' ? await (await import('./approval-links.js')).mintApprovalLink(n, user.id, d.channel, d.id) : null;
         if (d.channel === 'email') {
-          await sendEmail(user.id, user.email, `[Kernel] ${n.ref ? `${n.ref}: ` : ''}${n.title}`, [n.summary, '', ...approvalLines(links), absolute(n.url)], n.event);
+          // Recorded first, so a reply to this mail finds its record even if the send is retried (#48 inbound).
+          const messageId = `<${randomUUID()}@${ownMail().messageIdDomain}>`;
+          await query('UPDATE notification_deliveries SET message_id = $2 WHERE id = $1', [d.id, messageId]);
+          await sendEmail(user.id, user.email, `[Kernel] ${n.ref ? `${n.ref}: ` : ''}${n.title}`, [n.summary, '', ...approvalLines(links), absolute(n.url)], n.event, messageId);
         } else {
           if (!user.chat_url) throw new Error('No chat webhook');
           const actions = links && links !== 'sign_in' ? [{ title: 'Approve', url: links.approve }, { title: 'Reject', url: links.reject }] : undefined;

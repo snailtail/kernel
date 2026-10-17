@@ -260,7 +260,7 @@ export const KUBERNETES: ConnectorType = {
         .map(([k, v]) => `${k.replace('app.kubernetes.io/', 'app_').replace(/[^a-z0-9_]/gi, '_').toLowerCase()}=${clean(v, 100)}`.slice(0, 50))
         .slice(0, 30);
     const version = await ctx.fetchJson('/version');
-    const cis: Awaited<ReturnType<ConnectorType['fetch']>>['cis'] = [];
+    const cis: Awaited<ReturnType<NonNullable<ConnectorType['fetch']>>>['cis'] = [];
     const relationships: { from_id: string; type: string; to_id: string }[] = [];
     const partial: { message: string; prefix?: string }[] = [];
     const warnings: string[] = [];

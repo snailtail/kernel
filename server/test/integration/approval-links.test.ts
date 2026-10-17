@@ -192,5 +192,13 @@ describe('approve or reject from email and chat (#48)', { skip }, () => {
     const { rows } = await db.query('SELECT status, decided_by FROM pending_approvals WHERE id = $1', [req.pending_approval]);
     assert.deepEqual([rows[0].status, rows[0].decided_by], ['approved', ids.admin]);
     assert.equal((await decide(link, 'approve')).status, 410);
+
+    // Accepting a risk is decided signed in: the mail has no links.
+    const risky = (await analyst.post('/api/problems', { title: 'Known risk to accept' })).body;
+    await approvals.requestApproval(u[0], risky.ref, 'risk_decision', { risk_level: 3, decision: 'accept', review_date: '2099-06-01' }, 'Accept the risk until 2099', 'yes accept');
+    await n.processNotificationDeliveries(100);
+    const mail = n.capturedMail.filter((m) => m.to === 'admin@example.com' && m.subject.includes(risky.ref)).at(-1)!;
+    assert.match(mail.text, /sign in to decide/);
+    assert.doesNotMatch(mail.text, /Approve:/);
   });
 });

@@ -38,9 +38,17 @@ jobs:
         with:
           node-version: 24
           cache: npm
+      # A throwaway mail server for the mailbox connector tests (#48), started first so it is up by the time they run.
+      - name: Start GreenMail (IMAP and SMTP, test users only)
+        run: >-
+          docker run -d --name greenmail -p 127.0.0.1:3025:3025 -p 127.0.0.1:3143:3143
+          -e GREENMAIL_OPTS="-Dgreenmail.setup.test.smtp -Dgreenmail.setup.test.imap -Dgreenmail.hostname=0.0.0.0 -Dgreenmail.users=support:secret@example.com"
+          "$(scripts/tool-image.sh greenmail)"
       - run: npm ci --ignore-scripts
       - run: npm run typecheck
       - run: npm test
+        env:
+          GREENMAIL_HOST: 127.0.0.1
       # The demo data goes through the service layer, so a schema or API change that breaks it fails here (#115).
       - name: Demo data seeds a fresh database
         run: npm run demo:reset

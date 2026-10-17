@@ -9,6 +9,7 @@ import * as conn from './connectors.js';
 import * as retire from './ci-retire.js';
 import * as problemCis from './problem-cis.js';
 import * as inc from './incidents.js';
+import * as inbound from './inbound-mail.js';
 import * as majorInc from './major-incidents.js';
 import * as reviewsMod from './reviews.js';
 import * as oc from './oncall.js';
@@ -318,6 +319,8 @@ export const OPERATIONS: Op[] = [
   { method: 'post', path: '/api/event-sources/:id/rotate', tag: 'Events', summary: "Rotate a source's token" },
   { method: 'patch', path: '/api/event-sources/:id', tag: 'Events', summary: 'Enable/disable a source or change its CMDB source system' },
   { method: 'delete', path: '/api/event-sources/:id', tag: 'Events', summary: 'Delete a source' },
+  { method: 'get', path: '/api/inbound-mail', tag: 'Incidents', summary: 'Inbound email waiting for review: replies that could not be added on their own, with why (#48)' },
+  { method: 'post', path: '/api/inbound-mail/:id/decide', tag: 'Incidents', summary: 'Decide a held email: a new incident, a comment on an incident, or discard', body: inbound.inboundDecisionSchema },
   { method: 'get', path: '/api/incidents', tag: 'Incidents', summary: 'List incidents (open by default)', query: inc.listIncidentsSchema },
   { method: 'post', path: '/api/incidents', tag: 'Incidents', summary: 'Log an incident (optionally with affected CIs); supports Idempotency-Key', body: inc.createIncidentSchema },
   { method: 'get', path: '/api/incidents/:ref', tag: 'Incidents', summary: 'An incident with affected CIs and services, known errors with workarounds, activity and next steps' },

@@ -4,6 +4,7 @@
 // - runs never overlap (a lease per connector) and every run is logged with counts and errors;
 // - a full snapshot that failed or shrank implausibly never marks CIs missing.
 import { KUBERNETES } from './connector-kubernetes.js';
+import { IMAP, MSGRAPH } from './connector-mailbox.js';
 import { z } from 'zod';
 import type { User } from './auth.js';
 import { audit } from './audit.js';
@@ -12,6 +13,8 @@ import { logCi, upsertCis, upsertSchema } from './cmdb.js';
 import { query, tx } from './db.js';
 import { badRequest, conflict, forbidden, notFound } from './errors.js';
 import { processEvents, type NormalisedEvent } from './events.js';
+import { asSystem } from './context.js';
+import { mailboxTargetSchema, receiveMail } from './inbound-mail.js';
 import { logger } from './log.js';
 import { moduleEnabled } from './modules.js';
 import { outboundFetch, validatePrivateAllow } from './outbound.js';
@@ -104,6 +107,12 @@ export interface RunContext {
   sourceSystem: string;
   /** How often the connector runs, for types that judge whether an event is still current. */
   scheduleMinutes: number;
+  /** Private addresses the connector may reach (for types that open their own connections, e.g. IMAP). */
+  privateAllow: string[];
+  /** Aborted when the run is stopped. */
+  signal?: AbortSignal;
+  /** Any HTTPS request through the SSRF-safe client, with the connector's private allowlist and the run's signal. */
+  request: (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string }) => Promise<{ status: number; ok: boolean; body: string }>;
 }
 export interface ConnectorType {
   label: string;
@@ -113,8 +122,13 @@ export interface ConnectorType {
   test: (ctx: RunContext) => Promise<string>;
   /** Setup text for the source system (e.g. a least-privilege manifest), from the form's current settings. */
   setup?: (config: Record<string, unknown>) => string;
+  /**
+   * A mailbox (#48) instead of a CI source: reads new messages and hands each one to `deliver` (raw MIME), then marks
+   * it handled. A message whose delivery throws is left for the next run.
+   */
+  receive?: (ctx: RunContext, deliver: (raw: Buffer) => Promise<unknown>) => Promise<{ warnings: string[] }>;
   /** Fetch and map: CIs (complete snapshot) and the current problems as events. */
-  fetch: (ctx: RunContext) => Promise<{
+  fetch?: (ctx: RunContext) => Promise<{
     cis: z.infer<typeof batchCi>[];
     relationships?: { from_id: string; type: string; to_id: string }[];
     events?: NormalisedEvent[];
@@ -177,12 +191,12 @@ const OP5: ConnectorType = {
   },
 };
 
-export const CONNECTOR_TYPES: Record<string, ConnectorType> = { op5: OP5, kubernetes: KUBERNETES };
+export const CONNECTOR_TYPES: Record<string, ConnectorType> = { op5: OP5, kubernetes: KUBERNETES, imap: IMAP, msgraph: MSGRAPH };
 
 // ---- Registry ----------------------------------------------------------------------------------
 
 export const connectorSchema = z.object({
-  type: z.enum(['op5', 'kubernetes']),
+  type: z.enum(['op5', 'kubernetes', 'imap', 'msgraph']),
   name: z.string().trim().min(1).max(100),
   source_system: z.string().trim().min(1).max(100),
   config: z.record(z.string(), z.unknown()),
@@ -287,6 +301,9 @@ function contextFor(c: any, signal?: AbortSignal): RunContext {
     secret,
     sourceSystem: c.source_system,
     scheduleMinutes: c.schedule_minutes,
+    privateAllow: c.private_allow ?? [],
+    signal,
+    request: (url, init = {}) => outboundFetch(url, { timeoutMs: 30_000, maxBytes: 60_000_000, privateAllow: c.private_allow, signal, ...init }),
     fetchJson: (path) => call(path),
     postJson: (path, body) => call(path, body),
   };
@@ -303,6 +320,9 @@ export async function testConnector(user: User, id: number) {
   }
 }
 
+/** The module a connector type feeds: mailboxes create incidents, the others CIs. */
+const moduleOf = (type: string) => (CONNECTOR_TYPES[type]?.receive ? 'incident' : 'cmdb');
+
 /** How long a run may fetch before it is stopped; well inside the 30-minute lease. */
 export const RUN_TIMEOUT_MS = 10 * 60_000;
 const duration = (ms: number) => (ms >= 60_000 ? `${Math.round(ms / 60_000)} minutes` : `${ms / 1000} s`);
@@ -314,7 +334,8 @@ const duration = (ms: number) => (ms >= 60_000 ? `${Math.round(ms / 60_000)} min
  */
 export async function runConnector(id: number, trigger: 'schedule' | 'manual', actor?: User, timeoutMs = RUN_TIMEOUT_MS) {
   if (actor) authorize(actor, 'user.manage');
-  if (!moduleEnabled('cmdb')) throw forbidden('The CMDB module is turned off');
+  const { rows: kind } = await query('SELECT type FROM connectors WHERE id = $1', [id]);
+  if (kind[0] && !moduleEnabled(moduleOf(kind[0].type))) throw forbidden(`The ${moduleOf(kind[0].type) === 'cmdb' ? 'CMDB' : 'incident'} module is turned off`);
   // A scheduled run also claims only a connector that is still due: another tick (or replica) may have listed it
   // too, run it and released the lease already, which moved next_run_at on. Checked in the same statement as the lease.
   const { rows } = await query(
@@ -336,7 +357,22 @@ export async function runConnector(id: number, trigger: 'schedule' | 'manual', a
     const user = owner[0] as User;
     const timer = setTimeout(() => abort.abort(new Error(`${c.name}: no complete answer within ${duration(timeoutMs)}; the run was stopped`)), timeoutMs);
     const stopped = new Promise<never>((_, reject) => abort.signal.addEventListener('abort', () => reject(abort.signal.reason), { once: true }));
-    const work = CONNECTOR_TYPES[c.type].fetch(contextFor(c, abort.signal));
+    const type = CONNECTOR_TYPES[c.type];
+    if (type.receive) {
+      // A mailbox: each message is handled as it is read; the counts say what became of them.
+      const target = mailboxTargetSchema.parse(c.config);
+      const counts: Record<string, number> = {};
+      const receiving = type.receive(contextFor(c, abort.signal), async (raw) => {
+        const h = await asSystem(() => receiveMail({ id: c.id, name: c.name }, user, target, raw));
+        counts[h.outcome] = (counts[h.outcome] ?? 0) + 1;
+      });
+      fetching = receiving;
+      const { warnings } = await Promise.race([receiving, stopped]).finally(() => clearTimeout(timer));
+      const message = Object.keys(counts).length ? Object.entries(counts).map(([k, n]) => `${n} ${k}`).join(', ') : 'No new mail';
+      await finish('succeeded', counts, warnings.map((w) => ({ skipped: w })), message);
+      return { status: 'succeeded', counts };
+    }
+    const work = type.fetch!(contextFor(c, abort.signal));
     fetching = work;
     const fetched = await Promise.race([work, stopped]).finally(() => clearTimeout(timer));
     // What could not be read completely is never marked missing: only its prefix, or the whole snapshot when the
@@ -392,9 +428,8 @@ export async function runConnector(id: number, trigger: 'schedule' | 'manual', a
  * lease, so replicas share the work without overlap: a connector another replica took is skipped here.
  */
 export async function runDueConnectors({ concurrency = 3, timeoutMs = RUN_TIMEOUT_MS } = {}) {
-  if (!moduleEnabled('cmdb')) return 0;
-  const { rows } = await query('SELECT id FROM connectors WHERE enabled AND next_run_at <= now() AND (running_until IS NULL OR running_until < now()) ORDER BY next_run_at');
-  const queue = rows.map((r) => r.id as number);
+  const { rows } = await query('SELECT id, type FROM connectors WHERE enabled AND next_run_at <= now() AND (running_until IS NULL OR running_until < now()) ORDER BY next_run_at');
+  const queue = rows.filter((r) => moduleEnabled(moduleOf(r.type))).map((r) => r.id as number);
   let ran = 0;
   const worker = async () => {
     for (let id = queue.shift(); id !== undefined; id = queue.shift()) {

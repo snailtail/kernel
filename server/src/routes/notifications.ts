@@ -4,6 +4,7 @@ import { checkApprovalLink, useApprovalLink } from '../approval-links.js';
 import { requireUser } from '../auth.js';
 import { forbidden, HttpError } from '../errors.js';
 import * as n from '../notifications.js';
+import { securityEvent } from '../security-events.js';
 import { checkSameOrigin } from '../security.js';
 
 export async function notificationRoutes(app: FastifyInstance) {
@@ -72,8 +73,13 @@ export async function notificationRoutes(app: FastifyInstance) {
       const q = link.parse(req.query);
       try {
         // The form is posted from the page above: a browser always sends Origin on a form POST.
-        if (!req.headers.origin) throw forbidden('Cross-site request rejected');
-        checkSameOrigin(req);
+        try {
+          if (!req.headers.origin) throw forbidden('Cross-site request rejected');
+          checkSameOrigin(req);
+        } catch (err) {
+          securityEvent({ action: 'approval_link.refused', category: 'authentication', outcome: 'denied', message: 'Approval link refused: origin', detail: { reason: 'origin' } }, req);
+          throw err;
+        }
         const body = new URLSearchParams(typeof req.body === 'string' ? req.body : '');
         const r = await useApprovalLink(req, q.token, { decision: body.get('decision') ?? '', comment: body.get('comment') ?? '', form: body.get('form') ?? '' });
         return send(reply, page(r.message, openLink(r.path)), r.ok ? 200 : 410);

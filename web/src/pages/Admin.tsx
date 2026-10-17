@@ -42,7 +42,7 @@ export function AdminPage() {
       {user.role === 'admin' && <ModulesCard />}
       {user.role === 'admin' && <SecurityCard />}
       {user.role === 'admin' && <WebhooksCard />}
-      {user.role === 'admin' && meta.modules?.cmdb !== false && <ConnectorsCard />}
+      {user.role === 'admin' && (meta.modules?.cmdb !== false || meta.modules?.incident !== false) && <ConnectorsCard />}
       {meta.modules?.change !== false && <DevSourcesSection />}
       {user.role === 'admin' && <SsoAdminSection />}
       <AiAdminSection />

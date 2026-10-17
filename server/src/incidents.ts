@@ -298,7 +298,7 @@ export async function insertIncident(
   actorId: number | null,
   fields: Omit<z.infer<typeof createIncidentSchema>, 'cis'>,
   ciIds: number[],
-  source: 'user' | 'api' | 'mcp' | 'event',
+  source: 'user' | 'api' | 'mcp' | 'event' | 'email',
   extra: { event_rule_id?: number; event_group_key?: string; restricted?: boolean } = {},
 ) {
   const values: Record<string, unknown> = { ...fields, ...extra, source, created_by: actorId };

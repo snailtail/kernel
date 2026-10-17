@@ -89,7 +89,8 @@ async function subjectOf(user: User, target: { change_id?: number | null; approv
     // The problem as it was when the request was sent; any later change means the approver should look again.
     version: fingerprint([a.id, new Date(a.updated_at).toISOString()]),
     deadline,
-    signIn: false,
+    // Accepting or deferring a risk is decided signed in, like a high-risk change.
+    signIn: a.kind === 'risk_decision',
     facts: [['Decision', a.summary], ['Requested by', `${a.requested_by} through an AI agent (MCP)`], ['Requested', when(a.created_at)]],
     path: `/problems/${a.ref}`,
   };
@@ -136,7 +137,7 @@ const REFUSALS: Record<Refusal, string> = {
   expired: 'This link has expired.',
   decided: 'There is nothing left for you to decide here: it was decided, withdrawn or you no longer approve it.',
   changed: 'What you were asked to approve has changed since the link was sent. Open it in Kernel to see the current version.',
-  sign_in: 'This decision needs you to sign in: it is an emergency or high-risk change, or your account needs attention first.',
+  sign_in: 'This decision needs you to sign in: it is an emergency or high-risk change or a risk decision, or your account needs attention first.',
 };
 
 export type LinkState =
@@ -150,7 +151,8 @@ export async function checkApprovalLink(req: FastifyRequest, token: string): Pro
   rateLimit(`approval-link:t:${hash.toString('hex').slice(0, 32)}`, 10, 600_000);
   const refuse = (reason: Refusal, linkId?: number, userId?: number, path?: string): LinkState => {
     securityEvent({
-      action: 'approval_link.refused', category: 'authentication', outcome: reason === 'sign_in' ? 'info' : 'denied',
+      // Mail scanners reopen links that were used, expired or decided: routine, so info. An unknown token is denied.
+      action: 'approval_link.refused', category: 'authentication', outcome: reason === 'invalid' ? 'denied' : 'info',
       message: `Approval link refused: ${reason}`, userId: userId ?? null, detail: { reason, ...(linkId ? { link_id: linkId } : {}) },
     }, req);
     return { ok: false, reason, message: REFUSALS[reason], path };
@@ -186,7 +188,10 @@ export async function useApprovalLink(req: FastifyRequest, token: string, input:
   if (!state.ok) return state;
   const given = Buffer.from(input.form);
   const expected = Buffer.from(state.formToken);
-  if (given.length !== expected.length || !timingSafeEqual(given, expected)) throw badRequest('Open the link again and use the form on that page');
+  if (given.length !== expected.length || !timingSafeEqual(given, expected)) {
+    securityEvent({ action: 'approval_link.refused', category: 'authentication', outcome: 'denied', message: 'Approval link refused: form token', userId: state.user.id, detail: { reason: 'form_token', link_id: state.id } }, req);
+    throw badRequest('Open the link again and use the form on that page');
+  }
   if (!['approve', 'reject'].includes(input.decision)) throw badRequest('Choose approve or reject');
   const comment = input.comment.trim().slice(0, 5000);
   if (input.decision === 'reject' && !comment) throw badRequest('Give a reason for rejecting');
