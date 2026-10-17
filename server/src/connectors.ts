@@ -319,7 +319,8 @@ export async function runConnector(id: number, trigger: 'schedule' | 'manual', a
   // too, run it and released the lease already, which moved next_run_at on. Checked in the same statement as the lease.
   const { rows } = await query(
     `UPDATE connectors SET running_until = now() + interval '30 minutes', next_run_at = now() + schedule_minutes * interval '1 minute'
-     WHERE id = $1 AND (running_until IS NULL OR running_until < now()) AND ($2 = 'manual' OR (enabled AND next_run_at <= now())) RETURNING *`,
+     WHERE id = $1 AND (running_until IS NULL OR running_until < now()) AND ($2 = 'manual' OR (enabled AND next_run_at <= now()))
+     RETURNING *, running_until::text AS lease`,
     [id, trigger],
   );
   const c = rows[0];
@@ -374,7 +375,8 @@ export async function runConnector(id: number, trigger: 'schedule' | 'manual', a
     await finish('failed', {}, [], (err as Error).message);
     return { status: 'failed', message: (err as Error).message };
   } finally {
-    const release = () => query('UPDATE connectors SET running_until = NULL WHERE id = $1', [c.id]);
+    // Only this run's own lease: a fetch that outlived it (30 minutes) must not release the next run's.
+    const release = () => query('UPDATE connectors SET running_until = NULL WHERE id = $1 AND running_until = $2::timestamptz', [c.id, c.lease]);
     if (abort.signal.aborted && fetching) {
       // A fetch that does not honour the signal everywhere may still be talking to the source: the lease stands until
       // it settles (or expires after 30 minutes), so the next tick never starts a second fetch beside it.
