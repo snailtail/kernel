@@ -58,12 +58,14 @@ export async function notificationRoutes(app: FastifyInstance) {
       const choice = (value: string, label: string) =>
         `<label style="margin-right:1rem"><input type="radio" name="decision" value="${value}" required${q.decision === value ? ' checked' : ''}> ${label}</label>`;
       const action = `/api/public/approval-links?token=${encodeURIComponent(q.token)}`;
-      // nosemgrep: raw-html-format -- every value is escaped by esc() above
-      const form = `<h2 style="font-size:1.1rem">${esc(s.subject.ref)}: ${esc(s.subject.title)}</h2><dl>${facts}</dl>
-<form method="post" action="${esc(action)}"><p>${choice('approve', 'Approve')}${choice('reject', 'Reject')}</p>
-<p><label>Comment (required to reject)<br><textarea name="comment" rows="4" maxlength="5000" style="width:100%;font:inherit"></textarea></label></p>
-<input type="hidden" name="form" value="${esc(s.formToken)}"><button type="submit" style="font:inherit;padding:.5rem 1rem">Confirm</button></form>
-${openLink(s.subject.path)}`;
+      // nosemgrep: raw-html-format -- ref, title and facts are escaped by esc() above
+      const head = `<h2 style="font-size:1.1rem">${esc(s.subject.ref)}: ${esc(s.subject.title)}</h2><dl>${facts}</dl>`;
+      // nosemgrep: raw-html-format -- the action is escaped; choice() takes only the literals below
+      const start = `<form method="post" action="${esc(action)}"><p>${choice('approve', 'Approve')}${choice('reject', 'Reject')}</p>`;
+      const comment = '<p><label>Comment (required to reject)<br><textarea name="comment" rows="4" maxlength="5000" style="width:100%;font:inherit"></textarea></label></p>';
+      // nosemgrep: raw-html-format -- the form token is escaped by esc() above
+      const submit = `<input type="hidden" name="form" value="${esc(s.formToken)}"><button type="submit" style="font:inherit;padding:.5rem 1rem">Confirm</button></form>`;
+      const form = [head, start, comment, submit, openLink(s.subject.path)].join('\n');
       return send(reply, page(`You decide as ${s.user.display_name}. Nothing happens until you confirm.`, form));
     });
     scope.post('/api/public/approval-links', async (req, reply) => {
