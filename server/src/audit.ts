@@ -114,7 +114,11 @@ export function withoutSecrets(changes: Record<string, unknown>) {
   return out;
 }
 
-/** Writes an audit entry. Pass the transaction's client so the entry commits (or rolls back) with the change. */
+/**
+ * Writes an audit entry. Pass the transaction's client so the entry commits (or rolls back) with the change; inside a
+ * transaction it is appended at commit. Inside tx, use savepoint() for partial rollbacks, so a rolled-back part drops
+ * its queued entries too.
+ */
 export async function audit(db: Db | null, entry: AuditEntry) {
   const base = currentContext();
   const ctx = entry.actor ? { ...base, userId: entry.actor.id, userName: entry.actor.name, actorType: base.actorType === 'anonymous' ? ('user' as const) : base.actorType } : base;

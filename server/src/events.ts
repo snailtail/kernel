@@ -7,7 +7,7 @@ import type { User } from './auth.js';
 import { audit } from './audit.js';
 import { computeImpact, getGroup, impactSchema } from './cmdb-graph.js';
 import { registerCiExtra } from './cmdb.js';
-import { query, tx } from './db.js';
+import { query, savepoint, tx } from './db.js';
 import { badRequest, conflict, notFound } from './errors.js';
 import { insertIncident, logIncident } from './incidents.js';
 import { slaOnTransition } from './sla.js';
@@ -401,19 +401,16 @@ async function processOne(db: Db, source: string, ciSourceSystem: string, e: Nor
   let fresh = false;
   // Flapping: it fired again shortly after clearing – reopen that alert instead of starting a new one.
   if (last && last.status === 'closed' && last.cleared_at > new Date(Date.now() - settings.reopen_window_minutes * 60_000)) {
-    await db.query('SAVEPOINT reopen');
     try {
-      const { rows } = await db.query(
+      const { rows } = await savepoint(db, 'reopen', () => db.query(
         `UPDATE alerts SET status = 'open', flap_count = flap_count + 1, count = count + 1, cleared_at = NULL, state_at = $2, last_seen = $2,
                 severity = $3, message = $4 WHERE id = $1 AND status = 'closed' RETURNING *`,
         [last.id, at, e.severity, message],
-      );
+      ));
       alert = rows[0];
       fresh = !!alert;
-      await db.query('RELEASE SAVEPOINT reopen');
     } catch (err: any) {
-      if (err.code !== '23505') throw err;
-      await db.query('ROLLBACK TO SAVEPOINT reopen'); // someone opened a new one concurrently: fall through and count it
+      if (err.code !== '23505') throw err; // someone opened a new one concurrently: fall through and count it
     }
   }
   if (!alert) {

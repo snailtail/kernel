@@ -82,7 +82,7 @@ export function beforeCommit(db: unknown, fn: () => Promise<void>): boolean {
  * Runs fn under a savepoint. When it fails the savepoint is rolled back together with the before- and after-commit
  * work it queued, so a rolled-back audit entry is neither appended nor anchored.
  */
-export async function savepoint<T>(db: pg.PoolClient, name: string, fn: () => Promise<T>): Promise<T> {
+export async function savepoint<T>(db: { query: (sql: string) => Promise<unknown> }, name: string, fn: () => Promise<T>): Promise<T> {
   const hooked = db as Hooked;
   const before = hooked[BEFORE_COMMIT]?.length ?? 0;
   const after = hooked[AFTER_COMMIT]?.length ?? 0;

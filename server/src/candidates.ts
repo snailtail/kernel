@@ -8,7 +8,7 @@ import { z } from 'zod';
 import type { User } from './auth.js';
 import { audit, requireReason } from './audit.js';
 import { audienceOf, BROADEST, copyText, mayCopyText, titleAudience, type Audience } from './audience.js';
-import { query, tx } from './db.js';
+import { query, savepoint, tx } from './db.js';
 import { badRequest, conflict, HttpError, notFound } from './errors.js';
 import { logger } from './log.js';
 import { attachToProblem } from './incidents.js';
@@ -472,12 +472,9 @@ async function compute(db: Db, only?: RuleId, errors = new Map<RuleId, string>()
   // times out is reported as such and the others are still listed.
   const raws: Raw[] = [];
   for (const r of rules) {
-    await db.query('SAVEPOINT candidate_rule');
     try {
-      raws.push(...(await COMPUTE[r.rule](db, r.settings)));
-      await db.query('RELEASE SAVEPOINT candidate_rule');
+      raws.push(...(await savepoint(db, 'candidate_rule', () => COMPUTE[r.rule](db, r.settings))));
     } catch (err) {
-      await db.query('ROLLBACK TO SAVEPOINT candidate_rule');
       logger.error({ err, rule: r.rule }, 'problem candidate rule failed');
       errors.set(r.rule, (err as { code?: string }).code === '57014' ? 'This rule timed out' : 'This rule could not run');
     }
