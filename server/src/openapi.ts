@@ -6,6 +6,7 @@ import * as cmdb from './cmdb.js';
 import { MODULE_TAGS, moduleEnabled } from './modules.js';
 import * as graph from './cmdb-graph.js';
 import * as conn from './connectors.js';
+import * as retire from './ci-retire.js';
 import * as problemCis from './problem-cis.js';
 import * as inc from './incidents.js';
 import * as majorInc from './major-incidents.js';
@@ -137,6 +138,8 @@ export const OPERATIONS: Op[] = [
   { method: 'get', path: '/api/cis', tag: 'CMDB', summary: 'Search configuration items and services', query: cmdb.listCisSchema },
   { method: 'post', path: '/api/cis', tag: 'CMDB', summary: 'Create a CI or service (problem managers)', body: cmdb.createCiSchema },
   { method: 'post', path: '/api/cis/upsert', tag: 'CMDB', summary: 'Upsert CIs from a source system (connectors/integrations), matched by source_system + source_id', body: cmdb.upsertSchema },
+  { method: 'get', path: '/api/cis/retire-proposals', tag: 'CMDB', summary: 'CIs missing for their sources\' retire_after_days, proposed for retirement: sources, last seen, relationships and open records that name them' },
+  { method: 'post', path: '/api/cis/retire', tag: 'CMDB', summary: 'Retire missing CIs (administrators, CMDB managers or the owner); open records that name one need acknowledge_open. Never deletes', body: retire.retireSchema },
   { method: 'get', path: '/api/cis/:ref', tag: 'CMDB', summary: 'A CI or service with sources, links, relationships and history' },
   { method: 'patch', path: '/api/cis/:ref', tag: 'CMDB', summary: 'Update a CI or service', body: cmdb.updateCiSchema },
   { method: 'post', path: '/api/cis/:ref/transition', tag: 'CMDB', summary: 'Change status (planned, active, maintenance, retired, missing)', body: cmdb.transitionCiSchema },

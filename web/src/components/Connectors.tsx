@@ -7,7 +7,7 @@ import { Modal } from './Modal';
 
 interface Run { id?: number; trigger?: string; status: string; counts: Record<string, any>; errors?: { source_id?: string; error: string }[]; message: string; started_at: string; finished_at: string | null }
 interface Connector {
-  id: number; type: string; name: string; source_system: string; config: Record<string, any>; private_allow: string[]; schedule_minutes: number;
+  id: number; type: string; name: string; source_system: string; config: Record<string, any>; private_allow: string[]; schedule_minutes: number; retire_after_days: number;
   enabled: boolean; next_run_at: string; running_until: string | null; has_secret: boolean; last_run: Run | null;
 }
 
@@ -35,7 +35,7 @@ export function ConnectorsCard() {
   };
   return (
     <section className="card">
-      <div className="section-head"><h2>Connectors</h2><button className="btn-link" onClick={() => setEditing({ type: 'op5', private_allow: [], schedule_minutes: 60, enabled: true })}>+ Connector</button></div>
+      <div className="section-head"><h2>Connectors</h2><button className="btn-link" onClick={() => setEditing({ type: 'op5', private_allow: [], schedule_minutes: 60, retire_after_days: 14, enabled: true })}>+ Connector</button></div>
       <p className="muted small">Kernel fetches CIs (and current problems as alerts) from your tools on a schedule. Anything else can push with <span className="mono">POST /api/cmdb/ci-batch</span> or the MCP tool <span className="mono">sync_ci_batch</span>.</p>
       {data.connectors.length === 0 && <p className="placeholder">No connectors yet.</p>}
       <ul className="work-list">
@@ -90,7 +90,7 @@ function ConnectorEditor({ connector: c, types, onClose, onDone }: { connector: 
   const initial = (type: string, cfg: Record<string, any>) => ({
     type, name: c.name ?? '', source_system: c.source_system ?? NEW[type]?.source_system ?? '', base_url: cfg.base_url ?? '', default_ci_type: cfg.default_ci_type ?? 'virtual_machine',
     environment: cfg.environment ?? 'prod', sync_events: cfg.sync_events ?? type === 'op5', username: '', password: '', token: '', private_allow: (c.private_allow ?? []).join(', '),
-    schedule_minutes: c.schedule_minutes ?? 60, enabled: c.enabled ?? true, insecure_http: cfg.insecure_http ?? false, ca_pem: cfg.ca_pem ?? '',
+    schedule_minutes: c.schedule_minutes ?? 60, retire_after_days: c.retire_after_days ?? 14, enabled: c.enabled ?? true, insecure_http: cfg.insecure_http ?? false, ca_pem: cfg.ca_pem ?? '',
     exclude_namespaces: (cfg.exclude_namespaces ?? ['kube-system', 'kube-public', 'kube-node-lease']).join(', '), cluster_name: cfg.cluster_name ?? '', node_ci_type: cfg.node_ci_type ?? 'virtual_machine', owner_label: cfg.owner_label ?? '', console_url: cfg.console_url ?? '',
   });
   const [form, setForm] = useState(() => initial(c.type ?? 'op5', c.config ?? NEW[c.type ?? 'op5']?.config ?? {}));
@@ -104,7 +104,7 @@ function ConnectorEditor({ connector: c, types, onClose, onDone }: { connector: 
       : { ...shared, default_ci_type: form.default_ci_type, insecure_http: form.insecure_http };
     const secret = k8s ? (form.token ? { token: form.token.trim() } : null) : form.username || form.password ? { username: form.username, password: form.password } : null;
     const body = {
-      type: form.type, name: form.name, source_system: form.source_system, schedule_minutes: Number(form.schedule_minutes), enabled: form.enabled,
+      type: form.type, name: form.name, source_system: form.source_system, schedule_minutes: Number(form.schedule_minutes), retire_after_days: Number(form.retire_after_days), enabled: form.enabled,
       config, private_allow: form.private_allow.split(/[\s,]+/).filter(Boolean), ...(secret ? { secret } : {}),
     };
     try {
@@ -141,6 +141,7 @@ function ConnectorEditor({ connector: c, types, onClose, onDone }: { connector: 
         <label>Source system <span className="muted small">(owned by this connector)</span><input required value={form.source_system} onChange={(e) => setForm({ ...form, source_system: e.target.value })} /></label>
         <label>Environment<select value={form.environment} onChange={(e) => setForm({ ...form, environment: e.target.value })}>{['prod', 'test', 'dev', 'other'].map((x) => <option key={x}>{x}</option>)}</select></label>
         <label>Every (minutes)<input type="number" min={5} max={10080} value={form.schedule_minutes} onChange={(e) => setForm({ ...form, schedule_minutes: Number(e.target.value) })} /></label>
+        <label>Propose retiring after (days missing)<input type="number" min={1} max={365} value={form.retire_after_days} onChange={(e) => setForm({ ...form, retire_after_days: Number(e.target.value) })} /></label>
         <label className="full">Private network access <span className="muted small">(addresses or ranges on your LAN this connector may reach, e.g. 192.168.1.20 or 10.0.0.0/8)</span><input value={form.private_allow} onChange={(e) => setForm({ ...form, private_allow: e.target.value })} /></label>
         {!k8s && form.base_url.startsWith('http://') && (
           <label className="check full warn-box"><input type="checkbox" checked={form.insecure_http} onChange={(e) => setForm({ ...form, insecure_http: e.target.checked })} /> Plain HTTP (lab only): the password is sent in clear text</label>

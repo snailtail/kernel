@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
 import { after, before, describe, test } from 'node:test';
+import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { Client, skip, startKernel, type Harness } from './harness.js';
 
 /** A stand-in for the OP5 Monitor REST API. */
@@ -14,6 +16,25 @@ function mockOp5() {
     res.setHeader('Content-Type', 'application/json');
     if (req.url!.startsWith('/api/filter/count')) return res.end(JSON.stringify({ count: state.hosts.length }));
     res.end(JSON.stringify(q.startsWith('[hosts]') ? state.hosts : state.problems));
+  });
+  return { state, server, listen: () => new Promise<number>((r) => server.listen(0, '127.0.0.1', () => r((server.address() as any).port))) };
+}
+
+/** Many OP5 stand-ins on one port (/c0, /c1…), counting requests in flight; paths in `hang` never answer. */
+function mockFleet() {
+  const state = { inFlight: 0, maxInFlight: 0, perConnector: new Map<string, number>(), maxPerConnector: 0, hang: new Set<string>() };
+  const server: Server = createServer(async (req, res) => {
+    const name = req.url!.split('/')[1];
+    if (state.hang.has(name)) return;
+    const mine = (state.perConnector.get(name) ?? 0) + 1;
+    state.perConnector.set(name, mine);
+    state.maxPerConnector = Math.max(state.maxPerConnector, mine);
+    state.maxInFlight = Math.max(state.maxInFlight, ++state.inFlight);
+    await new Promise((r) => setTimeout(r, 150));
+    state.inFlight--;
+    state.perConnector.set(name, state.perConnector.get(name)! - 1);
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify(req.url!.includes(encodeURIComponent('[hosts]')) ? [{ name: `${name}-host`, address: '10.2.0.1' }] : []));
   });
   return { state, server, listen: () => new Promise<number>((r) => server.listen(0, '127.0.0.1', () => r((server.address() as any).port))) };
 }
@@ -120,5 +141,128 @@ describe('connector framework and push contract (#18)', { skip }, () => {
     assert.match(r.cis.errors[0].error, /synced by a Kernel connector/);
     const blocked = await admin.post('/api/connectors', { type: 'op5', name: 'Private', source_system: 'Private', config: { base_url: 'https://10.9.9.9' }, secret: { username: 'a', password: 'b' } });
     assert.equal((await admin.post(`/api/connectors/${blocked.body.id}/test`, {})).body.ok, false, 'a private address needs the connector allowlist');
+  });
+
+  test('CIs missing for retire_after_days are proposed for retirement, and a person retires them', async () => {
+    const push = (cis: object[]) => pm.post('/api/cmdb/ci-batch', { source_system: 'Retiring', cis, full_sync: true });
+    const all = Array.from({ length: 12 }, (_, n) => ci(`old-${n}`));
+    await push(all);
+    for (let n = 0; n < 3; n++) await push(all.slice(0, 9));
+    const refOf = async (name: string) => (await analyst.get(`/api/cis?q=${name}&status=all`)).body[0].ref as string;
+    const [gone, owned, back] = await Promise.all([refOf('old-9'), refOf('old-10'), refOf('old-11')]);
+    assert.equal((await analyst.get(`/api/cis/${gone}`)).body.status, 'missing');
+    assert.deepEqual((await analyst.get('/api/cis/retire-proposals')).body, [], 'not proposed before retire_after_days');
+    assert.match((await analyst.get(`/api/cis/${gone}`)).body.next_steps.next, /proposed for retirement on \d{4}-\d{2}-\d{2}/);
+
+    await db.query("UPDATE configuration_items SET missing_since = now() - interval '15 days' WHERE ref = ANY($1)", [[gone, owned, back]]);
+    const me = (await analyst.get('/api/auth/me')).body;
+    await pm.patch(`/api/cis/${owned}`, { owner_id: me.id });
+    assert.equal((await pm.post(`/api/cis/${back}/relationships`, { type: 'runs_on', target: gone })).status, 200);
+    const inc = (await analyst.post('/api/incidents', { title: 'Old host unreachable' })).body.ref;
+    await analyst.post(`/api/incidents/${inc}/cis`, { ci: gone });
+
+    const proposals = (await analyst.get('/api/cis/retire-proposals')).body;
+    assert.deepEqual(proposals.map((p: any) => p.ref).sort(), [gone, owned, back].sort());
+    const p = proposals.find((x: any) => x.ref === gone);
+    assert.deepEqual([p.sources[0].source_system, p.retire_after_days, p.can_retire], ['Retiring', 14, false]);
+    assert.deepEqual(p.open_records.map((o: any) => o.ref), [inc]);
+    assert.equal(proposals.find((x: any) => x.ref === owned).can_retire, true, 'the owner may retire their own CI');
+    assert.match((await analyst.get(`/api/cis/${gone}`)).body.next_steps.next, /^Proposed for retirement/);
+    assert.deepEqual(p.relationships.map((r: any) => [r.type, r.direction, r.ref]), [['runs_on', 'in', back]]);
+    assert.equal((await analyst.get('/api/health-tips')).body.find((t: any) => t.id === 'ci_retire')?.count, 3);
+
+    // A CI that comes back before it is retired is active again and no longer proposed.
+    await push([...all.slice(0, 9), all[11]]);
+    assert.equal((await analyst.get(`/api/cis/${back}`)).body.status, 'active');
+    assert.equal((await db.query('SELECT missing_since FROM configuration_items WHERE ref = $1', [back])).rows[0].missing_since, null);
+
+    const denied = (await analyst.post('/api/cis/retire', { refs: [gone] })).body;
+    assert.match(denied.results[0].reason, /Only an administrator, a CMDB manager or the owner/);
+    assert.equal((await analyst.post('/api/cis/retire', { refs: [owned], comment: 'Decommissioned in March' })).body.retired, 1);
+    const first = (await pm.post('/api/cis/retire', { refs: [gone, back, owned] })).body.results;
+    assert.deepEqual(first.map((r: any) => r.outcome), ['skipped', 'skipped', 'unchanged']);
+    assert.match(first[0].reason, new RegExp(`Open records name it: ${inc}`));
+    assert.match(first[1].reason, /not missing/);
+    assert.equal((await pm.post('/api/cis/retire', { refs: [gone], acknowledge_open: true })).body.retired, 1);
+
+    const page = (await analyst.get(`/api/cis/${gone}`)).body;
+    assert.equal(page.status, 'retired');
+    const entry = page.activity.find((a: any) => a.kind === 'status' && a.data.to === 'retired');
+    assert.deepEqual([entry.data.from, entry.data.open_records], ['missing', [inc]]);
+    assert.equal((await analyst.get(`/api/cis/${owned}`)).body.activity.find((a: any) => a.data.to === 'retired').body, 'Decommissioned in March');
+    assert.ok((await db.query("SELECT 1 FROM audit_log WHERE entity_ref = $1 AND action = 'status' AND changes->>'to' = 'retired'", [gone])).rows[0], 'audited');
+    assert.deepEqual((await analyst.get('/api/cis/retire-proposals')).body, []);
+    assert.equal((await db.query('SELECT count(*)::int AS n FROM configuration_items WHERE ref = ANY($1)', [[gone, owned]])).rows[0].n, 2, 'never deleted');
+  });
+
+  test('retire_after_days per connector, and retiring over MCP needs the person\'s confirmation', async () => {
+    const push = (cis: object[]) => pm.post('/api/cmdb/ci-batch', { source_system: 'Patient', cis, full_sync: true });
+    const all = Array.from({ length: 10 }, (_, n) => ci(`patient-${n}`));
+    await push(all);
+    for (let n = 0; n < 3; n++) await push(all.slice(0, 9));
+    const ref = (await analyst.get('/api/cis?q=patient-9&status=all')).body[0].ref;
+    await db.query("UPDATE configuration_items SET missing_since = now() - interval '20 days' WHERE ref = $1", [ref]);
+    const proposed = async () => (await analyst.get('/api/cis/retire-proposals')).body.map((p: any) => p.ref);
+    assert.ok((await proposed()).includes(ref));
+    const c = (await admin.post('/api/connectors', { type: 'op5', name: 'Patient', source_system: 'Patient', retire_after_days: 30, enabled: false,
+      config: { base_url: 'https://op5.example.com' }, secret: { username: 'a', password: 'b' } })).body;
+    assert.equal(c.retire_after_days, 30);
+    assert.ok(!(await proposed()).includes(ref), 'the connector waits 30 days');
+    await admin.put(`/api/connectors/${c.id}`, { type: 'op5', name: 'Patient', source_system: 'Patient', retire_after_days: 7, enabled: false, config: { base_url: 'https://op5.example.com' } });
+    assert.ok((await proposed()).includes(ref));
+
+    const mcp = new McpClient({ name: 'retire-test', version: '1' });
+    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('pm')}` } } }));
+    try {
+      const call = async (name: string, args: object) => (await mcp.callTool({ name, arguments: args as any })) as any;
+      assert.ok(JSON.parse((await call('list_retire_proposals', {})).content[0].text).some((p: any) => p.ref === ref));
+      const unconfirmed = await call('retire_cis', { refs: [ref] });
+      assert.equal(unconfirmed.isError, true);
+      assert.match(unconfirmed.content[0].text, /is a decision/);
+      const done = await call('retire_cis', { refs: [ref], human_confirmation: 'Yes, retire it' });
+      assert.equal(JSON.parse(done.content[0].text).retired, 1);
+      assert.ok((await db.query("SELECT 1 FROM audit_log WHERE entity_type = 'ci' AND action = 'mcp_human_confirmation' AND reason = 'Yes, retire it'")).rows[0]);
+    } finally {
+      await mcp.close();
+    }
+  });
+
+  test('the scheduler runs every due connector in one tick, a few at a time, never one twice, past a hanging one', async () => {
+    const fleet = mockFleet();
+    const fleetPort = await fleet.listen();
+    const { runDueConnectors } = await import('../../src/connectors.js');
+    await db.query('UPDATE connectors SET enabled = false');
+    const ids: number[] = [];
+    for (let n = 0; n < 8; n++) {
+      const c = (await admin.post('/api/connectors', { type: 'op5', name: `Fleet ${n}`, source_system: `Fleet ${n}`, private_allow: [],
+        config: { base_url: `http://127.0.0.1:${fleetPort}/c${n}`, insecure_http: true }, secret: { username: 'kernel', password: 'pw' } })).body;
+      ids.push(c.id);
+    }
+    fleet.state.hang.add('c3');
+    try {
+      const ran = await runDueConnectors({ concurrency: 3, timeoutMs: 1500 });
+      assert.equal(ran, 8, 'all eight in one tick, not five');
+      assert.ok(fleet.state.maxInFlight <= 3 && fleet.state.maxInFlight >= 2, `at most three at once (saw ${fleet.state.maxInFlight})`);
+      const last = async () => (await db.query('SELECT DISTINCT ON (connector_id) connector_id, status, message FROM connector_runs WHERE connector_id = ANY($1) ORDER BY connector_id, id DESC', [ids])).rows;
+      const runs = await last();
+      assert.equal(runs.length, 8);
+      const hung = runs.find((r) => r.connector_id === ids[3]);
+      assert.deepEqual([hung.status, /no complete answer within 1.5 s/.test(hung.message)], ['failed', true]);
+      assert.ok(runs.filter((r) => r.connector_id !== ids[3]).every((r) => r.status === 'succeeded'), JSON.stringify(runs));
+      assert.equal((await db.query('SELECT count(*)::int AS n FROM connectors WHERE id = ANY($1) AND running_until IS NOT NULL', [ids])).rows[0].n, 0, 'every lease released');
+
+      // Two replicas ticking at once share the work: each connector runs exactly once, never twice at the same time.
+      fleet.state.hang.clear();
+      fleet.state.maxPerConnector = 0;
+      await db.query("UPDATE connectors SET next_run_at = now() - interval '1 minute' WHERE id = ANY($1)", [ids]);
+      const before = (await db.query('SELECT count(*)::int AS n FROM connector_runs WHERE connector_id = ANY($1)', [ids])).rows[0].n;
+      const [a, b] = await Promise.all([runDueConnectors({ timeoutMs: 5000 }), runDueConnectors({ timeoutMs: 5000 })]);
+      assert.equal(a + b, 8);
+      assert.equal((await db.query('SELECT count(*)::int AS n FROM connector_runs WHERE connector_id = ANY($1)', [ids])).rows[0].n - before, 8);
+      assert.equal(fleet.state.maxPerConnector, 1);
+    } finally {
+      fleet.server.closeAllConnections();
+      fleet.server.close();
+    }
   });
 });
