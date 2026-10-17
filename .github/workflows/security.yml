@@ -11,7 +11,7 @@ on:
 permissions:
   contents: read
 
-# Scanner images are pinned by tag and digest in .github/tools/Dockerfile, where Dependabot updates them; the steps
+# Scanner images are pinned by tag and digest in tools/Dockerfile, where Dependabot updates them; the steps
 # read them with scripts/tool-image.sh.
 
 concurrency:

@@ -1,5 +1,6 @@
 # Tool images the workflows and scripts/deploy.sh run, pinned by tag and digest (#66). Nothing builds this file:
-# it exists so that Dependabot proposes updates for these images, which it cannot do inside `docker run` lines.
+# it exists so that Dependabot proposes updates for these images, which it cannot do inside `docker run` lines. It is
+# outside .github/ because Dependabot may not change files there other than workflows.
 # Read an image with `scripts/tool-image.sh <stage>`. The Trivy steps mount the Docker socket (root on the runner),
 # so a re-pushed tag must never run: always keep the digest.
 FROM ghcr.io/google/osv-scanner:v2.6.0@sha256:afd838850ac1a0fcc15ff4a041dc9ba11123c3f0d2666217a5f0fcf9222b55fa AS osv-scanner
