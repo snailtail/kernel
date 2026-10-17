@@ -87,7 +87,7 @@ describe('inbound email (#48)', { skip }, () => {
     assert.equal(h.outcome, 'incident');
     const i = (await analyst.get(`/api/incidents/${h.ref}`)).body;
     assert.match(i.description, /The app shows (\*\*)?error 42/i);
-    assert.doesNotMatch(i.description, /<script>|<p>/, 'no markup');
+    assert.doesNotMatch(i.description, /<\/?[a-z]/i, 'no markup, in any case');
     const files = (await analyst.get(`/api/records/${h.ref}/attachments`)).body;
     assert.deepEqual((files.attachments ?? files).map((f: any) => f.filename), ['log.txt']);
   });
