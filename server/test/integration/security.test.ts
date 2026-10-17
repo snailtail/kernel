@@ -19,6 +19,9 @@ describe('HTTP security', { skip }, () => {
     assert.match(csp, /script-src 'self'(;|$)/, 'no inline or eval scripts');
     assert.match(csp, /frame-ancestors 'none'/);
     assert.match(csp, /object-src 'none'/);
+    assert.match(csp, /report-to csp/);
+    assert.equal(res.headers.get('reporting-endpoints'), 'csp="/api/csp-report"');
+    assert.equal(res.headers.get('cross-origin-embedder-policy'), 'require-corp');
     assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
     assert.equal(res.headers.get('referrer-policy'), 'strict-origin-when-cross-origin');
     assert.match(res.headers.get('permissions-policy') ?? '', /camera=\(\)/);

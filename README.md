@@ -273,15 +273,18 @@ Open http://localhost:8080 and sign in as `admin`. Database migrations run autom
 | `KERNEL_HIBP_CHECK` | `false` | Also check new passwords against Have I Been Pwned (k-anonymity; only a hash prefix leaves Kernel) |
 | `PORT` | `8080` | Listen port inside the container |
 
-To deploy to the test server, push your commits and run `scripts/deploy.sh`. It pulls `main` in `~/kernel` on
-`dockerhost` (a clone using a read-only deploy key), rebuilds the containers and waits until the app is healthy.
+To deploy to the test server, merge to `main`, wait for CI's **Publish signed image** job and run
+`scripts/deploy.sh`. It updates `~/kernel` on `dockerhost` (a clone using a read-only deploy key), pulls the image CI
+built for that commit, verifies its Sigstore signature and waits until the app is healthy. `scripts/deploy.sh --build
+<branch>` builds a branch on the server instead. See [docs/security-checks.md](docs/security-checks.md#signed-images-and-deployment).
 
 `GET /healthz` checks the app and its database connection, for container health checks and Kubernetes probes.
 
 ## Security
 
-- Strict Content Security Policy (no inline or eval scripts, no framing), HSTS, `nosniff`, a restrictive
-  `Permissions-Policy`, `Cache-Control: no-store` on API responses and a 256 kB request body limit.
+- Strict Content Security Policy (no inline or eval scripts, no framing), cross-origin isolation (COOP, COEP,
+  CORP), HSTS, `nosniff`, a restrictive `Permissions-Policy`, `Cache-Control: no-store` on API responses and a
+  256 kB request body limit.
 - Cookie-authenticated writes need the `X-Kernel-Request` header, a same-origin `Origin`/`Sec-Fetch-Site` and a
   JSON body; bearer tokens are exempt. Sessions use `HttpOnly`, `SameSite=Lax` and `Secure` over HTTPS.
 - Passwords follow NIST SP 800-63B: at least 12 characters, no composition rules, rejected if common, containing the
