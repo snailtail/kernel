@@ -1,4 +1,5 @@
-# Grouped weekly updates (#66): npm packages, the Node base image digest and the pinned GitHub Actions.
+# Grouped weekly updates (#66): npm packages, the Node base image digest, the scanner and tool images
+# (.github/tools/Dockerfile) and the pinned GitHub Actions.
 # Cooldown: a release is proposed only once it has aged (14 days, 30 for a major), so a compromised or broken release
 # is usually caught by others first (the 30-day major cooldown exists for npm only). Security updates ignore the cooldown and still arrive at once.
 version: 2
@@ -24,6 +25,14 @@ updates:
       # deliberately once it is promoted.
       - dependency-name: node
         update-types: [version-update:semver-major]
+  # Scanner, ZAP and cosign images that the workflows and scripts/deploy.sh run with `docker run`.
+  - package-ecosystem: docker
+    directory: /.github/tools
+    schedule: { interval: weekly, day: monday }
+    cooldown: { default-days: 14 }
+    groups:
+      tools:
+        patterns: ["*"]
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly, day: monday }

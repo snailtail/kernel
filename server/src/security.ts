@@ -34,13 +34,17 @@ export async function registerSecurity(app: FastifyInstance<any, any, any, any>)
         baseUri: ["'self'"],
         formAction: ["'self'"],
         frameAncestors: ["'none'"],
+        // report-to for current browsers (endpoint in Reporting-Endpoints below), report-uri for the rest.
         reportUri: ['/api/csp-report'],
+        reportTo: ['csp'],
       },
     },
     strictTransportSecurity: { maxAge: 31536000, includeSubDomains: true },
     referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
     crossOriginOpenerPolicy: { policy: 'same-origin' },
     crossOriginResourcePolicy: { policy: 'same-origin' },
+    // Kernel loads nothing from other origins, so pages can isolate themselves from cross-origin resources.
+    crossOriginEmbedderPolicy: { policy: 'require-corp' },
   });
   // A ceiling per caller on the whole API (#66): a runaway script or a stolen token cannot exhaust the server. Keyed
   // on the session or token (hashed), else the client address; event ingestion gets a higher ceiling for bursts.
@@ -58,6 +62,7 @@ export async function registerSecurity(app: FastifyInstance<any, any, any, any>)
     errorResponseBuilder: (_req, ctx) => new HttpError(429, 'Too many requests, try again later', { retry_after_seconds: Math.ceil(ctx.ttl / 1000) }),
   });
   app.addHook('onSend', async (req, reply) => {
+    reply.header('Reporting-Endpoints', 'csp="/api/csp-report"');
     reply.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()');
     // Everything is private and uncached, except the public status page (cacheable, published data only).
     if ((req.url.startsWith('/api/') && !req.url.startsWith('/api/public/')) || req.url.startsWith('/mcp')) reply.header('Cache-Control', 'no-store');
