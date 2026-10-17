@@ -282,6 +282,14 @@ export async function seedStory(p: People) {
     if (round === 0) await vcenter(vms);
   }
   await query("UPDATE ci_activity SET created_at = created_at - interval '20 days' WHERE id = (SELECT min(id) FROM ci_activity WHERE data->>'to' = 'missing')");
+  // The asset inventory lost a scanner server three weeks ago: long enough to be proposed for retirement (#18).
+  const assets = [{ source_id: 'scan01', name: 'scan01', ci_type: 'virtual_machine' }, { source_id: 'kiosk01', name: 'kiosk01', ci_type: 'virtual_machine' }];
+  const sweep = (cis: typeof assets) => connectors.ciBatch(admin, { source_system: 'Asset inventory', cis, relationships: [], full_sync: true, incomplete_prefixes: [] } as any);
+  await sweep(assets);
+  for (let miss = 0; miss < 3; miss++) await sweep(assets.slice(1));
+  await query("UPDATE configuration_items SET missing_since = now() - interval '23 days' WHERE name = 'scan01'");
+  await query("UPDATE ci_sources SET first_seen_at = now() - interval '400 days', last_seen_at = now() - interval '26 days' WHERE source_id = 'scan01'");
+  await query("UPDATE ci_activity SET created_at = now() - interval '23 days' WHERE data->>'to' = 'missing' AND ci_id = (SELECT id FROM configuration_items WHERE name = 'scan01')");
   // The pages the story queued (the worker is not running while seeding).
   await oncall.deliverPages();
   return { incident: inc, problem: prb, change: chg, earlier: old };

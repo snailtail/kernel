@@ -29,6 +29,7 @@ const SetupPage = lazy(() => import('./pages/Setup').then((m) => ({ default: m.S
 const EventsPage = lazy(() => import('./pages/Events').then((m) => ({ default: m.EventsPage })));
 const CiGroupsPage = lazy(() => import('./pages/Cmdb').then((m) => ({ default: m.CiGroupsPage })));
 const CiPage = lazy(() => import('./pages/Cmdb').then((m) => ({ default: m.CiPage })));
+const CiRetirePage = lazy(() => import('./pages/Cmdb').then((m) => ({ default: m.CiRetirePage })));
 const CmdbListPage = lazy(() => import('./pages/Cmdb').then((m) => ({ default: m.CmdbListPage })));
 const AdminPage = lazy(() => import('./pages/Admin').then((m) => ({ default: m.AdminPage })));
 const ApiDocsPage = lazy(() => import('./pages/ApiDocs').then((m) => ({ default: m.ApiDocsPage })));
@@ -141,6 +142,7 @@ export function App() {
             <Route path="/incident-reviews" element={<IncidentReviewsPage />} />
             <Route path="/cis" element={<CmdbListPage />} />
             <Route path="/cis/groups" element={<CiGroupsPage />} />
+            <Route path="/cis/retire" element={<CiRetirePage />} />
             <Route path="/cis/:ref" element={<CiPage />} />
             <Route path="/knowledge" element={<KnowledgePage />} />
             <Route path="/knowledge/:ref" element={<ArticlePage />} />

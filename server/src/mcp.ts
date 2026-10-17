@@ -16,6 +16,7 @@ import * as cmdb from './cmdb.js';
 import { moduleEnabled } from './modules.js';
 import * as graph from './cmdb-graph.js';
 import * as connectors from './connectors.js';
+import * as retire from './ci-retire.js';
 import * as problemCis from './problem-cis.js';
 import * as incidents from './incidents.js';
 import * as major from './major-incidents.js';
@@ -143,6 +144,8 @@ function buildServer(user: User, scopes?: string[]) {
     check_analysis: 'problem.read', get_problem_context: 'problem.read',
     search_cis: 'ci.read', get_ci: 'ci.read', list_ci_types: 'ci.read', create_ci: 'ci.manage', update_ci: 'ci.manage',
     transition_ci: 'ci.manage', upsert_cis: 'ci.ingest',
+    // An owner may retire their own CIs; retireCis checks per CI.
+    list_retire_proposals: 'ci.read', retire_cis: 'ci.annotate',
     link_ci_to_problem: 'problem.link', unlink_ci_from_problem: 'problem.link',
     list_attachments: 'meta.read', read_attachment: 'meta.read', add_attachment: 'attachment.add',
     summarize_record: 'meta.read', analyze_log: 'meta.read',
@@ -226,11 +229,11 @@ function buildServer(user: User, scopes?: string[]) {
     .max(1000)
     .optional()
     .describe('Required for decisions: quote the person\'s explicit confirmation, e.g. "Yes, close it as resolved". Ask them first; never decide on their behalf.');
-  const requireConfirmation = async (ref: string, tool: string, confirmation: string | undefined) => {
+  const requireConfirmation = async (ref: string, tool: string, confirmation: string | undefined, entityType = 'problem') => {
     if (!confirmation?.trim()) {
       throw new Error(`${tool} is a decision: ask the person to confirm it, then call again with human_confirmation quoting their answer.`);
     }
-    await audit(null, { entity_type: 'problem', entity_ref: ref.toUpperCase(), action: 'mcp_human_confirmation', changes: { tool }, reason: confirmation.trim() });
+    await audit(null, { entity_type: entityType, entity_ref: ref.toUpperCase(), action: 'mcp_human_confirmation', changes: { tool }, reason: confirmation.trim() });
   };
   /**
    * The agent's quote cannot prove the person agreed (it could come from a prompt injection), so by default the
@@ -408,6 +411,24 @@ function buildServer(user: User, scopes?: string[]) {
     { ref: z.string(), to: z.enum(cmdb.CI_STATUSES), comment: z.string().optional() },
     false,
     async ({ ref, ...args }) => cmdb.transitionCi(user, ref, cmdb.transitionCiSchema.parse(args)),
+  );
+  tool(
+    'list_retire_proposals',
+    'CIs proposed for retirement: missing from every source for longer than the source\'s retire_after_days. Each shows its sources, when it was last seen, its relationships and the open incidents, problems and changes that still name it. Kernel never retires them by itself.',
+    {},
+    true,
+    () => retire.retireProposals(user),
+  );
+  tool(
+    'retire_cis',
+    'Retire missing CIs (a decision: ask first). Only missing CIs are retired, nothing is deleted, and a CI named by open records is skipped unless acknowledge_open. Administrators and CMDB managers may retire any CI, an owner their own.',
+    { refs: retire.retireSchema.shape.refs, comment: z.string().optional(), acknowledge_open: z.boolean().optional(), human_confirmation: HUMAN_CONFIRMATION },
+    false,
+    async ({ human_confirmation, ...args }) => {
+      const parsed = retire.retireSchema.parse(args);
+      await requireConfirmation(parsed.refs.join(', ').slice(0, 200), 'retire_cis', human_confirmation, 'ci');
+      return retire.retireCis(user, parsed);
+    },
   );
   tool(
     'upsert_cis',

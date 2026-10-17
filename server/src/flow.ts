@@ -24,6 +24,7 @@ interface Node {
 /** All counts in one round trip (each is a small indexed count). */
 // TODO(#53): when access scoping arrives, these counts must be limited to what the viewer may read.
 const COUNTS_SQL = `SELECT (SELECT count(*) FROM configuration_items WHERE status = 'missing')::int AS cmissing,
+    (SELECT count(*) FROM ci_retire_due WHERE proposed_at <= now())::int AS cretire,
     (SELECT count(*) FROM alerts WHERE status = 'open' AND suppressed = '')::int AS c0,
     (SELECT count(*) FROM alerts WHERE status = 'open' AND suppressed = '' AND incident_id IS NULL)::int AS c1,
     (SELECT count(*) FROM incidents WHERE status NOT IN ('resolved', 'closed'))::int AS c2,
@@ -169,7 +170,8 @@ export async function healthTips(user: User) {
   }
   if (moduleEnabled('cmdb') && can(user.role, 'ci.read')) {
     add('ci_not_seen', c.c20, 'active CIs have not been seen by their source for 30 days – retired, or a broken sync?', '/cis');
-    add('ci_missing', c.cmissing, 'CIs are missing from every source that reported them: retire them, or fix the sync.', '/cis?status=missing');
+    add('ci_missing', c.cmissing - c.cretire, 'CIs are missing from every source that reported them: a broken sync, or gone for good?', '/cis?status=missing');
+    add('ci_retire', c.cretire, 'CIs have been missing long enough to be proposed for retirement: retire them, or fix the sync.', '/cis/retire');
   }
   return tips;
 }

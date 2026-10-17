@@ -190,10 +190,12 @@ export const connectorSchema = z.object({
   secret: z.record(z.string(), z.string()).optional(),
   private_allow: z.array(z.string().max(50)).max(20).default([]),
   schedule_minutes: z.number().int().min(5).max(10080).default(60),
+  /** How many days a CI this connector reports may stay missing before it is proposed for retirement. */
+  retire_after_days: z.number().int().min(1).max(365).default(14),
   enabled: z.boolean().default(true),
 });
 
-const PUBLIC = 'id, type, name, source_system, config, private_allow, schedule_minutes, enabled, next_run_at, running_until, created_at, secret IS NOT NULL AS has_secret';
+const PUBLIC = 'id, type, name, source_system, config, private_allow, schedule_minutes, retire_after_days, enabled, next_run_at, running_until, created_at, secret IS NOT NULL AS has_secret';
 
 export async function listConnectors(user: User) {
   authorize(user, 'user.manage');
@@ -221,12 +223,12 @@ export async function saveConnector(user: User, id: number | null, input: z.infe
   try {
     const { rows } = id
       ? await query(
-          `UPDATE connectors SET name = $2, source_system = $3, config = $4, secret = coalesce($5, secret), private_allow = $6, schedule_minutes = $7, enabled = $8 WHERE id = $1 RETURNING ${PUBLIC}`,
-          [id, input.name, input.source_system, config, secret ? encryptSecret(JSON.stringify(secret)) : null, input.private_allow, input.schedule_minutes, input.enabled],
+          `UPDATE connectors SET name = $2, source_system = $3, config = $4, secret = coalesce($5, secret), private_allow = $6, schedule_minutes = $7, enabled = $8, retire_after_days = $9 WHERE id = $1 RETURNING ${PUBLIC}`,
+          [id, input.name, input.source_system, config, secret ? encryptSecret(JSON.stringify(secret)) : null, input.private_allow, input.schedule_minutes, input.enabled, input.retire_after_days],
         )
       : await query(
-          `INSERT INTO connectors (type, name, source_system, config, secret, private_allow, schedule_minutes, enabled, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING ${PUBLIC}`,
-          [input.type, input.name, input.source_system, config, encryptSecret(JSON.stringify(secret)), input.private_allow, input.schedule_minutes, input.enabled, user.id],
+          `INSERT INTO connectors (type, name, source_system, config, secret, private_allow, schedule_minutes, enabled, created_by, retire_after_days) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING ${PUBLIC}`,
+          [input.type, input.name, input.source_system, config, encryptSecret(JSON.stringify(secret)), input.private_allow, input.schedule_minutes, input.enabled, user.id, input.retire_after_days],
         );
     if (!rows[0]) throw notFound('Connector not found');
     await audit(null, { entity_type: 'connector', entity_ref: input.name, action: id ? 'update' : 'create', changes: { ...input, secret: input.secret ? '[changed]' : undefined, config } });
@@ -257,7 +259,7 @@ export async function connectorRuns(user: User, id: number) {
   return (await query('SELECT id, trigger, status, counts, errors, message, started_at, finished_at FROM connector_runs WHERE connector_id = $1 ORDER BY id DESC LIMIT 50', [id])).rows;
 }
 
-function contextFor(c: any): RunContext {
+function contextFor(c: any, signal?: AbortSignal): RunContext {
   const type = CONNECTOR_TYPES[c.type];
   const secret = c.secret ? JSON.parse(decryptSecret(c.secret)) : {};
   const config = type.config.parse(c.config);
@@ -271,6 +273,7 @@ function contextFor(c: any): RunContext {
       ca: config.ca_pem || undefined,
       timeoutMs: 30_000,
       maxBytes: 50_000_000,
+      signal,
     });
     if (!res.ok) throw Object.assign(new Error(`${c.name}: HTTP ${res.status}`), { status: res.status });
     try {
@@ -300,11 +303,16 @@ export async function testConnector(user: User, id: number) {
   }
 }
 
+/** How long a run may fetch before it is stopped; well inside the 30-minute lease. */
+export const RUN_TIMEOUT_MS = 10 * 60_000;
+const duration = (ms: number) => (ms >= 60_000 ? `${Math.round(ms / 60_000)} minutes` : `${ms / 1000} s`);
+
 /**
  * Runs a connector once. A lease on the connector row stops overlapping runs, also across replicas. The run fetches,
- * then pushes through ciBatch as the connector's creator, bound to the connector's own source system.
+ * then pushes through ciBatch as the connector's creator, bound to the connector's own source system. A fetch that
+ * takes longer than timeoutMs is stopped and the run fails, so a hanging source never holds the scheduler.
  */
-export async function runConnector(id: number, trigger: 'schedule' | 'manual', actor?: User) {
+export async function runConnector(id: number, trigger: 'schedule' | 'manual', actor?: User, timeoutMs = RUN_TIMEOUT_MS) {
   if (actor) authorize(actor, 'user.manage');
   if (!moduleEnabled('cmdb')) throw forbidden('The CMDB module is turned off');
   const { rows } = await query(
@@ -321,7 +329,10 @@ export async function runConnector(id: number, trigger: 'schedule' | 'manual', a
     const { rows: owner } = await query('SELECT id, username, display_name, email, role, preferences, must_change_password, true AS mfa_enabled FROM users WHERE id = $1', [c.created_by]);
     if (!owner[0]) throw new Error('The connector has no owner; save it again as an administrator');
     const user = owner[0] as User;
-    const fetched = await CONNECTOR_TYPES[c.type].fetch(contextFor(c));
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(new Error(`${c.name}: no complete answer within ${duration(timeoutMs)}; the run was stopped`)), timeoutMs);
+    const stopped = new Promise<never>((_, reject) => abort.signal.addEventListener('abort', () => reject(abort.signal.reason), { once: true }));
+    const fetched = await Promise.race([CONNECTOR_TYPES[c.type].fetch(contextFor(c, abort.signal)), stopped]).finally(() => clearTimeout(timer));
     // What could not be read completely is never marked missing: only its prefix, or the whole snapshot when the
     // type cannot say which part is affected.
     const partial = fetched.partial ?? [];
@@ -362,14 +373,32 @@ export async function runConnector(id: number, trigger: 'schedule' | 'manual', a
   }
 }
 
-/** Runs due connectors; each claims its own lease, so replicas share the work without overlap. */
-export async function runDueConnectors() {
+/**
+ * Runs every due connector, a few at a time, so one slow source never holds up the others. Each run claims its own
+ * lease, so replicas share the work without overlap: a connector another replica took is skipped here.
+ */
+export async function runDueConnectors({ concurrency = 3, timeoutMs = RUN_TIMEOUT_MS } = {}) {
   if (!moduleEnabled('cmdb')) return 0;
-  const { rows } = await query('SELECT id FROM connectors WHERE enabled AND next_run_at <= now() AND (running_until IS NULL OR running_until < now()) ORDER BY next_run_at LIMIT 5');
-  for (const r of rows) await runConnector(r.id, 'schedule').catch(() => {});
-  return rows.length;
+  const { rows } = await query('SELECT id FROM connectors WHERE enabled AND next_run_at <= now() AND (running_until IS NULL OR running_until < now()) ORDER BY next_run_at');
+  const queue = rows.map((r) => r.id as number);
+  let ran = 0;
+  const worker = async () => {
+    for (let id = queue.shift(); id !== undefined; id = queue.shift()) {
+      if (await runConnector(id, 'schedule', undefined, timeoutMs).then(() => true, () => false)) ran++;
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, worker));
+  return ran;
 }
 
 export function startConnectorWorker(log: (msg: string) => void) {
-  setInterval(() => runDueConnectors().catch((err) => log(`connector scheduler failed: ${err.message}`)), 60_000).unref();
+  // A tick can outlast the interval (a run may take minutes); the next tick waits so the concurrency limit holds.
+  let busy = false;
+  setInterval(() => {
+    if (busy) return;
+    busy = true;
+    runDueConnectors()
+      .catch((err) => log(`connector scheduler failed: ${err.message}`))
+      .finally(() => { busy = false; });
+  }, 60_000).unref();
 }

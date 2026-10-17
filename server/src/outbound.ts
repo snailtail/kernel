@@ -130,7 +130,7 @@ export function checkUrl(url: string, privateAllow?: BlockList): string | null {
   return null;
 }
 
-type OutboundInit = { method?: string; headers?: Record<string, string>; body?: string; timeoutMs?: number; maxBytes?: number; privateAllow?: string[]; ca?: string };
+type OutboundInit = { method?: string; headers?: Record<string, string>; body?: string; timeoutMs?: number; maxBytes?: number; privateAllow?: string[]; ca?: string; signal?: AbortSignal };
 
 /** Told about every blocked request (security-events.ts records them, #64). */
 let blockedSink: (url: string, reason: string) => void = () => {};
@@ -168,7 +168,7 @@ async function fetchChecked(url: string, init: OutboundInit): Promise<OutboundRe
         body: init.body,
         redirect: 'manual',
         dispatcher,
-        signal: AbortSignal.timeout(init.timeoutMs ?? 10_000),
+        signal: init.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(init.timeoutMs ?? 10_000)]) : AbortSignal.timeout(init.timeoutMs ?? 10_000),
       });
     } catch (err) {
       // undici wraps connect errors; surface our own reason when the lookup blocked the address.

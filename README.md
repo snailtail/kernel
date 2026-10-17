@@ -103,7 +103,9 @@ relationships from one source, matched to existing CIs by source id, an explicit
 IP. With `full_sync`, CIs a source stops reporting count as missed and become `missing` after three syncs;
 `incomplete_prefixes` leaves the source ids under a prefix alone (a kind that could not be read this time); a snapshot
 that shrank by more than half is refused for that step. Per-attribute source precedence decides which source's value
-wins (settings `cmdb_reconciliation`).
+wins (settings `cmdb_reconciliation`). A CI missing for longer than its connector's `retire_after_days` (default 14)
+is proposed for retirement under CMDB → Proposed for retirement, where a person retires it; Kernel never retires or
+deletes CIs by itself ([docs/connectors/README.md](docs/connectors/README.md)).
 
 **Relationships and impact**: CIs and services are connected by typed relationships (runs on, depends on, uses
 database, connects to, contains, part of service). The CI page shows what is affected if it is down, up to the

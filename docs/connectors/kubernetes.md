@@ -124,7 +124,8 @@ are left as they are, while every kind that was read completely is synced as usu
 
 `kube-system`, `kube-public` and `kube-node-lease` are left out by default (no CIs, workloads or alerts); change the
 list under **Leave out namespaces**. A namespace added to the list after it was synced is no longer reported, so it
-and its workloads count as missed and become `missing` after three runs (they are never deleted).
+and its workloads count as missed and become `missing` after three runs (they are never deleted; see
+[the CI lifecycle](README.md#lifecycle-active--missing--proposed--retired) for what happens next).
 
 Labels kept as tags: `app.kubernetes.io/*` and the optional owner label. Nodes on Azure, AWS, GCE or vSphere carry
 the VM's id, so the CMDB joins them to the VM another connector reports. Relationships: the cluster contains its

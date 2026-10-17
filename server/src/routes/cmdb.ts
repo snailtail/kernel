@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { requireUser } from '../auth.js';
 import * as cmdb from '../cmdb.js';
 import * as graph from '../cmdb-graph.js';
+import * as retire from '../ci-retire.js';
 import * as problemCis from '../problem-cis.js';
 
 type RefParams = { Params: { ref: string } };
@@ -21,6 +22,8 @@ export async function cmdbRoutes(app: FastifyInstance) {
     return created;
   });
   app.post('/api/cis/upsert', { bodyLimit: 4 * 1024 * 1024 }, async (req) => cmdb.upsertCis(requireUser(req), cmdb.upsertSchema.parse(req.body)));
+  app.get('/api/cis/retire-proposals', async (req) => retire.retireProposals(requireUser(req)));
+  app.post('/api/cis/retire', async (req) => retire.retireCis(requireUser(req), retire.retireSchema.parse(req.body)));
   app.get<RefParams>('/api/cis/:ref', async (req) => cmdb.getCi(requireUser(req), req.params.ref));
   app.patch<RefParams>('/api/cis/:ref', async (req) => cmdb.updateCi(requireUser(req), req.params.ref, cmdb.updateCiSchema.parse(req.body)));
   app.post<RefParams>('/api/cis/:ref/transition', async (req) => cmdb.transitionCi(requireUser(req), req.params.ref, cmdb.transitionCiSchema.parse(req.body)));

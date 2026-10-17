@@ -200,7 +200,7 @@ export async function getCi(user: User, ref: string) {
   const { rows } = await query(`${SELECT_CI} WHERE c.ref = $1`, [ref.toUpperCase()]);
   if (!rows[0]) throw notFound(`${ref} not found`);
   const ci = rows[0];
-  const [sources, links, activity, extra] = await Promise.all([
+  const [sources, links, activity, extra, due] = await Promise.all([
     query('SELECT id, source_system, source_id, source_url, first_seen_at, last_seen_at FROM ci_sources WHERE ci_id = $1 ORDER BY source_system', [ci.id]),
     query(
       `SELECT l.id, l.kind, l.reference, l.system, l.url, l.note, l.created_at, u.display_name AS created_by
@@ -213,6 +213,7 @@ export async function getCi(user: User, ref: string) {
       [ci.id],
     ),
     ciExtras(ci.id),
+    query('SELECT missing_since, retire_after_days, proposed_at FROM ci_retire_due WHERE id = $1', [ci.id]),
   ]);
   return {
     type: ci.class === 'service' ? 'service' : 'ci',
@@ -222,7 +223,8 @@ export async function getCi(user: User, ref: string) {
     links: links.rows,
     activity: activity.rows,
     ...extra,
-    next_steps: ciNextSteps(ci, sources.rows),
+    retirement: due.rows[0] ? { ...due.rows[0], proposed: due.rows[0].proposed_at <= new Date() } : null,
+    next_steps: ciNextSteps(ci, sources.rows, due.rows[0]),
   };
 }
 
@@ -234,7 +236,7 @@ async function ciExtras(ciId: number) {
   return Object.assign({}, ...(await Promise.all(extras.map((fn) => fn(ciId)))));
 }
 
-function ciNextSteps(ci: any, sources: any[]) {
+function ciNextSteps(ci: any, sources: any[], due?: { retire_after_days: number; proposed_at: Date }) {
   const steps = [
     { id: 'owner', label: 'Set an owner or team', hint: 'Someone accountable for the CI.', done: !!ci.owner_id || !!ci.team },
     { id: 'source', label: 'Link it to its source', hint: 'Where the CI really lives (vCenter, Azure, OP5…), so people can open it there.', done: sources.length > 0 },
@@ -244,7 +246,9 @@ function ciNextSteps(ci: any, sources: any[]) {
     phase: ci.class === 'service' ? 'Service record' : 'Configuration item',
     purpose: 'A pointer to something we operate, so incidents, problems and changes can say what they affect.',
     steps,
-    next: ci.status === 'missing' ? 'The source no longer reports this CI: check whether it was retired.' : 'Keep owner, sources and relationships current.',
+    next: ci.status !== 'missing' || !due ? 'Keep owner, sources and relationships current.'
+      : due.proposed_at <= new Date() ? `Proposed for retirement: no source has reported it for ${due.retire_after_days} days. Retire it, or fix the sync.`
+      : `The source no longer reports this CI: check whether it was retired. If nothing reports it, it is proposed for retirement on ${due.proposed_at.toISOString().slice(0, 10)}.`,
   };
 }
 
