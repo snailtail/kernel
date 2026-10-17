@@ -665,6 +665,7 @@ export function ActivityLine({ activity: a }: { activity: Activity }) {
       <div className="activity-head">
         <strong>{a.user_name ?? 'System'}</strong> {text}
         {(a.channel === 'mcp' || a.channel === 'api') && <span className="tag channel" title={a.channel === 'mcp' ? 'Through MCP (an AI agent or MCP client)' : 'Through the REST API'}>via {a.channel.toUpperCase()}</span>}
+        {(a.channel === 'email_link' || a.channel === 'chat_link') && <span className="tag channel" title="Decided from the approval link in a notification">via {a.channel === 'email_link' ? 'email' : 'chat'} link</span>}
         <time title={formatDate(a.created_at)}>{relativeTime(a.created_at)}</time>
       </div>
       {(a.kind === 'comment' || (a.kind === 'status' && a.body)) && <Markdown text={a.body} className="activity-body" />}

@@ -67,7 +67,7 @@ export function ChangeList({ changes }: { changes: Record<string, unknown> }) {
   );
 }
 
-const CHANNEL: Record<string, string> = { web: 'web', api: 'API', mcp: 'an AI agent (MCP)', system: 'Kernel', email: 'email', github: 'GitHub' };
+const CHANNEL: Record<string, string> = { web: 'web', api: 'API', mcp: 'an AI agent (MCP)', system: 'Kernel', email: 'email', email_link: 'an approval link in email', chat_link: 'an approval link in chat', github: 'GitHub' };
 const ACTOR_FALLBACK: Record<string, string> = { system: 'Kernel', integration: 'An integration', anonymous: 'Someone' };
 
 const VERB: Record<string, string> = {

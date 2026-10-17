@@ -394,6 +394,7 @@ export function ChangePage() {
                     <strong>{a.user_name ?? 'System'}</strong>{' '}
                     {a.kind === 'comment' ? 'added a note' : a.kind === 'status' ? `moved it from ${CHANGE_STATUS[a.data.from as Status]} to ${CHANGE_STATUS[a.data.to as Status]}` : a.kind === 'vote' ? (a.data.decision === 'approve' ? 'approved' : 'rejected') : a.body}
                     {(a.channel === 'mcp' || a.channel === 'api') && <span className="tag channel">via {a.channel.toUpperCase()}</span>}
+                    {(a.channel === 'email_link' || a.channel === 'chat_link') && <span className="tag channel" title="Decided from the approval link in a notification">via {a.channel === 'email_link' ? 'email' : 'chat'} link</span>}
                     <time title={formatDate(a.created_at)}>{relativeTime(a.created_at)}</time>
                   </div>
                   {(a.kind === 'comment' || ((a.kind === 'status' || a.kind === 'vote') && a.body)) && <Markdown text={a.body} className="activity-body" />}

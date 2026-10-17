@@ -88,9 +88,12 @@ export function formatBody(format: string, payload: any) {
   const who = payload.actor?.display_name ?? 'Kernel';
   const title = p.ref ? `${p.ref}: ${p.title}` : 'Kernel';
   const line = `${who}: ${payload.summary || payload.event}`;
+  // Optional link buttons, e.g. Approve and Reject on a personal approval notice (#48).
+  const actions: { title: string; url: string }[] = payload.actions ?? [];
   if (format === 'slack') {
     const link = p.url ? `<${p.url}|${title}>` : `*${title}*`;
-    return { text: `${link}\n${line}` };
+    const buttons = actions.map((a) => `<${a.url}|${a.title}>`).join(' · ');
+    return { text: `${link}\n${line}${buttons ? `\n${buttons}` : ''}` };
   }
   if (format === 'teams_workflow') {
     return {
@@ -106,7 +109,7 @@ export function formatBody(format: string, payload: any) {
               { type: 'TextBlock', text: title, weight: 'Bolder', size: 'Medium', wrap: true },
               { type: 'TextBlock', text: line, wrap: true },
             ],
-            ...(p.url ? { actions: [{ type: 'Action.OpenUrl', title: 'Open in Kernel', url: p.url }] } : {}),
+            ...(p.url || actions.length ? { actions: [...actions, ...(p.url ? [{ title: 'Open in Kernel', url: p.url }] : [])].map((a) => ({ type: 'Action.OpenUrl', ...a })) } : {}),
           },
         },
       ],
