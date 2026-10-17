@@ -18,6 +18,7 @@ import { useLive } from '../live';
 import { Presence } from '../components/Presence';
 import { useApi, useOpenOnNew } from '../hooks';
 import { useSession } from '../session';
+import { HistoryPanel } from '../components/History';
 
 type Status = 'draft' | 'assess' | 'authorize' | 'scheduled' | 'implementing' | 'review' | 'closed' | 'rejected' | 'cancelled';
 export const CHANGE_STATUS: Record<Status, string> = {
@@ -406,6 +407,7 @@ export function ChangePage() {
           <VisibilityPanel record={c as any} onChange={reload} />
           <DevLinksPanel recordRef={c.ref} editable={editable} />
           <AttachmentsPanel recordRef={c.ref} editable={editable} canDelete={(a) => a.uploaded_by === user.id || user.role === 'admin' || user.role === 'problem_manager'} />
+          <HistoryPanel recordRef={c.ref} version={c} />
           <section className="card">
             <h2>Window</h2>
             <dl className="kv">

@@ -1072,9 +1072,11 @@ function buildServer(user: User, scopes?: string[]) {
   {
     tool(
       'query_audit_log',
-      'Search the audit trail across everything (admins): filter by actor, actor_type (user, api_token, mcp, integration, system, anonymous), entity_type (problem, user, api_token, webhook, session, setting…), entity_ref, action, date range or IP.',
+      'Search the audit trail across everything (admins): filter by actor (name) or actor_id, actor_type (user, api_token, mcp, integration, system, anonymous), token_prefix (everything one token did), entity_type (problem, user, api_token, webhook, session, setting…), entity_ref, action, date range or IP.',
       {
         actor: z.string().optional(),
+        actor_id: z.number().int().optional(),
+        token_prefix: z.string().optional(),
         actor_type: z.string().optional(),
         entity_type: z.string().optional(),
         entity_ref: z.string().optional(),

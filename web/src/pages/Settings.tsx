@@ -126,7 +126,7 @@ function PasswordCard() {
 }
 
 function TokensCard() {
-  const { meta } = useSession();
+  const { meta, user } = useSession();
   const { data: tokens, reload } = useApi<Token[]>('/api/tokens');
   const [name, setName] = useState('');
   const [expires, setExpires] = useState('90');
@@ -224,7 +224,7 @@ function TokensCard() {
             {tokens.map((t) => (
               <tr key={t.id}>
                 <td>{t.name}</td>
-                <td className="mono">{t.prefix}…</td>
+                <td className="mono">{user.role === 'admin' ? <Link to={`/admin/audit?token_prefix=${encodeURIComponent(t.prefix)}`} title="Everything this token did">{t.prefix}…</Link> : `${t.prefix}…`}</td>
                 <td className="small">{t.scopes?.join(', ')}</td>
                 <td>{formatDate(t.created_at)}</td>
                 <td>{t.last_used_at ? `${relativeTime(t.last_used_at)}${t.last_used_ip ? ` from ${t.last_used_ip}` : ''}` : 'Never'}</td>

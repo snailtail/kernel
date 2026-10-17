@@ -84,7 +84,7 @@ function UsersCard() {
               <td>{u.mfa_enabled ? '✓' : '–'}</td>
               <td>{u.active ? 'Active' : 'Deactivated'}</td>
               <td>{formatDate(u.created_at)}</td>
-              <td><button className="btn-link" onClick={() => setEditing(u)}>Edit</button></td>
+              <td className="nowrap"><button className="btn-link" onClick={() => setEditing(u)}>Edit</button> <Link to={`/admin/audit?actor_id=${u.id}`}>Activity</Link></td>
             </tr>
           ))}
         </tbody>

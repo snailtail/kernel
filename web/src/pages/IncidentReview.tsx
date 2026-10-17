@@ -8,6 +8,7 @@ import { Markdown } from '../components/Markdown';
 import { formatDate } from '../format';
 import { useApi } from '../hooks';
 import { useSession } from '../session';
+import { HistoryPanel } from '../components/History';
 
 type Section = 'what_happened' | 'impact_summary' | 'went_well' | 'was_hard' | 'lucky';
 interface Item {
@@ -171,6 +172,7 @@ export function IncidentReviewPage() {
               </form>
             )}
           </section>
+          <HistoryPanel recordRef={r.ref} version={r} />
         </aside>
       </div>
     </>

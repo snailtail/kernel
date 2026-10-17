@@ -32,9 +32,10 @@ export interface RecordType {
   mcp: { list: string; get: string; create: string; update: string; transition: string };
   /**
    * Where its history lives in the audit trail: the entity type (default: the type) and the refs it was audited
-   * under (default: the record's ref), given the record as `get` returned it.
+   * under (default: the record's ref), given the record as `get` returned it. `mentions` adds entries of another
+   * entity type whose changes contain the given JSON, such as the sync batches that created or updated a CI.
    */
-  history?: { entityType: string; refs?: (record: Record<string, unknown>) => string[] };
+  history?: { entityType?: string; refs?: (record: Record<string, unknown>) => string[]; mentions?: (record: Record<string, unknown>) => { entity_type: string; changes: unknown }[] };
 }
 
 const registry = new Map<string, RecordType>();
