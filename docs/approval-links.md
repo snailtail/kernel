@@ -23,6 +23,10 @@ high-risk changes still need a signed-in approver.
   - the approver decides with the same request's link from the other channel.
 - A retried delivery sends a new link and revokes the one from the failed attempt.
 
+**Forwarding the message forwards the decision.** The link is the credential: whoever has it can decide as the
+approver until it is used or expires. Do not forward approval emails; set `link_max_risk` lower (or to `none`) where
+that is not acceptable.
+
 ## Using a link
 
 - **GET never changes anything.** Mail security scanners (Safe Links, Proofpoint, Mimecast) open every link in a
@@ -35,13 +39,15 @@ high-risk changes still need a signed-in approver.
 - **High risk needs a sign-in.** For an emergency change, or a change whose risk is above `link_max_risk` in the
   `change_policy` setting (default `medium`, so high risk needs a sign-in; `none` turns links off for changes), the
   message says "sign in to decide" and carries no Approve or Reject link. A link sent before the risk was raised
-  shows the same. Accounts that must change their password or set up required MFA are also sent to sign in.
+  shows the same. An MCP request to accept or defer a risk (`risk_decision`) also needs a sign-in. Accounts that
+  must change their password or set up required MFA are also sent to sign in.
 
 ## Traceability
 
 - The decision is recorded as the approver, with channel `email_link` or `chat_link`, in the change's activity and
   in the audit trail. The audit trail gets an extra `decided_by_link` entry with the link's id, never the token. The
   client IP and user agent go in `audit_context`.
-- Refused links (unknown, used, expired, changed, decided, or needing a sign-in) are security events
-  (`approval_link.refused`, with the reason).
+- Refused links are security events (`approval_link.refused`, with the reason). An unknown token, a wrong form token
+  or a wrong origin is `denied`. A link that was used, expired, changed, decided or needs a sign-in is `info`, because
+  mail scanners reopen links all the time.
 - The endpoint is rate-limited per client address (120 a minute) and per token (10 per 10 minutes).

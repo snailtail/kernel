@@ -19,6 +19,7 @@ import * as connectors from './connectors.js';
 import * as retire from './ci-retire.js';
 import * as problemCis from './problem-cis.js';
 import * as incidents from './incidents.js';
+import * as inbound from './inbound-mail.js';
 import * as major from './major-incidents.js';
 import * as reviews from './reviews.js';
 import * as oncall from './oncall.js';
@@ -146,6 +147,7 @@ function buildServer(user: User, scopes?: string[]) {
     transition_ci: 'ci.manage', upsert_cis: 'ci.ingest',
     // An owner may retire their own CIs; retireCis checks per CI.
     list_retire_proposals: 'ci.read', retire_cis: 'ci.annotate',
+    list_inbound_mail: 'incident.update', decide_inbound_mail: 'incident.update',
     link_ci_to_problem: 'problem.link', unlink_ci_from_problem: 'problem.link',
     list_attachments: 'meta.read', read_attachment: 'meta.read', add_attachment: 'attachment.add',
     summarize_record: 'meta.read', analyze_log: 'meta.read',
@@ -521,6 +523,26 @@ function buildServer(user: User, scopes?: string[]) {
         ref: i.ref, status: i.status, priority: i.priority, is_major: i.is_major, assignee: i.assignee, problem: i.problem_ref, created_at: i.created_at, sla_state: i.sla_state, resolution_due_at: i.resolution_due_at,
         ...(i.is_major ? { next_update_at: i.next_update_at, update_overdue: i.update_overdue } : {}), ...(i.parent_ref ? { parent: i.parent_ref } : {}), ...(i.child_count ? { related_incidents: i.child_count } : {}), url: i.url, title_untrusted: i.title,
       })),
+  );
+  tool(
+    'list_inbound_mail',
+    `Email that waits for a person (#48): replies that could not be added to an incident on their own (sender not verified, not a participant, closed incident), with the reason. ${incidentNotice}`,
+    {},
+    true,
+    async () => ({
+      notice: incidentNotice,
+      mail: (await inbound.listInboundMail(user)).map(({ subject, body, from_name, ...m }) => ({ ...m, untrusted_content: { subject, from_name, body } })),
+    }),
+  );
+  tool(
+    'decide_inbound_mail',
+    'Decide what a held email becomes: a new incident, a comment on an incident (ref, default the one it answered), or discarded. Discarding is a decision: ask first and quote the answer in human_confirmation.',
+    { id: z.number().int(), action: inbound.inboundDecisionSchema.shape.action, ref: z.string().optional(), human_confirmation: HUMAN_CONFIRMATION },
+    false,
+    async ({ id, action, ref, human_confirmation }) => {
+      if (action === 'discard') await requireConfirmation(`#${id}`, 'decide_inbound_mail', human_confirmation, 'inbound_mail');
+      return inbound.decideInboundMail(user, id, { action, ref });
+    },
   );
   tool('get_incident', `Get an incident: status, priority, affected CIs and services, known errors with workarounds on those CIs, links and next steps. ${incidentNotice}`, { ref: z.string() }, true, async ({ ref }) =>
     incidentForAgent(await incidents.getIncident(user, ref)),
