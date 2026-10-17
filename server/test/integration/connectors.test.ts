@@ -295,6 +295,22 @@ describe('connector framework and push contract (#18)', { skip }, () => {
         finish();
         for (let i = 0; i < 50 && (await lease()); i++) await new Promise((r) => setTimeout(r, 20));
         assert.equal(await lease(), false, 'released once the fetch settled');
+
+        // A fetch that outlives its 30-minute lease must not release the next run's lease when it finally settles.
+        const settle: (() => void)[] = [];
+        op5.fetch = () => new Promise((resolve) => { settle.push(() => resolve({ cis: [] })); });
+        await db.query("UPDATE connectors SET next_run_at = now() - interval '1 minute' WHERE id = $1", [c.id]);
+        assert.equal((await connectors.runConnector(c.id, 'schedule', undefined, 200)).status, 'failed');
+        await db.query("UPDATE connectors SET running_until = now() - interval '1 minute' WHERE id = $1", [c.id]); // A's lease expired
+        const b = connectors.runConnector(c.id, 'manual', undefined, 60_000);
+        for (let i = 0; i < 50 && settle.length < 2; i++) await new Promise((r) => setTimeout(r, 20));
+        assert.equal(settle.length, 2, 'B is fetching');
+        settle[0](); // the zombie A settles
+        await new Promise((r) => setTimeout(r, 200));
+        assert.equal(await lease(), true, "A did not release B's lease");
+        settle[1]();
+        assert.equal((await b).status, 'succeeded');
+        assert.equal(await lease(), false);
       } finally {
         op5.fetch = original;
       }
