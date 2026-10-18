@@ -128,7 +128,7 @@ export function DevSourcesSection() {
         <label className="full">Read-only API token <span className="muted small">(optional, for private projects: {setup.token})</span><input type="password" autoComplete="off" value={form.api_token} onChange={(e) => setForm({ ...form, api_token: e.target.value })} /></label>
         {selfHosted && (
           <>
-            <label>Private network ranges <span className="muted small">(if it is on the internal network)</span><input placeholder="10.20.0.0/16" value={form.private_allow} onChange={(e) => setForm({ ...form, private_allow: e.target.value })} /></label>
+            <label>Private network ranges <span className="muted small">(if it is on the internal network)</span><input placeholder="Its subnet, in CIDR notation" value={form.private_allow} onChange={(e) => setForm({ ...form, private_allow: e.target.value })} /></label>
             <label>CA certificate <span className="muted small">(PEM, if an internal CA signed it)</span><textarea rows={2} value={form.ca_pem} onChange={(e) => setForm({ ...form, ca_pem: e.target.value })} /></label>
           </>
         )}
