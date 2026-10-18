@@ -73,6 +73,10 @@ clients send large selections in chunks so each request stays well within proxy 
   secrets (tokens, webhook/TOTP secrets, recovery codes) never opt in. MCP create tools take `idempotency_key`.
 - Concurrent edits: send `base` (the values the edit started from); changes by others to the same fields give 409
   with the current values instead of being overwritten.
+- A **reason** (for deleting, retracting, redacting) always goes in the JSON body, never in the query string:
+  query strings end up in proxy, gateway and request logs, and a reason may describe people. A route that needs one
+  is a `POST …/<verb>` with `{ "reason": "…" }` checked by `requireReason` (e.g. `POST /api/webhooks/:id/delete`,
+  `POST /api/status/updates/:id/retract`).
 - Request bodies are JSON validated by zod schemas; unknown fields are ignored, server-controlled fields (ids,
   status, timestamps, creator) are never taken from the client. The same schemas generate `/api/openapi.json`.
 
