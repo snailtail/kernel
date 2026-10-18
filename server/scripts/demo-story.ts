@@ -34,7 +34,7 @@ async function shift(ref: string, minutes: number) {
   const [table, log] = TABLE[ref.slice(0, 3)];
   for (const t of [table, log?.[0]].filter(Boolean) as string[]) {
     if (!columns.has(t)) {
-      const { rows } = await query("SELECT column_name FROM information_schema.columns WHERE table_name = $1 AND data_type IN ('timestamp with time zone', 'date') AND is_generated = 'NEVER'", [t]);
+      const { rows } = await query("SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 AND data_type IN ('timestamp with time zone', 'date') AND is_generated = 'NEVER'", [t]);
       columns.set(t, rows.map((r) => r.column_name));
     }
   }
