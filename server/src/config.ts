@@ -12,6 +12,10 @@ export const config = {
   databaseUrl: env('DATABASE_URL', 'postgres://kernel:kernel@localhost:5432/kernel'),
   appDbUser: process.env.KERNEL_APP_DB_USER || 'kernel_app',
   appDbPassword: process.env.KERNEL_APP_DB_PASSWORD || null,
+  // With KERNEL_REPORTING_DB_PASSWORD set, a read-only role for BI tools (KERNEL_REPORTING_DB_USER, default
+  // kernel_reporting) may read the views in the reporting schema and nothing else (#150, docs/reporting.md).
+  reportingDbUser: process.env.KERNEL_REPORTING_DB_USER || 'kernel_reporting',
+  reportingDbPassword: process.env.KERNEL_REPORTING_DB_PASSWORD || null,
   // Used only on first start, when the users table is empty.
   adminPassword: process.env.KERNEL_ADMIN_PASSWORD,
   sessionDays: Number(env('KERNEL_SESSION_DAYS', '7')),

@@ -23,6 +23,8 @@ services:
       KERNEL_SECRET_KEY_ID: ${KERNEL_SECRET_KEY_ID:-}
       # The app connects as this least-privilege role; DATABASE_URL (the owner) only runs migrations.
       KERNEL_APP_DB_PASSWORD: ${KERNEL_APP_DB_PASSWORD:-}
+      # Read-only role for Power BI or Grafana on the reporting views (docs/reporting.md); unset = no such role.
+      KERNEL_REPORTING_DB_PASSWORD: ${KERNEL_REPORTING_DB_PASSWORD:-}
       KERNEL_OUTBOUND_ALLOW: ${KERNEL_OUTBOUND_ALLOW:-}
       KERNEL_WEBHOOK_RETENTION_DAYS: ${KERNEL_WEBHOOK_RETENTION_DAYS:-30}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}

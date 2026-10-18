@@ -133,7 +133,7 @@ export interface SecurityCheck {
 
 /** A checklist of the security-relevant configuration, for the admin Security page. */
 export async function securityStatus(): Promise<{ checks: SecurityCheck[] }> {
-  const [admins, mustChange, neverExpiring, backups, mfaAdmins, dbRole, legacyAudit, attachmentUse, breakGlass, securityTeam] = await Promise.all([
+  const [admins, mustChange, neverExpiring, backups, mfaAdmins, dbRole, legacyAudit, attachmentUse, breakGlass, securityTeam, reporting] = await Promise.all([
     query("SELECT count(*)::int AS n FROM users WHERE role = 'admin' AND active"),
     query('SELECT count(*)::int AS n FROM users WHERE must_change_password AND active'),
     query('SELECT count(*)::int AS n FROM api_tokens WHERE expires_at IS NULL'),
@@ -147,6 +147,10 @@ export async function securityStatus(): Promise<{ checks: SecurityCheck[] }> {
     // An enabled rule for Kernel's security alerts with a team (by id, or an active team named as its group).
     query(`SELECT count(*)::int AS n FROM event_rules r WHERE r.enabled AND r.conditions->'sources' ? 'Kernel security'
              AND (r.team_id IS NOT NULL OR EXISTS (SELECT 1 FROM teams t WHERE t.active AND r.assignment_group <> '' AND lower(t.name) = lower(trim(r.assignment_group))))`),
+    // The BI role (#150): it may log in only while configured, and must not read any table in public.
+    query(`SELECT r.rolcanlogin AS login, (SELECT count(*)::int FROM pg_class c WHERE c.relnamespace = 'public'::regnamespace
+             AND c.relkind IN ('r', 'p', 'v', 'm') AND has_table_privilege(r.oid, c.oid, 'SELECT')) AS public_tables
+           FROM pg_roles r WHERE r.rolname = $1`, [config.reportingDbUser]),
   ]);
   const usedPct = Math.round((attachmentUse.bytes / attachmentUse.quota_bytes) * 100);
   // Key rotation (#63): which keys are in use, and whether any is missing from the keyring.
@@ -218,6 +222,18 @@ export async function securityStatus(): Promise<{ checks: SecurityCheck[] }> {
             ? `Kernel runs as "${role.me}", which cannot change the schema or the audit trail.`
             : `Kernel runs as the table owner "${role.me}"${role.superuser ? ' (a superuser)' : ''}; set KERNEL_APP_DB_PASSWORD so it uses a restricted role.`,
       },
+      ((r) => ({
+        id: 'reporting_role',
+        label: 'Reporting database role',
+        ok: config.reportingDbPassword ? !!r?.login && r.public_tables === 0 : !r?.login,
+        detail: !config.reportingDbPassword
+          ? r?.login ? `"${config.reportingDbUser}" can still log in; restart Kernel to disable it.` : 'Off. Set KERNEL_REPORTING_DB_PASSWORD to let Power BI or Grafana read the reporting views (docs/reporting.md).'
+          : !r?.login
+            ? `"${config.reportingDbUser}" cannot log in yet; restart Kernel to create it.`
+            : r.public_tables
+              ? `"${config.reportingDbUser}" can read ${r.public_tables} table(s) in public; revoke them, it should only read the reporting views.`
+              : `"${config.reportingDbUser}" reads the reporting views only: no free text, no personal data, no restricted records, every team's other records.`,
+      }))(reporting.rows[0]),
       {
         id: 'security_team',
         label: 'Security incidents',
