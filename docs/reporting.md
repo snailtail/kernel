@@ -15,6 +15,9 @@ deliberate decision.
   The views filter them out themselves, so it does not depend on row-level security or on anything the reader sets.
 - **Confidential records** (#61) are included: what is confidential about them is their text, and no view has any.
   Their `classification` column says which they are.
+- **CI names are shown as they are in the CMDB.** Kernel has no built-in type for client devices, but if you keep
+  laptops or phones as CIs (a type of your own, or imported), their names often carry a person's name
+  (`anna-laptop`). Then report on `ref` and `ci_type` instead of `name`, or keep such CIs out of the CMDB.
 - **Team-scoped practices are not applied.** The role is for BI over the whole operation: whoever has its password
   sees every record that is not restricted, whatever team it belongs to. Give the password only to people who may see
   that.
@@ -54,6 +57,17 @@ Notes on the columns:
 3. **Administration → Security status** shows "Reporting database role" as read-only.
 
 To switch it off, remove the variable and restart: the role can no longer log in.
+
+Switching it on also takes `USAGE` on schema `public` away from `PUBLIC` (when the owner owns the schema or is a
+superuser), so the reporting role cannot call Kernel's functions there. Kernel's own runtime role is granted it by
+name. Any other role you added yourself that reads `public` directly, such as a Prometheus `postgres_exporter` or a
+backup user that is not the owner, needs the same:
+
+```sql
+GRANT USAGE ON SCHEMA public TO my_exporter;
+```
+
+The Compose backup service connects as the owner and is not affected.
 
 ## Reaching the database
 
