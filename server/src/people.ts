@@ -21,6 +21,8 @@ export const personFields = {
   organisation_id: z.number().int().nullable(),
   manager_id: z.number().int().nullable(),
   is_vip: z.boolean(),
+  /** Hears about published status updates on the services their organisation uses (#46). */
+  status_contact: z.boolean(),
   active: z.boolean(),
   external_id: z.string().trim().max(300).nullable(),
 };
@@ -35,7 +37,7 @@ export const listPeopleSchema = z.object({
 
 const SELECT_PERSON = `
   SELECT p.id, p.name, p.email, p.phone, p.title, p.department, p.location, p.organisation_id, o.name AS organisation,
-         p.manager_id, m.name AS manager, p.is_vip, p.active, p.external_id, p.source, p.user_id, p.erased_at, p.created_at, p.updated_at
+         p.manager_id, m.name AS manager, p.is_vip, p.status_contact, p.active, p.external_id, p.source, p.user_id, p.erased_at, p.created_at, p.updated_at
   FROM people p LEFT JOIN organisations o ON o.id = p.organisation_id LEFT JOIN people m ON m.id = p.manager_id`;
 
 /**
@@ -107,6 +109,7 @@ async function validate(db: Db, input: { organisation_id?: number | null; manage
 
 export async function createPerson(user: User, input: z.infer<typeof createPersonSchema>) {
   authorize(user, 'person.write');
+  if (input.is_vip !== undefined || input.status_contact !== undefined) authorize(user, 'organisation.manage');
   try {
     return await tx(async (db) => {
       await validate(db, input);
@@ -123,7 +126,7 @@ export async function createPerson(user: User, input: z.infer<typeof createPerso
 
 export async function updatePerson(user: User, id: number, input: z.infer<typeof updatePersonSchema>) {
   authorize(user, 'person.write');
-  if (input.is_vip !== undefined) authorize(user, 'organisation.manage');
+  if (input.is_vip !== undefined || input.status_contact !== undefined) authorize(user, 'organisation.manage');
   try {
     await tx(async (db) => {
       const { rows } = await db.query('SELECT * FROM people WHERE id = $1 AND erased_at IS NULL FOR UPDATE', [id]);
@@ -148,7 +151,7 @@ export async function erasePerson(user: User, id: number, reason: string) {
   await tx(async (db) => {
     const { rowCount } = await db.query(
       `UPDATE people SET name = 'Erased person #' || id, email = NULL, phone = '', title = '', department = '', location = '', external_id = NULL,
-              manager_id = NULL, is_vip = false, active = false, erased_at = now(), updated_at = now() WHERE id = $1 AND erased_at IS NULL`,
+              manager_id = NULL, is_vip = false, status_contact = false, active = false, erased_at = now(), updated_at = now() WHERE id = $1 AND erased_at IS NULL`,
       [id],
     );
     if (!rowCount) throw notFound('No such person, or already erased');

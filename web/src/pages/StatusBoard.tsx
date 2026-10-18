@@ -10,10 +10,14 @@ import { canEdit, isManager, useSession } from '../session';
 type Status = 'operational' | 'degraded' | 'partial_outage' | 'major_outage' | 'maintenance';
 interface Service {
   id: number; ref: string; name: string; criticality: number; status: Status; suggested: Status; incidents: { ref: string; priority: number; major: boolean }[];
-  public: boolean; public_name: string; public_description: string; public_status: Status; updated_at: string | null; updated_by: string | null;
+  public: boolean; public_name: string; public_description: string; public_status: Status; updated_at: string | null; updated_by: string | null; following: boolean;
 }
-interface Update { id: number; phase: string; status: Status | null; message: string; public: boolean; retracted_at: string | null; created_at: string; incident: string | null; author: string | null; services: string[] | null }
-interface Board { services: Service[]; updates: Update[]; planned_maintenance: { ref: string; title: string; planned_start: string; planned_end: string; service: string }[]; settings: { public_enabled: boolean; title: string } }
+interface Update {
+  id: number; phase: string; status: Status | null; message: string; public: boolean; retracted_at: string | null; created_at: string; incident: string | null; author: string | null; services: string[] | null;
+  /** Mail to people outside: subscribers and organisation contacts. */
+  outside: { sent: number; pending: number; failed: number } | null;
+}
+interface Board { services: Service[]; updates: Update[]; planned_maintenance: { ref: string; title: string; planned_start: string; planned_end: string; service: string }[]; settings: { public_enabled: boolean; title: string; sign_up: boolean } }
 
 export const STATUS_LABEL: Record<Status, string> = { operational: 'Operational', degraded: 'Degraded', partial_outage: 'Partial outage', major_outage: 'Major outage', maintenance: 'Maintenance' };
 const PHASES = ['investigating', 'identified', 'monitoring', 'resolved', 'maintenance'] as const;
@@ -87,7 +91,13 @@ export function StatusBoardPage() {
                       {manager && <button className="btn-link small" onClick={() => setPublishing(s)}>{s.public ? 'Edit' : 'Show'}</button>}
                     </td>
                   )}
-                  <td>{canEdit(user) && <button className="btn small" onClick={() => setComposing([s.ref])}>Update</button>}</td>
+                  <td>
+                    <div className="row-actions">
+                    <button className={`btn small${s.following ? ' active' : ''}`} aria-pressed={s.following} title={s.following ? 'You hear about its updates. Click to stop.' : 'Hear about its updates by your notification settings'}
+                      onClick={() => run(async () => { await api.put(`/api/status/${s.ref}/follow`, { follow: !s.following }); return api.get<Board>('/api/status'); })}>{s.following ? 'Following' : 'Follow'}</button>
+                    {canEdit(user) && <button className="btn small" onClick={() => setComposing([s.ref])}>Update</button>}
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -104,8 +114,8 @@ export function StatusBoardPage() {
                 <strong>{u.phase[0].toUpperCase() + u.phase.slice(1)}</strong> {u.status && <StatusPill status={u.status} />} {(u.services ?? []).join(', ')}
                 {u.public && <span className="badge">public</span>}{u.retracted_at && <span className="badge">retracted</span>}
                 <p>{u.message}</p>
-                <span className="muted small">{u.author ?? 'System'} · {relativeTime(u.created_at)}{u.incident ? <> · <Link to={`/incidents/${u.incident}`}>{u.incident}</Link></> : null}</span>
-                {manager && u.public && <button className="btn-link small" onClick={async () => { const reason = await askReason('Retract the update', 'It leaves the public page; it stays here, marked as retracted.'); if (reason) run(async () => { await api.del(`/api/status/updates/${u.id}?reason=${encodeURIComponent(reason)}`); return api.get<Board>('/api/status'); }); }}>Retract</button>}
+                <span className="muted small">{u.author ?? 'System'} · {relativeTime(u.created_at)}{u.incident ? <> · <Link to={`/incidents/${u.incident}`}>{u.incident}</Link></> : null}{u.outside && (u.outside.sent || u.outside.pending || u.outside.failed) ? <> · emailed {u.outside.sent}{u.outside.pending ? `, ${u.outside.pending} queued` : ''}{u.outside.failed ? `, ${u.outside.failed} failed` : ''}</> : null}</span>{' '}
+                {manager && u.public && <button className="btn-link small" onClick={async () => { const reason = await askReason('Retract the update', 'It leaves the public page and email not yet sent is stopped; it stays here, marked as retracted.'); if (reason) run(async () => { await api.post(`/api/status/updates/${u.id}/retract`, { reason }); return api.get<Board>('/api/status'); }); }}>Retract</button>}
               </li>
             ))}
           </ul>
@@ -149,7 +159,7 @@ function ComposeModal({ services, initial, publicEnabled, onClose, onDone, incid
         <label>Phase<select value={phase} onChange={(e) => { const p = e.target.value as (typeof PHASES)[number]; setPhase(p); setMessage(TEMPLATES[p].replace('{service}', names)); }}>{PHASES.map((p) => <option key={p} value={p}>{p[0].toUpperCase() + p.slice(1)}</option>)}</select></label>
         <label>Set status<select value={status} onChange={(e) => setStatus(e.target.value as Status | '')}><option value="">Leave as is</option>{Object.entries(STATUS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
         <label className="full">Message<textarea rows={4} value={message} onChange={(e) => setMessage(e.target.value)} /></label>
-        {publicEnabled && <label className="check full"><input type="checkbox" checked={pub} onChange={(e) => setPub(e.target.checked)} /> Publish on the public page <span className="muted small">(written for customers: no internal names, hosts or people)</span></label>}
+        {publicEnabled && <label className="check full"><input type="checkbox" checked={pub} onChange={(e) => setPub(e.target.checked)} /> Publish <span className="muted small">(the public page, email subscribers and the contacts of organisations using these services; written for customers: no internal names, hosts or people)</span></label>}
         {error && <div className="error full">{error}</div>}
         <div className="actions full"><button type="button" className="btn" onClick={onClose}>Cancel</button><button type="button" className="btn primary" disabled={!chosen.length || message.trim().length < 5} onClick={submit}>Post</button></div>
       </div>
@@ -189,7 +199,7 @@ export function StatusPageAdmin() {
     <section className="card">
       <h2>Public status page</h2>
       <label className="check"><input type="checkbox" checked={data.settings.public_enabled} onChange={toggle} /> Publish a status page at <span className="mono">/status</span></label>
-      <p className="muted small">It shows only services you make public (under a public name) and updates you publish. If Kernel sits behind an access gateway such as Cloudflare Access, add a bypass for <span className="mono">/status</span> and <span className="mono">/api/public/status</span>, or publish it on a separate host name.</p>
+      <p className="muted small">It shows only services you make public (under a public name) and updates you publish. {data.settings.sign_up ? 'Visitors can sign up for email about public services (they confirm their address first).' : 'With outgoing mail configured, visitors can also sign up for email.'} If Kernel sits behind an access gateway such as Cloudflare Access, add a bypass for <span className="mono">/status</span>, <span className="mono">/status/*</span> and <span className="mono">/api/public/status</span>, or publish it on a separate host name.</p>
     </section>
   );
 }

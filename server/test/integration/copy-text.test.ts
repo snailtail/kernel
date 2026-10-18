@@ -35,6 +35,8 @@ describe('copying text between records (#117)', { skip }, () => {
     k = await startKernel();
     pm = await k.login('pm');
     await ownerQuery("INSERT INTO webhooks (name, url, secret, events) VALUES ('Probe', 'https://hooks.example.com/x', 'unused', '{}')");
+    // People outside (#46) are the broadest audience of all: status webhooks are checked with the others below.
+    await ownerQuery("INSERT INTO webhooks (name, url, secret, events) VALUES ('Status probe', 'https://hooks.example.com/s', 'unused', '{status.published}')");
   });
   after(async () => k?.close());
 
@@ -207,6 +209,23 @@ describe('copying text between records (#117)', { skip }, () => {
         const item = (await pm.post(`/api/incidents/${inc}/review/items`, { kind: 'follow_up', body: text })).body.items[0];
         ok(await pm.post(`/api/incidents/${inc}/review/items/${item.id}/action`, { problem: p, title: 'Rotate credentials' }));
         return { readable: await dumpProblem(p) };
+      },
+    },
+    {
+      // The proposal names services, never the incident; a person writes and publishes what goes outside.
+      path: 'major incident → status update for people outside (subscribers, organisation contacts, status webhooks)',
+      copies: false,
+      run: async (narrow, text) => {
+        const svc = (await pm.post('/api/cis', { name: `Billing ${n}`, ci_type: 'business_service' })).body.ref;
+        ok(await pm.put(`/api/status/${svc}/public`, { public: true, public_name: `Billing ${n}` }));
+        ok(await pm.put('/api/admin/status-page', { public_enabled: true, title: 'Status', reason: 'Copy-text check' }));
+        const inc = (await pm.post('/api/incidents', { title: text, description: text, impact: 1, urgency: 1, cis: [svc] })).body.ref;
+        await narrowTo(inc, narrow);
+        ok(await pm.post(`/api/incidents/${inc}/major`, {}));
+        const proposal = (await pm.get(`/api/incidents/${inc}`)).body.status_proposal;
+        ok(await pm.post('/api/status/updates', { incident: inc, services: proposal.services, phase: proposal.phase, status: proposal.status, message: proposal.message, public: true }));
+        const outside = await fetch(`${k.base}/api/public/status`).then((r) => r.text());
+        return { readable: JSON.stringify(proposal) + outside };
       },
     },
     {

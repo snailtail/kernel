@@ -3,7 +3,7 @@
 // and related incidents (the same outage reported again) that are resolved together with the major one.
 // Shared by REST, MCP and the web UI like every other practice.
 import { z } from 'zod';
-import { audienceOf, copyText } from './audience.js';
+import { audienceOf, copyText, outsideNames } from './audience.js';
 import { audit } from './audit.js';
 import { maskedRefs } from './confidential.js';
 import { currentContext } from './context.js';
@@ -18,6 +18,7 @@ import { authorize, can } from './policy.js';
 import type { Db } from './problems.js';
 import { affectedFrom } from './problem-cis.js';
 import { slaOnTransition } from './sla.js';
+import { communicationLog } from './status-subscriptions.js';
 
 /** Minutes between stakeholder updates by priority, until the lead changes it (settings `major_incident`). */
 const DEFAULT_CADENCE: Record<number, number> = { 1: 30, 2: 60, 3: 120, 4: 240, 5: 240 };
@@ -268,13 +269,16 @@ async function suggestParent(incidentId: number, affectedServices: { ref: string
 
 /** The major incident header, related incidents, a suggested parent and a status page proposal. */
 export async function majorDetail(user: User, i: any, affectedServices: { ref: string; name: string }[]) {
-  const [children, parent, people, lastUpdate, suggested, statusPosted] = await Promise.all([
+  const [children, parent, people, lastUpdate, suggested, statusPosted, outside, communications] = await Promise.all([
     query('SELECT ref, title, status, priority, resolve_with_parent FROM incidents WHERE parent_id = $1 ORDER BY id', [i.id]),
     i.parent_id ? query('SELECT ref, title, status, is_major FROM incidents WHERE id = $1', [i.parent_id]) : Promise.resolve({ rows: [] as any[] }),
     query('SELECT id, display_name FROM users WHERE id = ANY($1)', [[i.major_lead_id, i.major_comms_id].filter(Boolean)]),
     i.is_major ? query("SELECT body, created_at FROM incident_activity WHERE incident_id = $1 AND kind = 'communication' ORDER BY created_at DESC, id DESC LIMIT 1", [i.id]) : Promise.resolve({ rows: [] as any[] }),
     !i.is_major && !i.parent_id && isOpen(i) ? suggestParent(i.id, affectedServices) : Promise.resolve({ rows: [] as any[] }),
     i.is_major ? query('SELECT 1 FROM status_updates WHERE incident_id = $1 LIMIT 1', [i.id]) : Promise.resolve({ rows: [] as any[] }),
+    // The proposal is written for people outside, so it names services as they know them (audience.ts).
+    i.is_major ? outsideNames(null, affectedServices.slice(0, 20).map((s) => s.ref)) : Promise.resolve([] as string[]),
+    i.is_major ? communicationLog(i.id) : Promise.resolve([]),
   ]);
   const name = (id: number | null) => people.rows.find((p) => p.id === id)?.display_name ?? null;
   const open = isOpen(i);
@@ -288,6 +292,8 @@ export async function majorDetail(user: User, i: any, affectedServices: { ref: s
         next_update_at: open ? i.major_next_update_at : null,
         update_overdue: open && !!i.major_next_update_at && new Date(i.major_next_update_at) < new Date(),
         last_update: lastUpdate.rows[0] ?? null,
+        // Who outside was told what and when: subscribers, organisation contacts (for the post-incident review).
+        communications,
       }
     : null;
   // A proposal only: a person reviews it and posts it to the status board; nothing goes public by itself.
@@ -297,7 +303,7 @@ export async function majorDetail(user: User, i: any, affectedServices: { ref: s
         services: services.map((s) => s.ref),
         status: i.priority <= 1 ? 'major_outage' : i.priority === 2 ? 'partial_outage' : 'degraded',
         phase: 'investigating',
-        message: `We are investigating a disruption affecting ${services.map((s) => s.name).join(', ')}.${i.major_next_update_at ? ' We will post an update as soon as we know more.' : ''}`,
+        message: `We are investigating a disruption affecting ${outside.length ? outside.join(', ') : 'some of our services'}.${i.major_next_update_at ? ' We will post an update as soon as we know more.' : ''}`,
       }
     : null;
   return { major, children: children.rows, parent: parent.rows[0] ?? null, suggested_parent: suggested.rows[0] ?? null, status_proposal: statusProposal };

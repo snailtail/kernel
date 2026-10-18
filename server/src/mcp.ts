@@ -3,6 +3,7 @@
 import { maskForViewer } from './confidential.js';
 import * as serviceReports from './service-report.js';
 import * as statusMod from './status.js';
+import * as statusSubs from './status-subscriptions.js';
 import type { FastifyInstance } from 'fastify';
 import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -151,7 +152,7 @@ function buildServer(user: User, scopes?: string[]) {
     link_ci_to_problem: 'problem.link', unlink_ci_from_problem: 'problem.link',
     list_attachments: 'meta.read', read_attachment: 'meta.read', add_attachment: 'attachment.add',
     summarize_record: 'meta.read', analyze_log: 'meta.read',
-    get_service_report: 'report.read', get_service_status: 'ci.read', post_status_update: 'status.set',
+    get_service_report: 'report.read', get_service_status: 'ci.read', post_status_update: 'status.set', follow_service: 'ci.read',
     get_on_call: 'team.read', list_teams: 'team.read',
     // Each operation checks its own permission; the tool is listed for roles that can change records.
     bulk_update: 'problem.update',
@@ -489,7 +490,9 @@ function buildServer(user: User, scopes?: string[]) {
     possible_change_causes: (i.possible_change_causes ?? []).map((c: any) => ({ ref: c.ref, ci: c.ci, started_at: c.started_at, outcome: c.outcome })),
     links: i.links.map((l: any) => ({ kind: l.kind, reference: l.reference, system: l.system, url: l.url })),
     alerts: (i.alerts ?? []).map((a: any) => ({ id: a.id, source: a.source, severity: a.severity, status: a.status, count: a.count, flap_count: a.flap_count, ci: a.ci_ref, last_seen: a.last_seen })),
-    major: i.major ? { declared_at: i.major.declared_at, lead: i.major.lead, comms_lead: i.major.comms, update_minutes: i.major.update_minutes, next_update_at: i.major.next_update_at, update_overdue: i.major.update_overdue, last_update_at: i.major.last_update?.created_at ?? null } : null,
+    major: i.major ? { declared_at: i.major.declared_at, lead: i.major.lead, comms_lead: i.major.comms, update_minutes: i.major.update_minutes, next_update_at: i.major.next_update_at, update_overdue: i.major.update_overdue, last_update_at: i.major.last_update?.created_at ?? null,
+      // Who outside was told: organisations and counts, never contacts' names or subscribers' addresses (data minimisation).
+      communications: (i.major.communications ?? []).map((c: any) => ({ at: c.created_at, phase: c.phase, public: c.public, retracted: !!c.retracted_at, organisations: [...new Set(c.contacts.map((x: any) => x.organisation))], contacts_sent: c.contacts.filter((x: any) => x.status === 'sent').length, subscribers_sent: c.subscribers_sent })) } : null,
     pages: (i.pages ?? []).map((p: any) => ({ action: p.action, via: p.kind, team: p.team, status: p.status, sent_at: p.sent_at, error: p.error || undefined })),
     review: i.review ? { status: i.review.status, owner: i.review.owner, due: i.review.due, overdue: i.review.overdue } : null,
     related_incidents: (i.children ?? []).map((c: any) => ({ ref: c.ref, status: c.status, priority: c.priority, resolve_with_parent: c.resolve_with_parent })),
@@ -746,6 +749,9 @@ function buildServer(user: User, scopes?: string[]) {
       await statusMod.postUpdate(user, statusMod.updateSchema.parse({ ...input, public: false }));
       return { ok: true };
     },
+  );
+  tool('follow_service', 'Follow (or stop following) a service: its status updates then reach you by your own notification settings.', { service: z.string(), follow: z.boolean().default(true) }, false, async ({ service, follow }) =>
+    statusSubs.followService(user, service, follow),
   );
 
   // ---- Teams (#42) ----

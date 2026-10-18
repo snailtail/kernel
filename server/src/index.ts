@@ -15,6 +15,7 @@ import { startEventWorker } from './events.js';
 import { startSecurityAlertWorker } from './security-alerts.js';
 import { startSlaWorker } from './sla.js';
 import { startNotificationWorker } from './notifications.js';
+import { startStatusWorker } from './status-subscriptions.js';
 import { startConnectorWorker } from './connectors.js';
 import { startMajorIncidentWorker } from './major-incidents.js';
 import { startPagingWorker } from './oncall.js';
@@ -42,6 +43,7 @@ asSystem(() => {
   startSecurityAlertWorker(log);
   startSlaWorker(log);
   startNotificationWorker(log);
+  startStatusWorker(log);
   startConnectorWorker(log);
   startMajorIncidentWorker(log, () => moduleEnabled('incident'));
   startPagingWorker(log, () => moduleEnabled('incident'));

@@ -350,7 +350,7 @@ function SystemModal({ system, onClose, onDone }: { system: ExternalSystem | nul
   );
 }
 
-interface Webhook { id: number; name: string; url: string; format: string; events: string[]; active: boolean; failed: number; last_delivered_at: string | null; secret_set_at: string; secret?: string }
+interface Webhook { id: number; name: string; url: string; format: string; events: string[]; services: string[]; active: boolean; failed: number; last_delivered_at: string | null; secret_set_at: string; secret?: string }
 interface Delivery { id: number; event: string; status: string; attempts: number; response_status: number | null; last_error: string | null; created_at: string; summary: string | null; ref: string | null }
 
 function WebhooksCard() {
@@ -393,7 +393,7 @@ function WebhooksCard() {
                 <td>{w.name}{w.failed > 0 && <span className="badge major" title="Failed deliveries"> {w.failed} failed</span>}</td>
                 <td className="mono small url-cell">{w.url}</td>
                 <td>{w.format}</td>
-                <td className="small">{w.events.length ? w.events.join(', ') : 'All'}</td>
+                <td className="small">{w.events.length ? w.events.join(', ') : 'All problem events'}</td>
                 <td className="nowrap">{w.last_delivered_at ? relativeTime(w.last_delivered_at) : '–'}</td>
                 <td className="nowrap row-links">
                   <button className="btn-link" onClick={() => ping(w)}>Test</button>
@@ -427,7 +427,8 @@ function WebhooksCard() {
 }
 
 function WebhookModal({ hook, events, formats, onClose, onDone }: { hook: Webhook | null; events: string[]; formats: string[]; onClose: () => void; onDone: (w?: Webhook) => void }) {
-  const [form, setForm] = useState({ name: hook?.name ?? '', url: hook?.url ?? '', format: hook?.format ?? 'json', events: hook?.events ?? [], active: hook?.active ?? true });
+  const [form, setForm] = useState({ name: hook?.name ?? '', url: hook?.url ?? '', format: hook?.format ?? 'json', events: hook?.events ?? [], services: hook?.services ?? [], active: hook?.active ?? true });
+  const { data: services } = useApi<{ ref: string; name: string }[]>('/api/cis?class=service&limit=200');
   const [error, setError] = useState<string | null>(null);
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -456,11 +457,19 @@ function WebhookModal({ hook, events, formats, onClose, onDone }: { hook: Webhoo
         </label>
         <label className="full">URL<input required type="url" value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} placeholder="https://hooks.slack.com/services/…" /></label>
         <fieldset className="full event-picker">
-          <legend>Events <span className="muted small">(none selected = all)</span></legend>
+          <legend>Events <span className="muted small">(none selected = all problem events)</span></legend>
           {events.map((ev) => (
             <label key={ev} className="check"><input type="checkbox" checked={form.events.includes(ev)} onChange={() => toggle(ev)} /> {ev}</label>
           ))}
         </fieldset>
+        {form.events.includes('status.published') && (
+          <fieldset className="full event-picker">
+            <legend>Status updates for <span className="muted small">(none selected = every public service; only published text under public names is sent)</span></legend>
+            {(services ?? []).map((sv) => (
+              <label key={sv.ref} className="check"><input type="checkbox" checked={form.services.includes(sv.ref)} onChange={() => setForm({ ...form, services: form.services.includes(sv.ref) ? form.services.filter((x) => x !== sv.ref) : [...form.services, sv.ref] })} /> {sv.name}</label>
+            ))}
+          </fieldset>
+        )}
         <label className="check full"><input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Active</label>
         {error && <div className="error full">{error}</div>}
         <div className="actions full">

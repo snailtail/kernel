@@ -17,7 +17,7 @@ import { IncidentPeoplePanel, PersonPicker, type PersonLite, type PersonRef } fr
 import { AffectedCisPanel, type AffectedCi, type AffectedService, type ImpactHint } from '../components/AffectedCis';
 import { MajorBadge, PriorityBadge } from '../components/Badges';
 import { Markdown } from '../components/Markdown';
-import { DeclareMajorModal, IncidentTimeline, KeyMomentToggle, MajorHeader, RelatedIncidentsPanel, ReviewCard, StatusProposalCard, type MajorInfo, type RelatedRow, type ReviewSummary, type StatusProposal } from '../components/MajorIncident';
+import { CommunicationLogCard, DeclareMajorModal, IncidentTimeline, KeyMomentToggle, MajorHeader, RelatedIncidentsPanel, ReviewCard, StatusProposalCard, type MajorInfo, type RelatedRow, type ReviewSummary, type StatusProposal } from '../components/MajorIncident';
 import { Modal } from '../components/Modal';
 import { duration, formatDate, relativeTime } from '../format';
 import { useLive } from '../live';
@@ -367,6 +367,7 @@ export function IncidentPage() {
           {/* During an outage these come first: the same outage reported again, and what the status page says. */}
           <RelatedIncidentsPanel incidentRef={i.ref} isMajor={i.is_major} parent={i.parent} children={i.children} suggested={i.suggested_parent} editable={editable} onChange={setData} />
           {i.status_proposal && editable && <StatusProposalCard incidentRef={i.ref} proposal={i.status_proposal} onPosted={reload} />}
+          {i.major && i.major.communications.length > 0 && <CommunicationLogCard log={i.major.communications} />}
           {i.sla && (
             <section className={`card sla-card sla-${i.sla.resolution.state}`}>
               <h2>Service level <span className="muted small">{i.sla.name} · {i.sla.calendar}</span></h2>

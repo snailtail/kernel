@@ -10,7 +10,7 @@ import { canEdit, isManager, useSession } from '../session';
 interface Person {
   id: number; name: string; email: string | null; phone: string; title: string; department: string; location: string;
   organisation_id: number | null; organisation: string | null; manager_id: number | null; manager: string | null;
-  is_vip: boolean; active: boolean; external_id: string | null; source: string; user_id: number | null; erased_at: string | null;
+  is_vip: boolean; status_contact: boolean; active: boolean; external_id: string | null; source: string; user_id: number | null; erased_at: string | null;
 }
 interface PersonPage extends Person {
   incidents: { ref: string; title: string; status: string; priority: number; created_at: string; role: string }[];
@@ -187,7 +187,7 @@ function PersonModal({ person, orgs, onClose, onDone }: { person?: Person; orgs:
   const { user } = useSession();
   const [form, setForm] = useState({
     name: person?.name ?? '', email: person?.email ?? '', phone: person?.phone ?? '', title: person?.title ?? '', department: person?.department ?? '',
-    location: person?.location ?? '', organisation_id: person?.organisation_id ? String(person.organisation_id) : '', is_vip: person?.is_vip ?? false, active: person?.active ?? true,
+    location: person?.location ?? '', organisation_id: person?.organisation_id ? String(person.organisation_id) : '', is_vip: person?.is_vip ?? false, status_contact: person?.status_contact ?? false, active: person?.active ?? true,
   });
   const [error, setError] = useState<string | null>(null);
   const submit = async (e: FormEvent) => {
@@ -196,7 +196,7 @@ function PersonModal({ person, orgs, onClose, onDone }: { person?: Person; orgs:
       name: form.name, email: form.email.trim() || null, phone: form.phone, title: form.title, department: form.department, location: form.location,
       organisation_id: form.organisation_id ? Number(form.organisation_id) : null, active: form.active,
     };
-    if (isManager(user)) body.is_vip = form.is_vip;
+    if (isManager(user)) Object.assign(body, { is_vip: form.is_vip, status_contact: form.status_contact });
     try {
       onDone(person ? await api.patch<Person>(`/api/people/${person.id}`, body) : await api.post<Person>('/api/people', body));
     } catch (err) {
@@ -212,6 +212,7 @@ function PersonModal({ person, orgs, onClose, onDone }: { person?: Person; orgs:
         {field('name', 'Name')}{field('email', 'Email', 'email')}{field('phone', 'Phone', 'tel')}{field('title', 'Title')}{field('department', 'Department')}{field('location', 'Location')}
         <label>Organisation<select value={form.organisation_id} onChange={(e) => setForm({ ...form, organisation_id: e.target.value })}><option value="">–</option>{orgs.filter((o) => o.active).map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select></label>
         {isManager(user) && <label className="check"><input type="checkbox" checked={form.is_vip} onChange={(e) => setForm({ ...form, is_vip: e.target.checked })} /> VIP <span className="muted small">(raises the suggested impact of their incidents)</span></label>}
+        {isManager(user) && <label className="check"><input type="checkbox" checked={form.status_contact} onChange={(e) => setForm({ ...form, status_contact: e.target.checked })} /> Status contact <span className="muted small">(gets published status updates by email for the services their organisation uses)</span></label>}
         {person && <label className="check"><input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Active</label>}
         <p className="muted small full">Record only what is needed to handle incidents. Contact details are personal data.</p>
         {error && <div className="error full">{error}</div>}

@@ -4,7 +4,7 @@ import { createHmac, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { config } from './config.js';
 import { query, tx } from './db.js';
-import { notFound } from './errors.js';
+import { badRequest, notFound } from './errors.js';
 import { audit } from './audit.js';
 import { minimiseData } from './minimise.js';
 import { checkUrl, outboundFetch } from './outbound.js';
@@ -23,6 +23,9 @@ export const EVENTS = [
   'problem.analysis',
   'action.changed',
   'action.overdue',
+  // A published status update (#46): only to webhooks that choose it ("all events" means the problem events above),
+  // with the published text under public names (status-subscriptions.ts queueOutside).
+  'status.published',
 ] as const;
 export type EventType = (typeof EVENTS)[number];
 export const FORMATS = ['json', 'slack', 'teams_workflow', 'teams'] as const;
@@ -84,10 +87,13 @@ export async function enqueue(db: Db, event: EventType, problemId: number, actor
 /** Formats the payload for the webhook's target (generic JSON, Slack or Teams incoming webhooks). */
 export function formatBody(format: string, payload: any) {
   if (format === 'json') return payload;
-  const p = payload.problem ?? {};
+  // A published status update (#46) links to the public page and speaks for itself.
+  const status = payload.status_update;
+  const p = payload.problem ?? (status ? { url: payload.url } : {});
   const who = payload.actor?.display_name ?? 'Kernel';
-  const title = p.ref ? `${p.ref}: ${p.title}` : 'Kernel';
-  const line = `${who}: ${payload.summary || payload.event}`;
+  const title = p.ref ? `${p.ref}: ${p.title}` : status ? `${payload.title}: ${status.services.join(', ')}` : 'Kernel';
+  const line = status ? payload.summary : `${who}: ${payload.summary || payload.event}`;
+  const open = status ? 'Status page' : 'Open in Kernel';
   // Optional link buttons, e.g. Approve and Reject on a personal approval notice (#48).
   const actions: { title: string; url: string }[] = payload.actions ?? [];
   if (format === 'slack') {
@@ -109,7 +115,7 @@ export function formatBody(format: string, payload: any) {
               { type: 'TextBlock', text: title, weight: 'Bolder', size: 'Medium', wrap: true },
               { type: 'TextBlock', text: line, wrap: true },
             ],
-            ...(p.url || actions.length ? { actions: [...actions, ...(p.url ? [{ title: 'Open in Kernel', url: p.url }] : [])].map((a) => ({ type: 'Action.OpenUrl', ...a })) } : {}),
+            ...(p.url || actions.length ? { actions: [...actions, ...(p.url ? [{ title: open, url: p.url }] : [])].map((a) => ({ type: 'Action.OpenUrl', ...a })) } : {}),
           },
         },
       ],
@@ -122,7 +128,7 @@ export function formatBody(format: string, payload: any) {
     summary: title,
     title,
     text: line,
-    ...(p.url ? { potentialAction: [{ '@type': 'OpenUri', name: 'Open in Kernel', targets: [{ os: 'default', uri: p.url }] }] } : {}),
+    ...(p.url ? { potentialAction: [{ '@type': 'OpenUri', name: open, targets: [{ os: 'default', uri: p.url }] }] } : {}),
   };
 }
 
@@ -270,10 +276,21 @@ export const webhookSchema = z.object({
   }),
   format: z.enum(FORMATS).default('json'),
   events: z.array(z.enum(EVENTS)).default([]),
+  /** For status.published: the services (refs) to carry updates for; none means every public service. */
+  services: z.array(z.string().max(30)).max(50).default([]),
   active: z.boolean().default(true),
 });
 
-const COLUMNS = `w.id, w.name, w.url, w.format, w.events, w.active, w.created_at, coalesce(w.secret_rotated_at, w.created_at) AS secret_set_at,
+/** Service refs to ids; an unknown ref is refused. */
+async function serviceIds(refs: string[]) {
+  if (!refs.length) return [];
+  const { rows } = await query("SELECT id FROM configuration_items WHERE class = 'service' AND ref = ANY($1)", [refs.map((r) => r.toUpperCase())]);
+  if (rows.length !== new Set(refs.map((r) => r.toUpperCase())).size) throw badRequest('Every entry in services must be a service ref');
+  return rows.map((r) => r.id as number);
+}
+
+const COLUMNS = `w.id, w.name, w.url, w.format, w.events, w.active, w.created_at,
+  coalesce((SELECT array_agg(c.ref ORDER BY c.ref) FROM configuration_items c WHERE c.id = ANY(w.ci_ids)), '{}') AS services, coalesce(w.secret_rotated_at, w.created_at) AS secret_set_at,
   (SELECT count(*) FROM webhook_deliveries d WHERE d.webhook_id = w.id AND d.status = 'failed')::int AS failed,
   (SELECT max(delivered_at) FROM webhook_deliveries d WHERE d.webhook_id = w.id) AS last_delivered_at`;
 
@@ -286,19 +303,20 @@ type Actor = { id: number; username: string };
 export async function createWebhook(actor: Actor, input: z.infer<typeof webhookSchema>) {
   const secret = newSecret();
   const { rows } = await query(
-    `INSERT INTO webhooks (name, url, format, events, active, secret) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-    [input.name, input.url, input.format, input.events, input.active, encryptSecret(secret)],
+    `INSERT INTO webhooks (name, url, format, events, active, secret, ci_ids) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+    [input.name, input.url, input.format, input.events, input.active, encryptSecret(secret), await serviceIds(input.services)],
   );
-  await audit(null, { entity_type: 'webhook', entity_ref: String(rows[0].id), action: 'create', changes: { name: input.name, url: input.url, format: input.format, events: input.events, active: input.active } });
+  await audit(null, { entity_type: 'webhook', entity_ref: String(rows[0].id), action: 'create', changes: { name: input.name, url: input.url, format: input.format, events: input.events, services: input.services, active: input.active } });
   // The secret is shown once, at creation; afterwards it can only be rotated.
   return { ...(await query(`SELECT ${COLUMNS} FROM webhooks w WHERE w.id = $1`, [rows[0].id])).rows[0], secret };
 }
 
 export async function updateWebhook(actor: Actor, id: number, input: z.infer<typeof webhookSchema>) {
-  const { rows: before } = await query('SELECT name, url, format, events, active FROM webhooks WHERE id = $1', [id]);
+  const { rows: before } = await query(`SELECT w.name, w.url, w.format, w.events, w.active,
+    coalesce((SELECT array_agg(c.ref ORDER BY c.ref) FROM configuration_items c WHERE c.id = ANY(w.ci_ids)), '{}') AS services FROM webhooks w WHERE w.id = $1`, [id]);
   if (!before[0]) throw notFound();
-  await query('UPDATE webhooks SET name = $2, url = $3, format = $4, events = $5, active = $6 WHERE id = $1', [
-    id, input.name, input.url, input.format, input.events, input.active,
+  await query('UPDATE webhooks SET name = $2, url = $3, format = $4, events = $5, active = $6, ci_ids = $7 WHERE id = $1', [
+    id, input.name, input.url, input.format, input.events, input.active, await serviceIds(input.services),
   ]);
   const changed = Object.fromEntries(Object.entries(input).filter(([k, v]) => JSON.stringify(before[0][k]) !== JSON.stringify(v)).map(([k, v]) => [k, { from: before[0][k], to: v }]));
   await audit(null, { entity_type: 'webhook', entity_ref: String(id), action: 'update', changes: changed });

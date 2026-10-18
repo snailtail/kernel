@@ -26,6 +26,7 @@ import * as bulkMod from './bulk.js';
 import * as dv from './dev.js';
 import * as aiMod from './ai.js';
 import * as st from './status.js';
+import * as subs from './status-subscriptions.js';
 import * as srMod from './service-report.js';
 import * as ssoMod from './sso.js';
 import * as hooks from './event-hooks.js';
@@ -198,9 +199,16 @@ export const OPERATIONS: Op[] = [
   { method: 'put', path: '/api/status/:ref', tag: 'Status', summary: 'Set a service status (publish: also on the public page)', body: st.setStatusSchema },
   { method: 'put', path: '/api/status/:ref/public', tag: 'Status', summary: 'Show a service on the public page under a curated name and description', body: st.publicServiceSchema },
   { method: 'post', path: '/api/status/updates', tag: 'Status', summary: 'Post a status update (investigating → identified → monitoring → resolved); public updates need a problem manager', body: st.updateSchema },
-  { method: 'delete', path: '/api/status/updates/:id', tag: 'Status', summary: 'Retract a published update (?reason=)' },
+  { method: 'post', path: '/api/status/updates/:id/retract', tag: 'Status', summary: 'Retract a published update: it leaves the public page and mail not yet sent is stopped (reason in the body)', body: z.object({ reason: z.string() }) },
+  { method: 'delete', path: '/api/status/updates/:id', tag: 'Status', summary: 'Deprecated: answers 400 pointing to POST /api/status/updates/:id/retract (the reason no longer goes in the query string)' },
+  { method: 'put', path: '/api/status/:ref/follow', tag: 'Status', summary: 'Follow a service (or stop): its status updates reach you by your notification settings', body: z.object({ follow: z.boolean() }) },
   { method: 'put', path: '/api/admin/status-page', tag: 'Status', summary: 'Turn the public status page on or off and set its title (with a reason)' },
   { method: 'get', path: '/api/public/status', tag: 'Status', summary: 'The public status page as JSON (no authentication; published data only; cacheable)' },
+  { method: 'post', path: '/status/subscribe', tag: 'Status', summary: 'Sign up for email about public services (no authentication; a form or JSON). The same answer whether or not the address is subscribed; a confirmation mail follows', body: subs.signUpSchema },
+  { method: 'get', path: '/status/confirm', tag: 'Status', summary: 'Shows what a confirmation link confirms (?s=&token=); changes nothing' },
+  { method: 'post', path: '/status/confirm', tag: 'Status', summary: 'Confirms an email subscription (the link works once and expires in 48 hours)' },
+  { method: 'get', path: '/status/unsubscribe', tag: 'Status', summary: 'Shows the unsubscribe confirmation for a signed link (?s= or ?p=, &token=)' },
+  { method: 'post', path: '/status/unsubscribe', tag: 'Status', summary: 'One-click unsubscribe from status email (RFC 8058)' },
   { method: 'get', path: '/api/records/:ref/dev-links', tag: 'Dev platforms', summary: 'Pull requests, issues, commits, workflow runs and releases linked to a problem, change or incident, with their status' },
   { method: 'post', path: '/api/records/:ref/dev-links', tag: 'Dev platforms', summary: 'Link a GitHub, GitLab or Azure DevOps URL (pull request or merge request, issue or work item, commit, pipeline run or release)' },
   { method: 'delete', path: '/api/records/:ref/dev-links/:id', tag: 'Dev platforms', summary: 'Remove a dev link' },
