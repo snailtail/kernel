@@ -149,14 +149,14 @@ export async function kpis(user: User, { period }: z.infer<typeof kpiSchema>) {
     });
   }
   if (problem) {
-  const resolvedProblems = per(problems.rows, (rs) => rs[0]?.resolved ?? 0);
-  const ke = knownErrors.rows[0];
-  tiles.push({
-    id: 'problems_resolved', label: 'Problems resolved', value: last(resolvedProblems), unit: 'count', trend: resolvedProblems, trend_label: `per ${unit}`, lower_is_better: false,
-    detail: `${ke.with_workaround} of ${ke.known_errors} known errors have a workaround.`,
-    basis: `Problems resolved in the ${unit}. Known errors: open known errors now, and how many have a workaround written down.`,
-    link: '/problems?status=resolved',
-  });
+    const resolvedProblems = per(problems.rows, (rs) => rs[0]?.resolved ?? 0);
+    const ke = knownErrors.rows[0];
+    tiles.push({
+      id: 'problems_resolved', label: 'Problems resolved', value: last(resolvedProblems), unit: 'count', trend: resolvedProblems, trend_label: `per ${unit}`, lower_is_better: false,
+      detail: `${ke.with_workaround} of ${ke.known_errors} known errors have a workaround.`,
+      basis: `Problems resolved in the ${unit}. Known errors: open known errors now, and how many have a workaround written down.`,
+      link: '/problems?status=resolved',
+    });
   }
   if (incident) {
     const declared = per(major.rows, (rs) => rs[0]?.declared ?? 0);

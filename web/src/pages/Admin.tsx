@@ -441,7 +441,7 @@ function WebhookModal({ hook, events, formats, onClose, onDone }: { hook: Webhoo
   const remove = async () => {
     const reason = hook ? await askReason(`Delete ${hook.name}`, 'The webhook and its delivery log are deleted.', { confirmLabel: 'Delete webhook', danger: true }) : null;
     if (hook && reason) {
-      await api.del(`/api/webhooks/${hook.id}?reason=${encodeURIComponent(reason)}`);
+      await api.post(`/api/webhooks/${hook.id}/delete`, { reason });
       onDone();
     }
   };
