@@ -3,6 +3,7 @@ import { HiddenRecordsNote } from '../components/Visibility';
 import { Link } from 'react-router';
 import type { Action, Activity, Problem, Status } from '../api';
 import { ActionList } from '../components/Actions';
+import { KpiSection } from '../components/Kpis';
 import { ProblemTable } from '../components/ProblemTable';
 import { PRIORITY_LABEL, relativeTime, STATUS_LABEL, STATUS_PHASE } from '../format';
 import { useApi } from '../hooks';
@@ -62,6 +63,9 @@ export function DashboardPage() {
         </Link>
       )}
 
+      <KpiSection />
+
+      <h2 className="dashboard-subhead">Problem backlog</h2>
       <section className="stat-row">
         <Link to="/problems" className="stat">
           <span className="stat-label">Open problems</span>

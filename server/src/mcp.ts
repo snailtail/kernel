@@ -2,6 +2,7 @@
 // Each request authenticates with a personal API token and acts as that user.
 import { maskForViewer } from './confidential.js';
 import * as serviceReports from './service-report.js';
+import * as kpiMod from './kpis.js';
 import * as statusMod from './status.js';
 import * as statusSubs from './status-subscriptions.js';
 import type { FastifyInstance } from 'fastify';
@@ -1188,8 +1189,13 @@ function buildServer(user: User, scopes?: string[]) {
       })),
   );
 
-  tool('get_dashboard', 'Summary of the problem backlog: counts by status and priority, aging, my open problems and recent activity.', {}, true, () =>
-    problems.dashboard(user),
+  tool(
+    'get_dashboard',
+    'The dashboard: cross-practice KPIs with a trend over the last six periods (MTTR, SLA compliance, change success, recurring incidents, problems resolved, open major incidents; each says how it is calculated), plus the problem backlog: counts by status and priority, aging, my open problems and recent activity.',
+    { period: z.enum(['month', 'week']).optional().describe('KPI trend per month (default) or per week') },
+    true,
+    // Extended compatibly (#54): the backlog fields stay as they were, the KPIs come in their own section.
+    async ({ period }) => ({ ...(await problems.dashboard(user)), ...(can(user.role, 'report.read') ? { kpis: await kpiMod.kpis(user, kpiMod.kpiSchema.parse({ period })) } : {}) }),
   );
 
   tool(

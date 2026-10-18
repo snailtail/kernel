@@ -31,6 +31,8 @@ export interface Preferences {
   /** Show others when I have a record open (#70); on unless turned off. */
   live_presence?: boolean;
   nav_collapsed?: string[];
+  /** The dashboard's KPI tiles, in order (#54); all of them when unset. */
+  dashboard_tiles?: string[];
 }
 
 declare module 'fastify' {

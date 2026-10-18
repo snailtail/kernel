@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
-import { skip, startKernel, type Client, type Harness } from './harness.js';
+import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { ownerQuery, skip, startKernel, type Client, type Harness } from './harness.js';
 
 describe('service reports (#54)', { skip }, () => {
   let k: Harness;
@@ -82,5 +84,147 @@ describe('service reports (#54)', { skip }, () => {
     assert.ok(!other.incidents.major.some((i: any) => i.ref === secret));
     assert.equal((await pm.get(`/api/services/${svc}/report`)).body.restricted_records_left_out, true, 'managers are told');
     assert.equal((await viewer.get('/api/services/CI999999/report')).status, 404);
+  });
+
+  test('CSV: the records behind the report, only what the reader may see, formulas neutralised', async () => {
+    const formula = (await analyst.post('/api/incidents', { title: '=HYPERLINK("http://evil.example","x")', impact: 3, urgency: 3, cis: [svc] })).body.ref;
+    const secret = (await db.query("SELECT ref FROM incidents WHERE title = 'Payroll data exposure'")).rows[0].ref;
+    const csv = async (c: Client) => {
+      const res = await fetch(`${k.base}/api/reports/service.csv?service=${svc}`, { headers: { Cookie: c.cookie! } });
+      assert.equal(res.status, 200);
+      assert.match(res.headers.get('content-type')!, /text\/csv/);
+      return res.text();
+    };
+    const text = await csv(analyst2);
+    assert.match(text, /^kind,ref,title,status,priority,type,major,started,ended,outcome,resolution_target_met,problem\r\n/);
+    assert.match(text, new RegExp(`incident,${formula},"'=HYPERLINK`), 'a formula is prefixed with a quote');
+    assert.match(text, /\nchange,CHG/);
+    assert.match(text, /\nproblem,PRB/);
+    assert.ok(!text.includes(secret), 'a restricted incident is left out for someone who cannot see it');
+    assert.ok((await csv(analyst)).includes(secret));
+    assert.equal((await viewer.get('/api/reports/service.csv')).status, 400, 'a service is required');
+  });
+
+  test('dashboard KPIs: six periods, how each is calculated, the list behind it, through RLS', async () => {
+    // Three incidents on one CI within 30 days and no problem: recurring.
+    const nas = (await pm.post('/api/cis', { name: 'nas-01', ci_type: 'virtual_machine' })).body.ref;
+    for (const t of ['NAS full', 'NAS full again', 'NAS full once more']) await analyst.post('/api/incidents', { title: t, impact: 3, urgency: 3, cis: [nas] });
+    const quick = (await analyst.post('/api/incidents', { title: 'Printer jam', impact: 2, urgency: 2 })).body.ref;
+    await db.query("UPDATE incidents SET created_at = now() - interval '90 minutes' WHERE ref = $1", [quick]);
+    await analyst.post(`/api/incidents/${quick}/transition`, { to: 'resolved', resolution_code: 'fixed', resolution: 'Cleared' });
+
+    const d = (await viewer.get('/api/dashboard/kpis')).body;
+    assert.equal(d.period.unit, 'month');
+    assert.equal(d.period.starts.length, 6);
+    assert.deepEqual(d.tiles.map((t: any) => t.id), ['mttr', 'sla', 'change_success', 'recurring', 'problems_resolved', 'major_open']);
+    for (const t of d.tiles) {
+      assert.equal(t.trend.length, 6, t.id);
+      assert.ok(t.basis.length > 20 && t.link.startsWith('/'), t.id);
+    }
+    const tile = (id: string) => d.tiles.find((t: any) => t.id === id);
+    assert.ok(tile('mttr').value > 0);
+    assert.match(tile('mttr').detail, /P2 /);
+    assert.ok(tile('recurring').value >= 1);
+    assert.equal(tile('major_open').unit, 'count');
+    assert.equal((await viewer.get('/api/dashboard/kpis?period=week')).body.period.starts.length, 6);
+    assert.equal((await viewer.get('/api/dashboard/kpis?period=year')).status, 400);
+    assert.equal((await pm.get('/api/dashboard/kpis')).body.restricted_records_left_out, true, 'managers are told');
+
+    // Choosing and ordering tiles is a preference; each tile once, known tiles only.
+    assert.deepEqual((await viewer.put('/api/auth/preferences', { dashboard_tiles: ['sla', 'mttr'] })).body.dashboard_tiles, ['sla', 'mttr']);
+    // Unknown ids are dropped (a module switched off later must not break the page); each tile counts once.
+    assert.deepEqual((await viewer.put('/api/auth/preferences', { dashboard_tiles: ['sla', 'cost', 'sla', 'mttr'] })).body.dashboard_tiles, ['sla', 'mttr']);
+
+    // A switched-off practice has no tiles, and the rest still work.
+    const admin = await k.login('admin');
+    assert.equal((await admin.put('/api/admin/modules', { change: false, reason: 'Testing' })).status, 200);
+    try {
+      const without = (await viewer.get('/api/dashboard/kpis')).body.tiles.map((t: any) => t.id);
+      assert.ok(!without.includes('change_success') && without.includes('mttr'));
+    } finally {
+      await admin.put('/api/admin/modules', { change: true, reason: 'Back on' });
+    }
+
+    // get_dashboard (like the web page, through GET /api/dashboard) needs problem.read: that keeps parity only while
+    // every role that may read a practice also reads problems and reports. Guard that assumption.
+    const { PERMISSIONS } = await import('../../src/policy.js');
+    for (const [role, actions] of Object.entries(PERMISSIONS)) {
+      if (['incident.read', 'change.read'].some((a) => actions.has(a as any))) assert.ok(actions.has('problem.read') && actions.has('report.read'), role);
+    }
+
+    // MCP parity: get_dashboard carries the same KPIs.
+    const mcp = new McpClient({ name: 'kpi', version: '1' });
+    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('viewer')}` } } }));
+    const res = (await mcp.callTool({ name: 'get_dashboard', arguments: {} })) as any;
+    assert.ok(!res.isError, res.content[0].text);
+    const viaMcp = JSON.parse(res.content[0].text);
+    assert.deepEqual(viaMcp.kpis.tiles.map((t: any) => [t.id, t.value]), d.tiles.map((t: any) => [t.id, t.value]));
+    assert.ok(viaMcp.by_status, 'the backlog summary is still there');
+    await mcp.close();
+  });
+
+  test('scheduled reports: the owner or a manager, once per period, by email without restricted records', async () => {
+    const n = await import('../../src/notifications.js');
+    const rs = await import('../../src/report-schedules.js');
+    process.env.SMTP_URL = 'capture:';
+    try {
+      await ownerQuery("UPDATE users SET email = username || '@example.com'");
+      await ownerQuery("UPDATE configuration_items SET owner_id = (SELECT id FROM users WHERE username = 'analyst') WHERE ref = $1", [svc]);
+      assert.equal((await analyst2.post('/api/report-schedules', { service: svc, frequency: 'monthly' })).status, 403, 'not the owner');
+      assert.equal((await analyst.post('/api/report-schedules', { frequency: 'monthly' })).status, 400, 'a service or an organisation');
+      const created = await analyst.post('/api/report-schedules', { service: svc, frequency: 'monthly' });
+      assert.equal(created.status, 201);
+      assert.equal(created.body.service_ref, svc);
+      assert.equal((await analyst.post('/api/report-schedules', { service: svc, frequency: 'monthly' })).body.id, created.body.id, 'asking twice keeps one');
+      assert.equal((await analyst.get('/api/report-schedules')).body.schedules.length, 1);
+      assert.equal((await analyst2.get('/api/report-schedules')).body.schedules.length, 0, 'only my own');
+
+      // At the start of next month this month is due: queued once however often the worker runs.
+      const now = new Date();
+      const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 2));
+      assert.equal(await rs.queueScheduledReports(next), 1);
+      assert.equal(await rs.queueScheduledReports(next), 0);
+      const before = n.capturedMail.length;
+      assert.equal(await rs.processReportDeliveries(), 1);
+      assert.equal(await rs.processReportDeliveries(), 0);
+      const mail = n.capturedMail.slice(before);
+      assert.equal(mail.length, 1);
+      assert.equal(mail[0].to, 'analyst@example.com');
+      assert.match(mail[0].subject, new RegExp(`service report Payroll, ${now.toISOString().slice(0, 7)}`));
+      assert.match(mail[0].text, /Availability .* %/);
+      assert.match(mail[0].text, new RegExp(`/services/${svc}/report\\?from=`));
+      assert.match(mail[0].attachments![0].content, /^# Service report: Payroll/);
+      // The analyst can see the restricted incident in Kernel, but it never goes by mail.
+      const secret = (await db.query("SELECT ref FROM incidents WHERE title = 'Payroll data exposure'")).rows[0].ref;
+      assert.ok((await analyst.get(`/api/services/${svc}/report`)).body.incidents.major.some((i: any) => i.ref === secret));
+      assert.ok(!mail[0].text.includes(secret) && !mail[0].attachments![0].content.includes(secret));
+      assert.ok(!mail[0].attachments![0].content.includes('Payroll data exposure'));
+
+      // An owner who handed the service on no longer gets it.
+      await ownerQuery('UPDATE configuration_items SET owner_id = NULL WHERE ref = $1', [svc]);
+      const later = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 2, 2));
+      assert.equal(await rs.queueScheduledReports(later), 1);
+      assert.equal(await rs.processReportDeliveries(), 0);
+      assert.equal((await ownerQuery("SELECT status FROM report_deliveries ORDER BY id DESC LIMIT 1")).rows[0].status, 'skipped');
+
+      // A manager schedules an organisation's services.
+      const org = (await ownerQuery("INSERT INTO organisations (name) VALUES ('Finance') RETURNING id")).rows[0].id;
+      await ownerQuery('INSERT INTO organisation_services (organisation_id, ci_id) SELECT $1, id FROM configuration_items WHERE ref = $2', [org, svc]);
+      assert.equal((await analyst.post('/api/report-schedules', { organisation_id: org, frequency: 'quarterly' })).status, 403);
+      const orgSchedule = (await pm.post('/api/report-schedules', { organisation_id: org, frequency: 'quarterly' })).body;
+      await ownerQuery("UPDATE report_schedules SET created_at = now() - interval '1 year' WHERE id = $1", [orgSchedule.id]);
+      assert.equal(await rs.queueScheduledReports(), 1);
+      assert.equal(await rs.processReportDeliveries(), 1);
+      const orgMail = n.capturedMail.at(-1)!;
+      assert.equal(orgMail.to, 'pm@example.com');
+      assert.match(orgMail.subject, /service report Finance, \d{4}-Q\d/);
+      assert.match(orgMail.text, /Payroll \(/);
+
+      assert.equal((await analyst2.del(`/api/report-schedules/${created.body.id}`)).status, 404);
+      assert.equal((await analyst.del(`/api/report-schedules/${created.body.id}`)).status, 200);
+      assert.equal((await pm.get('/api/report-schedules')).body.schedules.length, 1, 'managers see everyone\'s');
+    } finally {
+      delete process.env.SMTP_URL;
+    }
   });
 });

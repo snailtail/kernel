@@ -8,6 +8,7 @@ import { pool, query } from './db.js';
 import { loadCalendar } from './sla.js';
 import { notFound } from './errors.js';
 import { authorize } from './policy.js';
+import { csvCell } from './reports.js';
 import { hiddenRecordsExist } from './visibility.js';
 
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
@@ -55,17 +56,18 @@ export function coveredMinutes(intervals: [number, number][]) {
   return Math.round(total / 60_000);
 }
 
-export async function serviceReport(user: User, ref: string, period: z.infer<typeof serviceReportSchema>) {
-  authorize(user, 'report.read');
-  const { rows: svc } = await query("SELECT id, ref, name, criticality, description FROM configuration_items WHERE ref = $1 AND class = 'service'", [ref.toUpperCase()]);
-  const s = svc[0];
-  if (!s) throw notFound(`Service ${ref} not found`);
-  const fromTs = Date.parse(`${period.from}T00:00:00Z`);
-  const toTs = Date.parse(`${period.to}T00:00:00Z`) + 86_400_000;
-  const params = [s.id, period.from, period.to];
-  // The service and its components (CIs that are part of it).
-  const members = `(SELECT $1::int UNION SELECT r.from_ci FROM ci_relationships r WHERE r.to_ci = $1 AND r.type = 'member_of')`;
-  const [incidents, changes, problems, sla, maintenance] = await Promise.all([
+async function findService(ref: string) {
+  const { rows } = await query("SELECT id, ref, name, criticality, description, owner_id FROM configuration_items WHERE ref = $1 AND class = 'service'", [ref.toUpperCase()]);
+  if (!rows[0]) throw notFound(`Service ${ref} not found`);
+  return rows[0];
+}
+
+// The service and its components (CIs that are part of it); $1 is the service's id, $2 and $3 the period.
+const members = `(SELECT $1::int UNION SELECT r.from_ci FROM ci_relationships r WHERE r.to_ci = $1 AND r.type = 'member_of')`;
+
+/** The records behind a service report: incidents active in the period, changes in it, problems open now. */
+function serviceRecords(params: unknown[]) {
+  return Promise.all([
     query(
       `SELECT DISTINCT i.id, i.ref, i.title, i.priority, i.is_major, i.status, i.created_at, i.resolved_at, i.resolution_due_at, i.resolution_breached_at, i.problem_id,
               (SELECT min(a.first_seen) FROM alerts a WHERE a.incident_id = i.id) AS alert_first_seen
@@ -75,19 +77,30 @@ export async function serviceReport(user: User, ref: string, period: z.infer<typ
       params,
     ),
     query(
-      `SELECT DISTINCT c.ref, c.title, c.change_type, c.status, c.outcome, c.actual_start, c.planned_start
+      `SELECT DISTINCT c.ref, c.title, c.change_type, c.status, c.outcome, c.actual_start, c.actual_end, c.planned_start, c.created_at
        FROM changes c JOIN change_cis x ON x.change_id = c.id
        WHERE x.ci_id IN ${members} AND coalesce(c.actual_start, c.planned_start, c.created_at) BETWEEN $2::date AND $3::date + 1
        ORDER BY 1`,
       params,
     ),
     query(
-      `SELECT DISTINCT p.ref, p.title, p.status, p.priority, p.workaround, p.known_error_at
+      `SELECT DISTINCT p.ref, p.title, p.status, p.priority, p.workaround, p.known_error_at, p.created_at
        FROM problems p JOIN problem_cis x ON x.problem_id = p.id
        WHERE x.ci_id IN ${members} AND p.status NOT IN ('resolved', 'closed') AND $2::date IS NOT NULL AND $3::date IS NOT NULL
        ORDER BY p.priority, 1`,
       params,
     ),
+  ]);
+}
+
+export async function serviceReport(user: User, ref: string, period: z.infer<typeof serviceReportSchema>) {
+  authorize(user, 'report.read');
+  const s = await findService(ref);
+  const fromTs = Date.parse(`${period.from}T00:00:00Z`);
+  const toTs = Date.parse(`${period.to}T00:00:00Z`) + 86_400_000;
+  const params = [s.id, period.from, period.to];
+  const [[incidents, changes, problems], sla, maintenance] = await Promise.all([
+    serviceRecords(params),
     query('SELECT s.name, s.availability_target, s.calendar_id FROM slas s WHERE s.id = (SELECT sla_id FROM configuration_items WHERE id = $1) OR (s.is_default AND (SELECT sla_id FROM configuration_items WHERE id = $1) IS NULL) LIMIT 1', [s.id]),
     query(`SELECT DISTINCT w.starts_at, w.ends_at, w.reason FROM maintenance_windows w WHERE w.ci_id IN ${members} AND w.starts_at < $3::date + 1 AND w.ends_at > $2::date ORDER BY 1`, params),
   ]);
@@ -115,7 +128,7 @@ export async function serviceReport(user: User, ref: string, period: z.infer<typ
   const byPriority = [1, 2, 3, 4, 5].map((p) => ({ priority: p, count: incidents.rows.filter((i) => i.priority === p).length })).filter((x) => x.count);
   const recurring = incidents.rows.filter((i) => i.problem_id).length;
   return {
-    service: { ref: s.ref, name: s.name, criticality: s.criticality, sla: sla.rows[0]?.name ?? null },
+    service: { ref: s.ref, name: s.name, criticality: s.criticality, sla: sla.rows[0]?.name ?? null, owner_id: s.owner_id as number | null },
     period: { from: period.from, to: period.to, minutes: periodMinutes },
     availability: {
       percent: periodMinutes > 0 ? Math.round((1 - outageMinutes / periodMinutes) * 100000) / 1000 : null,
@@ -180,4 +193,25 @@ export function serviceReportMarkdown(r: Awaited<ReturnType<typeof serviceReport
     ...(r.restricted_records_left_out ? ['_Some restricted records are not included._', ''] : []),
   ];
   return lines.join('\n');
+}
+
+/**
+ * The report's rows as CSV (one per incident, change and problem), for a spreadsheet or BI tool. Only what the reader
+ * may see; text cells are neutralised against formula injection (#69).
+ */
+export async function serviceReportCsv(user: User, ref: string, period: z.infer<typeof serviceReportSchema>) {
+  authorize(user, 'report.read');
+  const s = await findService(ref);
+  const [incidents, changes, problems] = await serviceRecords([s.id, period.from, period.to]);
+  const columns = ['kind', 'ref', 'title', 'status', 'priority', 'type', 'major', 'started', 'ended', 'outcome', 'resolution_target_met', 'problem'];
+  const rows = [
+    ...incidents.rows.map((i) => ({
+      kind: 'incident', ref: i.ref, title: i.title, status: i.status, priority: i.priority, major: i.is_major, started: i.created_at, ended: i.resolved_at,
+      resolution_target_met: !i.resolution_due_at || !i.resolved_at ? null : !i.resolution_breached_at && Date.parse(i.resolved_at) <= Date.parse(i.resolution_due_at),
+      problem: i.problem_id ? 'yes' : 'no',
+    })),
+    ...changes.rows.map((c) => ({ kind: 'change', ref: c.ref, title: c.title, status: c.status, type: c.change_type, started: c.actual_start ?? c.planned_start, ended: c.actual_end, outcome: c.outcome })),
+    ...problems.rows.map((p) => ({ kind: 'problem', ref: p.ref, title: p.title, status: p.status, priority: p.priority, started: p.created_at })),
+  ];
+  return [columns.join(','), ...rows.map((r: Record<string, unknown>) => columns.map((c) => csvCell(r[c])).join(','))].join('\r\n') + '\r\n';
 }

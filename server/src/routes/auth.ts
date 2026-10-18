@@ -4,6 +4,7 @@ import * as passkeys from '../passkeys.js';
 import { MFA_PENDING_COOKIE, ssoSettings } from '../sso.js';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
+import { TILES } from '../kpis.js';
 import { TOKEN_MAX_DAYS, TOKEN_SCOPES, createApiToken, createSession, currentSessionHash, destroySession, guardLogin, hashPassword, listSessions, loginFailed, loginSucceeded, requireUser, revokeSession, verifyLogin } from '../auth.js';
 import { audit } from '../audit.js';
 import { config } from '../config.js';
@@ -177,6 +178,8 @@ export async function authRoutes(app: FastifyInstance) {
         intro_seen: z.boolean().optional(),
         live_presence: z.boolean().optional(),
         nav_collapsed: z.array(z.enum(['respond', 'improve', 'learn', 'directory'])).max(4).optional(),
+        // Unknown tile ids are dropped (a tile may go when a module is switched off), and each tile counts once.
+        dashboard_tiles: z.array(z.string().max(40)).max(20).transform((t) => [...new Set(t)].filter((id): id is (typeof TILES)[number] => (TILES as readonly string[]).includes(id))).optional(),
       })
       .strict()
       .parse(req.body);
