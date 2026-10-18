@@ -20,7 +20,7 @@ import { registerDeploymentChange } from './changes.js';
 import { azureDevOps, AZURE_DEVOPS } from './dev-azure.js';
 import { github } from './dev-github.js';
 import { gitlab, GITLAB_COM } from './dev-gitlab.js';
-import { getJsonVia, PLATFORMS, postJsonVia, refsIn, type Adapter, type CommitStatus, type EventContext, type ItemType, type ParsedItem, type Platform, type UpsertItem } from './dev-platform.js';
+import { getJsonVia, iso, PLATFORMS, postJsonVia, refsIn, type Adapter, type CommitStatus, type EventContext, type ItemType, type ParsedItem, type Platform, type UpsertItem } from './dev-platform.js';
 
 export { ITEM_TYPES, refsIn, type ParsedItem } from './dev-platform.js';
 export { verifyGitHubSignature } from './dev-github.js';
@@ -431,21 +431,22 @@ function eventContext(db: Db, source: { id: number; platform: Platform }, delive
       const production = target ? target.production : /^prod(uction)?$/i.test(d.environment);
       const id = await upsertItem(db, {
         platform, repo: d.repo, item_type: 'deployment', key: d.key, url: d.url, title: d.title, state: d.state, author: d.author, environment: d.environment,
-        data: { source_id: source.id, sha: d.sha, production, rollback: !!d.rollback, target_id: target?.id, cis: target?.ci_refs, started_at: d.started_at, finished_at: d.finished_at },
+        data: { source_id: source.id, sha: d.sha, production, rollback: !!d.rollback, target_id: target?.id, cis: target?.ci_refs, started_at: iso(d.started_at), finished_at: iso(d.finished_at) },
       });
-      // What the deploy contains: items at its commit, and pull requests merged since the last successful deploy there.
+      // What the deploy contains: items at its commit, and pull requests merged since the last successful deploy there
+      // (by when they were merged; a PR from before merged_at was kept falls back to its last update).
       const { rows: contents } = await db.query(
         `SELECT id, repo, item_type, key FROM dev_items i WHERE platform = $1 AND repo = $2 AND item_type IN ('pull_request', 'commit', 'workflow_run')
            AND (($3::text IS NOT NULL AND (key = $3 OR data->>'sha' = $3 OR data->>'merge_sha' = $3))
-             OR (item_type = 'pull_request' AND state = 'merged' AND updated_at > coalesce(
-                  (SELECT max(p.updated_at) FROM dev_items p WHERE p.platform = $1 AND p.repo = $2 AND p.item_type = 'deployment'
-                     AND lower(p.environment) = lower($4) AND p.state = 'success' AND p.id <> $5), now() - interval '7 days')))`,
+             OR (item_type = 'pull_request' AND state = 'merged' AND coalesce((data->>'merged_at')::timestamptz, updated_at) > coalesce(
+                  (SELECT max(coalesce((p.data->>'finished_at')::timestamptz, p.updated_at)) FROM dev_items p WHERE p.platform = $1 AND p.repo = $2
+                     AND p.item_type = 'deployment' AND lower(p.environment) = lower($4) AND p.state = 'success' AND p.id <> $5), now() - interval '7 days')))`,
         [platform, d.repo, d.sha ?? null, d.environment, id],
       );
       const { rows: refs } = await db.query('SELECT DISTINCT record_ref FROM dev_item_links WHERE dev_item_id = ANY($1)', [contents.map((c) => c.id)]);
       const linked = await ctx.mention(id, d.text ?? '', refs.map((r) => r.record_ref as string));
       if (d.state === 'success' && target?.register_change && target.template_id) {
-        after.push(() => registerFromDeploy(source.id, { ...d, id, platform, template_id: target.template_id, cis: target.ci_refs, contents }));
+        after.push(() => registerFromDeploy(source.id, { ...d, started_at: iso(d.started_at), finished_at: iso(d.finished_at), id, platform, target_id: target.id, authorised_by: target.created_by, template_id: target.template_id, cis: target.ci_refs, contents }));
       }
       return linked;
     },
@@ -459,14 +460,14 @@ function eventContext(db: Db, source: { id: number; platform: Platform }, delive
  * deploy outside the template's scope (risk, CI types, a change freeze) registers nothing; the reason is kept on the
  * deployment and audited, so someone can raise a normal change instead.
  */
-async function registerFromDeploy(sourceId: number, d: Parameters<EventContext['deployed']>[0] & { id: number; platform: Platform; template_id: number; cis: string[]; contents: { id: number; repo: string; item_type: string; key: string }[] }) {
+async function registerFromDeploy(sourceId: number, d: Parameters<EventContext['deployed']>[0] & { id: number; platform: Platform; target_id: number; authorised_by: number | null; template_id: number; cis: string[]; contents: { id: number; repo: string; item_type: string; key: string }[] }) {
   const now = new Date().toISOString();
   const contained = d.contents.map(label);
   try {
     const r = await registerDeploymentChange({
       template_id: d.template_id, title: `Deploy ${d.repo} to ${d.environment}${d.sha ? ` (${d.sha.slice(0, 7)})` : ''}`,
       description: `Registered by a successful deploy on ${ADAPTERS[d.platform].label}.${contained.length ? `\n\nContains: ${contained.slice(0, 30).join(', ')}.` : ''}`,
-      cis: d.cis, actual_start: d.started_at ?? d.finished_at ?? now, actual_end: d.finished_at ?? now, source_key: `${d.platform}:${d.repo}:${d.key}`.slice(0, 300),
+      cis: d.cis, actual_start: d.started_at ?? d.finished_at ?? now, actual_end: d.finished_at ?? now, source_key: `${d.platform}:${d.repo}:${d.key}`.slice(0, 300), target_id: d.target_id, authorised_by: d.authorised_by,
     });
     await tx(async (db) => {
       if (r.created) for (const itemId of [d.id, ...d.contents.map((c) => c.id)]) await linkItem(db, itemId, r.ref, 'webhook', null);
@@ -517,21 +518,34 @@ export async function postStatusForItems(ids: number[]) {
        WHERE d.id = ANY($1) AND d.item_type = 'pull_request' AND s.enabled AND s.post_status AND s.status_token IS NOT NULL`,
       [ids],
     );
-    for (const pr of rows) {
+    // A few at a time, and the whole round within a limit: a slow platform never holds up a change for long.
+    const queue = [...rows];
+    const worker = async () => {
+      for (let pr = queue.shift(); pr; pr = queue.shift()) await postOne(pr);
+    };
+    const postOne = async (pr: any) => {
       const { rows: changes } = await query(
         `SELECT c.ref, c.status, c.change_type, c.planned_start, c.planned_end FROM dev_item_links l JOIN changes c ON c.ref = l.record_ref
          WHERE l.dev_item_id = $1 AND l.record_type = 'change' AND NOT coalesce((SELECT is_restricted FROM kernel_record_lookup(c.ref)), false) ORDER BY c.ref`,
         [pr.id],
       );
-      if (!changes.length) continue;
+      if (!changes.length) return;
       const each = changes.map((c) => ({ ...changeStatus(c), ref: c.ref as string }));
       const worst = each.reduce((a, b) => (RANK[b.state] > RANK[a.state] ? b : a));
       const status: CommitStatus = { state: worst.state, description: (each.length > 1 ? `${worst.description} (+${each.length - 1} more)` : worst.description).slice(0, 140), target_url: changeLink(worst.ref) };
       const ok = await ADAPTERS[pr.platform as Platform].postStatus(pr, pr.base_url, decryptSecret(pr.status_token), postJsonVia(pr.private_allow, pr.ca_pem), status).catch(() => false);
       await query("UPDATE dev_items SET data = data || jsonb_build_object('kernel_status', $2::jsonb) WHERE id = $1", [pr.id, JSON.stringify({ state: status.state, description: status.description, ok, at: new Date().toISOString() })]);
-    }
+    };
+    let timer: NodeJS.Timeout | undefined;
+    const limit = new Promise<void>((resolve) => { timer = setTimeout(resolve, STATUS_ROUND_MS); });
+    await Promise.race([Promise.all(Array.from({ length: Math.min(STATUS_PARALLEL, rows.length) }, worker)), limit]);
+    clearTimeout(timer);
+    queue.length = 0; // past the limit, the rest waits for the next event or window refresh
   });
 }
+
+const STATUS_PARALLEL = 4;
+const STATUS_ROUND_MS = 15_000;
 
 /** After a change moved or its window changed: the status on every pull request linked to it. */
 export async function postChangeStatus(ref: string) {

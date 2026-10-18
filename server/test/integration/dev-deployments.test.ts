@@ -42,7 +42,7 @@ describe('dev platforms: deployments, standard changes and status on pull reques
     }).then(async (r) => ({ status: r.status, body: await r.json() as any }));
   };
   const pr = (number: number, title: string, extra: object = {}) => deliver('pull_request', {
-    action: 'closed', pull_request: { number, title, body: '', html_url: `https://github.com/acme/shop/pull/${number}`, state: 'closed', draft: false, merged_at: '2026-10-18T08:00:00Z', merge_commit_sha: 'm'.repeat(40), user: { login: 'dev1' }, head: { ref: 'fix', sha: 'h'.repeat(40) }, base: { ref: 'main' }, ...extra },
+    action: 'closed', pull_request: { number, title, body: '', html_url: `https://github.com/acme/shop/pull/${number}`, state: 'closed', draft: false, merged_at: at(-1), merge_commit_sha: 'm'.repeat(40), user: { login: 'dev1' }, head: { ref: 'fix', sha: 'h'.repeat(40) }, base: { ref: 'main' }, ...extra },
   });
   const deploy = (id: number, environment: string, state: string, extra: { task?: string; description?: string; sha?: string; created_at?: string } = {}) => deliver('deployment_status', {
     deployment: { id, environment, sha: extra.sha ?? 'm'.repeat(40), ref: 'main', task: extra.task ?? 'deploy', description: extra.description ?? '', creator: { login: 'ci' }, created_at: extra.created_at ?? at(-0.2) },
@@ -95,6 +95,8 @@ describe('dev platforms: deployments, standard changes and status on pull reques
     const staging = await deploy(100, 'staging', 'success');
     assert.deepEqual(staging.body.linked, [chg], 'the deploy follows the PR it contains');
     assert.equal((await changesFrom('github:acme/shop:100')).length, 0, 'staging registers nothing');
+    // Merged months ago and only edited now: not part of this deploy (contents go by merged_at, not the last update).
+    await pr(4, `Old cleanup (${chg})`, { merged_at: '2026-01-02T10:00:00Z', merge_commit_sha: 'o'.repeat(40), head: { ref: 'old', sha: 'p'.repeat(40) } });
     assert.equal((await deploy(101, 'production', 'in_progress')).status, 202);
     assert.equal((await changesFrom('github:acme/shop:101')).length, 0, 'not until it succeeded');
     await deploy(101, 'production', 'success');
@@ -106,7 +108,10 @@ describe('dev platforms: deployments, standard changes and status on pull reques
     assert.deepEqual(c.affected_cis.map((x: any) => x.ref), [app]);
     assert.ok(c.actual_start && c.actual_end, 'times from the deploy feed change-incident correlation');
     const links = (await analyst.get(`/api/records/${c.ref}/dev-links`)).body;
-    assert.deepEqual(links.map((l: any) => l.item_type).sort(), ['deployment', 'pull_request']);
+    assert.deepEqual(links.map((l: any) => [l.item_type, l.key]).sort(), [['deployment', '101'], ['pull_request', '3']]);
+    const created = (await db.query("SELECT a.data FROM change_activity a JOIN changes c ON c.id = a.change_id WHERE c.ref = $1 AND a.kind = 'created'", [c.ref])).rows[0].data;
+    const pmId = (await db.query("SELECT id FROM users WHERE username = 'pm'")).rows[0].id;
+    assert.deepEqual([created.authorised_by, typeof created.deploy_target], [pmId, 'number'], 'the history names who allowed registration, and the target');
     assert.equal(links.find((l: any) => l.item_type === 'deployment').environment, 'production');
 
     await deliver('deployment_status', { repository: { full_name: 'acme/admin' }, deployment: { id: 200, environment: 'production', sha: 'a'.repeat(40), ref: 'main' }, deployment_status: { state: 'success', environment: 'production' } });
@@ -115,7 +120,7 @@ describe('dev platforms: deployments, standard changes and status on pull reques
 
   test('outcomes are suggested from deployments, never decided', async () => {
     let step = await implement(chg);
-    assert.deepEqual(step.suggestion, { outcome: 'successful', to: 'review', reason: 'All 1 linked pull request is merged and deployed to production' });
+    assert.deepEqual(step.suggestion, { outcome: 'successful', to: 'review', reason: 'All 2 linked pull requests are merged and deployed to production' });
     await deploy(102, 'production', 'failure');
     step = await implement(chg);
     assert.equal(step.suggestion.outcome, 'failed');

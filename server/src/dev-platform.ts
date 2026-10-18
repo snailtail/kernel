@@ -75,8 +75,12 @@ export interface Adapter {
   postStatus(item: { repo: string; key: string; data: Record<string, any> }, base: string, token: string, post: PostJson, status: CommitStatus): Promise<boolean>;
 }
 
-/** Deployments described as rollbacks (GitHub's task, a GitLab or ADO description, a "Revert" title). */
-export const isRollback = (...texts: unknown[]) => texts.some((t) => /\b(roll[ -]?back|revert)/i.test(String(t ?? '')));
+/** Deployments described as rollbacks (GitHub's task, a GitHub or ADO description). */
+// Only a deployment's own description counts: a "Revert …" commit deployed forward is a new deploy, not a rollback.
+export const isRollback = (...texts: unknown[]) => texts.some((t) => /\broll[ -]?back/i.test(String(t ?? '')));
+
+/** A timestamp from a delivery as ISO 8601, or undefined when it is missing or not a date (never stored as text). */
+export const iso = (v: unknown) => (typeof v === 'string' && v && !Number.isNaN(Date.parse(v)) ? new Date(v).toISOString() : undefined);
 
 /** Constant-time comparison of two secrets of any length (both hashed first, so the length leaks nothing). */
 export function sameSecret(given: string | undefined, expected: string) {
