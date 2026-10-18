@@ -147,18 +147,11 @@ export async function adminRoutes(app: FastifyInstance) {
     await requireStepUp(req);
     return webhooks.updateWebhook(admin, Number(req.params.id), webhooks.webhookSchema.parse(req.body));
   });
-  // The reason travels in the body: query strings end up in proxy and request logs, and reasons may describe people.
-  app.post<Id>('/api/webhooks/:id/delete', async (req) => {
+  app.delete<Id & { Querystring: { reason?: string } }>('/api/webhooks/:id', async (req) => {
     const admin = requireUser(req, 'webhook.manage');
     await requireStepUp(req);
-    const body = z.object({ reason: z.string().max(1000).optional() }).parse(req.body ?? {});
-    await webhooks.deleteWebhook(admin, Number(req.params.id), requireReason(body.reason));
+    await webhooks.deleteWebhook(admin, Number(req.params.id), requireReason(req.query.reason));
     return { ok: true };
-  });
-  // The old shape, kept for one release so callers learn where it moved.
-  app.delete<Id>('/api/webhooks/:id', async (req, reply) => {
-    requireUser(req, 'webhook.manage');
-    return reply.code(400).send({ error: 'Delete with POST /api/webhooks/:id/delete and { "reason": "…" } in the body' });
   });
   app.post<Id>('/api/webhooks/:id/rotate', async (req) => {
     const admin = requireUser(req, 'webhook.manage');

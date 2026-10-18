@@ -2,10 +2,12 @@ import { useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router';
 import { PriorityBadge } from '../components/Badges';
 import { formatDate } from '../format';
+import { api } from '../api';
 import { useApi } from '../hooks';
+import { isManager, useSession } from '../session';
 
 interface Report {
-  service: { ref: string; name: string; criticality: number; sla: string | null };
+  service: { ref: string; name: string; criticality: number; sla: string | null; owner_id: number | null };
   period: { from: string; to: string; minutes: number };
   availability: { percent: number | null; target: number | null; outage_minutes: number; degraded_minutes: number; maintenance_minutes: number; basis: string };
   incidents: { total: number; by_priority: { priority: number; count: number }[]; resolution_sla: { met: number; of: number; percent: number } | null; mttr_minutes: number | null; linked_to_problems: number; major: { ref: string; title: string; created_at: string; resolved_at: string | null }[] };
@@ -41,6 +43,7 @@ export function ServiceReportPage() {
             <button className="btn">Show</button>
           </form>
           <a className="btn" href={`/api/services/${r.service.ref}/report.md?${params}`}>Markdown</a>
+          <a className="btn" href={`/api/reports/service.csv?${new URLSearchParams({ service: r.service.ref, from: r.period.from, to: r.period.to })}`}>CSV</a>
           <button className="btn" onClick={() => window.print()}>Print</button>
         </div>
       </header>
@@ -79,6 +82,57 @@ export function ServiceReportPage() {
           </ul>
         )}
       </section>
+      <ScheduleReport service={r.service} />
     </div>
+  );
+}
+
+interface Schedule { id: number; frequency: 'monthly' | 'quarterly'; recipient: string; user_id: number; last_sent: string | null }
+
+/** The service's owner (or a manager) gets the report by email each month or quarter, without restricted records. */
+function ScheduleReport({ service }: { service: Report['service'] }) {
+  const { user } = useSession();
+  const allowed = isManager(user) || service.owner_id === user.id;
+  const { data, reload } = useApi<{ schedules: Schedule[] }>(allowed ? `/api/report-schedules?service=${service.ref}` : null);
+  const [frequency, setFrequency] = useState<'monthly' | 'quarterly'>('monthly');
+  const [error, setError] = useState('');
+  if (!allowed || !data) return null;
+  const add = async () => {
+    setError('');
+    try {
+      await api.post('/api/report-schedules', { service: service.ref, frequency });
+      reload();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+  const remove = async (id: number) => {
+    await api.del(`/api/report-schedules/${id}`);
+    reload();
+  };
+  return (
+    <section className="card no-print">
+      <h2>By email</h2>
+      <p className="muted small">The report for each past month or quarter, as a short summary with a link and the Markdown attached. Restricted records are never included in mail.</p>
+      {data.schedules.length > 0 && (
+        <ul className="plain-list">
+          {data.schedules.map((s) => (
+            <li key={s.id}>
+              {s.frequency === 'monthly' ? 'Monthly' : 'Quarterly'} to {s.user_id === user.id ? 'you' : s.recipient}
+              <span className="muted small"> · {s.last_sent ? `last sent for ${s.last_sent}` : 'not sent yet'}</span>{' '}
+              <button className="link-btn small" onClick={() => remove(s.id)}>Stop</button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="inline-form">
+        <select value={frequency} onChange={(e) => setFrequency(e.target.value as 'monthly' | 'quarterly')} aria-label="How often">
+          <option value="monthly">Every month</option>
+          <option value="quarterly">Every quarter</option>
+        </select>
+        <button className="btn" onClick={add}>Send it to me</button>
+      </div>
+      {error && <div className="error">{error}</div>}
+    </section>
   );
 }

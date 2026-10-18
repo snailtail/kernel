@@ -21,6 +21,8 @@ export interface Preferences {
   /** Menu groups the user folded (#102); unset means only Directory is folded. */
   nav_collapsed?: string[];
   intro_seen?: boolean;
+  /** The dashboard's KPI tiles in order (#54); unset means all. */
+  dashboard_tiles?: string[];
 }
 
 export interface Guidance {

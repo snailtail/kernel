@@ -28,6 +28,8 @@ import * as aiMod from './ai.js';
 import * as st from './status.js';
 import * as subs from './status-subscriptions.js';
 import * as srMod from './service-report.js';
+import * as kpiMod from './kpis.js';
+import * as rsMod from './report-schedules.js';
 import * as ssoMod from './sso.js';
 import * as hooks from './event-hooks.js';
 import { privacySchema, securityQuerySchema } from './security-events.js';
@@ -195,6 +197,11 @@ export const OPERATIONS: Op[] = [
   { method: 'put', path: '/api/admin/cf-access', tag: 'Authentication', summary: 'Configure Cloudflare Access sign-in (team domain, audience tag)', body: ssoMod.cfAccessSchema },
   { method: 'get', path: '/api/services/:ref/report', tag: 'Reports', summary: 'Service report for a period (?from=&to=): availability against the SLA target, incidents, SLA compliance, MTTR, changes, open problems and known errors', query: srMod.serviceReportSchema },
   { method: 'get', path: '/api/services/:ref/report.md', tag: 'Reports', summary: 'The service report as Markdown, for the service review' },
+  { method: 'get', path: '/api/reports/service.csv', tag: 'Reports', summary: "The service report's records as CSV (?service=&from=&to=): incidents active in the period, changes in it, problems open now" },
+  { method: 'get', path: '/api/dashboard/kpis', tag: 'Reports', summary: 'Cross-practice KPIs with a trend over the last six months or weeks (?period=), each with how it is calculated and the list behind it', query: kpiMod.kpiSchema },
+  { method: 'get', path: '/api/report-schedules', tag: 'Reports', summary: 'Scheduled service reports: mine (managers: everyone\'s), optionally ?service=' },
+  { method: 'post', path: '/api/report-schedules', tag: 'Reports', summary: "Schedule a service's report (its owner or a manager) or an organisation's (a manager), monthly or quarterly, by email to me", body: rsMod.scheduleSchema },
+  { method: 'delete', path: '/api/report-schedules/:id', tag: 'Reports', summary: 'Stop a scheduled report (my own; managers any)' },
   { method: 'get', path: '/api/status', tag: 'Status', summary: 'Service status board: set and suggested status per service (from incidents, maintenance, changes), updates, planned maintenance' },
   { method: 'put', path: '/api/status/:ref', tag: 'Status', summary: 'Set a service status (publish: also on the public page)', body: st.setStatusSchema },
   { method: 'put', path: '/api/status/:ref/public', tag: 'Status', summary: 'Show a service on the public page under a curated name and description', body: st.publicServiceSchema },
@@ -438,8 +445,7 @@ export const OPERATIONS: Op[] = [
   { method: 'get', path: '/api/webhooks', tag: 'Administration', summary: 'Webhooks, available events and formats (admins)' },
   { method: 'post', path: '/api/webhooks', tag: 'Administration', summary: 'Create a webhook (secret returned once)', body: webhooks.webhookSchema },
   { method: 'put', path: '/api/webhooks/:id', tag: 'Administration', summary: 'Update a webhook', body: webhooks.webhookSchema },
-  { method: 'post', path: '/api/webhooks/:id/delete', tag: 'Administration', summary: 'Delete a webhook and its delivery log (reason in the body)', body: z.object({ reason: z.string() }) },
-  { method: 'delete', path: '/api/webhooks/:id', tag: 'Administration', summary: 'Deprecated: answers 400 pointing to POST /api/webhooks/:id/delete (the reason no longer goes in the query string)' },
+  { method: 'delete', path: '/api/webhooks/:id', tag: 'Administration', summary: 'Delete a webhook (reason required as ?reason=)', query: z.object({ reason: z.string() }) },
   { method: 'post', path: '/api/webhooks/:id/rotate', tag: 'Administration', summary: 'Replace the signing secret (new secret returned once)' },
   { method: 'get', path: '/api/webhooks/:id/deliveries', tag: 'Administration', summary: 'Recent deliveries' },
   { method: 'post', path: '/api/webhooks/:id/ping', tag: 'Administration', summary: 'Send a test delivery' },

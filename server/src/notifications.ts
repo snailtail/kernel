@@ -239,13 +239,13 @@ export async function unsubscribe(userId: number, event: string, token: string) 
 // ---- Delivery ----------------------------------------------------------------------------------
 
 /** Mail sent through the "capture:" transport, for tests and local development. */
-export const capturedMail: { to: string; subject: string; text: string; headers: Record<string, string>; messageId?: string }[] = [];
+export const capturedMail: { to: string; subject: string; text: string; headers: Record<string, string>; messageId?: string; attachments?: { filename: string; content: string }[] }[] = [];
 let transporter: Transporter | null = null;
 function mailer() {
   const url = process.env.SMTP_URL;
   if (!url) return null;
   if (url === 'capture:') {
-    return { sendMail: async (m: any) => { capturedMail.push({ to: m.to, subject: m.subject, text: m.text, headers: m.headers, messageId: m.messageId }); return {}; } } as unknown as Transporter;
+    return { sendMail: async (m: any) => { capturedMail.push({ to: m.to, subject: m.subject, text: m.text, headers: m.headers, messageId: m.messageId, attachments: m.attachments }); return {}; } } as unknown as Transporter;
   }
   transporter ??= nodemailer.createTransport(url);
   return transporter;
@@ -280,7 +280,23 @@ export async function sendOutsideMail(to: string, subject: string, lines: string
 
 export const mailConfigured = () => !!process.env.SMTP_URL;
 
-const absolute = (path: string) => `${(config.publicUrl ?? '').replace(/\/$/, '')}${path}`;
+export const absoluteUrl = (path: string) => `${(config.publicUrl ?? '').replace(/\/$/, '')}${path}`;
+const absolute = absoluteUrl;
+
+/** A scheduled report to a Kernel user (#54): a summary, the report attached, and where to change or stop it. */
+export async function sendReportMail(to: string, subject: string, lines: string[], attachment: { filename: string; content: string }, manage: string) {
+  const m = mailer();
+  if (!m) throw new Error('Email is not configured (SMTP_URL)');
+  await m.sendMail({
+    from: process.env.KERNEL_MAIL_FROM ?? 'Kernel <kernel@localhost>',
+    to,
+    messageId: `<${randomUUID()}@${ownMail().messageIdDomain}>`,
+    subject: clip(subject, 200),
+    text: [...lines, '', '—', `You scheduled this report. Change or stop it: ${manage}`].join('\n'),
+    attachments: [{ filename: attachment.filename, content: attachment.content, contentType: 'text/markdown; charset=utf-8' }],
+    headers: { 'Auto-Submitted': 'auto-generated' },
+  });
+}
 
 async function sendEmail(userId: number, to: string, subject: string, lines: string[], event: string, messageId?: string) {
   const m = mailer();
