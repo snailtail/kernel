@@ -8,6 +8,8 @@ import { pool, query } from './db.js';
 import { loadCalendar } from './sla.js';
 import { notFound } from './errors.js';
 import { authorize } from './policy.js';
+import { maskedRefs } from './confidential.js';
+import { currentContext } from './context.js';
 import { csvCell } from './reports.js';
 import { hiddenRecordsExist } from './visibility.js';
 
@@ -93,7 +95,11 @@ function serviceRecords(params: unknown[]) {
   ]);
 }
 
-export async function serviceReport(user: User, ref: string, period: z.infer<typeof serviceReportSchema>) {
+/**
+ * `exported`: the report leaves Kernel (Markdown download, scheduled mail), so a confidential known error's workaround
+ * is always masked, as for agents (#61). In the web it is masked unless this reader may read it.
+ */
+export async function serviceReport(user: User, ref: string, period: z.infer<typeof serviceReportSchema>, options: { exported?: boolean } = {}) {
   authorize(user, 'report.read');
   const s = await findService(ref);
   const fromTs = Date.parse(`${period.from}T00:00:00Z`);
@@ -127,6 +133,7 @@ export async function serviceReport(user: User, ref: string, period: z.infer<typ
   const done = changes.rows.filter((c) => c.outcome);
   const byPriority = [1, 2, 3, 4, 5].map((p) => ({ priority: p, count: incidents.rows.filter((i) => i.priority === p).length })).filter((x) => x.count);
   const recurring = incidents.rows.filter((i) => i.problem_id).length;
+  const masked = await maskedRefs(options.exported || currentContext().channel === 'mcp' ? null : user, problems.rows.map((p) => p.ref));
   return {
     service: { ref: s.ref, name: s.name, criticality: s.criticality, sla: sla.rows[0]?.name ?? null, owner_id: s.owner_id as number | null },
     period: { from: period.from, to: period.to, minutes: periodMinutes },
@@ -153,7 +160,11 @@ export async function serviceReport(user: User, ref: string, period: z.infer<typ
       success_rate: done.length ? Math.round((done.filter((c) => c.outcome === 'successful').length / done.length) * 1000) / 10 : null,
       failed: done.filter((c) => c.outcome !== 'successful').map((c) => ({ ref: c.ref, title: c.title, outcome: c.outcome })),
     },
-    problems: problems.rows.map((p) => ({ ref: p.ref, title: p.title, status: p.status, priority: p.priority, workaround: p.status === 'known_error' ? p.workaround : null })),
+    problems: problems.rows.map((p) => ({
+      ref: p.ref, title: p.title, status: p.status, priority: p.priority,
+      workaround: p.status === 'known_error' && !masked.has(p.ref) ? p.workaround : null,
+      ...(masked.has(p.ref) ? { workaround_masked: true } : {}),
+    })),
     restricted_records_left_out: ['admin', 'problem_manager'].includes(user.role) ? await hiddenRecordsExist() : false,
   };
 }
@@ -188,7 +199,7 @@ export function serviceReportMarkdown(r: Awaited<ReturnType<typeof serviceReport
     '',
     '## Open problems and known errors',
     '',
-    ...(r.problems.length ? r.problems.map((p) => `- **${p.ref}** ${p.title} (${p.status.replace('_', ' ')}, P${p.priority})${p.workaround ? `\n  - Workaround: ${p.workaround.split('\n')[0]}` : ''}`) : ['None.']),
+    ...(r.problems.length ? r.problems.map((p) => `- **${p.ref}** ${p.title} (${p.status.replace('_', ' ')}, P${p.priority})${p.workaround ? `\n  - Workaround: ${p.workaround.split('\n')[0]}` : p.workaround_masked ? '\n  - Workaround: confidential, not included' : ''}`) : ['None.']),
     '',
     ...(r.restricted_records_left_out ? ['_Some restricted records are not included._', ''] : []),
   ];

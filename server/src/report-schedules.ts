@@ -159,7 +159,7 @@ async function sendScheduled(sch: any, d: any) {
     if (!refs.length) throw new Error('The organisation uses no services');
     const period = { from: d.period_from, to: d.period_to };
     const reports = [];
-    for (const ref of refs) reports.push(await serviceReport(recipient, ref, period));
+    for (const ref of refs) reports.push(await serviceReport(recipient, ref, period, { exported: true }));
     const title = sch.service_ref ? reports[0].service.name : sch.organisation_name;
     const query_ = `from=${period.from}&to=${period.to}`;
     const lines = [

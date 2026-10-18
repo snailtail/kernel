@@ -12,7 +12,7 @@ interface Report {
   availability: { percent: number | null; target: number | null; outage_minutes: number; degraded_minutes: number; maintenance_minutes: number; basis: string };
   incidents: { total: number; by_priority: { priority: number; count: number }[]; resolution_sla: { met: number; of: number; percent: number } | null; mttr_minutes: number | null; linked_to_problems: number; major: { ref: string; title: string; created_at: string; resolved_at: string | null }[] };
   changes: { total: number; completed: number; successful: number; success_rate: number | null; failed: { ref: string; title: string; outcome: string }[] };
-  problems: { ref: string; title: string; status: string; priority: number; workaround: string | null }[];
+  problems: { ref: string; title: string; status: string; priority: number; workaround: string | null; workaround_masked?: boolean }[];
   restricted_records_left_out: boolean;
 }
 
@@ -77,7 +77,8 @@ export function ServiceReportPage() {
           <ul className="plain-list">
             {r.problems.map((p) => (
               <li key={p.ref}><Link to={`/problems/${p.ref}`} className="mono small">{p.ref}</Link> {p.title} <PriorityBadge priority={p.priority} /> <span className="muted small">{p.status.replace('_', ' ')}</span>
-                {p.workaround && <div className="muted small">Workaround: {p.workaround.split('\n')[0]}</div>}</li>
+                {p.workaround && <div className="muted small">Workaround: {p.workaround.split('\n')[0]}</div>}
+                {p.workaround_masked && <div className="muted small">🔒 Workaround: confidential. <Link to={`/problems/${p.ref}`}>Open the problem</Link> to reveal it.</div>}</li>
             ))}
           </ul>
         )}

@@ -223,6 +223,23 @@ describe('service reports (#54)', { skip }, () => {
       assert.equal((await analyst2.del(`/api/report-schedules/${created.body.id}`)).status, 404);
       assert.equal((await analyst.del(`/api/report-schedules/${created.body.id}`)).status, 200);
       assert.equal((await pm.get('/api/report-schedules')).body.schedules.length, 1, 'managers see everyone\'s');
+
+      // A confidential known error's workaround (#61): masked in the web until revealed, never in exports or mail.
+      const ke = (await analyst.post('/api/problems', { title: 'Payroll export times out' })).body.ref;
+      await analyst.post(`/api/problems/${ke}/cis`, { ci: vm });
+      await db.query("UPDATE problems SET status = 'known_error', known_error_at = now(), workaround = 'Run the export for the board member at night' WHERE ref = $1", [ke]);
+      assert.equal((await analyst.put(`/api/records/${ke}/classification`, { classification: 'confidential', reason: 'Concerns a board member' })).status, 200);
+      const inWeb = async (c: Client) => (await c.get(`/api/services/${svc}/report`)).body.problems.find((p: any) => p.ref === ke);
+      assert.deepEqual([(await inWeb(analyst2)).workaround, (await inWeb(analyst2)).workaround_masked], [null, true]);
+      assert.equal((await analyst.post(`/api/records/${ke}/reveal`, { reason: 'Service review' })).status, 200);
+      assert.match((await inWeb(analyst)).workaround, /board member/, 'revealed, the reader sees it in Kernel');
+      const md = await (await fetch(`${k.base}/api/services/${svc}/report.md`, { headers: { Cookie: analyst.cookie! } })).text();
+      assert.ok(md.includes(ke) && md.includes('Workaround: confidential, not included') && !md.includes('board member'), 'never in a download');
+      const quarter = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 4, 2));
+      assert.equal(await rs.queueScheduledReports(quarter), 1);
+      assert.equal(await rs.processReportDeliveries(), 1);
+      const keMail = n.capturedMail.at(-1)!;
+      assert.ok(keMail.attachments![0].content.includes(ke) && !keMail.attachments![0].content.includes('board member') && !keMail.text.includes('board member'), 'never by mail');
     } finally {
       delete process.env.SMTP_URL;
     }
