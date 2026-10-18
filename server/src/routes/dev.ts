@@ -40,4 +40,14 @@ export async function devRoutes(app: FastifyInstance) {
     return dev.rotateSourceSecret(user, Number(req.params.id));
   });
   app.delete<Id>('/api/dev-sources/:id', async (req) => dev.deleteSource(requireUser(req), Number(req.params.id)));
+
+  // Deployment targets: which CIs a deploy changes, and whether a production deploy registers a standard change.
+  app.get<Id>('/api/dev-sources/:id/targets', async (req) => dev.listTargets(requireUser(req), Number(req.params.id)));
+  app.post<Id>('/api/dev-sources/:id/targets', async (req, reply) => {
+    const user = requireUser(req, 'change.manage');
+    await requireStepUp(req);
+    reply.code(201);
+    return dev.createTarget(user, Number(req.params.id), dev.targetSchema.parse(req.body));
+  });
+  app.delete<Id>('/api/dev-targets/:id', async (req) => dev.deleteTarget(requireUser(req), Number(req.params.id)));
 }

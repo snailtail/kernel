@@ -19,6 +19,7 @@ export const SECRET_COLUMNS: [table: string, column: string][] = [
   ['connectors', 'secret'],
   ['dev_sources', 'webhook_secret'],
   ['dev_sources', 'api_token'],
+  ['dev_sources', 'status_token'],
   ['ai_providers', 'api_key'],
   ['notification_settings', 'chat_url'],
   ['users', 'mfa_secret'],

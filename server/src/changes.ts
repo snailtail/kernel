@@ -2,7 +2,7 @@
 // or freezes, and reviewing. Problems raise changes for their permanent fix; incidents on CIs shortly after a change on
 // what they depend on are flagged as possibly change-related.
 import { checkAssigneeInTeam, validTeam } from './teams.js';
-import { pullRequestSummary } from './dev.js';
+import { deploymentSummary, postChangeStatus, pullRequestSummary } from './dev.js';
 import { z } from 'zod';
 import { audienceOf, startNarrow } from './audience.js';
 import type { User } from './auth.js';
@@ -24,6 +24,7 @@ export const OUTCOMES = ['successful', 'failed', 'rolled_back'] as const;
 export const RISKS = ['low', 'medium', 'high'] as const;
 type Status = (typeof CHANGE_STATUSES)[number];
 type Risk = (typeof RISKS)[number];
+type Outcome = (typeof OUTCOMES)[number];
 
 /** Who moves a change where; votes move authorize → scheduled/rejected, not a transition. */
 const TRANSITIONS: Record<Status, Status[]> = {
@@ -254,6 +255,7 @@ export async function getChange(user: User, ref: string) {
     links: links.rows,
     related_incidents: incidents,
     pull_requests: await pullRequestSummary(c.ref),
+    deployments: await deploymentSummary(c.ref),
   };
   return { type: 'change', ...detail, url: changeUrl(c.ref), next_steps: changeGuidance(detail) };
 }
@@ -265,12 +267,8 @@ function changeGuidance(c: any) {
     { id: 'plans', label: 'Write the implementation and backout plans', hint: 'How to do it, how to test it, and how to undo it if it goes wrong.', done: !!c.implementation_plan.trim() && !!c.backout_plan.trim() },
     { id: 'window', label: 'Plan the window', hint: 'Planned start and end; Kernel checks collisions and freezes.', done: !!c.planned_start && !!c.planned_end },
     ...(standard ? [] : [{ id: 'authorize', label: `Get it authorised (${c.approvals.required} approval${c.approvals.required === 1 ? '' : 's'})`, hint: `${c.risk} risk: ${c.risk_reason}`, done: ['scheduled', 'implementing', 'review', 'closed'].includes(c.status) || (c.status === 'authorize' && c.approvals.approved >= c.approvals.required) }]),
-    // Dev platforms (#32): merged pull requests suggest the implementation is done; a person records the outcome.
-    { id: 'implement', label: 'Implement and record the outcome', hint: c.pull_requests?.total
-      ? c.pull_requests.merged === c.pull_requests.total
-        ? `All ${c.pull_requests.total} linked pull request${c.pull_requests.total === 1 ? ' is' : 's are'} merged${c.pull_requests.failing ? ', but checks failed' : ''}: if it is deployed, record the outcome and move it to review.`
-        : `${c.pull_requests.merged} of ${c.pull_requests.total} linked pull requests merged.`
-      : 'Successful, failed or rolled back.', done: !!c.outcome },
+    // Dev platforms (#32): merged pull requests and deployments suggest an outcome; a person records it.
+    { id: 'implement', label: 'Implement and record the outcome', ...implementHint(c), done: !!c.outcome },
     { id: 'review', label: 'Review', hint: c.outcome && c.outcome !== 'successful' ? 'A failed or rolled back change needs a review.' : 'What went well, what to improve.', done: c.status === 'closed' },
   ];
   const handover = c.status === 'closed' && c.outcome === 'successful' && c.problem_ref && !['resolved', 'closed'].includes(c.problem_status)
@@ -283,6 +281,38 @@ function changeGuidance(c: any) {
     steps,
     next: steps.find((s) => !s.done)?.label ?? 'Nothing pending.',
   };
+}
+
+/**
+ * What the linked pull requests and deployments suggest (#32): a rollback or a failed deploy suggests that outcome, and
+ * everything merged and deployed to production suggests moving to review. Suggestions only: nothing transitions.
+ */
+function implementHint(c: any): { hint: string; suggestion?: { outcome?: Outcome; to?: Status; reason: string } } {
+  const prs = c.pull_requests ?? { total: 0, merged: 0, failing: 0 };
+  const deploys: { environment: string; state: string; production: boolean; rollback: boolean }[] = c.deployments ?? [];
+  const rolledBack = deploys.find((d) => d.rollback);
+  const failed = deploys.find((d) => d.state === 'failure' && !d.rollback);
+  const prod = deploys.find((d) => d.production && d.state === 'success' && !d.rollback);
+  if (!c.outcome && rolledBack) {
+    const reason = `A rollback was deployed to ${rolledBack.environment}`;
+    return { hint: `${reason}: if the change was undone, record the outcome "rolled back".`, suggestion: { outcome: 'rolled_back', reason } };
+  }
+  if (!c.outcome && failed) {
+    const reason = `The deployment to ${failed.environment} failed`;
+    return { hint: `${reason}: if it stays failed, record the outcome "failed".`, suggestion: { outcome: 'failed', reason } };
+  }
+  if (!c.outcome && prod && prs.total && prs.merged === prs.total) {
+    const reason = `All ${prs.total} linked pull request${prs.total === 1 ? ' is' : 's are'} merged and deployed to ${prod.environment}`;
+    return { hint: `${reason}: check it works, then record the outcome and move it to review.`, suggestion: { outcome: 'successful', to: 'review', reason } };
+  }
+  if (prs.total) {
+    return {
+      hint: prs.merged === prs.total
+        ? `All ${prs.total} linked pull request${prs.total === 1 ? ' is' : 's are'} merged${prs.failing ? ', but checks failed' : ''}: if it is deployed, record the outcome and move it to review.`
+        : `${prs.merged} of ${prs.total} linked pull requests merged.`,
+    };
+  }
+  return { hint: 'Successful, failed or rolled back.' };
 }
 
 /** Incidents on the change's CIs, or on CIs that depend on them, within the related window after it started. */
@@ -418,7 +448,7 @@ export async function updateChangeLean(user: User, ref: string, { base, ...input
       await notify(db, { users: [input.assignee_id], event: 'assigned', ref: current.ref, title: input.title ?? current.title, summary: 'A change was assigned to you.', path: `/changes/${current.ref}`, dedupe: `assigned:${current.ref}:${Date.now()}`, actorId: user.id });
     }
     await logChange(db, current.id, user.id, 'update', `Updated ${changed.map(([k]) => k).join(', ')}`, Object.fromEntries(changed.map(([k, v]) => [k, { from: current[k] ?? null, to: v }])));
-  });
+  });  if (input.planned_start !== undefined || input.planned_end !== undefined) await statusOnPullRequests(ref);
 }
 
 /** The same, then the full record as the API returns it. */
@@ -482,7 +512,12 @@ export async function transitionChangeLean(user: User, ref: string, input: z.inf
     if (c.problem_id && input.to === 'review') {
       await logActivity(db, c.problem_id, user.id, 'link', `Change ${c.ref} implemented: ${input.outcome?.replace('_', ' ')}`, { kind: 'change', reference: c.ref, outcome: input.outcome });
     }
-  });
+  });  await statusOnPullRequests(ref);
+}
+
+/** Dev platforms (#32): the change's status on its linked pull requests; best effort, never blocks the change. */
+async function statusOnPullRequests(ref: string) {
+  await postChangeStatus(ref).catch(() => undefined);
 }
 
 /** The same, then the full record as the API returns it. */
@@ -521,6 +556,7 @@ export async function voteOnChange(user: User, ref: string, input: z.infer<typeo
       await notify(db, { users: [c.created_by, c.assignee_id], event: 'decision', ref: c.ref, title: c.title, summary: 'The change is authorised and scheduled.', path: `/changes/${c.ref}`, dedupe: `decision:${c.ref}:${Date.now()}`, actorId: user.id });
     }
   });
+  await statusOnPullRequests(ref);
   return getChange(user, ref);
 }
 
@@ -594,11 +630,11 @@ export async function raiseChangeForProblem(user: User, problemRef: string, over
  * accounts are bound to theirs), the CIs are of an allowed type, the assessed risk is within max_risk, and the window
  * is not in a change freeze. Anything else needs a normal change.
  */
-async function checkTemplateScope(user: User, templateId: number, ciRefs: string[], start: string | null, end: string | null) {
+async function checkTemplateScope(user: User | null, templateId: number, ciRefs: string[], start: string | null, end: string | null) {
   const { rows } = await query('SELECT * FROM change_templates WHERE id = $1 AND active', [templateId]);
   const t = rows[0];
   if (!t) throw badRequest('Unknown or inactive standard change template');
-  if (user.role === 'integration') {
+  if (user?.role === 'integration') {
     const { rows: me } = await query('SELECT change_templates FROM users WHERE id = $1', [user.id]);
     if (!(me[0]?.change_templates ?? []).includes(t.id)) throw forbidden(`This account may not use the standard change "${t.name}". An administrator can allow it under Users.`);
   }
@@ -638,6 +674,34 @@ export async function registerStandardChange(user: User, input: z.infer<typeof r
     return rows[0];
   });
   return { ref: created.ref, url: changeUrl(created.ref) };
+}
+
+/**
+ * A successful production deploy registers a standard change (#32): the deploy target's template, its CIs and the
+ * deploy's times, closed as successful. The admin who enabled the target chose the template, so no account scope
+ * applies, but the template's CI types, risk ceiling and change freezes do. Idempotent on the platform deployment:
+ * the same deploy delivered twice returns the change it already registered.
+ */
+export async function registerDeploymentChange(input: { template_id: number; title: string; description: string; cis: string[]; actual_start: string; actual_end: string; source_key: string }) {
+  const { rows: existing } = await query('SELECT ref FROM changes WHERE source_key = $1', [input.source_key]);
+  if (existing[0]) return { ref: existing[0].ref as string, created: false };
+  const t = await checkTemplateScope(null, input.template_id, input.cis, input.actual_start, input.actual_end);
+  return tx(async (db) => {
+    const { rows } = await db.query(
+      `INSERT INTO changes (title, description, change_type, template_id, status, implementation_plan, test_plan, backout_plan,
+                            actual_start, actual_end, outcome, source, source_key, closed_at, planned_start, planned_end)
+       VALUES ($1, $2, 'standard', $3, 'closed', $4, $5, $6, $7, $8, 'successful', 'pipeline', $9, now(), $7, $8)
+       ON CONFLICT (source_key) WHERE source_key IS NOT NULL DO NOTHING RETURNING id, ref`,
+      [input.title, input.description || t.description, t.id, t.implementation_plan, t.test_plan, t.backout_plan, input.actual_start, input.actual_end, input.source_key],
+    );
+    if (!rows[0]) {
+      const { rows: again } = await db.query('SELECT ref FROM changes WHERE source_key = $1', [input.source_key]);
+      return { ref: again[0].ref as string, created: false };
+    }
+    await attachCis(db, rows[0].id, input.cis, null);
+    await logChange(db, rows[0].id, null, 'created', `Standard change ${rows[0].ref} registered by a production deploy`, { template: t.name, cis: input.cis, outcome: 'successful', deployment: input.source_key });
+    return { ref: rows[0].ref as string, created: true };
+  });
 }
 
 // ---- Templates and freezes ---------------------------------------------------------------------

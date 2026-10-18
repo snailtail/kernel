@@ -84,3 +84,19 @@ describe('dev platform adapters (#32)', () => {
     assert.deepEqual(refsIn('Fixes chg-000017 and AB#12, not INC0010001'), ['CHG000017']);
   });
 });
+
+describe('the change status on a pull request (#32)', () => {
+  test('authorised within its window, outside it, not yet, rejected, implemented', async () => {
+    const { changeStatus } = await import('../src/dev.js');
+    const now = new Date('2026-10-18T22:30:00Z');
+    const c = (status: string, extra: object = {}) => ({ ref: 'CHG000017', status, change_type: 'normal', planned_start: new Date('2026-10-18T22:00:00Z'), planned_end: new Date('2026-10-18T23:00:00Z'), ...extra });
+    assert.deepEqual(changeStatus(c('scheduled'), now), { state: 'success', description: 'CHG000017 authorised, window 2026-10-18 22:00–23:00 UTC' });
+    assert.deepEqual(changeStatus(c('scheduled'), new Date('2026-10-18T21:00:00Z')), { state: 'pending', description: 'CHG000017 authorised, outside the window 2026-10-18 22:00–23:00 UTC' });
+    assert.deepEqual(changeStatus(c('authorize'), now), { state: 'pending', description: 'CHG000017 not yet authorised' });
+    assert.deepEqual(changeStatus(c('rejected'), now), { state: 'failure', description: 'CHG000017 was rejected' });
+    assert.deepEqual(changeStatus(c('closed'), now), { state: 'success', description: 'CHG000017 implemented' });
+    assert.equal(changeStatus(c('draft', { change_type: 'standard' }), now).state, 'pending', 'a standard change in draft is not yet scheduled');
+    assert.deepEqual(changeStatus(c('scheduled', { planned_end: new Date('2026-10-19T01:00:00Z') }), now).description, 'CHG000017 authorised, window 2026-10-18 22:00 – 2026-10-19 01:00 UTC');
+    assert.equal(changeStatus(c('scheduled', { planned_start: null, planned_end: null }), now).description, 'CHG000017 authorised');
+  });
+});

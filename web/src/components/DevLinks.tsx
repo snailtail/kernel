@@ -2,11 +2,11 @@ import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
 import { relativeTime } from '../format';
 
-interface DevItem { id: number; platform: Platform; repo: string; item_type: string; key: string; url: string; title: string; state: string; checks: string | null; author: string; via: string; updated_at: string }
+interface DevItem { id: number; platform: Platform; repo: string; item_type: string; key: string; url: string; title: string; state: string; checks: string | null; author: string; environment: string; via: string; updated_at: string }
 
 type Platform = 'github' | 'gitlab' | 'azure_devops';
 const PLATFORM: Record<Platform, string> = { github: 'GitHub', gitlab: 'GitLab', azure_devops: 'Azure DevOps' };
-const TYPE: Record<string, string> = { pull_request: 'PR', issue: 'Issue', commit: 'Commit', workflow_run: 'Run', release: 'Release' };
+const TYPE: Record<string, string> = { pull_request: 'PR', issue: 'Issue', commit: 'Commit', workflow_run: 'Run', release: 'Release', deployment: 'Deploy' };
 // Each platform's own words for the same kinds of item.
 const TYPE_ON: Record<Platform, Record<string, string>> = { github: {}, gitlab: { pull_request: 'MR', workflow_run: 'Pipeline' }, azure_devops: { issue: 'Work item', workflow_run: 'Pipeline' } };
 const typeLabel = (d: DevItem) => TYPE_ON[d.platform]?.[d.item_type] ?? TYPE[d.item_type] ?? d.item_type;
@@ -45,6 +45,7 @@ export function DevLinksPanel({ recordRef, editable }: { recordRef: string; edit
               : <span className="dev-title">{title(d)}</span>}
             <span className={`badge ${STATE_CLASS[d.state] ?? ''}`}>{d.state}</span>
             {d.checks && <span className={`badge ${STATE_CLASS[d.checks] ?? ''}`} title="Checks">checks: {d.checks}</span>}
+            {d.item_type === 'deployment' && d.environment && <span className="badge" title="Environment">{d.environment}</span>}
             <span className="muted small">{PLATFORM[d.platform] ?? d.platform} · {d.repo} · {d.author || '–'} · {relativeTime(d.updated_at)}{d.via === 'webhook' ? ` · linked from ${PLATFORM[d.platform] ?? d.platform}` : ''}</span>
             {editable && <button className="btn-icon small" aria-label="Remove link" onClick={() => api.del<DevItem[]>(`/api/records/${recordRef}/dev-links/${d.id}`).then(setItems, (err) => setError(err.message))}>×</button>}
           </li>
@@ -61,7 +62,7 @@ export function DevLinksPanel({ recordRef, editable }: { recordRef: string; edit
   );
 }
 
-interface Source { id: number; name: string; platform: Platform; base_url: string; repositories: string[]; has_token: boolean; has_ca: boolean; private_allow: string[]; enabled: boolean; received_count: number; rejected_count: number; last_received_at: string | null; webhook_url: string }
+interface Source { id: number; name: string; platform: Platform; base_url: string; repositories: string[]; has_token: boolean; has_ca: boolean; private_allow: string[]; has_status_token: boolean; post_status: boolean; enabled: boolean; received_count: number; rejected_count: number; last_received_at: string | null; webhook_url: string }
 interface Created { platform: Platform; webhook_url: string; webhook_secret: string; events?: string[] }
 
 // What each platform needs: the allowlist's shape, a read-only token and where the webhook is set up.
@@ -111,6 +112,7 @@ export function DevSourcesSection() {
           <div className="mono small">{s.webhook_url}</div>
           <button className="btn small" onClick={async () => setCreated({ platform: s.platform, webhook_url: s.webhook_url, ...(await api.post<{ webhook_secret: string }>(`/api/dev-sources/${s.id}/rotate`, {})) })}>New secret</button>
           <button className="btn small danger" onClick={async () => { if (window.confirm(`Remove ${s.name}?`)) { await api.del(`/api/dev-sources/${s.id}`); load(); } }}>Remove</button>
+          <SourceDetails source={s} onChange={load} />
         </div>
       ))}
       {created && <WebhookSetup created={created} />}
@@ -132,11 +134,94 @@ export function DevSourcesSection() {
             <label>CA certificate <span className="muted small">(PEM, if an internal CA signed it)</span><textarea rows={2} value={form.ca_pem} onChange={(e) => setForm({ ...form, ca_pem: e.target.value })} /></label>
           </>
         )}
-        {form.platform === 'azure_devops' && <p className="hint full small">Azure DevOps cannot sign its deliveries, so the secret is sent as a password with every delivery. That is weaker than GitHub's signature, so Kernel only accepts it over HTTPS and from the projects listed here.</p>}
+        {form.platform === 'azure_devops' && <p className="hint full small">Azure DevOps cannot sign its deliveries, so the secret is sent as a password with every delivery. That is weaker than GitHub's signature, so Kernel only accepts it over HTTPS and from the projects listed here. Behind a proxy or tunnel that terminates TLS, set <span className="mono">KERNEL_TRUST_PROXY</span> so Kernel sees the request as HTTPS.</p>}
         {error && <div className="error full">{error}</div>}
         <div className="actions full"><button type="button" className="btn primary" onClick={create} disabled={!form.repositories.trim()}>Add {PLATFORM[form.platform]} source</button></div>
       </div>
     </section>
+  );
+}
+
+interface Target { id: number; repo: string; environment: string; cis: string[]; production: boolean; register_change: boolean; template_name: string | null }
+const STATUS_TOKEN: Record<Platform, string> = {
+  github: 'a fine-grained token with Commit statuses: write, and nothing else',
+  gitlab: 'a project access token with the api scope, on the projects listed here only',
+  azure_devops: 'a PAT with Code (Status) only',
+};
+
+/**
+ * One source's deployment targets (which CIs a deploy changes; a production target may register standard changes)
+ * and the opt-in to post the change status back on pull requests.
+ */
+function SourceDetails({ source: s, onChange }: { source: Source; onChange: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [targets, setTargets] = useState<Target[]>([]);
+  const [templates, setTemplates] = useState<{ id: number; name: string; active: boolean }[]>([]);
+  const [form, setForm] = useState({ repo: s.repositories[0] ?? '', environment: 'production', cis: '', production: true, register_change: false, template_id: '' });
+  const [statusToken, setStatusToken] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(() => api.get<Target[]>(`/api/dev-sources/${s.id}/targets`).then(setTargets, () => setTargets([])), [s.id]);
+  useEffect(() => {
+    if (!open) return;
+    load();
+    api.get<{ id: number; name: string; active: boolean }[]>('/api/change-templates').then((t) => setTemplates(t.filter((x) => x.active)), () => setTemplates([]));
+  }, [open, load]);
+  const run = async (fn: () => Promise<unknown>) => {
+    setError(null);
+    try { await fn(); } catch (err) { setError((err as Error).message); }
+  };
+  if (!open) return <button className="btn small" onClick={() => setOpen(true)}>Deployments and status…</button>;
+  const addTarget = () => run(async () => {
+    await api.post(`/api/dev-sources/${s.id}/targets`, {
+      repo: form.repo.trim(), environment: form.environment.trim(), cis: form.cis.split(/[\s,]+/).filter(Boolean), production: form.production,
+      register_change: form.production && form.register_change, template_id: form.register_change && form.template_id ? Number(form.template_id) : null,
+    });
+    setForm({ ...form, cis: '', register_change: false });
+    load();
+  });
+  const saveStatus = (body: object) => run(async () => { await api.patch(`/api/dev-sources/${s.id}`, body); setStatusToken(''); onChange(); });
+  return (
+    <div className="dev-source-details full">
+      <h3>Deployment targets</h3>
+      <p className="muted small">Which CIs and services a deploy to an environment changes. A successful deploy to a production target can register a standard change from a pre-approved template, with the pull requests it contained.</p>
+      {targets.map((t) => (
+        <div key={t.id} className="dev-source">
+          <strong>{t.repo} → {t.environment}</strong>
+          {t.production && <span className="badge">production</span>}
+          <span className="muted small">{t.cis.join(', ') || 'no CIs'}{t.register_change ? ` · registers "${t.template_name}"` : ''}</span>
+          <button className="btn small danger" onClick={() => run(async () => { await api.del(`/api/dev-targets/${t.id}`); load(); })}>Remove</button>
+        </div>
+      ))}
+      <div className="form">
+        <label>Repository<input value={form.repo} onChange={(e) => setForm({ ...form, repo: e.target.value })} list={`repos-${s.id}`} /></label>
+        <datalist id={`repos-${s.id}`}>{s.repositories.map((r) => <option key={r} value={r} />)}</datalist>
+        <label>Environment<input value={form.environment} onChange={(e) => setForm({ ...form, environment: e.target.value })} /></label>
+        <label className="full">CIs and services <span className="muted small">(refs, e.g. SVC000003 CI000012)</span><input value={form.cis} onChange={(e) => setForm({ ...form, cis: e.target.value })} /></label>
+        <label className="check"><input type="checkbox" checked={form.production} onChange={(e) => setForm({ ...form, production: e.target.checked, register_change: e.target.checked && form.register_change })} /> Production</label>
+        {form.production && (
+          <label className="check"><input type="checkbox" checked={form.register_change} onChange={(e) => setForm({ ...form, register_change: e.target.checked })} /> A successful deploy registers a standard change</label>
+        )}
+        {form.production && form.register_change && (
+          <label className="full">Standard change template<select value={form.template_id} onChange={(e) => setForm({ ...form, template_id: e.target.value })}>
+            <option value="">Choose…</option>
+            {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select></label>
+        )}
+        <div className="actions full"><button type="button" className="btn" onClick={addTarget} disabled={!form.repo.trim() || !form.environment.trim()}>Add target</button></div>
+      </div>
+      <h3>Status on pull requests</h3>
+      <p className="muted small">Posts <span className="mono">kernel/change</span> on pull requests linked to a change: authorised within its window, outside it, or not yet authorised. Teams can make it a required check. It uses its own token, {STATUS_TOKEN[s.platform]}, so reading never needs write access.</p>
+      <div className="form">
+        <label className="full">Status token {s.has_status_token && <span className="muted small">(set; enter a new one to replace it)</span>}<input type="password" autoComplete="off" value={statusToken} onChange={(e) => setStatusToken(e.target.value)} /></label>
+        <label className="check"><input type="checkbox" checked={s.post_status} disabled={!s.has_status_token && !statusToken} onChange={(e) => saveStatus({ post_status: e.target.checked, ...(statusToken ? { status_token: statusToken } : {}) })} /> Post the change status</label>
+        <div className="actions full">
+          {statusToken && <button type="button" className="btn" onClick={() => saveStatus({ status_token: statusToken })}>Save token</button>}
+          {s.has_status_token && <button type="button" className="btn danger" onClick={() => saveStatus({ status_token: '', post_status: false })}>Remove token</button>}
+          <button type="button" className="btn" onClick={() => setOpen(false)}>Close</button>
+        </div>
+      </div>
+      {error && <div className="error small">{error}</div>}
+    </div>
   );
 }
 

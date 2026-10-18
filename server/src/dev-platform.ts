@@ -6,12 +6,12 @@ import { outboundFetch } from './outbound.js';
 
 export const PLATFORMS = ['github', 'gitlab', 'azure_devops'] as const;
 export type Platform = (typeof PLATFORMS)[number];
-export const ITEM_TYPES = ['pull_request', 'issue', 'commit', 'workflow_run', 'release'] as const;
+export const ITEM_TYPES = ['pull_request', 'issue', 'commit', 'workflow_run', 'release', 'deployment'] as const;
 export type ItemType = (typeof ITEM_TYPES)[number];
 
 /** A link as an item. `base` is where the platform lives (https://gitlab.com, a self-hosted GitLab…). */
 export interface ParsedItem { platform: Platform; base: string; repo: string; item_type: ItemType; key: string; url: string; data?: Record<string, unknown> }
-export interface ItemStatus { title?: string; state?: string; checks?: string | null; author?: string }
+export interface ItemStatus { title?: string; state?: string; checks?: string | null; author?: string; data?: Record<string, unknown> }
 export type UpsertItem = Omit<ParsedItem, 'base'> & ItemStatus & { environment?: string };
 
 /** What an adapter may do while handling a delivery; dev.ts owns the tables and the visibility rules. */
@@ -22,7 +22,31 @@ export interface EventContext {
   /** The refs that items of this repository are already linked to (a run follows the pull request it built). */
   refsOf(repo: string, type: ItemType, keys: string[]): Promise<string[]>;
   setChecks(repo: string, prKey: string, checks: string): Promise<void>;
+  /** A deployment to an environment: dev.ts finds what it contains, maps it to CIs and may register a change. */
+  deployed(d: Deployment): Promise<string[]>;
 }
+
+/** One deployment as the platform reports it, on one scale: success, failure, cancelled, in_progress, queued. */
+export interface Deployment {
+  repo: string;
+  key: string;
+  url: string;
+  environment: string;
+  state: string;
+  title: string;
+  author?: string;
+  sha?: string;
+  /** The platform or its description calls it a rollback. */
+  rollback?: boolean;
+  started_at?: string;
+  finished_at?: string;
+  /** Text that may mention Kernel refs (description, ref, commit title). */
+  text?: string;
+}
+
+/** The change's status on a pull request's head commit: what teams can make a required check. */
+export interface CommitStatus { state: 'success' | 'pending' | 'failure'; description: string; target_url: string }
+export type PostJson = (url: string, headers: Record<string, string>, body: unknown) => Promise<boolean>;
 
 /** An outbound GET through the source's network settings: parsed JSON, or null when it failed (best effort). */
 export type GetJson = (url: string, headers: Record<string, string>) => Promise<any>;
@@ -47,7 +71,12 @@ export interface Adapter {
   read(req: FastifyRequest, body: any): Delivery | null;
   inScope(repositories: string[], scope: string): boolean;
   handle(ctx: EventContext, event: string, body: any, scope: string): Promise<string[]>;
+  /** Posts the change status on a pull request (its head commit, or the PR itself where the platform has PR statuses). */
+  postStatus(item: { repo: string; key: string; data: Record<string, any> }, base: string, token: string, post: PostJson, status: CommitStatus): Promise<boolean>;
 }
+
+/** Deployments described as rollbacks (GitHub's task, a GitLab or ADO description, a "Revert" title). */
+export const isRollback = (...texts: unknown[]) => texts.some((t) => /\b(roll[ -]?back|revert)/i.test(String(t ?? '')));
 
 /** Constant-time comparison of two secrets of any length (both hashed first, so the length leaks nothing). */
 export function sameSecret(given: string | undefined, expected: string) {
@@ -81,6 +110,21 @@ export function refsIn(text: string) {
 
 /** The first line of a commit message. */
 export const firstLine = (s: unknown) => String(s ?? '').split('\n')[0];
+
+/** Makes a PostJson for one source: the same network settings; true when the platform accepted it. */
+export function postJsonVia(privateAllow: string[], ca: string | null): PostJson {
+  return async (url, headers, body) => {
+    try {
+      const res = await outboundFetch(url, {
+        method: 'POST', body: JSON.stringify(body), headers: { 'User-Agent': 'Kernel', Accept: 'application/json', 'Content-Type': 'application/json', ...headers },
+        timeoutMs: 5000, maxBytes: 100_000, privateAllow: privateAllow.length ? privateAllow : undefined, ca: ca ?? undefined,
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  };
+}
 
 /** Makes a GetJson for one source: its private ranges and CA certificate, short timeouts and a size limit. */
 export function getJsonVia(privateAllow: string[], ca: string | null): GetJson {

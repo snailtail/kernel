@@ -16,6 +16,11 @@ test('a sender is verified only by the topmost Authentication-Results of the tru
   assert.equal(senderVerified([line('mx.evil; dmarc=pass header.from=example.com')], 'anna@example.com', 'mx.test'), false, 'another server');
   assert.equal(senderVerified([line('mx.test; dmarc=pass header.from=example.com')], 'anna@example.com', ''), false, 'nothing trusted');
   assert.equal(senderVerified([line('mx.test 1;\r\n\tdmarc=pass\r\n header.from=example.com')], 'anna@example.com', 'MX.TEST'), true, 'folded, with a version');
+  // RFC 8601 §5: the receiving server adds its own header on top and removes forged ones with its authserv-id. Kernel
+  // relies on that; a server that does not strip them lets a forged header on top through (docs/inbound-email.md).
+  assert.equal(senderVerified([line('mx.test; dmarc=pass header.from=example.com'), line('mx.test; dmarc=fail header.from=example.com')], 'anna@example.com', 'mx.test'), true, 'a forged header on top is believed: the mail server must strip it');
+  assert.equal(senderVerified([line('mx.test; dkim=pass header.d=notexample.com')], 'anna@example.com', 'mx.test'), false, 'alignment needs a dot: notexample.com is not example.com');
+  assert.equal(senderVerified([line('mx.test; spf=pass smtp.mailfrom=b@example.com')], 'anna@support.example.com', 'mx.test'), true, 'relaxed alignment: the parent domain');
 });
 
 test('the quoted message below a reply is cut', () => {

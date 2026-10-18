@@ -26,7 +26,8 @@ export interface Preferences {
 export interface Guidance {
   phase: string;
   purpose: string;
-  steps: { id: string; label: string; hint: string; done: boolean | null }[];
+  /** `suggestion`: what linked work suggests (#32), e.g. a failed deploy → the outcome failed; a person decides. */
+  steps: { id: string; label: string; hint: string; done: boolean | null; suggestion?: { outcome?: string; to?: string; reason: string } }[];
   next: string;
   /** The hand-over to the next practice in the flow (#37). */
   handover?: { label: string; hint: string; action?: 'raise_change' | 'create_problem' | 'link_problem' | 'resolve_problem'; target?: string } | null;

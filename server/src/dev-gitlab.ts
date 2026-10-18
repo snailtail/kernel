@@ -2,13 +2,13 @@
 // the source's secret in X-Gitlab-Token (no signature over the body), compared in constant time; replays are refused
 // on X-Gitlab-Event-UUID.
 import { badRequest } from './errors.js';
-import { ciState, firstLine, pushCommits, sameSecret, type Adapter, type ItemType, type ParsedItem } from './dev-platform.js';
+import { ciState, firstLine, isRollback, pushCommits, sameSecret, type Adapter, type ItemType, type ParsedItem } from './dev-platform.js';
 
 export const GITLAB_COM = 'https://gitlab.com';
-const SEGMENT: Record<ItemType, string> = { pull_request: 'merge_requests', issue: 'issues', commit: 'commit', workflow_run: 'pipelines', release: 'releases' };
+const SEGMENT: Record<ItemType, string> = { pull_request: 'merge_requests', issue: 'issues', commit: 'commit', workflow_run: 'pipelines', release: 'releases', deployment: 'environments' };
 const KIND: Record<string, ItemType> = { merge_requests: 'pull_request', issues: 'issue', work_items: 'issue', commit: 'commit', pipelines: 'workflow_run', releases: 'release' };
 // Confidential issues are not handled: their titles would become visible to everyone who can see the Kernel record.
-const HANDLED: Record<string, string> = { 'Merge Request Hook': 'merge_request', 'Issue Hook': 'issue', 'Push Hook': 'push', 'Pipeline Hook': 'pipeline', 'Release Hook': 'release' };
+const HANDLED: Record<string, string> = { 'Merge Request Hook': 'merge_request', 'Issue Hook': 'issue', 'Push Hook': 'push', 'Pipeline Hook': 'pipeline', 'Release Hook': 'release', 'Deployment Hook': 'deployment' };
 
 const mrState = (state: unknown, draft: unknown) => (state === 'opened' ? (draft ? 'draft' : 'open') : state === 'locked' ? 'closed' : String(state ?? 'unknown'));
 const issueState = (state: unknown) => (state === 'opened' ? 'open' : String(state ?? 'unknown'));
@@ -17,7 +17,7 @@ export const gitlab: Adapter = {
   label: 'GitLab',
   scopePattern: /^[\w.-]+(\/[\w.-]+)+$/,
   scopeExample: 'group/project',
-  events: ['Merge request events', 'Issues events', 'Push events', 'Pipeline events', 'Releases events'],
+  events: ['Merge request events', 'Issues events', 'Push events', 'Pipeline events', 'Releases events', 'Deployment events'],
 
   parseUrl(u, bases): ParsedItem | null {
     const base = [GITLAB_COM, ...bases].find((b) => {
@@ -37,12 +37,13 @@ export const gitlab: Adapter = {
   },
 
   async fetchStatus(item, token, get) {
+    if (item.item_type === 'deployment') return {};
     const api = `${item.base}/api/v4/projects/${encodeURIComponent(item.repo)}`;
     const headers: Record<string, string> = token ? { 'PRIVATE-TOKEN': token } : {};
-    const path = { pull_request: `merge_requests/${item.key}`, issue: `issues/${item.key}`, commit: `repository/commits/${item.key}`, workflow_run: `pipelines/${item.key}`, release: `releases/${encodeURIComponent(item.key)}` }[item.item_type];
+    const path = { pull_request: `merge_requests/${item.key}`, issue: `issues/${item.key}`, commit: `repository/commits/${item.key}`, workflow_run: `pipelines/${item.key}`, release: `releases/${encodeURIComponent(item.key)}`, deployment: '' }[item.item_type];
     const j = await get(`${api}/${path}`, headers);
     if (!j) return {};
-    if (item.item_type === 'pull_request') return { title: j.title, state: mrState(j.state, j.draft ?? j.work_in_progress), checks: ciState(j.head_pipeline?.status) ?? null, author: j.author?.username };
+    if (item.item_type === 'pull_request') return { title: j.title, state: mrState(j.state, j.draft ?? j.work_in_progress), checks: ciState(j.head_pipeline?.status) ?? null, author: j.author?.username, data: { sha: j.sha ?? undefined, merge_sha: j.merge_commit_sha ?? undefined } };
     if (item.item_type === 'issue') return { title: j.title, state: issueState(j.state), author: j.author?.username };
     if (item.item_type === 'commit') return { title: j.title ?? firstLine(j.message), state: 'committed', author: j.author_name };
     if (item.item_type === 'workflow_run') return { title: `${j.name || 'Pipeline'}: ${j.ref ?? ''}`.trim(), state: ciState(j.status), author: j.user?.username };
@@ -66,7 +67,8 @@ export const gitlab: Adapter = {
     if (event === 'merge_request' && a.iid) {
       const id = await ctx.upsert({
         ...base, item_type: 'pull_request', key: String(a.iid), url: a.url, title: a.title,
-        state: mrState(a.state, a.draft ?? a.work_in_progress), author: b.user?.username, data: { branch: a.source_branch, base: a.target_branch },
+        state: mrState(a.state, a.draft ?? a.work_in_progress), author: b.user?.username,
+        data: { branch: a.source_branch, base: a.target_branch, sha: a.last_commit?.id, ...(a.merge_commit_sha ? { merge_sha: a.merge_commit_sha } : {}) },
       });
       return ctx.mention(id, `${a.title ?? ''}\n${a.description ?? ''}\n${a.source_branch ?? ''}`);
     }
@@ -92,6 +94,22 @@ export const gitlab: Adapter = {
       const id = await ctx.upsert({ ...base, item_type: 'release', key: String(b.tag), url: b.url, title: b.name || b.tag, state: b.action === 'delete' ? 'deleted' : 'published' });
       return ctx.mention(id, `${b.name ?? ''}\n${b.description ?? ''}`);
     }
+    if (event === 'deployment' && b.deployment_id) {
+      const sha = String(b.commit_url ?? '').match(/\/commit\/([0-9a-f]{7,40})$/i)?.[1];
+      return ctx.deployed({
+        repo, key: String(b.deployment_id), url: b.deployable_url || `${b.project?.web_url}/-/environments`, environment: String(b.environment ?? ''), state: ciState(b.status) ?? 'unknown',
+        title: `${b.environment ?? 'Deployment'}: ${b.ref ?? b.short_sha ?? ''}`.trim(), author: b.user?.username, sha,
+        rollback: isRollback(b.commit_title), finished_at: b.status_changed_at, text: `${b.ref ?? ''}\n${b.commit_title ?? ''}`,
+      });
+    }
     return [];
+  },
+
+  async postStatus(item, base, token, post, s) {
+    const sha = item.data.sha;
+    if (!sha) return false;
+    return post(`${base}/api/v4/projects/${encodeURIComponent(item.repo)}/statuses/${sha}`, { 'PRIVATE-TOKEN': token }, {
+      state: s.state === 'failure' ? 'failed' : s.state, name: 'kernel/change', description: s.description, target_url: s.target_url,
+    });
   },
 };

@@ -1,6 +1,6 @@
 import { buildApp } from './app.js';
 import { logger } from './log.js';
-import { pruneDeliveries } from './dev.js';
+import { pruneDeliveries, refreshWindowStatuses } from './dev.js';
 import { startChainVerification } from './audit.js';
 import { purgeSecurityEvents } from './security-events.js';
 import { asSystem } from './context.js';
@@ -48,6 +48,8 @@ asSystem(() => {
   startChainVerification((msg) => app.log.error(msg));
   setInterval(() => pruneIdempotencyKeys().catch(() => {}), 3600_000).unref();
   setInterval(() => pruneDeliveries().catch(() => {}), 3600_000).unref();
+  // A change window opening or closing changes the status on its pull requests (#32).
+  setInterval(() => refreshWindowStatuses().catch(() => {}), 5 * 60_000).unref();
 });
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
