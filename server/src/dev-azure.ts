@@ -3,7 +3,7 @@
 // weaker than GitHub's HMAC (whoever sees one delivery can send others), so they are only accepted over HTTPS, from an
 // allowlisted organisation/project, and replays are refused on notificationId + id.
 import { badRequest } from './errors.js';
-import { ciState, firstLine, isRollback, pushCommits, sameSecret, type Adapter, type ParsedItem } from './dev-platform.js';
+import { ciState, firstLine, iso, isRollback, pushCommits, sameSecret, type Adapter, type ParsedItem } from './dev-platform.js';
 
 export const AZURE_DEVOPS = 'https://dev.azure.com';
 const HANDLED = new Set(['git.pullrequest.created', 'git.pullrequest.updated', 'git.pullrequest.merged', 'workitem.created', 'workitem.updated', 'git.push', 'build.complete', 'ms.vss-release.deployment-completed-event']);
@@ -76,7 +76,7 @@ export const azureDevOps: Adapter = {
     const v = 'api-version=7.1';
     if (item.item_type === 'pull_request') {
       const j = await get(`${api}/git/pullrequests/${item.key}?${v}`, headers);
-      return j ? { title: j.title, state: prState(j.status, j.isDraft), author: person(j.createdBy), data: { sha: j.lastMergeSourceCommit?.commitId, merge_sha: j.lastMergeCommit?.commitId } } : {};
+      return j ? { title: j.title, state: prState(j.status, j.isDraft), author: person(j.createdBy), data: { sha: j.lastMergeSourceCommit?.commitId, merge_sha: j.lastMergeCommit?.commitId, merged_at: j.status === 'completed' ? iso(j.closedDate) : undefined } } : {};
     }
     if (item.item_type === 'issue') {
       const j = await get(`${api}/wit/workitems/${item.key}?${v}`, headers);
@@ -125,7 +125,7 @@ export const azureDevOps: Adapter = {
       const id = await ctx.upsert({
         ...base, item_type: 'pull_request', key: String(r.pullRequestId), url: `${root}/_git/${enc(repository)}/pullrequest/${r.pullRequestId}`, title: r.title,
         state: prState(r.status, r.isDraft), author: person(r.createdBy),
-        data: { repository, branch: branchName(r.sourceRefName), base: branchName(r.targetRefName), sha: r.lastMergeSourceCommit?.commitId, ...(r.status === 'completed' && r.lastMergeCommit?.commitId ? { merge_sha: r.lastMergeCommit.commitId } : {}) },
+        data: { repository, branch: branchName(r.sourceRefName), base: branchName(r.targetRefName), sha: r.lastMergeSourceCommit?.commitId, ...(r.status === 'completed' && r.lastMergeCommit?.commitId ? { merge_sha: r.lastMergeCommit.commitId } : {}), ...(r.status === 'completed' ? { merged_at: iso(r.closedDate) } : {}) },
       });
       return ctx.mention(id, `${r.title ?? ''}\n${r.description ?? ''}\n${branchName(r.sourceRefName)}`);
     }

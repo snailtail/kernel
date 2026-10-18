@@ -679,10 +679,11 @@ export async function registerStandardChange(user: User, input: z.infer<typeof r
 /**
  * A successful production deploy registers a standard change (#32): the deploy target's template, its CIs and the
  * deploy's times, closed as successful. The admin who enabled the target chose the template, so no account scope
- * applies, but the template's CI types, risk ceiling and change freezes do. Idempotent on the platform deployment:
+ * applies (the history names them as authorised_by, with the target), but the template's CI types, risk ceiling and
+ * change freezes do. Idempotent on the platform deployment:
  * the same deploy delivered twice returns the change it already registered.
  */
-export async function registerDeploymentChange(input: { template_id: number; title: string; description: string; cis: string[]; actual_start: string; actual_end: string; source_key: string }) {
+export async function registerDeploymentChange(input: { template_id: number; title: string; description: string; cis: string[]; actual_start: string; actual_end: string; source_key: string; target_id: number; authorised_by: number | null }) {
   const { rows: existing } = await query('SELECT ref FROM changes WHERE source_key = $1', [input.source_key]);
   if (existing[0]) return { ref: existing[0].ref as string, created: false };
   const t = await checkTemplateScope(null, input.template_id, input.cis, input.actual_start, input.actual_end);
@@ -699,7 +700,7 @@ export async function registerDeploymentChange(input: { template_id: number; tit
       return { ref: again[0].ref as string, created: false };
     }
     await attachCis(db, rows[0].id, input.cis, null);
-    await logChange(db, rows[0].id, null, 'created', `Standard change ${rows[0].ref} registered by a production deploy`, { template: t.name, cis: input.cis, outcome: 'successful', deployment: input.source_key });
+    await logChange(db, rows[0].id, null, 'created', `Standard change ${rows[0].ref} registered by a production deploy`, { template: t.name, cis: input.cis, outcome: 'successful', deployment: input.source_key, deploy_target: input.target_id, authorised_by: input.authorised_by });
     return { ref: rows[0].ref as string, created: true };
   });
 }

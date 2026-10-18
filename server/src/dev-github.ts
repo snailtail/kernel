@@ -2,7 +2,7 @@
 // X-Hub-Signature-256 (HMAC-SHA256 of the raw body), the strongest verification of the three platforms.
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { badRequest } from './errors.js';
-import { ciState, firstLine, isRollback, pushCommits, type Adapter, type ItemType, type ParsedItem } from './dev-platform.js';
+import { ciState, firstLine, iso, isRollback, pushCommits, type Adapter, type ItemType, type ParsedItem } from './dev-platform.js';
 
 /** GitHub signs each delivery: X-Hub-Signature-256 = sha256=HMAC(secret, raw body). */
 export function verifyGitHubSignature(secret: string, raw: string, header: string | undefined) {
@@ -40,7 +40,7 @@ export const github: Adapter = {
     const path = { pull_request: `pulls/${item.key}`, issue: `issues/${item.key}`, commit: `commits/${item.key}`, workflow_run: `actions/runs/${item.key}`, release: `releases/tags/${encodeURIComponent(item.key)}` }[item.item_type];
     const j = await get(`https://api.github.com/repos/${item.repo}/${path}`, headers);
     if (!j) return {};
-    if (item.item_type === 'pull_request') return { title: j.title, state: j.merged_at ? 'merged' : j.draft ? 'draft' : j.state, author: j.user?.login, data: { sha: j.head?.sha, merge_sha: j.merge_commit_sha ?? undefined } };
+    if (item.item_type === 'pull_request') return { title: j.title, state: j.merged_at ? 'merged' : j.draft ? 'draft' : j.state, author: j.user?.login, data: { sha: j.head?.sha, merge_sha: j.merge_commit_sha ?? undefined, merged_at: iso(j.merged_at) } };
     if (item.item_type === 'issue') return { title: j.title, state: j.state, author: j.user?.login };
     if (item.item_type === 'commit') return { title: firstLine(j.commit?.message), state: 'committed', author: j.author?.login ?? j.commit?.author?.name };
     if (item.item_type === 'workflow_run') return { title: j.display_title ?? j.name, state: j.conclusion ?? j.status, author: j.actor?.login };
@@ -66,7 +66,7 @@ export const github: Adapter = {
       const id = await ctx.upsert({
         ...base, item_type: 'pull_request', key: String(p.number), url: p.html_url, title: p.title,
         state: p.merged_at ? 'merged' : p.draft ? 'draft' : p.state, author: p.user?.login,
-        data: { branch: p.head?.ref, base: p.base?.ref, sha: p.head?.sha, ...(p.merged_at && p.merge_commit_sha ? { merge_sha: p.merge_commit_sha } : {}) },
+        data: { branch: p.head?.ref, base: p.base?.ref, sha: p.head?.sha, ...(p.merged_at && p.merge_commit_sha ? { merge_sha: p.merge_commit_sha } : {}), merged_at: iso(p.merged_at) },
       });
       return ctx.mention(id, `${p.title}\n${p.body ?? ''}\n${p.head?.ref ?? ''}`);
     }

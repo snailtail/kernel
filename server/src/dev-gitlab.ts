@@ -2,7 +2,7 @@
 // the source's secret in X-Gitlab-Token (no signature over the body), compared in constant time; replays are refused
 // on X-Gitlab-Event-UUID.
 import { badRequest } from './errors.js';
-import { ciState, firstLine, isRollback, pushCommits, sameSecret, type Adapter, type ItemType, type ParsedItem } from './dev-platform.js';
+import { ciState, firstLine, iso, pushCommits, sameSecret, type Adapter, type ItemType, type ParsedItem } from './dev-platform.js';
 
 export const GITLAB_COM = 'https://gitlab.com';
 const SEGMENT: Record<ItemType, string> = { pull_request: 'merge_requests', issue: 'issues', commit: 'commit', workflow_run: 'pipelines', release: 'releases', deployment: 'environments' };
@@ -43,7 +43,7 @@ export const gitlab: Adapter = {
     const path = { pull_request: `merge_requests/${item.key}`, issue: `issues/${item.key}`, commit: `repository/commits/${item.key}`, workflow_run: `pipelines/${item.key}`, release: `releases/${encodeURIComponent(item.key)}`, deployment: '' }[item.item_type];
     const j = await get(`${api}/${path}`, headers);
     if (!j) return {};
-    if (item.item_type === 'pull_request') return { title: j.title, state: mrState(j.state, j.draft ?? j.work_in_progress), checks: ciState(j.head_pipeline?.status) ?? null, author: j.author?.username, data: { sha: j.sha ?? undefined, merge_sha: j.merge_commit_sha ?? undefined } };
+    if (item.item_type === 'pull_request') return { title: j.title, state: mrState(j.state, j.draft ?? j.work_in_progress), checks: ciState(j.head_pipeline?.status) ?? null, author: j.author?.username, data: { sha: j.sha ?? undefined, merge_sha: j.merge_commit_sha ?? undefined, merged_at: iso(j.merged_at) } };
     if (item.item_type === 'issue') return { title: j.title, state: issueState(j.state), author: j.author?.username };
     if (item.item_type === 'commit') return { title: j.title ?? firstLine(j.message), state: 'committed', author: j.author_name };
     if (item.item_type === 'workflow_run') return { title: `${j.name || 'Pipeline'}: ${j.ref ?? ''}`.trim(), state: ciState(j.status), author: j.user?.username };
@@ -68,7 +68,9 @@ export const gitlab: Adapter = {
       const id = await ctx.upsert({
         ...base, item_type: 'pull_request', key: String(a.iid), url: a.url, title: a.title,
         state: mrState(a.state, a.draft ?? a.work_in_progress), author: b.user?.username,
-        data: { branch: a.source_branch, base: a.target_branch, sha: a.last_commit?.id, ...(a.merge_commit_sha ? { merge_sha: a.merge_commit_sha } : {}) },
+        data: { branch: a.source_branch, base: a.target_branch, sha: a.last_commit?.id, ...(a.merge_commit_sha ? { merge_sha: a.merge_commit_sha } : {}),
+          // The hook has no merged_at of its own: the merge event's time is when it was merged; later edits keep it.
+          ...(iso(a.merged_at) ?? (a.action === 'merge' ? iso(a.updated_at) : undefined) ? { merged_at: iso(a.merged_at) ?? iso(a.updated_at) } : {}) },
       });
       return ctx.mention(id, `${a.title ?? ''}\n${a.description ?? ''}\n${a.source_branch ?? ''}`);
     }
@@ -99,7 +101,7 @@ export const gitlab: Adapter = {
       return ctx.deployed({
         repo, key: String(b.deployment_id), url: b.deployable_url || `${b.project?.web_url}/-/environments`, environment: String(b.environment ?? ''), state: ciState(b.status) ?? 'unknown',
         title: `${b.environment ?? 'Deployment'}: ${b.ref ?? b.short_sha ?? ''}`.trim(), author: b.user?.username, sha,
-        rollback: isRollback(b.commit_title), finished_at: b.status_changed_at, text: `${b.ref ?? ''}\n${b.commit_title ?? ''}`,
+        finished_at: b.status_changed_at, text: `${b.ref ?? ''}\n${b.commit_title ?? ''}`,
       });
     }
     return [];
