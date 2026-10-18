@@ -95,7 +95,7 @@ describe('dev platform links (#32)', { skip }, () => {
 
   test('links pasted in Kernel; viewers read but cannot add; agents link and see titles as untrusted', async () => {
     assert.equal((await viewer.post(`/api/records/${prb}/dev-links`, { url: 'https://github.com/acme/shop/issues/7' })).status, 403);
-    assert.equal((await analyst.post(`/api/records/${prb}/dev-links`, { url: 'https://gitlab.com/acme/shop/-/merge_requests/1' })).status, 400);
+    assert.equal((await analyst.post(`/api/records/${prb}/dev-links`, { url: 'https://bitbucket.org/acme/shop/pull-requests/1' })).status, 400);
     const added = (await analyst.post(`/api/records/${prb}/dev-links`, { url: 'https://github.com/acme/shop/issues/7' })).body;
     assert.ok(added.some((l: any) => l.item_type === 'issue' && l.key === '7'));
     assert.ok((await viewer.get(`/api/records/${prb}/dev-links`)).body.length >= 2);
