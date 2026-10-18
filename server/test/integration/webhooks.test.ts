@@ -3,7 +3,7 @@ import { createHmac } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { after, before, describe, test } from 'node:test';
-import { Client, skip, startKernel, type Harness } from './harness.js';
+import { Client, ownerQuery, skip, startKernel, type Harness } from './harness.js';
 
 describe('webhooks and watching', { skip }, () => {
   let k: Harness;
@@ -71,6 +71,23 @@ describe('webhooks and watching', { skip }, () => {
     const other = (await pool.query('SELECT status FROM webhook_deliveries WHERE id = $1', [queuedNow.rows[0].id])).rows[0];
     assert.equal(other.status, 'pending', 'other due deliveries are left to the worker');
     await pool.query("DELETE FROM webhook_deliveries WHERE event = 'problem.updated'");
+  });
+
+  test('deleting a webhook takes its reason from the body, never from the query string', async () => {
+    const hook = (await admin.post('/api/webhooks', { name: 'Short-lived', url: 'https://hooks.example.com/gone', events: [] })).body;
+    const { pool } = await import('../../src/db.js');
+    const audited = async () => (await ownerQuery("SELECT reason FROM audit_log WHERE entity_type = 'webhook' AND entity_ref = $1 AND action = 'delete'", [String(hook.id)])).rows;
+    // The old shape put the reason in the query string, where proxy and request logs keep it: refused, nothing stored.
+    const old = await admin.del(`/api/webhooks/${hook.id}?reason=${encodeURIComponent('Query reason about Bob')}`);
+    assert.equal(old.status, 400);
+    assert.match(old.body.error, /POST \/api\/webhooks\/:id\/delete/);
+    assert.deepEqual(await audited(), []);
+    assert.equal((await pool.query('SELECT count(*)::int AS n FROM webhooks WHERE id = $1', [hook.id])).rows[0].n, 1, 'not deleted');
+    assert.equal((await admin.post(`/api/webhooks/${hook.id}/delete`, {})).status, 400, 'a reason is required');
+    assert.equal((await pm.post(`/api/webhooks/${hook.id}/delete`, { reason: 'x' })).status, 403);
+    assert.equal((await admin.post(`/api/webhooks/${hook.id}/delete`, { reason: 'Receiver retired' })).status, 200);
+    assert.deepEqual((await audited()).map((r) => r.reason), ['Receiver retired']);
+    assert.equal((await ownerQuery("SELECT count(*)::int AS n FROM audit_log WHERE reason LIKE '%Bob%'")).rows[0].n, 0);
   });
 
   test('changes are delivered with Standard Webhooks signatures, minimal data, filtered by event, and retried', async () => {
