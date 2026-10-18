@@ -3,10 +3,10 @@
 // weaker than GitHub's HMAC (whoever sees one delivery can send others), so they are only accepted over HTTPS, from an
 // allowlisted organisation/project, and replays are refused on notificationId + id.
 import { badRequest } from './errors.js';
-import { ciState, firstLine, pushCommits, sameSecret, type Adapter, type ParsedItem } from './dev-platform.js';
+import { ciState, firstLine, isRollback, pushCommits, sameSecret, type Adapter, type ParsedItem } from './dev-platform.js';
 
 export const AZURE_DEVOPS = 'https://dev.azure.com';
-const HANDLED = new Set(['git.pullrequest.created', 'git.pullrequest.updated', 'git.pullrequest.merged', 'workitem.created', 'workitem.updated', 'git.push', 'build.complete']);
+const HANDLED = new Set(['git.pullrequest.created', 'git.pullrequest.updated', 'git.pullrequest.merged', 'workitem.created', 'workitem.updated', 'git.push', 'build.complete', 'ms.vss-release.deployment-completed-event']);
 const enc = encodeURIComponent;
 const web = (org: string, project: string) => `${AZURE_DEVOPS}/${enc(org)}/${enc(project)}`;
 
@@ -39,7 +39,7 @@ export const azureDevOps: Adapter = {
   label: 'Azure DevOps',
   scopePattern: /^[\w.-]+\/[\w .-]+$/,
   scopeExample: 'organisation/project',
-  events: ['Pull request created', 'Pull request updated', 'Pull request merge attempted', 'Work item created', 'Work item updated', 'Code pushed', 'Build completed'],
+  events: ['Pull request created', 'Pull request updated', 'Pull request merge attempted', 'Work item created', 'Work item updated', 'Code pushed', 'Build completed', 'Release deployment completed'],
   httpsOnly: true,
 
   parseUrl(u): ParsedItem | null {
@@ -69,13 +69,14 @@ export const azureDevOps: Adapter = {
   },
 
   async fetchStatus(item, token, get) {
+    if (item.item_type === 'deployment') return {};
     const [org, project] = [item.repo.slice(0, item.repo.indexOf('/')), item.repo.slice(item.repo.indexOf('/') + 1)];
     const headers: Record<string, string> = token ? { Authorization: `Basic ${Buffer.from(`:${token}`).toString('base64')}` } : {};
     const api = `${web(org, project)}/_apis`;
     const v = 'api-version=7.1';
     if (item.item_type === 'pull_request') {
       const j = await get(`${api}/git/pullrequests/${item.key}?${v}`, headers);
-      return j ? { title: j.title, state: prState(j.status, j.isDraft), author: person(j.createdBy) } : {};
+      return j ? { title: j.title, state: prState(j.status, j.isDraft), author: person(j.createdBy), data: { sha: j.lastMergeSourceCommit?.commitId, merge_sha: j.lastMergeCommit?.commitId } } : {};
     }
     if (item.item_type === 'issue') {
       const j = await get(`${api}/wit/workitems/${item.key}?${v}`, headers);
@@ -123,7 +124,8 @@ export const azureDevOps: Adapter = {
       const repository = String(r.repository?.name ?? '');
       const id = await ctx.upsert({
         ...base, item_type: 'pull_request', key: String(r.pullRequestId), url: `${root}/_git/${enc(repository)}/pullrequest/${r.pullRequestId}`, title: r.title,
-        state: prState(r.status, r.isDraft), author: person(r.createdBy), data: { repository, branch: branchName(r.sourceRefName), base: branchName(r.targetRefName) },
+        state: prState(r.status, r.isDraft), author: person(r.createdBy),
+        data: { repository, branch: branchName(r.sourceRefName), base: branchName(r.targetRefName), sha: r.lastMergeSourceCommit?.commitId, ...(r.status === 'completed' && r.lastMergeCommit?.commitId ? { merge_sha: r.lastMergeCommit.commitId } : {}) },
       });
       return ctx.mention(id, `${r.title ?? ''}\n${r.description ?? ''}\n${branchName(r.sourceRefName)}`);
     }
@@ -153,6 +155,27 @@ export const azureDevOps: Adapter = {
       if (pr && state) await ctx.setChecks(scope, pr, state);
       return ctx.mention(id, `${r.buildNumber ?? ''}\n${branchName(r.sourceBranch)}`, await ctx.refsOf(scope, 'pull_request', pr ? [pr] : []));
     }
+    if (event === 'ms.vss-release.deployment-completed-event' && r.environment?.id) {
+      // A classic release: one deployment per release, stage and attempt.
+      const env = r.environment;
+      const release = env.release ?? r.release ?? {};
+      const attempt = Array.isArray(env.deploySteps) ? env.deploySteps.length : 1;
+      return ctx.deployed({
+        repo: scope, key: `${release.id ?? env.releaseId}-${env.id}-${attempt}`, url: `${root}/_releaseProgress?releaseId=${release.id ?? env.releaseId}&environmentId=${env.id}`,
+        environment: String(env.name ?? ''), state: env.status === 'rejected' ? 'failure' : ciState(env.status) ?? 'unknown', title: `${env.name ?? 'Stage'}: ${release.name ?? ''}`.trim(),
+        author: person(env.deploySteps?.at(-1)?.requestedFor), rollback: isRollback(release.name, release.description, env.deploySteps?.at(-1)?.reason),
+        started_at: env.deploySteps?.at(-1)?.queuedOn, finished_at: env.deploySteps?.at(-1)?.lastModifiedOn, text: `${release.name ?? ''}\n${release.description ?? ''}`,
+      });
+    }
     return [];
+  },
+
+  async postStatus(item, _base, token, post, s) {
+    const [org, project] = [item.repo.slice(0, item.repo.indexOf('/')), item.repo.slice(item.repo.indexOf('/') + 1)];
+    const repository = String(item.data.repository ?? '');
+    if (!repository) return false;
+    return post(`${web(org, project)}/_apis/git/repositories/${enc(repository)}/pullRequests/${item.key}/statuses?api-version=7.1`, { Authorization: `Basic ${Buffer.from(`:${token}`).toString('base64')}` }, {
+      state: { success: 'succeeded', pending: 'pending', failure: 'failed' }[s.state], description: s.description, targetUrl: s.target_url, context: { genre: 'kernel', name: 'change' },
+    });
   },
 };

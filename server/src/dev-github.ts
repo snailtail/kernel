@@ -2,7 +2,7 @@
 // X-Hub-Signature-256 (HMAC-SHA256 of the raw body), the strongest verification of the three platforms.
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { badRequest } from './errors.js';
-import { firstLine, pushCommits, type Adapter, type ItemType, type ParsedItem } from './dev-platform.js';
+import { ciState, firstLine, isRollback, pushCommits, type Adapter, type ItemType, type ParsedItem } from './dev-platform.js';
 
 /** GitHub signs each delivery: X-Hub-Signature-256 = sha256=HMAC(secret, raw body). */
 export function verifyGitHubSignature(secret: string, raw: string, header: string | undefined) {
@@ -12,13 +12,13 @@ export function verifyGitHubSignature(secret: string, raw: string, header: strin
   return given.length === expected.length && timingSafeEqual(given, expected);
 }
 
-const HANDLED = new Set(['pull_request', 'issues', 'push', 'workflow_run', 'check_suite', 'release']);
+const HANDLED = new Set(['pull_request', 'issues', 'push', 'workflow_run', 'check_suite', 'release', 'deployment_status']);
 
 export const github: Adapter = {
   label: 'GitHub',
   scopePattern: /^[\w.-]+\/[\w.-]+$/,
   scopeExample: 'owner/repo',
-  events: ['Pull requests', 'Issues', 'Pushes', 'Workflow runs', 'Check suites', 'Releases'],
+  events: ['Pull requests', 'Issues', 'Pushes', 'Workflow runs', 'Check suites', 'Releases', 'Deployment statuses'],
 
   parseUrl(u): ParsedItem | null {
     if (u.hostname !== 'github.com') return null;
@@ -29,17 +29,18 @@ export const github: Adapter = {
     if ((item_type === 'pull_request' || item_type === 'issue' || item_type === 'workflow_run') && !/^\d+$/.test(key)) throw badRequest('That link has no number');
     if (item_type === 'commit' && !/^[0-9a-f]{7,40}$/i.test(key)) throw badRequest('That link has no commit id');
     const repo = `${owner}/${name}`;
-    const path = { pull_request: 'pull', issue: 'issues', commit: 'commit', workflow_run: 'actions/runs', release: 'releases/tag' }[item_type];
+    const path = { pull_request: 'pull', issue: 'issues', commit: 'commit', workflow_run: 'actions/runs', release: 'releases/tag' }[item_type as Exclude<ItemType, 'deployment'>];
     return { platform: 'github', base: 'https://github.com', repo, item_type, key: decodeURIComponent(key), url: `https://github.com/${repo}/${path}/${key}` };
   },
 
   async fetchStatus(item, token, get) {
+    if (item.item_type === 'deployment') return {};
     const headers: Record<string, string> = { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' };
     if (token) headers.Authorization = `Bearer ${token}`;
     const path = { pull_request: `pulls/${item.key}`, issue: `issues/${item.key}`, commit: `commits/${item.key}`, workflow_run: `actions/runs/${item.key}`, release: `releases/tags/${encodeURIComponent(item.key)}` }[item.item_type];
     const j = await get(`https://api.github.com/repos/${item.repo}/${path}`, headers);
     if (!j) return {};
-    if (item.item_type === 'pull_request') return { title: j.title, state: j.merged_at ? 'merged' : j.draft ? 'draft' : j.state, author: j.user?.login };
+    if (item.item_type === 'pull_request') return { title: j.title, state: j.merged_at ? 'merged' : j.draft ? 'draft' : j.state, author: j.user?.login, data: { sha: j.head?.sha, merge_sha: j.merge_commit_sha ?? undefined } };
     if (item.item_type === 'issue') return { title: j.title, state: j.state, author: j.user?.login };
     if (item.item_type === 'commit') return { title: firstLine(j.commit?.message), state: 'committed', author: j.author?.login ?? j.commit?.author?.name };
     if (item.item_type === 'workflow_run') return { title: j.display_title ?? j.name, state: j.conclusion ?? j.status, author: j.actor?.login };
@@ -64,7 +65,8 @@ export const github: Adapter = {
       const p = b.pull_request;
       const id = await ctx.upsert({
         ...base, item_type: 'pull_request', key: String(p.number), url: p.html_url, title: p.title,
-        state: p.merged_at ? 'merged' : p.draft ? 'draft' : p.state, author: p.user?.login, data: { branch: p.head?.ref, base: p.base?.ref },
+        state: p.merged_at ? 'merged' : p.draft ? 'draft' : p.state, author: p.user?.login,
+        data: { branch: p.head?.ref, base: p.base?.ref, sha: p.head?.sha, ...(p.merged_at && p.merge_commit_sha ? { merge_sha: p.merge_commit_sha } : {}) },
       });
       return ctx.mention(id, `${p.title}\n${p.body ?? ''}\n${p.head?.ref ?? ''}`);
     }
@@ -95,6 +97,32 @@ export const github: Adapter = {
       const id = await ctx.upsert({ ...base, item_type: 'release', key: String(r.tag_name), url: r.html_url, title: r.name || r.tag_name, state: r.draft ? 'draft' : r.prerelease ? 'prerelease' : 'published', author: r.author?.login });
       return ctx.mention(id, `${r.name ?? ''}\n${r.body ?? ''}`);
     }
+    if (event === 'deployment_status' && b.deployment && b.deployment_status) {
+      const d = b.deployment;
+      const st = b.deployment_status;
+      const link = [st.target_url, st.log_url].find((u) => /^https:\/\//.test(String(u ?? ''))) ?? `https://github.com/${repo}/deployments`;
+      return ctx.deployed({
+        repo, key: String(d.id), url: link, environment: String(st.environment ?? d.environment ?? ''), state: deployState(st.state),
+        title: `${d.environment ?? 'Deployment'}: ${d.ref ?? String(d.sha ?? '').slice(0, 7)}`, author: d.creator?.login, sha: d.sha,
+        rollback: d.task === 'rollback' || isRollback(d.description, st.description), started_at: d.created_at, finished_at: st.created_at,
+        text: `${d.description ?? ''}\n${d.ref ?? ''}`,
+      });
+    }
     return [];
   },
+
+  async postStatus(item, _base, token, post, s) {
+    const sha = item.data.sha;
+    if (!sha) return false;
+    return post(`https://api.github.com/repos/${item.repo}/statuses/${sha}`, { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' }, {
+      state: s.state, context: 'kernel/change', description: s.description, target_url: s.target_url,
+    });
+  },
 };
+
+/** GitHub deployment states on the shared scale (error and failure are both failures; inactive is superseded). */
+function deployState(s: unknown) {
+  if (s === 'error') return 'failure';
+  if (s === 'inactive') return 'inactive';
+  return ciState(s) ?? 'unknown';
+}

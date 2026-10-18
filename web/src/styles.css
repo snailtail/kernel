@@ -1149,6 +1149,8 @@ tr.total td { border-bottom: 2px solid var(--border-strong); }
 .dev-fail { background: var(--danger-soft); color: var(--danger); }
 .dev-draft, .dev-closed { background: var(--surface-2); color: var(--text-2); }
 .dev-source { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.dev-source-details { flex-basis: 100%; padding: 4px 0 8px; }
+.dev-source-details h3 { font-size: 14px; margin: 12px 0 4px; }
 /* AI (#68) */
 .ai-output { border: 1px dashed var(--accent); border-radius: var(--radius); padding: 10px 12px; background: var(--accent-soft); display: flex; flex-direction: column; gap: 8px; }
 .ai-label { font-size: 0.8rem; font-weight: 600; color: var(--accent); }

@@ -475,7 +475,9 @@ function EditChange({ change: c, onClose, onDone }: { change: Change; onClose: (
 }
 
 function FinishChange({ change: c, to, onClose, onDone }: { change: Change; to: 'review' | 'closed'; onClose: () => void; onDone: (c: Change) => void }) {
-  const [outcome, setOutcome] = useState(c.outcome ?? 'successful');
+  // Linked deployments may suggest an outcome (#32): preselected, but the person decides.
+  const suggestion = c.next_steps.steps.find((s) => s.id === 'implement')?.suggestion;
+  const [outcome, setOutcome] = useState(c.outcome ?? suggestion?.outcome ?? 'successful');
   const [review, setReview] = useState(c.review);
   const [error, setError] = useState<string | null>(null);
   const needsReview = to === 'closed' && (c.outcome !== 'successful' || c.change_type === 'emergency');
@@ -486,7 +488,10 @@ function FinishChange({ change: c, to, onClose, onDone }: { change: Change; to: 
         try { onDone(await api.post<Change>(`/api/changes/${c.ref}/transition`, to === 'review' ? { to, outcome } : { to, review })); } catch (err) { setError((err as Error).message); }
       }}>
         {to === 'review' ? (
-          <label className="full">Outcome<select value={outcome} onChange={(e) => setOutcome(e.target.value)}>{Object.entries(OUTCOME).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
+          <>
+            <label className="full">Outcome<select value={outcome} onChange={(e) => setOutcome(e.target.value)}>{Object.entries(OUTCOME).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
+            {suggestion?.outcome && <p className="hint full small">Suggested from the linked work: {suggestion.reason}.</p>}
+          </>
         ) : (
           <label className="full">Post-implementation review {needsReview ? <span className="muted small">(required)</span> : <span className="muted small">(optional)</span>}
             <textarea rows={5} required={needsReview} placeholder="What happened, what went well, what to improve" value={review} onChange={(e) => setReview(e.target.value)} />
