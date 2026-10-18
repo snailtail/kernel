@@ -10,6 +10,7 @@ import { badRequest, notFound } from './errors.js';
 import { logIncident } from './incident-log.js';
 import { notify } from './notifications.js';
 import { authorize } from './policy.js';
+import { cancelOutside, followers, queueOutside, signUpOpen } from './status-subscriptions.js';
 
 export const STATUSES = ['operational', 'degraded', 'partial_outage', 'major_outage', 'maintenance'] as const;
 export const PHASES = ['investigating', 'identified', 'monitoring', 'resolved', 'maintenance'] as const;
@@ -52,14 +53,18 @@ export async function statusBoard(user: User) {
   const [{ rows: services }, sug, { rows: updates }, { rows: planned }] = await Promise.all([
     query(
       `SELECT c.id, c.ref, c.name, c.criticality, coalesce(s.status, 'operational') AS status, coalesce(s.public, false) AS public, coalesce(s.public_name, '') AS public_name, coalesce(s.public_description, '') AS public_description, coalesce(s.public_status, 'operational') AS public_status,
-              s.updated_at, u.display_name AS updated_by
+              s.updated_at, u.display_name AS updated_by,
+              EXISTS (SELECT 1 FROM status_follows f WHERE f.user_id = $1 AND f.ci_id = c.id) AS following
        FROM configuration_items c LEFT JOIN service_status s ON s.ci_id = c.id LEFT JOIN users u ON u.id = s.updated_by
        WHERE c.class = 'service' AND c.status <> 'retired' ORDER BY c.criticality, c.name`,
+      [user.id],
     ),
     suggestions(),
     query(
       `SELECT su.id, su.phase, su.status, su.message, su.public, su.retracted_at, su.created_at, i.ref AS incident, u.display_name AS author,
-              (SELECT array_agg(c.name ORDER BY c.name) FROM configuration_items c WHERE c.id = ANY(su.ci_ids)) AS services
+              (SELECT array_agg(c.name ORDER BY c.name) FROM configuration_items c WHERE c.id = ANY(su.ci_ids)) AS services,
+              (SELECT json_build_object('sent', count(*) FILTER (WHERE d.status = 'sent'), 'pending', count(*) FILTER (WHERE d.status IN ('pending', 'sending')), 'failed', count(*) FILTER (WHERE d.status = 'failed'))
+               FROM status_deliveries d WHERE d.update_id = su.id) AS outside
        FROM status_updates su LEFT JOIN incidents i ON i.id = su.incident_id LEFT JOIN users u ON u.id = su.created_by
        ORDER BY su.created_at DESC LIMIT 30`,
     ),
@@ -75,7 +80,7 @@ export async function statusBoard(user: User) {
     services: services.map((s) => ({ ...s, ...(sug.get(s.id) ?? { suggested: 'operational', incidents: [], in_maintenance: false }) })),
     updates,
     planned_maintenance: planned,
-    settings: await pageSettings(),
+    settings: { ...(await pageSettings()), sign_up: await signUpOpen() },
   };
 }
 
@@ -131,12 +136,15 @@ export async function setPublicService(user: User, ref: string, input: z.infer<t
   return statusBoard(user);
 }
 
-/** Takes a published update off the public page (kept internally, audited). */
+/** Takes a published update off the public page and stops mail not yet sent (kept internally, audited). */
 export async function retractUpdate(user: User, id: number, reason: string) {
   authorize(user, 'status.publish');
-  const { rowCount } = await query('UPDATE status_updates SET public = false, retracted_at = now() WHERE id = $1 AND public', [id]);
-  if (!rowCount) throw notFound('No published update with that id');
-  await audit(null, { entity_type: 'status_update', entity_ref: `#${id}`, action: 'retract', reason });
+  await tx(async (db) => {
+    const { rowCount } = await db.query('UPDATE status_updates SET public = false, retracted_at = now() WHERE id = $1 AND public', [id]);
+    if (!rowCount) throw notFound('No published update with that id');
+    await cancelOutside(db, id);
+    await audit(db, { entity_type: 'status_update', entity_ref: `#${id}`, action: 'retract', reason });
+  });
   return { ok: true };
 }
 
@@ -162,7 +170,7 @@ export async function postUpdate(user: User, input: z.infer<typeof updateSchema>
       if (!rows[0]) throw notFound(`Incident ${input.incident} not found`);
       incident = rows[0];
     }
-    await db.query('INSERT INTO status_updates (incident_id, ci_ids, phase, status, message, public, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7)', [
+    const { rows: created } = await db.query('INSERT INTO status_updates (incident_id, ci_ids, phase, status, message, public, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id', [
       incident?.id ?? null, svcs.map((s) => s.id), input.phase, input.status ?? null, input.message, input.public, user.id,
     ]);
     if (input.status) {
@@ -176,7 +184,9 @@ export async function postUpdate(user: User, input: z.infer<typeof updateSchema>
         if (input.public) await db.query('UPDATE service_status SET public_status = $2 WHERE ci_id = $1 AND public', [s.id, input.status]);
       }
     }
-    if (incident) await logIncident(db, incident.id, user.id, 'communication', `${input.public ? 'Public status update' : 'Status update'} (${input.phase}): ${input.message}`, { phase: input.phase, status: input.status ?? null, public: input.public });
+    // Published: subscribers, organisation contacts and status webhooks hear about it (after the statuses above).
+    const outside = input.public ? await queueOutside(db, created[0].id) : null;
+    if (incident) await logIncident(db, incident.id, user.id, 'communication', `${input.public ? 'Public status update' : 'Status update'} (${input.phase}): ${input.message}`, { phase: input.phase, status: input.status ?? null, public: input.public, ...(outside ? { outside } : {}) });
     // The teams that support these services hear about it.
     const { rows: members } = await db.query(
       "SELECT DISTINCT m.user_id FROM team_cis tc JOIN team_members m ON m.team_id = tc.team_id WHERE tc.ci_id = ANY($1)",
@@ -184,7 +194,12 @@ export async function postUpdate(user: User, input: z.infer<typeof updateSchema>
     );
     await notify(db, {
       users: members.map((m) => m.user_id), event: 'watched_update', ref: incident?.ref ?? svcs[0].ref, title: svcs.map((s) => s.name).join(', '),
-      summary: `${input.phase[0].toUpperCase()}${input.phase.slice(1)}: ${input.message}`, path: '/status', dedupe: `status:${Date.now()}:${svcs[0].ref}`, actorId: user.id,
+      summary: `${input.phase[0].toUpperCase()}${input.phase.slice(1)}: ${input.message}`, path: '/service-status', dedupe: `status:${Date.now()}:${svcs[0].ref}`, actorId: user.id,
+    });
+    // People who follow these services, by their own channels (once, if they are also in a supporting team).
+    await notify(db, {
+      users: await followers(db, svcs.map((s) => s.id), members.map((m) => m.user_id)), event: 'service_status', ref: incident?.ref ?? svcs[0].ref, title: svcs.map((s) => s.name).join(', '),
+      summary: `${input.phase[0].toUpperCase()}${input.phase.slice(1)}: ${input.message}`, path: '/service-status', dedupe: `status-follow:${created[0].id}`, actorId: user.id,
     });
     await audit(db, { entity_type: 'status_update', entity_ref: incident?.ref ?? svcs.map((s) => s.ref).join(','), action: 'create', changes: { phase: input.phase, status: input.status ?? null, public: input.public, services: svcs.map((s) => s.ref) } });
   });
@@ -193,7 +208,7 @@ export async function postUpdate(user: User, input: z.infer<typeof updateSchema>
 
 // ---- The public page ---------------------------------------------------------------------------------------------
 
-async function pageSettings() {
+export async function pageSettings() {
   const { rows } = await query("SELECT value FROM settings WHERE key = 'status_page'");
   return { public_enabled: false, title: 'Service status', ...(rows[0]?.value ?? {}) } as { public_enabled: boolean; title: string };
 }
@@ -220,26 +235,40 @@ export async function publicStatus() {
       ),
     ]);
     // No generation timestamp: the ETag then changes only when something published changes.
-    return { title: s.title, services, updates: updates.filter((u) => u.services?.length) };
+    return { title: s.title, services, updates: updates.filter((u) => u.services?.length), sign_up: await signUpOpen() };
   });
 }
 
+const STYLE = `body{font-family:system-ui,sans-serif;max-width:46rem;margin:2rem auto;padding:0 1rem;color:#1b1f27;background:#f6f7f9}h1{font-size:1.5rem}h2{font-size:1.15rem}
+.banner{padding:1rem;border-radius:8px;font-weight:600;margin:1rem 0}.s-operational{background:#e7f6ee;color:#1b7f4b}.s-maintenance{background:#e6eeff;color:#1d4ed8}
+.s-degraded{background:#fff3e0;color:#b45309}.s-partial_outage{background:#fde7d9;color:#c2410c}.s-major_outage{background:#fdecec;color:#c62828}
+ul{list-style:none;padding:0;background:#fff;border:1px solid #e3e6eb;border-radius:8px}li{display:flex;justify-content:space-between;gap:1rem;padding:.75rem 1rem;border-bottom:1px solid #e3e6eb}li:last-child{border-bottom:0}
+.tag{font-size:.85rem;padding:.1rem .5rem;border-radius:999px;white-space:nowrap;align-self:center}.u{background:#fff;border:1px solid #e3e6eb;border-radius:8px;padding:.75rem 1rem;margin:.5rem 0}.m{color:#5b6473;font-size:.85rem}
+form{display:grid;gap:.75rem}fieldset{border:1px solid #e3e6eb;border-radius:8px;display:flex;flex-wrap:wrap;gap:.5rem 1.25rem}input[type=email]{font:inherit;padding:.5rem;border:1px solid #c9ced6;border-radius:6px;width:100%;box-sizing:border-box;max-width:24rem}
+button{font:inherit;padding:.5rem 1rem;border-radius:6px;border:0;background:#1d4ed8;color:#fff;justify-self:start;cursor:pointer}
+@media (prefers-color-scheme:dark){body{background:#0f1218;color:#e6e8ec}ul,.u{background:#171b23;border-color:#2a303b}li,fieldset{border-color:#2a303b}.m{color:#9aa3b2}input[type=email]{background:#171b23;color:inherit;border-color:#2a303b}button{background:#3b6ef5}}`;
+
+/** A one-message page for people outside (sign-up, confirmation, unsubscribe): no scripts, every value escaped. */
+export function outsidePage(text: string, form = '') {
+  // nosemgrep: raw-html-format -- text is escaped here; form is built by the caller from escaped values
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><title>Service status</title><style>${STYLE}</style></head><body><p>${esc(text)}</p>${form}</body></html>`;
+}
+
 const LABEL: Record<string, string> = { operational: 'Operational', degraded: 'Degraded performance', partial_outage: 'Partial outage', major_outage: 'Major outage', maintenance: 'Maintenance' };
-const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+export const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 /** The public page as plain HTML: no scripts, no external resources, every value escaped. */
 export function publicStatusHtml(p: NonNullable<Awaited<ReturnType<typeof publicStatus>>>) {
   const worst = p.services.reduce((acc: string, s: any) => (RANK[s.status as Status] > RANK[acc as Status] ? s.status : acc), 'operational');
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(p.title)}</title>
-<style>body{font-family:system-ui,sans-serif;max-width:46rem;margin:2rem auto;padding:0 1rem;color:#1b1f27;background:#f6f7f9}h1{font-size:1.5rem}
-.banner{padding:1rem;border-radius:8px;font-weight:600;margin:1rem 0}.s-operational{background:#e7f6ee;color:#1b7f4b}.s-maintenance{background:#e6eeff;color:#1d4ed8}
-.s-degraded{background:#fff3e0;color:#b45309}.s-partial_outage{background:#fde7d9;color:#c2410c}.s-major_outage{background:#fdecec;color:#c62828}
-ul{list-style:none;padding:0;background:#fff;border:1px solid #e3e6eb;border-radius:8px}li{display:flex;justify-content:space-between;gap:1rem;padding:.75rem 1rem;border-bottom:1px solid #e3e6eb}li:last-child{border-bottom:0}
-.tag{font-size:.85rem;padding:.1rem .5rem;border-radius:999px}.u{background:#fff;border:1px solid #e3e6eb;border-radius:8px;padding:.75rem 1rem;margin:.5rem 0}.m{color:#5b6473;font-size:.85rem}
-@media (prefers-color-scheme:dark){body{background:#0f1218;color:#e6e8ec}ul,.u{background:#171b23;border-color:#2a303b}li{border-color:#2a303b}.m{color:#9aa3b2}}</style></head><body>
+<style>${STYLE}</style></head><body>
 <h1>${esc(p.title)}</h1>
 <div class="banner s-${esc(worst)}">${worst === 'operational' ? 'All services are operating normally' : esc(LABEL[worst])}</div>
 <ul>${p.services.map((s: any) => `<li><span>${esc(s.name)}${s.description ? `<br><span class="m">${esc(s.description)}</span>` : ''}</span><span class="tag s-${esc(s.status)}">${esc(LABEL[s.status] ?? s.status)}</span></li>`).join('')}</ul>
 ${p.updates.length ? `<h2>Updates</h2>${p.updates.map((u: any) => `<div class="u"><strong>${esc(u.phase[0].toUpperCase() + u.phase.slice(1))}</strong> · ${esc((u.services ?? []).join(', '))}<p>${esc(u.message)}</p><div class="m">${esc(new Date(u.created_at).toUTCString())}</div></div>`).join('')}` : ''}
+${p.sign_up && p.services.length ? `<h2>Get updates by email</h2><form method="post" action="/status/subscribe">
+<input type="email" name="email" required maxlength="254" autocomplete="email" placeholder="you@example.com" aria-label="Email address">
+<fieldset><legend class="m">Services (choose none for all)</legend>${p.services.map((s: any) => `<label><input type="checkbox" name="service" value="${esc(s.name)}"> ${esc(s.name)}</label>`).join('')}</fieldset>
+<button type="submit">Subscribe</button><p class="m">We send a link to confirm the address first. Every message has a link to unsubscribe.</p></form>` : ''}
 </body></html>`;
 }

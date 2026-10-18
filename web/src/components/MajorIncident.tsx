@@ -11,6 +11,13 @@ import { Modal } from './Modal';
 export interface MajorInfo {
   declared_at: string | null; lead_id: number | null; lead: string | null; comms_id: number | null; comms: string | null; bridge: string;
   update_minutes: number | null; next_update_at: string | null; update_overdue: boolean; last_update: { body: string; created_at: string } | null;
+  communications: Communication[];
+}
+/** A status update on the incident and who outside was told (#46). */
+export interface Communication {
+  id: number; created_at: string; phase: string; message: string; public: boolean; retracted_at: string | null; author: string | null;
+  contacts: { person_id: number | null; name: string | null; organisation: string; status: string; sent_at: string | null }[];
+  subscribers_sent: number; subscribers_pending: number; subscribers_last_sent_at: string | null;
 }
 export interface ReviewSummary { status: 'scheduled' | 'draft' | 'published' | 'waived'; owner: string | null; due: string | null; due_in_days: number | null; overdue: boolean; published_at: string | null }
 export interface RelatedRow { ref: string; title: string; status: string; priority?: number; resolve_with_parent?: boolean; is_major?: boolean }
@@ -224,10 +231,39 @@ export function StatusProposalCard({ incidentRef, proposal, onPosted }: { incide
       }}>
         <label className="full">Status<select value={status} onChange={(e) => setStatus(e.target.value)}>{['degraded', 'partial_outage', 'major_outage'].map((s) => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}</select></label>
         <label className="full">Message<textarea rows={3} value={message} onChange={(e) => setMessage(e.target.value)} /></label>
-        {canPublish && <label className="check full"><input type="checkbox" checked={publish} onChange={(e) => setPublish(e.target.checked)} /> Also publish on the public status page</label>}
+        {canPublish && <label className="check full"><input type="checkbox" checked={publish} onChange={(e) => setPublish(e.target.checked)} /> Also publish <span className="muted small">(the public page, email subscribers and the contacts of organisations using these services)</span></label>}
         {error && <div className="error full">{error}</div>}
         <div className="actions full"><button className="btn">{publish ? 'Post and publish' : 'Post to the status board'}</button></div>
       </form>
+    </section>
+  );
+}
+
+const DELIVERY: Record<string, string> = { pending: 'queued', sending: 'sending', sent: 'sent', failed: 'failed', skipped: 'not sent' };
+
+/** Who outside was told what and when, per status update: for the communications lead and the post-incident review. */
+export function CommunicationLogCard({ log }: { log: Communication[] }) {
+  return (
+    <section className="card" aria-label="Communication log">
+      <h2>Communication log</h2>
+      <ul className="activity">
+        {log.map((c) => (
+          <li key={c.id} className={c.retracted_at ? 'muted' : ''}>
+            <strong>{c.phase[0].toUpperCase() + c.phase.slice(1)}</strong> {c.public ? <span className="badge">published</span> : <span className="badge">internal</span>}{c.retracted_at && <span className="badge">retracted</span>}
+            <p>{c.message}</p>
+            <span className="muted small">{c.author ?? 'System'} · {formatDate(c.created_at)}</span>
+            {c.public && (
+              <ul className="plain-list small comms-recipients">
+                {c.contacts.map((p, n) => (
+                  <li key={n}>{p.person_id ? <Link to={`/people/${p.person_id}`}>{p.name}</Link> : p.name ?? 'Removed contact'} <span className="muted">({p.organisation}) · {DELIVERY[p.status] ?? p.status}{p.sent_at ? ` ${formatDate(p.sent_at)}` : ''}</span></li>
+                ))}
+                {(c.subscribers_sent > 0 || c.subscribers_pending > 0) && <li>{c.subscribers_sent} email subscriber{c.subscribers_sent === 1 ? '' : 's'}{c.subscribers_pending ? <span className="muted"> · {c.subscribers_pending} queued</span> : null}{c.subscribers_last_sent_at ? <span className="muted"> · {formatDate(c.subscribers_last_sent_at)}</span> : null}</li>}
+                {!c.contacts.length && !c.subscribers_sent && !c.subscribers_pending && <li className="muted">No subscribers or organisation contacts for these services.</li>}
+              </ul>
+            )}
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }

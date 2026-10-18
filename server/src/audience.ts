@@ -72,3 +72,36 @@ export function whyNotForEveryone(a: Audience, what: string) {
   if (a.classification === 'confidential') return `${a.ref} is confidential, so its text is not copied into ${what}: everyone reads that. Write it separately, without the confidential details.`;
   return null;
 }
+
+/**
+ * People outside the organisation (#46): status page subscribers, organisation contacts and status webhooks. They are
+ * broader than everyone in Kernel, so they get only what a person published for them: the message of a public,
+ * unretracted status update, its phase and status, under the services' public names. Never an incident ref or title,
+ * an internal service name or who wrote it. Everything Kernel sends outside about service status is built here.
+ */
+export async function forOutside(db: Queryable | null, updateId: number) {
+  db ??= { query };
+  const { rows } = await db.query(
+    `SELECT su.phase, su.status, su.message, su.created_at,
+            coalesce((SELECT array_agg(st.public_name ORDER BY st.public_name) FROM service_status st WHERE st.public AND st.ci_id = ANY(su.ci_ids)), '{}') AS services,
+            coalesce((SELECT array_agg(st.ci_id) FROM service_status st WHERE st.public AND st.ci_id = ANY(su.ci_ids)), '{}') AS ci_ids
+     FROM status_updates su WHERE su.id = $1 AND su.public AND su.retracted_at IS NULL`,
+    [updateId],
+  );
+  const u = rows[0];
+  if (!u?.services.length) return null;
+  return {
+    ci_ids: u.ci_ids as number[],
+    published: { services: u.services as string[], phase: u.phase as string, status: (u.status ?? null) as string | null, message: u.message as string, published_at: new Date(u.created_at).toISOString() },
+  };
+}
+
+/** Services as people outside know them: their public names; a service without one is left out. */
+export async function outsideNames(db: Queryable | null, refs: string[]) {
+  db ??= { query };
+  const { rows } = await db.query(
+    "SELECT st.public_name FROM service_status st JOIN configuration_items c ON c.id = st.ci_id WHERE st.public AND c.ref = ANY($1) ORDER BY st.public_name",
+    [refs.map((r) => r.toUpperCase())],
+  );
+  return rows.map((r) => r.public_name as string);
+}

@@ -176,6 +176,7 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .btn:hover { background: var(--surface-2); text-decoration: none; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .btn.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+.btn[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 .btn:disabled { opacity: 0.5; cursor: default; }
 .btn.small { height: 28px; padding: 0 10px; font-size: 12px; }
 .btn-link { background: none; border: none; padding: 0; color: var(--accent); font: inherit; font-weight: 550; cursor: pointer; }
@@ -499,6 +500,7 @@ button.stat:hover { border-color: var(--accent); }
 .tl-edit .tl-desc { grid-column: 1 / 4; }
 .tl-meta { display: flex; gap: 8px; align-items: center; }
 .row-actions { display: flex; gap: 16px; }
+.table .row-actions { gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
 .analysis .btn-link.small { align-self: flex-start; }
 @media (max-width: 820px) {
   .why-fields, .ishikawa-grid, .tl-edit, .kt-causes li { grid-template-columns: 1fr; }
@@ -1375,3 +1377,4 @@ ol.timeline.compact li { grid-template-columns: 8rem 1fr; padding: 5px 0; font-s
 .security-alerting .retention h3 { margin: 0; font-size: 14px; }
 .security-alerting .retention input { width: 90px; margin: 0 6px; }
 .security-alerting .retention label { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 0; }
+.comms-recipients { margin-top: 6px; }

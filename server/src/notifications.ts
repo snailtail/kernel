@@ -32,6 +32,7 @@ export const EVENTS = {
   paged: { label: 'I am paged as the on-call person (built-in rotation), or a page for my team failed', email: true, chat: true },
   major_update_due: { label: 'A stakeholder update I am responsible for is overdue', email: false, chat: true },
   watched_update: { label: 'An update on something I watch', email: false, chat: false },
+  service_status: { label: 'A status update on a service I follow', email: true, chat: true },
 } as const;
 export type NotificationEvent = keyof typeof EVENTS;
 
@@ -259,6 +260,25 @@ export function ownMail() {
   } catch { /* the default */ }
   return { address: from.toLowerCase(), messageIdDomain: host.toLowerCase() };
 }
+
+/**
+ * Mail to someone outside Kernel's users (#46: status subscribers and organisation contacts), with its own signed
+ * one-click unsubscribe link (RFC 8058).
+ */
+export async function sendOutsideMail(to: string, subject: string, lines: string[], unsubscribe: string | null) {
+  const m = mailer();
+  if (!m) throw new Error('Email is not configured (SMTP_URL)');
+  await m.sendMail({
+    from: process.env.KERNEL_MAIL_FROM ?? 'Kernel <kernel@localhost>',
+    to,
+    messageId: `<${randomUUID()}@${ownMail().messageIdDomain}>`,
+    subject: clip(subject, 200),
+    text: [...lines, ...(unsubscribe ? ['', '—', `Unsubscribe: ${unsubscribe}`] : [])].join('\n'),
+    headers: { ...(unsubscribe ? { 'List-Unsubscribe': `<${unsubscribe}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' } : {}), 'Auto-Submitted': 'auto-generated' },
+  });
+}
+
+export const mailConfigured = () => !!process.env.SMTP_URL;
 
 const absolute = (path: string) => `${(config.publicUrl ?? '').replace(/\/$/, '')}${path}`;
 
