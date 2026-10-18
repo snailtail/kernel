@@ -108,13 +108,16 @@ describe('service status page (#46)', { skip }, () => {
   });
 
   let subscriber = 0;
+  let major = '';
   test('people outside sign up for public services with double opt-in, and the answer never tells who is subscribed', async () => {
     const page = await anon('/status').then((r) => r.text());
     assert.match(page, /<form method="post" action="\/status\/subscribe">/);
     const first = await form('/status/subscribe', [['email', 'Customer@Example.com'], ['service', 'Online shop']]);
     assert.equal(first.status, 200);
     assert.match(first.headers.get('content-security-policy')!, /form-action 'self'/);
+    await ownerQuery("UPDATE status_subscribers SET created_at = now() - interval '8 days' WHERE email = 'customer@example.com'");
     const again = await form('/status/subscribe', [['email', 'customer@example.com'], ['service', 'Online shop']]);
+    assert.ok((await ownerQuery("SELECT created_at > now() - interval '1 minute' AS fresh FROM status_subscribers WHERE email = 'customer@example.com'")).rows[0].fresh, 'an unconfirmed sign-up gets its week from the latest request');
     const stranger = await anon('/status/subscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'nobody@example.com' }) });
     assert.equal((await first.text()), await again.text(), 'the same answer for a repeated address');
     assert.equal((await stranger.json() as any).message, subs.SIGNED_UP);
@@ -144,7 +147,7 @@ describe('service status page (#46)', { skip }, () => {
     const contact = (await pm.post('/api/people', { name: 'Carla Contact', email: 'carla@customer.example', organisation_id: org, status_contact: true })).body.id;
     assert.equal((await analyst.post('/api/people', { name: 'Not allowed', status_contact: true })).status, 403, 'contacts are chosen by managers');
     await pm.post('/api/people', { name: 'Quiet Colleague', email: 'quiet@customer.example', organisation_id: org });
-    const major = (await analyst.post('/api/incidents', { title: `Payments down ${MARKER}`, impact: 1, urgency: 1, cis: [vm] })).body.ref;
+    major = (await analyst.post('/api/incidents', { title: `Payments down ${MARKER}`, impact: 1, urgency: 1, cis: [vm] })).body.ref;
     assert.equal((await pm.post(`/api/incidents/${major}/major`, {})).status, 200);
     const proposal = (await pm.get(`/api/incidents/${major}`)).body.status_proposal;
     assert.match(proposal.message, /affecting Online shop\./, 'the proposal names services as people outside know them');
@@ -195,6 +198,8 @@ describe('service status page (#46)', { skip }, () => {
     await subs.processStatusDeliveries(50);
     assert.equal(notifications.capturedMail.length, before);
     assert.deepEqual((await ownerQuery('SELECT DISTINCT status FROM status_deliveries WHERE update_id = $1', [id])).rows.map((r: any) => r.status), ['skipped']);
+    const hooks = await ownerQuery("SELECT status, last_error FROM webhook_deliveries WHERE event = 'status.published' AND payload->'data'->>'status_update_id' = $1", [String(id)]);
+    assert.deepEqual(hooks.rows, [{ status: 'failed', last_error: 'Retracted' }], 'the status webhook does not carry it either');
   });
 
   test('unsubscribing: GET only asks, the one-click POST removes the subscriber, a forged link does nothing', async () => {
@@ -206,6 +211,7 @@ describe('service status page (#46)', { skip }, () => {
     const r = await anon(unsub, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'List-Unsubscribe=One-Click' });
     assert.equal(r.status, 200);
     assert.equal((await ownerQuery('SELECT count(*)::int AS n FROM status_subscribers WHERE id = $1', [subscriber])).rows[0].n, 0, 'the address is gone');
+    assert.equal((await pm.get(`/api/incidents/${major}`)).body.major.communications[0].subscribers_sent, 1, 'the communication log keeps what was sent');
     const contactLink = link(mailTo('carla@customer.example')[0].text, '/status/unsubscribe');
     assert.equal((await anon(contactLink, { method: 'POST' })).status, 200);
     assert.equal((await ownerQuery("SELECT status_contact FROM people WHERE email = 'carla@customer.example'")).rows[0].status_contact, false);

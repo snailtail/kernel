@@ -14,7 +14,7 @@ CREATE INDEX status_follows_ci_idx ON status_follows (ci_id);
 
 -- Email subscribers from the public page. Only confirmed rows receive updates; unconfirmed ones are removed after a
 -- week. The confirmation token is stored as a hash only, minted when the mail is sent. ci_ids empty = every public
--- service. Unsubscribing deletes the row.
+-- service. Unsubscribing deletes the row; the log keeps its deliveries without the address.
 CREATE TABLE status_subscribers (
   id                 serial PRIMARY KEY,
   email              text NOT NULL,
@@ -40,7 +40,7 @@ CREATE TABLE status_deliveries (
   id              bigserial PRIMARY KEY,
   kind            text NOT NULL CHECK (kind IN ('confirm', 'subscriber', 'contact')),
   update_id       int REFERENCES status_updates(id) ON DELETE CASCADE,
-  subscriber_id   int REFERENCES status_subscribers(id) ON DELETE CASCADE,
+  subscriber_id   int REFERENCES status_subscribers(id) ON DELETE SET NULL,
   person_id       int REFERENCES people(id) ON DELETE SET NULL,
   organisation    text NOT NULL DEFAULT '',
   status          text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'sending', 'sent', 'failed', 'skipped')),

@@ -69,7 +69,10 @@ export async function signUp(input: z.infer<typeof signUpSchema>, ip: string) {
   if (input.services.length && !svc.length) throw badRequest('Choose services from the status page');
   const { rows } = await query(
     `INSERT INTO status_subscribers (email, pending_ci_ids) VALUES ($1, $2)
-     ON CONFLICT ((lower(email))) DO UPDATE SET pending_ci_ids = excluded.pending_ci_ids RETURNING id`,
+     ON CONFLICT ((lower(email))) DO UPDATE SET pending_ci_ids = excluded.pending_ci_ids,
+       -- An unconfirmed sign-up gets its week from the latest request.
+       created_at = CASE WHEN status_subscribers.confirmed_at IS NULL THEN now() ELSE status_subscribers.created_at END
+     RETURNING id`,
     [input.email, svc.map((s) => s.ci_id)],
   );
   // One confirmation in flight per address; a new sign-up before it is sent changes what it confirms.
@@ -169,15 +172,19 @@ export async function queueOutside(db: Db, updateId: number) {
   const { title } = await pageSettings();
   const payload = {
     event: 'status.published', occurred_at: new Date().toISOString(), title, url: absolute('/status'),
-    summary: `${cap(out.published.phase)}: ${out.published.message}`.slice(0, 200), status_update: out.published, problem: null, actor: null, data: {},
+    summary: `${cap(out.published.phase)}: ${out.published.message}`.slice(0, 200), status_update: out.published, problem: null, actor: null, data: { status_update_id: updateId },
   };
   for (const h of hooks) await db.query('INSERT INTO webhook_deliveries (webhook_id, event, payload) VALUES ($1, $2, $3)', [h.id, 'status.published', JSON.stringify(payload)]);
   return { subscribers: subscribers.rowCount ?? 0, contacts: contacts.rowCount ?? 0, webhooks: hooks.length };
 }
 
-/** A retracted update is not sent to anyone who has not had it yet. */
+/** A retracted update is not sent to anyone who has not had it yet, by mail or webhook. */
 export async function cancelOutside(db: Db, updateId: number) {
   await db.query("UPDATE status_deliveries SET status = 'skipped', error = 'Retracted' WHERE update_id = $1 AND status = 'pending'", [updateId]);
+  await db.query(
+    "UPDATE webhook_deliveries SET status = 'failed', last_error = 'Retracted' WHERE event = 'status.published' AND status = 'pending' AND payload->'data'->>'status_update_id' = $1",
+    [String(updateId)],
+  );
 }
 
 // ---- The communication log ----------------------------------------------------------------------
