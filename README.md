@@ -266,6 +266,7 @@ Open http://localhost:8080 and sign in as `admin`. Database migrations run autom
 | `KERNEL_LOG_FORMAT` | `json` | `ecs` writes Elastic Common Schema JSON logs |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | – | Enables OpenTelemetry traces and metrics over OTLP (standard `OTEL_*` variables apply) |
 | `KERNEL_APP_DB_PASSWORD` | – | Run the app as the least-privilege role `kernel_app` (created and granted automatically; `DATABASE_URL`'s owner only runs migrations). Strongly recommended |
+| `KERNEL_REPORTING_DB_PASSWORD` | – | Create the read-only role `kernel_reporting` for Power BI or Grafana: it reads the views in the `reporting` schema (no free text, no personal data, no restricted records) and nothing else; see [docs/reporting.md](docs/reporting.md) |
 | `KERNEL_SECRET_KEY` | – | Encrypts stored secrets at rest (≥ 32 random characters); required for webhooks |
 | `KERNEL_SECRET_KEYS`, `KERNEL_SECRET_KEY_ID` | – | More keys (`id:secret,…`) and the active one, for key rotation; see [docs/key-rotation.md](docs/key-rotation.md) |
 | `KERNEL_LIVE_PER_USER`, `KERNEL_LIVE_TOTAL` | 6, 1000 | Live update streams per user and in total; see [docs/live-updates.md](docs/live-updates.md) |
@@ -316,6 +317,8 @@ built for that commit, verifies its Sigstore signature and waits until the app i
   bulk exports, a sign-in from a new country, a new administrator, changed credentials) raise alerts in Kernel's own
   event management, open a restricted security incident and notify administrators. See [docs/security-events.md](docs/security-events.md).
 - With `KERNEL_APP_DB_PASSWORD` the app runs as a least-privilege PostgreSQL role without DDL rights.
+- With `KERNEL_REPORTING_DB_PASSWORD`, BI tools read the `reporting` views as a role that can read nothing else; the
+  views hold no free text or personal data and leave restricted records out ([docs/reporting.md](docs/reporting.md)).
 - Containers run with a read-only filesystem, no Linux capabilities beyond what PostgreSQL needs,
   `no-new-privileges` and memory/PID limits. PostgreSQL is not published on the host.
 - Reference deployment: Cloudflare Tunnel with Cloudflare Access in front of the public hostname, the MCP endpoint

@@ -54,4 +54,4 @@ what order, is each person's own preference
 (`dashboard_tiles`; unknown ids are ignored); there is no query language. `GET /api/dashboard` and MCP
 `get_dashboard` keep the problem backlog summary; `get_dashboard` adds the KPIs as `kpis`.
 
-A read-only reporting schema for Power BI or Grafana is not part of this; it is tracked in #150.
+For Power BI or Grafana, read the `reporting` views instead; see [reporting.md](reporting.md).

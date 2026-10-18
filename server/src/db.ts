@@ -162,6 +162,40 @@ export async function ensureAppRole(client: pg.PoolClient | pg.Client, user: str
   await client.query(`REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON schema_migrations FROM ${role}`);
 }
 
+/**
+ * Creates or updates the read-only role for BI tools (#150): it can log in, read the views in the reporting schema and
+ * nothing else. The views leave restricted records out themselves (migration 148), so the role needs no viewer.
+ * Idempotent; runs after every migration, so views added later are granted too.
+ */
+export async function ensureReportingRole(client: pg.PoolClient | pg.Client, user: string, password: string) {
+  const role = client.escapeIdentifier(user);
+  await client.query(`DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = ${client.escapeLiteral(user)}) THEN CREATE ROLE ${role}; END IF; END $$`);
+  await client.query(`ALTER ROLE ${role} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT PASSWORD ${client.escapeLiteral(scramVerifier(password))}`);
+  // A dashboard's runaway query should not hold the database; nothing it may read can be written anyway.
+  await client.query(`ALTER ROLE ${role} SET default_transaction_read_only = on`);
+  await client.query(`ALTER ROLE ${role} SET statement_timeout = '60s'`);
+  await client.query(`DO $$ BEGIN EXECUTE format('GRANT CONNECT ON DATABASE %I TO ${role}', current_database()); END $$`);
+  // Every role may use schema public by default (and so call its functions); this one may not. The runtime role is
+  // granted USAGE by name (ensureAppRole). Only revoked when the owner keeps its own access (owns the schema or is a
+  // superuser), as on PostgreSQL 15+ and in the Docker image.
+  await client.query(`DO $$ BEGIN
+    IF (SELECT rolsuper FROM pg_roles WHERE rolname = current_user)
+       OR pg_has_role(current_user, (SELECT nspowner FROM pg_namespace WHERE nspname = 'public'), 'USAGE') THEN
+      REVOKE ALL ON SCHEMA public FROM PUBLIC;
+    END IF;
+  END $$`);
+  await client.query(`REVOKE ALL ON ALL TABLES IN SCHEMA public FROM ${role}`);
+  await client.query('REVOKE ALL ON SCHEMA reporting FROM PUBLIC');
+  await client.query(`GRANT USAGE ON SCHEMA reporting TO ${role}`);
+  await client.query(`GRANT SELECT ON ALL TABLES IN SCHEMA reporting TO ${role}`);
+}
+
+/** Takes LOGIN away from a reporting role left over from when KERNEL_REPORTING_DB_PASSWORD was set. */
+async function disableReportingRole(client: pg.Client, user: string) {
+  const exists = await client.query('SELECT 1 FROM pg_roles WHERE rolname = $1 AND rolcanlogin', [user]);
+  if (exists.rowCount) await client.query(`ALTER ROLE ${client.escapeIdentifier(user)} NOLOGIN`);
+}
+
 /** Applies SQL files in migrations/ that have not been applied yet, in filename order (as the owner). */
 export async function migrate(log: (msg: string) => void) {
   const owner = new pg.Client({ connectionString: config.databaseUrl });
@@ -169,6 +203,8 @@ export async function migrate(log: (msg: string) => void) {
   try {
     await migrateWith(owner, log);
     if (config.appDbPassword) await ensureAppRole(owner, config.appDbUser, config.appDbPassword);
+    if (config.reportingDbPassword) await ensureReportingRole(owner, config.reportingDbUser, config.reportingDbPassword);
+    else await disableReportingRole(owner, config.reportingDbUser);
   } finally {
     await owner.end();
   }
