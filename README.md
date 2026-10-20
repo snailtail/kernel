@@ -163,7 +163,20 @@ of yours or your teams; the process map has the step between incident and proble
 reports show the share of major incidents with a published review and the time to it, and the review exports as
 Markdown or prints. API: `/api/incidents/:ref/review` (+ `/items`, `/publish`, `/waive`, `/article`, `/export.md`);
 MCP: `get_review`, `create_review`, `update_review`, `add_review_item`, `review_factor_to_problem`,
-`review_follow_up_to_action`, `publish_review`, `waive_review` and the prompt `draft_post_incident_review`.
+`review_follow_up_to_action`, `review_follow_up_to_improvement`, `publish_review`, `waive_review` and the prompt
+`draft_post_incident_review`.
+
+**Continual improvement register**: Improve → *Improvements* collects improvements (`IMP000012`) from post-incident
+reviews (a follow-up or gap becomes an improvement instead of an action), resolved or closed problems ("lessons
+learned"), service reports ("Suggest an improvement", with the service and period filled in) and anyone's idea. Each
+has a value and an effort (1–5), an owner, a service, and goes idea → approved → in progress → done, or rejected with a
+reason; a problem manager approves and rejects, and done needs the benefit it brought. The list has saved views and
+bulk actions, the board shows a Kanban by status (dragging a card changes its status with the API's rules; on a phone
+each card has a move menu), and the value/effort matrix puts quick wins top left. An improvement links the changes,
+problems and actions that carry it out, and can watch a dashboard KPI: its page shows that tile's trend. Restricted and
+confidential sources make restricted and confidential improvements. Guided mode shows the continual improvement model
+in four lines. API: `/api/improvements` (+ `/:ref/transition`, `/links`, `/comments`), `/api/problems/:ref/improvement`;
+MCP: `list_improvements`, `get_improvement`, `create_improvement`, `update_improvement`, `transition_improvement`.
 Viewers stay strictly read-only (auditors, stakeholders): end users report incidents through the service desk or,
 later, the self-service portal (#45), not with a viewer account.
 
@@ -442,7 +455,8 @@ ending in `_demo`; anything else is refused), migrates it and seeds it. `npm run
 CIs from service to VM, an SLA, two teams, monitoring events that opened an incident, a change two hours earlier on the
 payment gateway flagged as the likely cause, a major incident with a lead, a bridge, updates (the next one due in ten
 minutes), two related incidents and a status page entry, the problem behind it with a 5 Whys analysis, a known error
-and its article, follow-up actions (one overdue), an earlier major incident with a published post-incident review,
+and its article, follow-up actions (one overdue), an earlier major incident with a published post-incident review
+(one of its gaps became an improvement), a continual improvement register with ideas in every stage,
 contacts and organisations, maintenance next week and a change waiting for approval, plus a quarter of everyday
 incidents and changes for the reports. Dates are relative to the time of seeding. Everything goes through the service
 layer, so CI runs the seed against a fresh database and a change that breaks it fails the build. Demo users have the

@@ -4,7 +4,7 @@ import { PriorityBadge } from '../components/Badges';
 import { formatDate } from '../format';
 import { api } from '../api';
 import { useApi } from '../hooks';
-import { isManager, useSession } from '../session';
+import { canEdit, isManager, useSession } from '../session';
 
 interface Report {
   service: { ref: string; name: string; criticality: number; sla: string | null; owner_id: number | null };
@@ -21,6 +21,7 @@ const dur = (m: number | null) => (m === null ? '–' : m < 60 ? `${m} min` : m 
 /** One service, one period: the basis for the service review (#54). Print it, or download Markdown. */
 export function ServiceReportPage() {
   const { ref } = useParams();
+  const { user } = useSession();
   const [params, setParams] = useSearchParams();
   const [from, setFrom] = useState(params.get('from') ?? '');
   const [to, setTo] = useState(params.get('to') ?? '');
@@ -45,6 +46,10 @@ export function ServiceReportPage() {
           <a className="btn" href={`/api/services/${r.service.ref}/report.md?${params}`}>Markdown</a>
           <a className="btn" href={`/api/reports/service.csv?${new URLSearchParams({ service: r.service.ref, from: r.period.from, to: r.period.to })}`}>CSV</a>
           <button className="btn" onClick={() => window.print()}>Print</button>
+          {canEdit(user) && (
+            <Link className="btn" to={`/improvements?${new URLSearchParams({ new: '1', source: 'service_review', service: r.service.ref, from: r.period.from, to: r.period.to, ...(params.get('kpi') ? { kpi: params.get('kpi')! } : {}) })}`}
+              title="Continual improvement: what would make this service better next period?">Suggest an improvement</Link>
+          )}
         </div>
       </header>
       {r.restricted_records_left_out && <p className="muted small">🔒 Some restricted records are not included.</p>}

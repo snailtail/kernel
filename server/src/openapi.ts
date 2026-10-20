@@ -15,6 +15,7 @@ import * as reviewsMod from './reviews.js';
 import * as oc from './oncall.js';
 import * as events from './events.js';
 import * as ch from './changes.js';
+import * as imp from './improvements.js';
 import * as slaMod from './sla.js';
 import * as notif from './notifications.js';
 import * as setupMod from './setup.js';
@@ -67,7 +68,7 @@ const user = z.object({
 });
 const ids = candidates.candidateIdsSchema.extend({ key: z.string().optional() });
 
-const BULK_TAG: Record<bulkMod.Practice, string> = { incidents: 'Incidents', problems: 'Problems', changes: 'Changes', alerts: 'Events', actions: 'Actions', articles: 'Knowledge', cis: 'CMDB' };
+const BULK_TAG: Record<bulkMod.Practice, string> = { incidents: 'Incidents', problems: 'Problems', changes: 'Changes', alerts: 'Events', actions: 'Actions', articles: 'Knowledge', cis: 'CMDB', improvements: 'Improvements' };
 
 export const OPERATIONS: Op[] = [
   { method: 'post', path: '/api/auth/login', tag: 'Authentication', summary: 'Sign in with username and password (sets a session cookie)', body: z.object({ username: z.string(), password: z.string() }), public: true },
@@ -319,6 +320,16 @@ export const OPERATIONS: Op[] = [
   { method: 'get', path: '/api/change-freezes', tag: 'Changes', summary: 'Change freezes' },
   { method: 'post', path: '/api/change-freezes', tag: 'Changes', summary: 'Add a change freeze (change authority)', body: ch.freezeSchema },
   { method: 'delete', path: '/api/change-freezes/:id', tag: 'Changes', summary: 'Remove a change freeze' },
+  { method: 'get', path: '/api/improvements', tag: 'Improvements', summary: 'The continual improvement register (open by default); quick_wins=true for value 4–5 and effort 1–2', query: imp.listImprovementsSchema },
+  { method: 'get', path: '/api/improvements/model', tag: 'Improvements', summary: 'The continual improvement model in four lines, for guided mode' },
+  { method: 'post', path: '/api/improvements', tag: 'Improvements', summary: 'Suggest an improvement; from a review, problem or service review it starts as narrow as its source. Supports Idempotency-Key', body: imp.createImprovementSchema },
+  { method: 'get', path: '/api/improvements/:ref', tag: 'Improvements', summary: 'An improvement with its links, history, the linked KPI trend and next steps' },
+  { method: 'patch', path: '/api/improvements/:ref', tag: 'Improvements', summary: 'Update an improvement: title, description, owner, service, value, effort, KPI, benefit', body: imp.updateImprovementSchema },
+  { method: 'post', path: '/api/improvements/:ref/transition', tag: 'Improvements', summary: 'idea → approved → in_progress → done (with the benefit) | rejected (with a reason); approving and rejecting take a manager', body: imp.transitionImprovementSchema },
+  { method: 'post', path: '/api/improvements/:ref/comments', tag: 'Improvements', summary: 'Add a note', body: z.object({ body: z.string() }) },
+  { method: 'post', path: '/api/improvements/:ref/links', tag: 'Improvements', summary: 'Link a change, problem, action (by id), incident, review or document that carries it out', body: imp.improvementLinkSchema },
+  { method: 'delete', path: '/api/improvements/:ref/links/:id', tag: 'Improvements', summary: 'Remove a link' },
+  { method: 'post', path: '/api/problems/:ref/improvement', tag: 'Improvements', summary: 'Lessons learned → improvement, from a resolved or closed problem', body: imp.fromProblemSchema },
   { method: 'post', path: '/api/events', tag: 'Events', summary: 'Report normalised events (token with ingest scope, or a session); deduplicated into alerts', body: events.reportEventsSchema },
   { method: 'post', path: '/api/event-hooks/:id', tag: 'Events', summary: "Inbound webhook for a configured event source (Alertmanager, Uptime Kuma, Azure Monitor, OP5, generic). Authenticate with the source token (Authorization: Bearer, X-Kernel-Token, or ?token=); a signed generic source also needs Standard Webhooks headers" },
   { method: 'get', path: '/api/alerts', tag: 'Events', summary: 'Alerts (open by default), most severe first', query: events.listAlertsSchema },
@@ -367,6 +378,7 @@ export const OPERATIONS: Op[] = [
   { method: 'delete', path: '/api/incidents/:ref/review/items/:id', tag: 'Incidents', summary: 'Remove an item that has not become a problem or action' },
   { method: 'post', path: '/api/incidents/:ref/review/items/:id/problem', tag: 'Incidents', summary: 'Contributing factor → a new problem (the factor as its statement) or an existing one, linked both ways', body: reviewsMod.itemProblemSchema },
   { method: 'post', path: '/api/incidents/:ref/review/items/:id/action', tag: 'Incidents', summary: "Follow-up → an action with owner and due date, on the named problem, the factor's or the incident's", body: reviewsMod.itemActionSchema },
+  { method: 'post', path: '/api/incidents/:ref/review/items/:id/improvement', tag: 'Incidents', summary: 'Follow-up or gap → an improvement in the continual improvement register, as narrow as the incident', body: reviewsMod.itemImprovementSchema },
   { method: 'post', path: '/api/incidents/:ref/review/publish', tag: 'Incidents', summary: 'Publish the review (owner, incident lead or manager)' },
   { method: 'post', path: '/api/incidents/:ref/review/waive', tag: 'Incidents', summary: 'Waive the review with a reason (managers; audited)', body: reviewsMod.waiveSchema },
   { method: 'post', path: '/api/incidents/:ref/review/article', tag: 'Knowledge', summary: 'Draft a knowledge article from the lessons of the review' },

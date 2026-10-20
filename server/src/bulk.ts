@@ -15,6 +15,7 @@ import * as actions from './actions.js';
 import * as changes from './changes.js';
 import * as cmdb from './cmdb.js';
 import * as events from './events.js';
+import * as improvements from './improvements.js';
 import * as incidents from './incidents.js';
 import * as knowledge from './knowledge.js';
 import { logger } from './log.js';
@@ -25,7 +26,7 @@ import { authorize, can, type Action } from './policy.js';
 import * as problems from './problems.js';
 
 export const BULK_LIMIT = 500;
-export const PRACTICES = ['incidents', 'problems', 'changes', 'alerts', 'actions', 'articles', 'cis'] as const;
+export const PRACTICES = ['incidents', 'problems', 'changes', 'alerts', 'actions', 'articles', 'cis', 'improvements'] as const;
 export type Practice = (typeof PRACTICES)[number];
 
 const ref = z.string().trim().min(1).max(30);
@@ -209,6 +210,16 @@ const DEFS: Record<Practice, PracticeDef> = {
         apply: (u, r, op) => cmdb.updateCi(u, r.id, { tags: [...new Set([...r.tags.filter((t: string) => !op.remove.includes(t)), ...op.add])] }),
       },
       status: { action: 'ci.manage', noop: statusNoop, apply: (u, r, op) => cmdb.transitionCi(u, r.id, cmdb.transitionCiSchema.parse({ ...op.details, to: op.to })) },
+    },
+  },
+  improvements: {
+    read: 'improvement.read',
+    rows: improvements.improvementRows,
+    select: async (user, f, limit) => (await improvements.listImprovements(user, improvements.listImprovementsSchema.parse(params(f, limit)))).map((r) => r.ref),
+    ops: {
+      assign: { action: 'improvement.write', noop: assignNoop('owner_id'), undo: assignUndo('owner_id'), apply: (u, r, op) => improvements.updateImprovementLean(u, r.id, op.assignee_id !== undefined ? { owner_id: op.assignee_id } : {}) },
+      // Approving and rejecting take a manager (transitionImprovement checks); rejecting needs details.reason.
+      status: { action: 'improvement.write', noop: statusNoop, apply: (u, r, op) => improvements.transitionImprovementLean(u, r.id, improvements.transitionImprovementSchema.parse({ ...op.details, to: op.to })) },
     },
   },
 };

@@ -30,6 +30,7 @@ import { cmdbRoutes } from './routes/cmdb.js';
 import { incidentRoutes } from './routes/incidents.js';
 import { eventRoutes } from './routes/events.js';
 import { changeRoutes } from './routes/changes.js';
+import { improvementRoutes } from './routes/improvements.js';
 import { slaRoutes } from './routes/sla.js';
 import { refreshModules } from './modules.js';
 import { notificationRoutes } from './routes/notifications.js';
@@ -138,6 +139,7 @@ export async function buildApp(options: { logLevel?: string; serveWeb?: boolean 
   await app.register(incidentRoutes);
   await app.register(eventRoutes);
   await app.register(changeRoutes);
+  await app.register(improvementRoutes);
   await app.register(slaRoutes);
   await app.register(notificationRoutes);
   await app.register(setupRoutes);

@@ -1403,3 +1403,37 @@ ol.timeline.compact li { grid-template-columns: 8rem 1fr; padding: 5px 0; font-s
 .service-report .head-actions { flex-wrap: wrap; align-items: center; justify-content: flex-end; }
 .period-form input[type='date'] { width: auto; }
 .service-report > section.card { margin-top: 12px; }
+
+/* Continual improvement register (#52): status badges, the Kanban board and the value/effort matrix. */
+.imp-idea { color: var(--s-new); background: var(--s-new-bg); }
+.imp-approved { color: var(--s-known); background: var(--s-known-bg); }
+.imp-in_progress { color: var(--s-analysis); background: var(--s-analysis-bg); }
+.imp-done { color: var(--s-resolved); background: var(--s-resolved-bg); }
+.imp-rejected { color: var(--s-closed); background: var(--s-closed-bg); }
+.tag.quick-win { color: var(--success); background: var(--success-soft); border-color: transparent; margin-left: 6px; }
+.model-hint ol { margin: 6px 0 0; padding-left: 20px; }
+.model-hint li { margin: 2px 0; }
+.kanban { display: grid; grid-template-columns: repeat(5, minmax(160px, 1fr)); gap: 12px; overflow-x: auto; padding-bottom: 8px; }
+.kanban-col { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; min-height: 160px; display: flex; flex-direction: column; gap: 8px; }
+.kanban-col.over { border-color: var(--accent); background: var(--accent-soft); }
+.kanban-col h2 { font-size: 13px; margin: 0 0 2px; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.04em; }
+.kanban-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 4px; }
+.kanban-card[draggable='true'] { cursor: grab; }
+.kanban-title { font-weight: 550; color: var(--text); }
+.kanban-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: space-between; }
+.kanban-move { font-size: 12px; padding: 2px 4px; max-width: 110px; }
+.matrix { display: grid; grid-template-columns: 22px 1fr; grid-template-rows: 1fr auto; gap: 6px; margin-bottom: 16px; }
+.matrix-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.matrix-cell { margin: 0; min-height: 160px; }
+.matrix-cell h2 { margin-bottom: 2px; }
+.matrix-quick { border-color: var(--success); background: var(--success-soft); }
+.matrix-axis { color: var(--text-3); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+.matrix-y { writing-mode: vertical-rl; transform: rotate(180deg); text-align: right; align-self: start; }
+.matrix-x { grid-column: 2; text-align: right; }
+@media (max-width: 720px) {
+  .kanban { grid-template-columns: 1fr; overflow-x: visible; }
+  .kanban-col { min-height: 0; }
+  .matrix { grid-template-columns: 1fr; }
+  .matrix-grid { grid-template-columns: 1fr; }
+  .matrix-axis { display: none; }
+}

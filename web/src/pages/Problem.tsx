@@ -170,6 +170,7 @@ export function ProblemPage() {
           <HistoryPanel recordRef={p.ref} version={p} />
           {meta.modules?.cmdb !== false && <AffectedCisPanel record={p} basePath={`/api/problems/${p.ref}`} editable={canEdit(user)} onChange={setData} />}
           {meta.modules?.change !== false && <ProblemChanges problem={p} editable={canEdit(user) && !['resolved', 'closed'].includes(p.status)} />}
+          <ProblemImprovements problem={p} editable={canEdit(user)} />
           {meta.modules?.incident !== false && <ProblemIncidents problem={p} editable={canEdit(user)} onChange={setData} />}
           <LinksPanel problem={p} editable={canEdit(user)} onChange={setData} />
           <SimilarProblems text={`${p.title} ${p.description}`} exclude={p.ref} duplicateRef={isManager(user) && p.status !== 'closed' ? p.ref : undefined} />
@@ -803,6 +804,40 @@ function ProblemIncidents({ problem: p, editable, onChange }: { problem: Problem
 }
 
 /** Changes raised for the problem's fix; "Raise change" prefills one from the known error. */
+/** Lessons learned → improvement (#52): optional, once the problem is resolved or closed. */
+function ProblemImprovements({ problem: p, editable }: { problem: ProblemDetail; editable: boolean }) {
+  const navigate = useNavigate();
+  const [title, setTitle] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const done = ['resolved', 'closed'].includes(p.status);
+  const list = p.improvements ?? [];
+  if (!list.length && !(editable && done)) return null;
+  const create = async (e: FormEvent) => {
+    e.preventDefault();
+    try {
+      const m = await api.post<{ ref: string }>(`/api/problems/${p.ref}/improvement`, { title });
+      navigate(`/improvements/${m.ref}`);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+  return (
+    <section className="card">
+      <h2>Improvements</h2>
+      <ul className="plain-list">
+        {list.map((m) => <li key={m.ref}><Link to={`/improvements/${m.ref}`} className="mono">{m.ref}</Link> {m.title} <span className="muted small">{m.status.replace('_', ' ')}</span></li>)}
+      </ul>
+      {editable && done && (
+        <form className="rel-form small" onSubmit={create}>
+          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Lessons learned: what should change?" aria-label="Improvement title" />
+          <button className="btn small" disabled={!title.trim()}>Suggest an improvement</button>
+        </form>
+      )}
+      {error && <div className="error">{error}</div>}
+    </section>
+  );
+}
+
 function ProblemChanges({ problem: p, editable }: { problem: ProblemDetail; editable: boolean }) {
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);

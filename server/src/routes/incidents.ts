@@ -92,6 +92,9 @@ export async function incidentRoutes(app: FastifyInstance) {
   app.post<ItemParams>('/api/incidents/:ref/review/items/:id/action', async (req) =>
     reviews.itemToAction(requireUser(req), req.params.ref, Number(req.params.id), reviews.itemActionSchema.parse(req.body ?? {})),
   );
+  app.post<ItemParams>('/api/incidents/:ref/review/items/:id/improvement', async (req) =>
+    reviews.itemToImprovement(requireUser(req), req.params.ref, Number(req.params.id), reviews.itemImprovementSchema.parse(req.body ?? {})),
+  );
   app.post<RefParams>('/api/incidents/:ref/review/publish', async (req) => reviews.publishReview(requireUser(req), req.params.ref));
   app.post<RefParams>('/api/incidents/:ref/review/waive', async (req) => reviews.waiveReview(requireUser(req), req.params.ref, reviews.waiveSchema.parse(req.body)));
   app.post<RefParams>('/api/incidents/:ref/review/article', async (req, reply) => {

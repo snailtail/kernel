@@ -22,7 +22,7 @@ test('the g-shortcuts are unique and come from the menu definition', () => {
 test('the groups follow the process: respond, improve, learn, then the directory', () => {
   assert.deepEqual(NAV.map((g) => g.id), ['respond', 'improve', 'learn', 'directory']);
   const order = NAV.flatMap((g) => g.items.map((i) => i.to));
-  for (const [a, b] of [['/events', '/incidents'], ['/incidents', '/candidates'], ['/candidates', '/problems'], ['/problems', '/kedb'], ['/kedb', '/changes'], ['/changes', '/actions'], ['/actions', '/knowledge']]) {
+  for (const [a, b] of [['/events', '/incidents'], ['/incidents', '/candidates'], ['/candidates', '/problems'], ['/problems', '/kedb'], ['/kedb', '/changes'], ['/changes', '/actions'], ['/actions', '/improvements'], ['/improvements', '/knowledge']]) {
     assert.ok(order.indexOf(a) < order.indexOf(b), `${a} before ${b}`);
   }
 });
@@ -37,7 +37,7 @@ test('"+ New" offers what the role may create', () => {
   assert.deepEqual(newItems(user('viewer'), meta({})), []);
   assert.equal(newItems(user('problem_manager'), meta({}))[0].label, 'Problem');
   assert.equal(newItems(user('analyst'), meta({}))[0].label, 'Incident');
-  assert.deepEqual(newItems(user('analyst'), meta({ incident: false, change: false, knowledge: false })).map((i) => i.label), ['Problem']);
+  assert.deepEqual(newItems(user('analyst'), meta({ incident: false, change: false, knowledge: false })).map((i) => i.label), ['Problem', 'Improvement']);
   // On a practice's pages its own record comes first.
   assert.equal(newItems(user('problem_manager'), meta({}), '/incidents/INC000004')[0].label, 'Incident');
   assert.equal(newItems(user('analyst'), meta({}), '/changes')[0].label, 'Change');

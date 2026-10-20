@@ -17,12 +17,12 @@ export interface Audience { ref: string | null; restricted: boolean; restricted_
 /** Articles, actions, status updates and anything else everyone can read. */
 export const BROADEST: Audience = { ref: null, restricted: false, restricted_teams: [], classification: 'normal' };
 
-const TABLES: Record<string, string> = { PRB: 'problems', INC: 'incidents', CHG: 'changes' };
+const TABLES: Record<string, string> = { PRB: 'problems', INC: 'incidents', CHG: 'changes', IMP: 'improvements' };
 const tableOf = (ref: string) => TABLES[ref.toUpperCase().match(/^[A-Z]+/)?.[0] ?? ''];
 
 type Queryable = { query: (sql: string, params?: unknown[]) => Promise<{ rows: any[] }> };
 
-/** The audience of a problem, incident or change by ref (in the caller's transaction, or null); else the broadest. */
+/** The audience of a problem, incident, change or improvement by ref (in the caller's transaction, or null); else the broadest. */
 export async function audienceOf(db: Queryable | null, ref: string): Promise<Audience> {
   db ??= { query };
   const table = tableOf(ref);

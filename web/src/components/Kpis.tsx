@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router';
 import { useApi } from '../hooks';
-import { useSession } from '../session';
+import { canEdit, useSession } from '../session';
 import { Modal } from './Modal';
 
 export interface KpiTile {
@@ -23,13 +23,13 @@ interface Kpis { period: { unit: 'month' | 'week'; starts: string[] }; tiles: Kp
 const dur = (m: number) => (m < 60 ? `${m} min` : m < 1440 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${Math.floor(m / 1440)} d ${Math.floor((m % 1440) / 60)} h`);
 export const formatKpi = (v: number | null, unit: KpiTile['unit']) => (v === null ? '–' : unit === 'minutes' ? dur(v) : unit === 'percent' ? `${v} %` : String(v));
 
-const periodLabel = (start: string, unit: 'month' | 'week') => {
+export const periodLabel = (start: string, unit: 'month' | 'week') => {
   const d = new Date(`${start}T00:00:00Z`);
   return unit === 'month' ? d.toLocaleDateString('en-GB', { month: 'short', year: 'numeric', timeZone: 'UTC' }) : `Week of ${d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' })}`;
 };
 
 /** Six bars, oldest first; the current period is still running, so it is drawn lighter. Each bar has its value. */
-function Trend({ tile, starts, unit }: { tile: KpiTile; starts: string[]; unit: 'month' | 'week' }) {
+export function Trend({ tile, starts, unit }: { tile: Pick<KpiTile, 'label' | 'unit' | 'trend' | 'trend_label'>; starts: string[]; unit: 'month' | 'week' }) {
   const max = Math.max(1, ...tile.trend.map((v) => v ?? 0));
   const w = 16, gap = 6, h = 36;
   const label = tile.trend.map((v, i) => `${periodLabel(starts[i], unit)}: ${formatKpi(v, tile.unit)}`).join('; ');
@@ -88,6 +88,7 @@ export function KpiSection() {
                 <p>{t.basis}</p>
               </details>
               <Link to={t.link} className="small">The list →</Link>
+              {canEdit(user) && <Link to={`/improvements?new=1&kpi=${t.id}`} className="small" title="Suggest an improvement that this KPI should show">Improve</Link>}
             </div>
           </article>
         ))}
