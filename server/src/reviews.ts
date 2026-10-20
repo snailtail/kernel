@@ -12,6 +12,7 @@ import { currentContext } from './context.js';
 import { query, tx } from './db.js';
 import { badRequest, conflict, forbidden, notFound } from './errors.js';
 import { logIncident } from './incident-log.js';
+import { createImprovementInTx } from './improvements.js';
 import { getIncident } from './incidents.js';
 import { createArticle } from './knowledge.js';
 import { timeline } from './major-incidents.js';
@@ -38,6 +39,7 @@ export const updateReviewSchema = z.object({
 }).partial();
 export const itemSchema = z.object({ kind: z.enum(ITEM_KINDS), body: z.string().trim().min(1).max(2000) });
 export const itemProblemSchema = z.object({ problem: z.string().trim().max(20).optional() });
+export const itemImprovementSchema = z.object({ title: z.string().trim().min(1).max(300).optional(), owner_id: z.number().int().nullable().optional() });
 export const itemActionSchema = z.object({ title: z.string().trim().min(1).max(300).optional(), owner_id: z.number().int().nullable().optional(), due_date: date.nullable().optional(), problem: z.string().trim().max(20).optional() });
 export const waiveSchema = z.object({ reason: z.string().trim().min(5).max(2000) });
 
@@ -185,9 +187,11 @@ export async function getReview(user: User, ref: string) {
   const [items, owner, t, facts] = await Promise.all([
     query(
       `SELECT x.id, x.kind, x.body, x.created_at, u.display_name AS created_by, p.ref AS problem_ref, p.title AS problem_title, p.status AS problem_status,
-              a.id AS action_id, a.title AS action_title, a.status AS action_status, a.due_date::text AS action_due, o.display_name AS action_owner, ap.ref AS action_problem_ref
+              a.id AS action_id, a.title AS action_title, a.status AS action_status, a.due_date::text AS action_due, o.display_name AS action_owner, ap.ref AS action_problem_ref,
+              m.ref AS improvement_ref, m.title AS improvement_title, m.status AS improvement_status
        FROM incident_review_items x LEFT JOIN users u ON u.id = x.created_by LEFT JOIN problems p ON p.id = x.problem_id
        LEFT JOIN problem_actions a ON a.id = x.action_id LEFT JOIN users o ON o.id = a.owner_id LEFT JOIN problems ap ON ap.id = a.problem_id
+       LEFT JOIN improvements m ON m.id = x.improvement_id
        WHERE x.review_id = $1 ORDER BY x.kind, x.id`,
       [r.id],
     ),
@@ -219,7 +223,7 @@ export async function getReview(user: User, ref: string) {
 }
 
 /** Guided mode (#37): where the review stands and what is left before it can be published. */
-function reviewGuidance(r: { status: string; what_happened: string; impact_summary: string; items: { kind: string; problem_ref: string | null; action_id: number | null }[]; overdue: boolean; due: string | null }) {
+function reviewGuidance(r: { status: string; what_happened: string; impact_summary: string; items: { kind: string; problem_ref: string | null; action_id: number | null; improvement_ref: string | null }[]; overdue: boolean; due: string | null }) {
   const open = isOpenReview(r);
   const factors = r.items.filter((x) => x.kind === 'factor');
   const followUps = r.items.filter((x) => x.kind === 'follow_up');
@@ -227,7 +231,7 @@ function reviewGuidance(r: { status: string; what_happened: string; impact_summa
     { id: 'story', label: 'Describe what happened and the impact', hint: 'It starts from the timeline and the impact Kernel recorded; correct and complete it.', done: !!r.what_happened.trim() && !!r.impact_summary.trim() },
     { id: 'factors', label: 'Record the contributing factors', hint: 'Conditions and decisions that made it possible or worse, in blameless wording.', done: factors.length > 0 },
     { id: 'problems', label: 'Turn contributing factors into problems', hint: 'Problem management finds and removes the underlying causes.', done: factors.length > 0 && factors.every((x) => x.problem_ref) },
-    { id: 'actions', label: 'Turn follow-ups into actions', hint: 'Each with an owner and a due date, so they get done.', done: followUps.every((x) => x.action_id) },
+    { id: 'actions', label: 'Turn follow-ups into actions or improvements', hint: 'An action with an owner and a due date for a fix; an improvement for a bigger change to how things work.', done: followUps.every((x) => x.action_id || x.improvement_ref) },
     { id: 'publish', label: r.overdue ? 'The review is overdue: publish it' : 'Publish the review', hint: `The owner, the incident lead or a manager publishes it${r.due ? ` (due ${r.due})` : ''}; a manager can waive it with a reason.`, done: !open },
   ];
   return {
@@ -316,8 +320,8 @@ export async function removeItem(user: User, ref: string, itemId: number) {
     const r = await loadReview(db, ref, true);
     if (!isOpenReview(r)) throw conflict(`The review is ${r.status}: it can no longer be edited`);
     // A factor that became a problem, or a follow-up that became an action, stays: the link is the trace.
-    const { rows } = await db.query('DELETE FROM incident_review_items WHERE id = $1 AND review_id = $2 AND problem_id IS NULL AND action_id IS NULL RETURNING id', [itemId, r.id]);
-    if (!rows[0]) throw conflict('Only an item that has not become a problem or an action can be removed');
+    const { rows } = await db.query('DELETE FROM incident_review_items WHERE id = $1 AND review_id = $2 AND problem_id IS NULL AND action_id IS NULL AND improvement_id IS NULL RETURNING id', [itemId, r.id]);
+    if (!rows[0]) throw conflict('Only an item that has not become a problem, an action or an improvement can be removed');
     await audit(db, { entity_type: 'incident_review', entity_ref: r.review_ref, action: 'item_remove', changes: { item_id: itemId } });
   });
   return getReview(user, ref);
@@ -384,6 +388,7 @@ export async function itemToAction(user: User, ref: string, itemId: number, inpu
     if (!item) throw notFound('Review item not found');
     if (item.kind === 'factor') throw badRequest('A contributing factor becomes a problem; add the follow-up as its own item');
     if (item.action_id) throw conflict('This follow-up already has an action');
+    if (item.improvement_id) throw conflict('This follow-up became an improvement');
     let problemId: number | null = null;
     if (input.problem) problemId = (await loadForUpdate(db, input.problem)).id;
     else {
@@ -403,6 +408,35 @@ export async function itemToAction(user: User, ref: string, itemId: number, inpu
     });
     await db.query('UPDATE incident_review_items SET action_id = $2 WHERE id = $1', [item.id, actionId]);
     await logIncident(db, r.incident_id, user.id, 'link', `Follow-up → action on ${p[0].ref}`, { kind: 'problem', reference: p[0].ref, action: 'add', review_item: item.id, action_id: actionId });
+  });
+  return getReview(user, ref);
+}
+
+/**
+ * Follow-up (or gap) → improvement (#52): the third choice besides an action, for a change to how things work rather
+ * than a fix. It starts as narrow as the incident (restricted, confidential), so the follow-up's words go with it.
+ */
+export async function itemToImprovement(user: User, ref: string, itemId: number, input: z.infer<typeof itemImprovementSchema>) {
+  ref = await incidentRefOf(ref);
+  authorize(user, 'incident.update');
+  authorize(user, 'improvement.write');
+  await tx(async (db) => {
+    const r = await loadReview(db, ref, true);
+    const { rows: items } = await db.query('SELECT * FROM incident_review_items WHERE id = $1 AND review_id = $2 FOR UPDATE', [itemId, r.id]);
+    const item = items[0];
+    if (!item) throw notFound('Review item not found');
+    if (item.kind === 'factor') throw badRequest('A contributing factor becomes a problem; a follow-up or a gap can become an improvement');
+    if (item.action_id) throw conflict('This follow-up already has an action');
+    if (item.improvement_id) throw conflict('This follow-up already became an improvement');
+    const narrow = startNarrow({ ...(await audienceOf(db, r.ref)), ref: r.review_ref });
+    const m = await createImprovementInTx(db, user, {
+      title: (input.title ?? item.body.split('\n')[0]).slice(0, 300),
+      description: `Follow-up from the post-incident review of ${r.ref} (${r.incident_title}):\n\n${item.body}`,
+      source: 'review', source_ref: r.review_ref, owner_id: input.owner_id,
+    }, narrow);
+    await db.query('UPDATE incident_review_items SET improvement_id = $2 WHERE id = $1', [item.id, m.id]);
+    await logIncident(db, r.incident_id, user.id, 'link', `Follow-up → improvement ${m.ref}`, { kind: 'improvement', reference: m.ref, action: 'add', review_item: item.id });
+    await audit(db, { entity_type: 'incident_review', entity_ref: r.review_ref, action: 'item_improvement', changes: { item_id: item.id, improvement: m.ref } });
   });
   return getReview(user, ref);
 }
@@ -480,7 +514,7 @@ export async function reviewMarkdown(user: User, ref: string) {
   const section = (h: string, v: string) => `## ${h}\n\n${masked ? '_Confidential._' : v.trim() || '–'}\n`;
   const items = (kind: string, title: string) => {
     const list = r.items.filter((x: any) => x.kind === kind);
-    return list.length ? `## ${title}\n\n${list.map((x: any) => `- ${masked ? '_Confidential._' : x.body}${x.problem_ref ? ` → ${x.problem_ref}` : ''}${x.action_id ? ` → action on ${x.action_problem_ref}${x.action_owner ? ` (${x.action_owner}${x.action_due ? `, ${x.action_due}` : ''})` : ''}` : ''}`).join('\n')}\n` : '';
+    return list.length ? `## ${title}\n\n${list.map((x: any) => `- ${masked ? '_Confidential._' : x.body}${x.problem_ref ? ` → ${x.problem_ref}` : ''}${x.action_id ? ` → action on ${x.action_problem_ref}${x.action_owner ? ` (${x.action_owner}${x.action_due ? `, ${x.action_due}` : ''})` : ''}` : ''}${x.improvement_ref ? ` → improvement ${x.improvement_ref}` : ''}`).join('\n')}\n` : '';
   };
   return [
     `# Post-incident review: ${r.incident_ref} ${r.incident_title}`, '',

@@ -15,6 +15,7 @@ interface Item {
   id: number; kind: 'factor' | 'follow_up' | 'gap'; body: string; created_by: string | null; problem_ref: string | null; problem_title: string | null;
   problem_status: string | null;
   action_id: number | null; action_title: string | null; action_status: string | null; action_due: string | null; action_owner: string | null; action_problem_ref: string | null;
+  improvement_ref: string | null; improvement_title: string | null; improvement_status: string | null;
 }
 interface Review {
   ref: string; incident_ref: string; incident_title: string; is_major: boolean; status: 'scheduled' | 'draft' | 'published' | 'waived'; owner_id: number | null; owner: string | null;
@@ -28,7 +29,7 @@ type ReviewData = Review & Record<Section, string>;
 const SECTIONS: [Section, string][] = [['what_happened', 'What happened'], ['impact_summary', 'Impact'], ['went_well', 'What went well'], ['was_hard', 'What was hard'], ['lucky', 'Where we were lucky']];
 const KINDS: [Item['kind'], string, string][] = [
   ['factor', 'Contributing factors', 'Conditions that made the incident possible. Each can become a problem, where root cause analysis continues.'],
-  ['follow_up', 'Follow-up', 'Concrete actions with an owner and a date. Each becomes an action on a problem.'],
+  ['follow_up', 'Follow-up', 'Concrete actions with an owner and a date. Each becomes an action on a problem, or an improvement for a change to how things work.'],
   ['gap', 'Detection and response gaps', 'What made it slow to notice or to respond: alerting, runbooks, access, people.'],
 ];
 const STATUS_LABEL: Record<Review['status'], string> = { scheduled: 'Scheduled', draft: 'Draft', published: 'Published', waived: 'Waived' };
@@ -179,7 +180,7 @@ export function IncidentReviewPage() {
   );
 }
 
-/** Where an item went: a problem, an action, or the buttons to get it there. */
+/** Where an item went: a problem, an action, an improvement, or the buttons to get it there. */
 function ItemOutput({ item: x, reviewPath, editable, defaultProblem, people, onChange }: {
   item: Item; reviewPath: string; editable: boolean; defaultProblem: string | null; people: { id: number; display_name: string }[];
   onChange: (fn: () => Promise<any>) => Promise<boolean>;
@@ -189,6 +190,7 @@ function ItemOutput({ item: x, reviewPath, editable, defaultProblem, people, onC
   const [due, setDue] = useState('');
   if (x.problem_ref) return <div className="small">→ <Link to={`/problems/${x.problem_ref}`} className="mono">{x.problem_ref}</Link> {x.problem_title} <span className="muted">{x.problem_status?.replace('_', ' ')}</span></div>;
   if (x.action_id) return <div className="small">→ action on <Link to={`/problems/${x.action_problem_ref}`} className="mono">{x.action_problem_ref}</Link>{x.action_owner ? `, ${x.action_owner}` : ''}{x.action_due ? `, due ${x.action_due}` : ''} <span className="muted">{x.action_status}</span></div>;
+  if (x.improvement_ref) return <div className="small">→ improvement <Link to={`/improvements/${x.improvement_ref}`} className="mono">{x.improvement_ref}</Link> {x.improvement_title} <span className="muted">{x.improvement_status?.replace('_', ' ')}</span></div>;
   if (!editable) return null;
   if (x.kind === 'factor') {
     return (
@@ -207,6 +209,9 @@ function ItemOutput({ item: x, reviewPath, editable, defaultProblem, people, onC
       <input value={problem} onChange={(e) => setProblem(e.target.value)} placeholder={defaultProblem ?? 'PRB…'} aria-label="On problem" />
       <button className="btn small" disabled={!problem.trim() && !defaultProblem} title={!problem.trim() && !defaultProblem ? 'Actions live on a problem: turn a contributing factor into one first' : ''}
         onClick={() => onChange(() => api.post(`${reviewPath}/items/${x.id}/action`, { ...(owner ? { owner_id: Number(owner) } : {}), ...(due ? { due_date: due } : {}), ...(problem.trim() ? { problem: problem.trim() } : {}) }))}>Create action</button>
+      <span className="muted">or</span>
+      <button className="btn small" title="For a change to how things work rather than a fix: it goes to the continual improvement register"
+        onClick={() => onChange(() => api.post(`${reviewPath}/items/${x.id}/improvement`, { ...(owner ? { owner_id: Number(owner) } : {}) }))}>Suggest an improvement</button>
     </div>
   );
 }

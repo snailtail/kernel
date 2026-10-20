@@ -29,11 +29,17 @@ Registered types:
 | ci | `CI000012` | cmdb | `/api/cis` | `get_ci` |
 | service | `SVC000003` | cmdb | `/api/cis` | `get_ci` |
 | article | `KB000007` | knowledge | `/api/articles` | `get_article` |
+| improvement | `IMP000012` | always on | `/api/improvements` | `get_improvement` |
 
 A post-incident review also answers to its incident's ref (`/api/incidents/INC000123/review`, `get_review` with
 `INC000123`), and shares its incident's links: linking from or to a review links the incident. Its comments are kept
 in the incident's activity, marked with the review, and shown on the review. Its visibility and confidentiality are
 the incident's.
+
+An improvement (continual improvement register, #52) keeps the links to the changes, problems, actions (by id),
+incidents and reviews that carry it out, whichever side the link starts from: linking a problem to an improvement
+stores the link on the improvement. One made from a review, a problem or a service review names it in `source_ref` and
+starts as narrow as that record (restricted, confidential).
 
 ## REST
 

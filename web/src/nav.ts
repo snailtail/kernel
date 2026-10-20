@@ -6,7 +6,7 @@ import type { Meta, User } from './api';
 import { canEdit, isManager } from './session';
 
 export type Module = keyof Meta['modules'];
-export type IconName = 'home' | 'events' | 'incidents' | 'status' | 'candidates' | 'problems' | 'kedb' | 'changes' | 'actions' | 'knowledge' | 'review' | 'pir' | 'dashboard' | 'reports' | 'services' | 'cmdb' | 'teams' | 'people' | 'help' | 'admin';
+export type IconName = 'home' | 'events' | 'incidents' | 'status' | 'candidates' | 'problems' | 'kedb' | 'changes' | 'actions' | 'improvements' | 'knowledge' | 'review' | 'pir' | 'dashboard' | 'reports' | 'services' | 'cmdb' | 'teams' | 'people' | 'help' | 'admin';
 export type BadgeKey = 'my_work' | 'events' | 'incidents' | 'kedb' | 'actions' | 'reviews';
 
 export interface NavItem {
@@ -45,6 +45,7 @@ export const NAV: NavGroup[] = [
       { to: '/kedb', label: 'Known errors', icon: 'kedb', hint: 'Workarounds and decisions on fixes', badge: 'kedb', key: 'k' },
       { to: '/changes', label: 'Changes', icon: 'changes', hint: 'Implement the fix', module: 'change', key: 'h' },
       { to: '/actions', label: 'Actions', icon: 'actions', hint: 'Follow-ups with an owner and a date', badge: 'actions', key: 'a' },
+      { to: '/improvements', label: 'Improvements', icon: 'improvements', hint: 'Continual improvement register: ideas, quick wins and their benefit', key: 'o', match: ['/improvements/'] },
     ],
   },
   {
@@ -93,6 +94,7 @@ export function newItems(user: User, meta: Meta, path = '/'): NewItem[] {
     { to: '/problems/new', label: 'Problem' },
     { to: '/changes?new=1', label: 'Change', module: 'change' },
     { to: '/knowledge?new=1', label: 'Article', module: 'knowledge' },
+    { to: '/improvements?new=1', label: 'Improvement' },
   ];
   const all = candidates.filter((i) => on(i.module));
   // On a practice's pages, its own record comes first; elsewhere what the role logs most (managers problems, others
@@ -100,6 +102,7 @@ export function newItems(user: User, meta: Meta, path = '/'): NewItem[] {
   const here = path.startsWith('/incidents') || path.startsWith('/events') ? 'Incident'
     : path.startsWith('/changes') ? 'Change'
     : path.startsWith('/knowledge') ? 'Article'
+    : path.startsWith('/improvements') ? 'Improvement'
     : /^\/(problems|kedb|candidates|actions|review)/.test(path) ? 'Problem'
     : isManager(user) ? 'Problem' : 'Incident';
   const first = all.find((i) => i.label === here) ?? all[0];

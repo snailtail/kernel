@@ -140,6 +140,8 @@ export interface Analysis {
 }
 
 export interface ProblemDetail extends Problem {
+  /** Improvements that came from it or are linked to it (#52). */
+  improvements?: { ref: string; title: string; status: string }[];
   knowledge_article?: { ref: string; status: string } | null;
   affected_cis: import('./components/AffectedCis').AffectedCi[];
   affected_services: import('./components/AffectedCis').AffectedService[];

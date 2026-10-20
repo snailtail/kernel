@@ -27,6 +27,7 @@ import { addIncidentComment } from './incidents.js';
 import { addChangeComment } from './changes.js';
 import { addArticleComment } from './knowledge.js';
 import { addCiComment } from './cmdb.js';
+import { addImprovementComment, addImprovementLink, improvementLinkSchema, myImprovements } from './improvements.js';
 
 export const searchSchema = z.object({
   q: z.string().trim().min(1).max(200),
@@ -89,6 +90,7 @@ export async function addComment(user: User, ref: string, body: string) {
   else if (type === 'change') await addChangeComment(user, ref, body);
   else if (type === 'article') await addArticleComment(user, ref, body);
   else if (type === 'review') await addReviewComment(user, ref, body);
+  else if (type === 'improvement') await addImprovementComment(user, ref, body);
   else await addCiComment(user, ref, body);
 }
 
@@ -105,6 +107,14 @@ export async function linkRecords(user: User, from: string, to: string, options:
   }
   // A post-incident review shares its incident's links (#35): linking from or to a review links its incident.
   const kernelRef = !options.system || options.system === 'Kernel';
+  // An improvement (#52) keeps the links to what carries it out, whichever side the link starts from.
+  if (source.type === 'improvement') {
+    return (await addImprovementLink(user, from, improvementLinkSchema.parse({ kind, reference: to, system: options.system, url: options.url, note: options.note }))).links;
+  }
+  if (kind === 'improvement' && kernelRef) {
+    if (!['problem', 'change', 'incident', 'review'].includes(source.type)) throw badRequest(`An improvement links to the problems, changes, incidents and reviews that carry it out, not a ${source.type}`);
+    return (await addImprovementLink(user, to, improvementLinkSchema.parse({ kind: source.type, reference: from, note: options.note }))).links;
+  }
   if (source.type === 'review') return linkRecords(user, await incidentRefOf(from), to, options);
   if (kind === 'review' && kernelRef) return linkRecords(user, from, await incidentRefOf(to), { ...options, kind: 'incident' });
   // Knowledge articles (#47) apply to CIs and services.
@@ -198,6 +208,7 @@ export async function myWork(user: User) {
       )).rows
     : [];
   const reviews = can(user.role, 'incident.read') ? await myReviews(user.id) : [];
+  const improvements = can(user.role, 'improvement.read') ? await myImprovements(user.id) : [];
   const problemType = recordTypes().find((t) => t.type === 'problem')!;
   const teams = can(user.role, 'team.read') ? await myTeams(user.id) : [];
   const teamQueue = can(user.role, 'incident.read') && teams.length
@@ -214,6 +225,7 @@ export async function myWork(user: User) {
     incidents: incidents.rows,
     major_updates: majorUpdates,
     reviews,
+    improvements,
     change_votes: changeVotes.rows,
     changes: myChanges.rows,
     actions: actions.rows,

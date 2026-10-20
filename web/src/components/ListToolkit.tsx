@@ -38,6 +38,7 @@ export const BULK: Record<string, BulkSpec> = {
   alerts: { practice: 'alerts', noun: ['alert', 'alerts'], ops: ['acknowledge', 'close'] },
   actions: { practice: 'actions', noun: ['action', 'actions'], ops: ['assign', 'status'], statuses: { open: 'Open', done: 'Done', cancelled: 'Cancelled' }, owner: 'owner' },
   knowledge: { practice: 'articles', noun: ['article', 'articles'], ops: ['assign', 'status'], statuses: { draft: 'Draft', published: 'Published', retired: 'Retired' }, owner: 'owner' },
+  improvements: { practice: 'improvements', noun: ['improvement', 'improvements'], ops: ['assign', 'status'], statuses: { idea: 'Idea', approved: 'Approved', in_progress: 'In progress', done: 'Done', rejected: 'Rejected' }, owner: 'owner' },
   cis: { practice: 'cis', noun: ['CI', 'CIs'], ops: ['tags', 'status'], statuses: { planned: 'Planned', active: 'Active', maintenance: 'Maintenance', retired: 'Retired', missing: 'Missing' } },
 };
 

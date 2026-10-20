@@ -21,6 +21,8 @@ const MATRIX: [string, string, unknown, RoleName[]][] = [
   ['GET', '/api/dashboard', undefined, READERS],
   ['GET', '/api/kedb', undefined, READERS],
   ['GET', '/api/actions', undefined, READERS],
+  ['GET', '/api/improvements', undefined, READERS],
+  ['POST', '/api/improvements', { title: 'Matrix' }, WORKERS],
   ['GET', '/api/reports', undefined, READERS],
   ['GET', '/api/review', undefined, READERS],
   ['GET', '/api/candidates', undefined, READERS],

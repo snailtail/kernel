@@ -150,6 +150,9 @@ describe('service reports (#54)', { skip }, () => {
     const { PERMISSIONS } = await import('../../src/policy.js');
     for (const [role, actions] of Object.entries(PERMISSIONS)) {
       if (['incident.read', 'change.read'].some((a) => actions.has(a as any))) assert.ok(actions.has('problem.read') && actions.has('report.read'), role);
+      // The improvement register (#52): read by everyone who reads problems, written by those who comment on them.
+      assert.equal(actions.has('improvement.read'), actions.has('problem.read'), `${role}: improvement.read`);
+      assert.equal(actions.has('improvement.write'), actions.has('problem.comment'), `${role}: improvement.write`);
     }
 
     // MCP parity: get_dashboard carries the same KPIs.

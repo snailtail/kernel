@@ -18,6 +18,7 @@ import * as major from '../src/major-incidents.js';
 import * as oncall from '../src/oncall.js';
 import * as people from '../src/people.js';
 import * as problems from '../src/problems.js';
+import * as improvements from '../src/improvements.js';
 import * as reviews from '../src/reviews.js';
 import * as sla from '../src/sla.js';
 import * as status from '../src/status.js';
@@ -155,6 +156,9 @@ export async function seedStory(p: People) {
   await reviews.itemToProblem(erik, old, rv.items.find((x: any) => x.kind === 'factor').id, {});
   rv = await reviews.addItem(erik, old, { kind: 'follow_up', body: 'Blue/green index switch for mapping changes' });
   await reviews.itemToAction(erik, old, rv.items.find((x: any) => x.kind === 'follow_up').id, { owner_id: erik.id, due_date: new Date(Date.now() + 21 * D * 60_000).toISOString().slice(0, 10) });
+  // A detection gap is bigger than a fix: it goes to the continual improvement register (#52).
+  rv = await reviews.addItem(erik, old, { kind: 'gap', body: 'Synthetic search checks from outside, so we notice before customers do' });
+  await reviews.itemToImprovement(erik, old, rv.items.find((x: any) => x.kind === 'gap').id, { owner_id: erik.id });
   await reviews.publishReview(erik, old);
   await shift(old, 12 * D);
   // Reviewed three working days after it was resolved.
@@ -290,6 +294,30 @@ export async function seedStory(p: People) {
   await query("UPDATE configuration_items SET missing_since = now() - interval '23 days' WHERE name = 'scan01'");
   await query("UPDATE ci_sources SET first_seen_at = now() - interval '400 days', last_seen_at = now() - interval '26 days' WHERE source_id = 'scan01'");
   await query("UPDATE ci_activity SET created_at = now() - interval '23 days' WHERE data->>'to' = 'missing' AND ci_id = (SELECT id FROM configuration_items WHERE name = 'scan01')");
+  // ---- The continual improvement register (#52): ideas in every stage, rated by value and effort ----
+  const fromGap = (await query("SELECT ref FROM improvements WHERE source = 'review' ORDER BY id LIMIT 1")).rows[0].ref as string;
+  await improvements.updateImprovement(erik, fromGap, { service: webshop, value: 5, effort: 2, kpi: 'mttr', description: 'Search broke for 40 minutes before the first customer call. A synthetic check every minute would have paged us in two.' });
+  await improvements.transitionImprovement(anna, fromGap, { to: 'approved' });
+  await improvements.transitionImprovement(erik, fromGap, { to: 'in_progress' });
+  const ideas: { by: User; title: string; description: string; value: number; effort: number; to?: string[]; kpi?: 'mttr' | 'sla' | 'change_success' | 'recurring'; benefit?: string; reason?: string }[] = [
+    { by: sara, title: 'Status page link in the checkout error message', description: 'Customers call the desk when checkout fails; the status page already says what is wrong.', value: 4, effort: 1, kpi: 'sla' },
+    { by: jonas, title: 'Canary releases for the payment gateway', description: 'Two of the last five gateway releases were rolled back.', value: 5, effort: 4, to: ['approved'], kpi: 'change_success' },
+    { by: erik, title: 'Runbook for a full search index rebuild', description: 'Nobody knew how long a rebuild takes.', value: 3, effort: 1, to: ['approved', 'in_progress', 'done'], benefit: 'The last rebuild took 25 minutes instead of 70: the runbook names the right batch size.' },
+    { by: sara, title: 'Weekly review of incidents without a category', description: 'A third of last month\'s incidents had no category, so trends miss them.', value: 2, effort: 1, kpi: 'recurring' },
+    { by: anna, title: 'Move the webshop to a new CMS', description: 'Content editors find the current CMS slow.', value: 2, effort: 5, to: ['rejected'], reason: 'Not a service problem: the editors\' wish goes to the product backlog.' },
+    { by: jonas, title: 'Automatic certificate renewal everywhere', description: 'Three expired certificates this year, each found by customers.', value: 5, effort: 3, to: ['approved', 'in_progress'], kpi: 'mttr' },
+    { by: erik, title: 'Self-service password reset for shop staff', description: 'Password resets are a fifth of the desk\'s tickets.', value: 4, effort: 2 },
+  ];
+  for (const x of ideas) {
+    const m = (await improvements.createImprovement(x.by, { title: x.title, description: x.description, value: x.value, effort: x.effort, service: webshop, ...(x.kpi ? { kpi: x.kpi } : {}), owner_id: x.by.id })).ref;
+    for (const to of x.to ?? []) {
+      await improvements.transitionImprovement(['approved', 'rejected'].includes(to) ? anna : x.by, m, { to: to as 'approved', ...(to === 'done' ? { benefit: x.benefit } : {}), ...(to === 'rejected' ? { reason: x.reason } : {}) });
+    }
+  }
+  // The certificate work is carried out by the gateway certificate change (rolled back once).
+  const certChange = (await query("SELECT ref FROM changes WHERE title = 'Rotate the payment gateway certificate'")).rows[0].ref as string;
+  await improvements.addImprovementLink(jonas, (await query("SELECT ref FROM improvements WHERE title LIKE 'Automatic certificate%'")).rows[0].ref, { kind: 'change', reference: certChange, system: 'Kernel', url: '', note: '' });
+
   // The pages the story queued (the worker is not running while seeding).
   await oncall.deliverPages();
   return { incident: inc, problem: prb, change: chg, earlier: old };

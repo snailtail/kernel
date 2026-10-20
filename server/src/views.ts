@@ -9,13 +9,13 @@ import { badRequest, conflict, forbidden, notFound } from './errors.js';
 import { authorize, can, type Action } from './policy.js';
 import type { Db } from './problems.js';
 
-export const LISTS = ['problems', 'actions', 'incidents', 'changes', 'alerts', 'known_errors', 'knowledge', 'cis', 'candidates'] as const;
+export const LISTS = ['problems', 'actions', 'incidents', 'changes', 'alerts', 'known_errors', 'knowledge', 'cis', 'candidates', 'improvements'] as const;
 export type ListName = (typeof LISTS)[number];
 
 /** Reading a list's views needs the same permission as reading the list. */
 const READ: Record<ListName, Action> = {
   problems: 'problem.read', actions: 'problem.read', incidents: 'incident.read', changes: 'change.read', alerts: 'event.read',
-  known_errors: 'kedb.read', knowledge: 'article.read', cis: 'ci.read', candidates: 'candidate.read',
+  known_errors: 'kedb.read', knowledge: 'article.read', cis: 'ci.read', candidates: 'candidate.read', improvements: 'improvement.read',
 };
 
 interface BuiltIn {
@@ -61,6 +61,12 @@ export const BUILT_IN: Record<ListName, BuiltIn[]> = {
     { key: 'production', name: 'Production', query: 'environment=prod' },
   ],
   candidates: [{ key: 'all', name: 'All candidates', query: '' }],
+  improvements: [
+    { key: 'quick-wins', name: 'Quick wins', query: 'quick_wins=true' },
+    { key: 'ideas', name: 'Ideas to decide on', query: 'status=idea' },
+    { key: 'mine', name: 'Mine', query: 'owner=me' },
+    { key: 'done', name: 'Done', query: 'status=done' },
+  ],
 };
 
 export const listSchema = z.object({ list: z.enum(LISTS) });

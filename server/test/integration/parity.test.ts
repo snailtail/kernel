@@ -61,6 +61,7 @@ describe('API and MCP parity', { skip }, () => {
     ci: async () => (await pm.post('/api/cis', { name: `parity-vm-${Date.now()}`, ci_type: 'virtual_machine' })).body.ref,
     service: async () => (await pm.post('/api/cis', { name: `Parity service ${Date.now()}`, ci_type: 'business_service' })).body.ref,
     article: async () => (await analyst.post('/api/articles', { title: 'Parity envelope', body: 'Steps.' })).body.ref,
+    improvement: async () => (await analyst.post('/api/improvements', { title: 'Parity envelope' })).body.ref,
     review: async () => {
       const inc = (await analyst.post('/api/incidents', { title: 'Parity review' })).body.ref;
       const r = await analyst.post('/api/reviews', { incident: inc });
