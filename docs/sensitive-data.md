@@ -100,7 +100,7 @@ A confidential record stays visible: it shows up in lists and searches, and its 
 
 **Reveal on demand.** Everyone else who works in Kernel can reveal the text for 15 minutes. That takes step-up and a reason. The reveal is noted on the record, where its people can see who looked, and in the audit trail. Problem managers reveal like anyone else, because overseeing a record is not the same as working on it.
 
-**Writing.** A field you cannot read cannot be overwritten.
+**Writing.** A field you cannot read cannot be overwritten. That holds for edits, transitions that fill in text (a root cause, a resolution, a reason), actions and analyses on the record, and bulk changes, through the web, the REST API and MCP alike. Agents never read the text, so they cannot change it either. Adding a comment is not an overwrite and stays open to everyone who may work on the record.
 
 **Always masked.** AI agents (MCP) and exports always get the masked text, even for the record's own people, because both leave Kernel's access control. Live updates carry only kind and id, and each browser refetches through the normal API, so a reveal is never shared.
 

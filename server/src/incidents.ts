@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { audienceOf, copyText, startNarrow, titleAudience } from './audience.js';
 import type { User } from './auth.js';
 import { loadCi, logCi, registerCiExtra } from './cmdb.js';
-import { textFilterSql } from './confidential.js';
+import { assertMayWriteText, textFilterSql } from './confidential.js';
 import { currentContext } from './context.js';
 import { query, tx } from './db.js';
 import { badRequest, conflict, notFound } from './errors.js';
@@ -342,6 +342,8 @@ export async function insertIncident(
 export async function updateIncidentLean(user: User, ref: string, { base, caller, ...rawInput }: z.infer<typeof updateIncidentSchema>): Promise<void> {
   let input = rawInput;
   authorize(user, 'incident.update');
+  // No blind overwrites of masked text (#61, #156).
+  await assertMayWriteText(user, ref, rawInput);
   await tx(async (db) => {
     const current = await loadIncident(db, ref);
     if (caller !== undefined) {
@@ -404,6 +406,8 @@ export async function updateIncident(...args: Parameters<typeof updateIncidentLe
 
 export async function transitionIncidentLean(user: User, ref: string, input: z.infer<typeof transitionIncidentSchema>): Promise<void> {
   authorize(user, 'incident.update');
+  // No blind overwrites of masked text (#61, #156).
+  await assertMayWriteText(user, ref, { ...input, comment: undefined });
   await tx(async (db) => {
     const current = await loadIncident(db, ref);
     const from = current.status as IncidentStatus;

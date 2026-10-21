@@ -6,10 +6,10 @@ import { z } from 'zod';
 import { audienceOf, BROADEST, startNarrow, type Audience } from './audience.js';
 import type { User } from './auth.js';
 import { audit } from './audit.js';
-import { forgetExists, maskedRefs, textFilterSql } from './confidential.js';
+import { assertMayWriteText, forgetExists, textFilterSql } from './confidential.js';
 import { currentContext } from './context.js';
 import { query, tx } from './db.js';
-import { badRequest, conflict, forbidden, notFound } from './errors.js';
+import { badRequest, conflict, notFound } from './errors.js';
 import { kpis, TILES } from './kpis.js';
 import { notify } from './notifications.js';
 import { authorize, can } from './policy.js';
@@ -277,6 +277,8 @@ export async function createImprovement(user: User, input: z.infer<typeof create
 
 export async function updateImprovementLean(user: User, ref: string, input: z.infer<typeof updateImprovementSchema>): Promise<void> {
   authorize(user, 'improvement.write');
+  // No blind overwrites of masked text (#61, #156).
+  await assertMayWriteText(user, ref, input);
   await tx(async (db) => {
     const m = await loadImprovement(db, ref);
     if (input.owner_id !== undefined) await validateOwner(db, input.owner_id);
@@ -299,10 +301,8 @@ export async function updateImprovement(...args: Parameters<typeof updateImprove
 
 export async function transitionImprovementLean(user: User, ref: string, input: z.infer<typeof transitionImprovementSchema>): Promise<void> {
   authorize(user, 'improvement.write');
-  // No blind overwrites: the benefit and the reason are masked text (#61). Here, not in app.ts, so bulk and MCP are covered.
-  if ((input.benefit !== undefined || input.reason !== undefined) && (await maskedRefs(user, [ref])).has(ref.toUpperCase())) {
-    throw forbidden(`${ref.toUpperCase()} is confidential. Reveal its text before you change it.`);
-  }
+  // No blind overwrites of masked text (#61, #156).
+  await assertMayWriteText(user, ref, { benefit: input.benefit, reject_reason: input.reason });
   await tx(async (db) => {
     const m = await loadImprovement(db, ref);
     const from = m.status as Status;

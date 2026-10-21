@@ -3,7 +3,6 @@
 // step-up, is audited, and lasts 15 minutes. Titles, statuses and other fields stay readable, so the record can be
 // found and handled. Agents (MCP) and exports always get the masked text; AI models only with a provider that is
 // allowed confidential data.
-import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { audit, requireReason } from './audit.js';
 import type { User } from './auth.js';
@@ -226,9 +225,16 @@ export async function reveal(user: User, ref: string, reasonInput: string | unde
   });
 }
 
-/** Writing to a masked field needs the same right as reading it: no blind overwrites of text you cannot see. */
-export async function assertMayWriteText(req: FastifyRequest, ref: string, body: unknown) {
-  if (!req.user || !body || typeof body !== 'object') return;
-  if (!Object.keys(body).some((k) => MASKED_FIELDS.has(k))) return;
-  if ((await maskedRefs(req.user, [ref])).has(ref.toUpperCase())) throw forbidden(`${ref.toUpperCase()} is confidential. Reveal its text before you change it.`);
+/**
+ * Writing to a masked field needs the same right as reading it: no blind overwrites of text you cannot see (#61, #156).
+ * The service functions that change a record's text call this, so REST, MCP and bulk share one rule. `fields` are
+ * the fields the call writes (undefined ones are ignored); comments and other new entries are not overwrites. Agents
+ * (MCP) never read confidential text, so they may never change it either.
+ */
+export async function assertMayWriteText(user: { id: number }, ref: string, fields: Record<string, unknown>) {
+  if (!Object.entries(fields).some(([k, v]) => v !== undefined && MASKED_FIELDS.has(k))) return;
+  const reader = currentContext().channel === 'mcp' ? null : user;
+  if ((await maskedRefs(reader, [ref])).has(ref.toUpperCase())) {
+    throw forbidden(reader ? `${ref.toUpperCase()} is confidential. Reveal its text before you change it.` : `${ref.toUpperCase()} is confidential: agents cannot change its text. Ask a person working on it.`);
+  }
 }
