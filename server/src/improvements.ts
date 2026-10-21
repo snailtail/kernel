@@ -6,10 +6,10 @@ import { z } from 'zod';
 import { audienceOf, BROADEST, startNarrow, type Audience } from './audience.js';
 import type { User } from './auth.js';
 import { audit } from './audit.js';
-import { forgetExists, textFilterSql } from './confidential.js';
+import { forgetExists, maskedRefs, textFilterSql } from './confidential.js';
 import { currentContext } from './context.js';
 import { query, tx } from './db.js';
-import { badRequest, conflict, notFound } from './errors.js';
+import { badRequest, conflict, forbidden, notFound } from './errors.js';
 import { kpis, TILES } from './kpis.js';
 import { notify } from './notifications.js';
 import { authorize, can } from './policy.js';
@@ -32,7 +32,8 @@ const TRANSITIONS: Record<Status, Status[]> = {
   done: ['in_progress'],
   rejected: ['idea'],
 };
-const isDecision = (from: Status, to: Status) => (from === 'idea' && to === 'approved') || to === 'rejected' || from === 'rejected';
+// Taking an approval back is a decision too.
+const isDecision = (from: Status, to: Status) => (from === 'idea' && to === 'approved') || (from === 'approved' && to === 'idea') || to === 'rejected' || from === 'rejected';
 
 /** The ITIL 4 continual improvement model, short, for guided mode (#37): the empty list and the create form. */
 export const IMPROVEMENT_MODEL = [
@@ -118,7 +119,8 @@ async function serviceId(db: Db, ref: string | null | undefined) {
 // ---- Reading ---------------------------------------------------------------------------------
 
 const SELECT = `
-  SELECT m.*, o.display_name AS owner, c.display_name AS created_by_name, d.display_name AS decided_by_name, s.ref AS service_ref, s.name AS service_name
+  SELECT m.*, CASE WHEN m.source_ref IS NOT NULL AND kernel_ref_hidden(m.source_ref) THEN NULL ELSE m.source_ref END AS shown_source_ref,
+         o.display_name AS owner, c.display_name AS created_by_name, d.display_name AS decided_by_name, s.ref AS service_ref, s.name AS service_name
   FROM improvements m LEFT JOIN users o ON o.id = m.owner_id LEFT JOIN users c ON c.id = m.created_by
   LEFT JOIN users d ON d.id = m.decided_by LEFT JOIN configuration_items s ON s.id = m.service_id`;
 
@@ -135,10 +137,12 @@ export async function getImprovement(user: User, ref: string) {
     ),
     linksOf(m.id),
   ]);
-  const { search: _s, service_id: _sid, ...rest } = m;
+  const { search: _s, service_id: _sid, shown_source_ref, ...rest } = m;
   const detail = {
     type: 'improvement',
     ...rest,
+    // A source the viewer may not see is not named.
+    source_ref: shown_source_ref,
     service: m.service_ref ? { ref: m.service_ref, name: m.service_name } : null,
     links,
     activity: activity.rows,
@@ -214,7 +218,7 @@ export async function listImprovements(user: User, f: z.infer<typeof listImprove
   params.push(f.limit);
   const order = { updated: 'm.updated_at DESC', value: 'm.value DESC NULLS LAST, m.effort NULLS LAST, m.updated_at DESC', created: 'm.created_at DESC' }[f.sort];
   const { rows } = await query(
-    `SELECT m.id, m.ref, m.title, m.status, m.source, m.source_ref, m.value, m.effort, m.kpi, m.owner_id, o.display_name AS owner,
+    `SELECT m.id, m.ref, m.title, m.status, m.source, CASE WHEN m.source_ref IS NOT NULL AND kernel_ref_hidden(m.source_ref) THEN NULL ELSE m.source_ref END AS source_ref, m.value, m.effort, m.kpi, m.owner_id, o.display_name AS owner,
             s.ref AS service_ref, s.name AS service_name, m.created_at, m.updated_at, m.done_at,
             (SELECT count(*) FROM improvement_links l WHERE l.improvement_id = m.id)::int AS links
      FROM improvements m LEFT JOIN users o ON o.id = m.owner_id LEFT JOIN configuration_items s ON s.id = m.service_id
@@ -295,6 +299,10 @@ export async function updateImprovement(...args: Parameters<typeof updateImprove
 
 export async function transitionImprovementLean(user: User, ref: string, input: z.infer<typeof transitionImprovementSchema>): Promise<void> {
   authorize(user, 'improvement.write');
+  // No blind overwrites: the benefit and the reason are masked text (#61). Here, not in app.ts, so bulk and MCP are covered.
+  if ((input.benefit !== undefined || input.reason !== undefined) && (await maskedRefs(user, [ref])).has(ref.toUpperCase())) {
+    throw forbidden(`${ref.toUpperCase()} is confidential. Reveal its text before you change it.`);
+  }
   await tx(async (db) => {
     const m = await loadImprovement(db, ref);
     const from = m.status as Status;

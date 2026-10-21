@@ -187,7 +187,7 @@ export async function buildApp(options: { logLevel?: string; serveWeb?: boolean 
   app.addHook('onSend', async (req, reply, payload) => {
     if (!req.user || reply.statusCode >= 300 || typeof payload !== 'string' || !payload.includes('"ref"')) return payload;
     if (!String(reply.getHeader('content-type') ?? '').includes('application/json')) return payload;
-    const pageRef = /^\/api\/(problems|incidents|changes|reviews|records)\/[^/]+/.test(req.url) ? (req.params as { ref?: string } | undefined)?.ref : undefined;
+    const pageRef = /^\/api\/(problems|incidents|changes|reviews|improvements|records)\/[^/]+/.test(req.url) ? (req.params as { ref?: string } | undefined)?.ref : undefined;
     let parsed: unknown;
     try { parsed = JSON.parse(payload); } catch { return payload; }
     const before = payload.length;
@@ -196,7 +196,7 @@ export async function buildApp(options: { logLevel?: string; serveWeb?: boolean 
   });
   app.addHook('preHandler', async (req) => {
     // No blind overwrites: changing a masked field needs the right to read it.
-    if (!['PATCH', 'PUT'].includes(req.method) || !/^\/api\/(problems|incidents|changes|reviews)\/[^/]+(\/review)?$/.test(req.url.split('?')[0])) return;
+    if (!['PATCH', 'PUT'].includes(req.method) || !/^\/api\/(problems|incidents|changes|reviews|improvements)\/[^/]+(\/review)?$/.test(req.url.split('?')[0])) return;
     const ref = (req.params as { ref?: string } | undefined)?.ref;
     if (ref) await assertMayWriteText(req, ref, req.body);
   });
