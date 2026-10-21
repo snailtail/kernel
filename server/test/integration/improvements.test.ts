@@ -55,6 +55,7 @@ describe('continual improvement register (#52)', { skip }, () => {
     const approved = await go(pm, { to: 'approved' });
     ok(approved);
     assert.equal(approved.body.decided_by_name, 'Pm');
+    assert.equal((await go(analyst, { to: 'idea' })).status, 403, 'taking an approval back is a decision');
     ok(await analyst.patch(`/api/improvements/${ref}`, { owner_id: await userId('analyst') }));
     assert.equal((await go(analyst, { to: 'in_progress' })).body.status, 'in_progress');
     const noBenefit = await go(analyst, { to: 'done' });
@@ -113,6 +114,12 @@ describe('continual improvement register (#52)', { skip }, () => {
     assert.ok(!(await analyst2.get('/api/improvements?status=all')).body.some((m: any) => m.ref === r.body.ref));
     assert.ok(!(await analyst2.get(`/api/search?q=${r.body.ref}`)).body.some((h: any) => h.ref === r.body.ref));
     assert.equal((await analyst.get(`/api/improvements/${r.body.ref}`)).status, 200, 'positive control: its creator sees it');
+    ok(await analyst.put(`/api/records/${r.body.ref}/visibility`, { restricted: false, teams: [], reason: 'The lesson is general' }));
+    const widened = await analyst2.get(`/api/improvements/${r.body.ref}`);
+    assert.equal(widened.status, 200, 'widened, others see the improvement');
+    assert.equal(widened.body.source_ref, null, 'but not the name of a problem they cannot see');
+    assert.equal((await analyst2.get('/api/improvements?status=all')).body.find((m: any) => m.ref === r.body.ref).source_ref, null);
+    assert.equal((await analyst.get(`/api/improvements/${r.body.ref}`)).body.source_ref, prb, 'positive control');
   });
 
   test('a review follow-up becomes an improvement, as narrow as the incident', async () => {
@@ -136,6 +143,15 @@ describe('continual improvement register (#52)', { skip }, () => {
     const masked = (await analyst2.get(`/api/improvements/${imp}`)).body;
     assert.equal(masked.description, null, 'others see the title, not the text');
     assert.equal(masked.confidential_masked, true);
+    // No blind overwrites of the masked text, by edit or by transition.
+    assert.equal((await analyst2.patch(`/api/improvements/${imp}`, { description: 'Overwritten' })).status, 403);
+    assert.equal((await analyst2.patch(`/api/improvements/${imp}`, { benefit: 'Overwritten' })).status, 403);
+    assert.equal((await analyst2.post(`/api/improvements/${imp}/transition`, { to: 'done', benefit: 'Overwritten' })).status, 403);
+    assert.equal((await analyst2.post(`/api/improvements/${imp}/transition`, { to: 'rejected', reason: 'Overwritten' })).status, 403);
+    const after = (await analyst.get(`/api/improvements/${imp}`)).body;
+    assert.match(after.description, /failover drill/, 'the text is unchanged');
+    assert.equal(after.benefit, '');
+    assert.equal(after.status, 'idea');
   });
 
   test('a service review suggests one with the service prefilled; bulk and MCP work as for other records', async () => {
