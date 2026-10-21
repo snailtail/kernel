@@ -111,7 +111,8 @@ export async function confirm(subscriberId: number, token: string) {
 
 // ---- Unsubscribing (subscribers: s, organisation contacts: p) -------------------------------------
 
-type Who = 's' | 'p';
+// Requesters of service requests (#44): r, a person who hears about their requests by mail.
+type Who = 's' | 'p' | 'r';
 // Signed with the active key; links signed with an older key in the keyring keep working after a rotation (#63).
 const unsubscribeSigWith = (raw: string, who: Who, id: number) => createHmac('sha256', `kernel-status-unsubscribe:${raw}`).update(`${who}:${id}`).digest('base64url');
 
@@ -126,7 +127,7 @@ export function checkUnsubscribe(who: Who, id: number, token: string) {
     return expected.length === given.length && timingSafeEqual(expected, given);
   });
   if (!valid) throw badRequest('Invalid unsubscribe link');
-  return who === 's' ? 'Stop email about service status?' : 'Stop email about service status for your organisation?';
+  return who === 's' ? 'Stop email about service status?' : who === 'r' ? 'Stop email about the requests made for you?' : 'Stop email about service status for your organisation?';
 }
 
 /** One-click unsubscribe (POST only). A subscriber is deleted; a contact stays a contact for everything else. */
@@ -135,6 +136,10 @@ export async function unsubscribe(who: Who, id: number, token: string) {
   if (who === 's') {
     const { rowCount } = await query('DELETE FROM status_subscribers WHERE id = $1', [id]);
     if (rowCount) await audit(null, { entity_type: 'status_subscriber', entity_ref: `#${id}`, action: 'unsubscribe' });
+  } else if (who === 'r') {
+    const { rowCount } = await query('UPDATE people SET request_mail = false WHERE id = $1 AND request_mail', [id]);
+    if (rowCount) await audit(null, { entity_type: 'person', entity_ref: `#${id}`, action: 'unsubscribe_requests' });
+    return 'You will no longer receive email about the requests made for you.';
   } else {
     const { rowCount } = await query('UPDATE people SET status_contact = false WHERE id = $1 AND status_contact', [id]);
     if (rowCount) await audit(null, { entity_type: 'person', entity_ref: `#${id}`, action: 'unsubscribe_status' });

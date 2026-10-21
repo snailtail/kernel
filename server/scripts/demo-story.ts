@@ -346,10 +346,16 @@ export async function seedStory(p: People) {
     ],
     approval: 'requester_manager', fulfilment_tasks: [{ title: 'Grant the access', team_id: web!.id }, { title: 'Tell the requester', team_id: null }],
   });
-  await item({
+  // A new VM is a standard change (part 2 of #44): approved by the service owner, provisioned through the template.
+  const vmTemplate = await changes.saveTemplate(admin, null, changes.templateSchema.parse({
+    name: 'Provision a webshop VM', max_risk: 'high', description: 'A new VM from the platform image.',
+    implementation_plan: 'Run the VM pipeline with the requested size; join it to monitoring.', backout_plan: 'Delete the VM and its DNS record.',
+  }));
+  const newVm = await item({
     name: 'New VM', description: 'A virtual machine for the webshop platform. Becomes a standard change when approved.',
     form: [{ key: 'size', label: 'Size', type: 'choice', required: true, choices: ['Small (2 vCPU)', 'Medium (4 vCPU)', 'Large (8 vCPU)'] }, { key: 'purpose', label: 'What is it for?', type: 'textarea', required: true }],
-    approval: 'service_owner', fulfilment_tasks: [{ title: 'Provision the VM', team_id: web!.id }, { title: 'Add monitoring', team_id: web!.id }],
+    approval: 'service_owner', standard_change_template_id: vmTemplate.id,
+    fulfilment_tasks: [{ title: 'Provision the VM', team_id: web!.id, kind: 'change' }, { title: 'Add monitoring', team_id: web!.id }],
   });
   // Waiting for Anna's approval.
   await requests.createRequest(sara, { item_id: access.id, requester: { id: await personId('maria.svensson@example.com') }, answers: { system: db, level: 'Read', why: 'To look up orders when customers call about a failed checkout.' }, priority: 3 });
@@ -359,6 +365,9 @@ export async function seedStory(p: People) {
   const done = await requests.createRequest(sara, { item_id: access.id, requester: { id: await personId('johan.ek@example.com') }, answers: { system: frontend, level: 'Write', why: 'Publishing the campaign pages for the spring sale.' }, priority: 3 });
   await requests.decideRequest(anna, done.ref, { decision: 'approve', comment: 'For the campaign.' });
   for (const t of (await requests.getRequest(erik, done.ref)).tasks) await requests.completeRequestTask(erik, done.ref, t.id, { note: t.position === 1 ? 'Editor role in the CMS.' : '' });
+  // A VM: approved by Anna (the Webshop's owner), so its standard change waits to be scheduled.
+  const vm = await requests.createRequest(erik, { item_id: newVm.id, requester: { id: await personId('maria.svensson@example.com') }, answers: { size: 'Medium (4 vCPU)', purpose: 'A staging copy of the search service for the spring sale.' }, priority: 3 });
+  await requests.decideRequest(anna, vm.ref, { decision: 'approve', comment: '' });
   // Rejected, with the reason.
   const rejected = await requests.createRequest(sara, { item_id: access.id, requester: { id: await personId('johan.ek@example.com') }, answers: { system: db, level: 'Write', why: 'Fix prices directly in the database.' }, priority: 4 });
   await requests.decideRequest(anna, rejected.ref, { decision: 'reject', comment: 'Prices are changed in the shop admin, which keeps the history. Ask for the price editor role there.' });

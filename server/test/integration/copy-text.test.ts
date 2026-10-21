@@ -229,6 +229,27 @@ describe('copying text between records (#117)', { skip }, () => {
       },
     },
     {
+      // The change names the request by ref; the answers stay on the request (#44).
+      path: 'service request → standard change (its fulfilment task)',
+      copies: false,
+      run: async (narrow, text) => {
+        ok(await (await k.login('admin')).put('/api/admin/modules', { request: true, reason: 'Copy-text check' }));
+        const svc = (await pm.post('/api/cis', { name: `Requests ${n}`, ci_type: 'business_service' })).body.ref;
+        const template = (await pm.post('/api/change-templates', { name: `Template ${n}-${narrow}`, max_risk: 'high', implementation_plan: 'Run it.', backout_plan: 'Undo it.' })).body.id;
+        const item = (await pm.post('/api/request-items', {
+          service: svc, name: `Item ${n}-${narrow}`, standard_change_template_id: template, form: [{ key: 'why', label: 'Why', type: 'textarea' }],
+          fulfilment_tasks: [{ title: 'Check it' }, { title: 'Carry it out', kind: 'change' }],
+        })).body.id;
+        const person = (await pm.post('/api/people', { name: `Requester ${n}` })).body.id;
+        const r = (await pm.post('/api/requests', { item_id: item, requester: { id: person }, answers: { why: text } })).body;
+        await narrowTo(r.ref, narrow);
+        ok(await pm.post(`/api/requests/${r.ref}/tasks/${r.tasks[0].id}/complete`, {}));
+        const change = (await pm.get(`/api/requests/${r.ref}`)).body.tasks[1].change_ref;
+        assert.ok(change, 'the change was made');
+        return { target: change, readable: JSON.stringify((await ownerQuery('SELECT title, description FROM changes WHERE ref = $1', [change])).rows) };
+      },
+    },
+    {
       path: 'post-incident review → knowledge article',
       run: async (narrow, text) => {
         const inc = (await pm.post('/api/incidents', { title: 'Review source' })).body.ref;
@@ -287,7 +308,7 @@ describe('copying text between records (#117)', { skip }, () => {
     // Where records are created. A new call site fails this test: decide whether it copies text from another record
     // (then use copyText / startNarrow from audience.ts and add a row above), and update the counts.
     const expected: Record<string, number> = {
-      'actions.ts': 1, 'candidates.ts': 1, 'changes.ts': 1, 'events.ts': 1, 'incidents.ts': 2, 'knowledge.ts': 1, 'mcp.ts': 3, 'problems.ts': 1, 'reviews.ts': 3, 'setup.ts': 2,
+      'actions.ts': 1, 'candidates.ts': 1, 'changes.ts': 1, 'events.ts': 1, 'incidents.ts': 2, 'knowledge.ts': 1, 'mcp.ts': 3, 'problems.ts': 1, 'requests.ts': 1, 'reviews.ts': 3, 'setup.ts': 2,
       // An incident from an email (#48): its text comes from outside Kernel, not from another record.
       'inbound-mail.ts': 1,
     };
@@ -300,7 +321,7 @@ describe('copying text between records (#117)', { skip }, () => {
     }
     assert.deepEqual(found, expected);
     // The files that copy between records use the shared rule.
-    for (const f of ['candidates.ts', 'changes.ts', 'incidents.ts', 'knowledge.ts', 'major-incidents.ts', 'reviews.ts']) {
+    for (const f of ['candidates.ts', 'changes.ts', 'incidents.ts', 'knowledge.ts', 'major-incidents.ts', 'requests.ts', 'reviews.ts']) {
       assert.match(readFileSync(new URL(f, dir), 'utf8'), /from '\.\/audience\.js'/, `${f} copies between records without audience.ts`);
     }
   });

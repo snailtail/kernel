@@ -26,6 +26,8 @@ export const EVENTS = [
   // A published status update (#46): only to webhooks that choose it ("all events" means the problem events above),
   // with the published text under public names (status-subscriptions.ts queueOutside).
   'status.published',
+  // A service request's webhook task (#44): only to the webhook a catalogue item names for that task, with a callback.
+  'request.task',
 ] as const;
 export type EventType = (typeof EVENTS)[number];
 export const FORMATS = ['json', 'slack', 'teams_workflow', 'teams'] as const;
@@ -165,7 +167,13 @@ export async function processDeliveries(options: { limit?: number; ids?: number[
     let status: number | null = null;
     let error: string | null = null;
     try {
-      const body = JSON.stringify(formatBody(d.format, d.payload));
+      // A request task (#44) gets its single-use callback token as it is sent; a task no longer open is not sent.
+      const payload = d.event === 'request.task' ? await (await import('./requests.js')).withCallback(d.payload) : d.payload;
+      if (!payload) {
+        await query("UPDATE webhook_deliveries SET status = 'failed', attempts = attempts + 1, last_error = 'Skipped: the task is no longer open', locked_until = NULL WHERE id = $1", [d.id]);
+        continue;
+      }
+      const body = JSON.stringify(formatBody(d.format, payload));
       const secret = decryptSecret(d.secret);
       const id = `msg_${d.id}`;
       const timestamp = Math.floor(Date.now() / 1000);

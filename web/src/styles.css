@@ -1464,7 +1464,7 @@ ol.timeline.compact li { grid-template-columns: 8rem 1fr; padding: 5px 0; font-s
 .builder legend { padding: 0 4px; font-weight: 600; }
 .builder-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .builder-row > input:not([type='checkbox']) { flex: 1 1 160px; min-width: 0; }
-.builder-row > select { flex: 0 1 140px; }
+.builder-row > select { flex: 0 1 160px; }
 .builder-choices { flex-basis: 100% !important; }
 @media (max-width: 720px) {
   .kv.answers .kv-row { grid-template-columns: 1fr; gap: 2px; }
