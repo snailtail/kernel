@@ -186,7 +186,9 @@ an agent), then its tasks open one after the other in the teams' queues and My w
 item's SLA runs from submission to fulfilment and pauses while the request waits for approval; the dashboard gets a
 *Requests fulfilled* tile. API: `/api/request-items`, `/api/requests` (+ `/:ref/approval`, `/transition`,
 `/tasks/:id/complete`, `/links`, `/comments`); MCP: `list_request_items`, `list_requests`, `get_request`,
-`create_request`, `update_request`, `transition_request` (cancel only), `complete_request_task`.
+`create_request`, `update_request`, `transition_request` (cancel only), `complete_request_task`. A task can also be a
+standard change (its outcome completes the task) or a webhook that calls back with a single-use token, and the
+requester hears about their request in plain words; see [docs/service-requests.md](docs/service-requests.md).
 Viewers stay strictly read-only (auditors, stakeholders): end users report incidents through the service desk or,
 later, the self-service portal (#45), not with a viewer account.
 

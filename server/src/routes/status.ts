@@ -94,9 +94,9 @@ export async function statusRoutes(app: FastifyInstance) {
       const q = confirmQuery.parse(req.query);
       return answer(req, reply, await subs.confirm(q.s, q.token));
     }));
-    const unsubQuery = z.object({ s: z.coerce.number().int().positive().optional(), p: z.coerce.number().int().positive().optional(), token: z.string().max(100) })
-      .refine((q) => !!q.s !== !!q.p, 'Invalid unsubscribe link');
-    const who = (q: z.infer<typeof unsubQuery>) => (q.s ? (['s', q.s] as const) : (['p', q.p!] as const));
+    const unsubQuery = z.object({ s: z.coerce.number().int().positive().optional(), p: z.coerce.number().int().positive().optional(), r: z.coerce.number().int().positive().optional(), token: z.string().max(100) })
+      .refine((q) => [q.s, q.p, q.r].filter(Boolean).length === 1, 'Invalid unsubscribe link');
+    const who = (q: z.infer<typeof unsubQuery>) => (q.s ? (['s', q.s] as const) : q.p ? (['p', q.p] as const) : (['r', q.r!] as const));
     scope.get('/status/unsubscribe', guarded(async (req, reply) => {
       const q = unsubQuery.parse(req.query);
       const [w, id] = who(q);

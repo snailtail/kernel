@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { after, before, describe, test } from 'node:test';
@@ -28,8 +30,21 @@ describe('service request management (#44)', { skip }, () => {
     return { isError: !!r.isError, body: r.isError ? r.content[0].text : JSON.parse(r.content[0].text) };
   };
 
+  let receiver: Server;
+  let receiverUrl = '';
+  const received: { headers: any; body: any }[] = [];
+
   before(async () => {
     process.env.SMTP_URL = 'capture:';
+    process.env.KERNEL_SECRET_KEY = 'requests-test-key-0123456789abcdefghijklm';
+    process.env.KERNEL_OUTBOUND_ALLOW = '127.0.0.1';
+    receiver = createServer((req, res) => {
+      let body = '';
+      req.on('data', (c) => (body += c));
+      req.on('end', () => { received.push({ headers: req.headers, body: JSON.parse(body) }); res.writeHead(204).end(); });
+    });
+    await new Promise<void>((r) => receiver.listen(0, '127.0.0.1', r));
+    receiverUrl = `http://127.0.0.1:${(receiver.address() as AddressInfo).port}/hook`;
     k = await startKernel();
     [admin, pm, analyst, analyst2, viewer] = await Promise.all([k.login('admin'), k.login('pm'), k.login('analyst'), k.login('analyst2'), k.login('viewer')]);
     n = await import('../../src/notifications.js');
@@ -50,6 +65,8 @@ describe('service request management (#44)', { skip }, () => {
   });
   after(async () => {
     delete process.env.SMTP_URL;
+    delete process.env.KERNEL_OUTBOUND_ALLOW;
+    receiver?.close();
     await k?.close();
   });
 
@@ -270,5 +287,121 @@ describe('service request management (#44)', { skip }, () => {
     // The open task's team reads it too.
     assert.equal((await analyst2.get(`/api/requests/${r.ref}`)).body.answers[0].answer_text, 'Secret Person');
     assert.equal((await viewer.patch(`/api/requests/${r.ref}`, { answers: { name: 'x' } })).status, 403);
+  });
+  // ---- Part 2: separation of duties, approvers checked at the decision, automation, the requester ----
+
+  test('the user who logs a request does not approve it, unless the item allows it (and then the history says so)', async () => {
+    const svc = (await pm.post('/api/cis', { name: 'Separation', ci_type: 'business_service', owner_id: ids.pm })).body.ref;
+    const strict = (await pm.post('/api/request-items', { service: svc, name: 'Owner approves', approval: 'service_owner', fulfilment_tasks: [{ title: 'Do it' }] })).body.id;
+    assert.match((await pm.post('/api/requests', { item_id: strict, requester: { id: people.bo } })).body.error, /you are its only approver/);
+    const lax = (await pm.post('/api/request-items', { service: svc, name: 'Owner approves, may log', approval: 'service_owner', logger_may_approve: true, fulfilment_tasks: [{ title: 'Do it' }] })).body;
+    assert.equal(lax.logger_may_approve, true);
+    const r = (await pm.post('/api/requests', { item_id: lax.id, requester: { id: people.bo } })).body;
+    const decided = await pm.post(`/api/requests/${r.ref}/approval`, { decision: 'approve' });
+    ok(decided);
+    assert.ok(decided.body.activity.some((a: any) => a.kind === 'approval' && /logged and decided by the same person/.test(a.body)));
+    const trail = (await admin.get(`/api/audit?entity_ref=${r.ref}`)).body;
+    assert.ok(trail.some((e: any) => e.action === 'approval' && e.changes.same_person === true), 'and the audit');
+  });
+
+  test('an approver who has left the team no longer decides', async () => {
+    const byTeam = (await pm.post('/api/request-items', { service, name: 'Team decides', approval: `team:${team}`, fulfilment_tasks: [{ title: 'Do it' }] })).body.id;
+    const r = (await analyst.post('/api/requests', { item_id: byTeam, requester: { id: people.bo } })).body;
+    assert.deepEqual(r.approval.approvers, ['Analyst2']);
+    ok(await admin.put(`/api/teams/${team}/members`, { members: [{ user_id: ids.pm, role: 'lead' }] }));
+    const late = await analyst2.post(`/api/requests/${r.ref}/approval`, { decision: 'approve' });
+    assert.equal(late.status, 403);
+    assert.match(late.body.error, /no longer an approver/);
+    assert.equal((await analyst2.get(`/api/requests/${r.ref}`)).body.approval.may_decide, false);
+    ok(await admin.put(`/api/teams/${team}/members`, { members: [{ user_id: ids.analyst2, role: 'lead' }] }));
+    ok(await analyst2.post(`/api/requests/${r.ref}/approval`, { decision: 'approve' }));
+  });
+
+  test('a standard change task makes its change, and the change\'s outcome completes the task', async () => {
+    const template = (await pm.post('/api/change-templates', { name: 'Provision a VM', max_risk: 'high', implementation_plan: 'Run the VM pipeline.', backout_plan: 'Delete the VM.' })).body.id;
+    const bad = await pm.post('/api/request-items', { service, name: 'New VM', fulfilment_tasks: [{ title: 'Provision', kind: 'change' }] });
+    assert.equal(bad.status, 400, 'a change task needs the template');
+    const item = await pm.post('/api/request-items', {
+      service, name: 'New VM', standard_change_template_id: template,
+      form: [{ key: 'host', label: 'Host', type: 'ci', required: true }],
+      fulfilment_tasks: [{ title: 'Provision the VM', kind: 'change', team_id: team }, { title: 'Hand it over', team_id: null }],
+    });
+    assert.equal(item.status, 201, JSON.stringify(item.body));
+    const r = (await analyst.post('/api/requests', { item_id: item.body.id, requester: { id: people.bo }, answers: { host: vm } })).body;
+    const [task] = r.tasks;
+    assert.equal(task.kind, 'change');
+    assert.match(task.change_ref, /^CHG\d{6}$/, 'the change is made when its task opens');
+    assert.equal(task.by_change, true);
+    assert.equal(task.may_complete, false);
+    assert.ok(r.links.some((l: any) => l.kind === 'change' && l.reference === task.change_ref));
+    const change = (await analyst.get(`/api/changes/${task.change_ref}`)).body;
+    assert.equal(change.change_type, 'standard');
+    assert.deepEqual(change.affected_cis.map((c: any) => c.ref), [vm], 'on the CI the form names');
+    assert.match(change.description, new RegExp(r.ref));
+    const manual = await analyst2.post(`/api/requests/${r.ref}/tasks/${task.id}/complete`, {});
+    assert.equal(manual.status, 409, `the outcome completes it: ${JSON.stringify(manual.body)}`);
+    const go = (body: object) => analyst.post(`/api/changes/${task.change_ref}/transition`, body);
+    ok(await analyst.patch(`/api/changes/${task.change_ref}`, { planned_start: new Date(Date.now() + 3600_000).toISOString(), planned_end: new Date(Date.now() + 7200_000).toISOString() }));
+    ok(await go({ to: 'scheduled' }));
+    ok(await go({ to: 'implementing' }));
+    ok(await go({ to: 'review', outcome: 'successful' }));
+    const after = (await analyst.get(`/api/requests/${r.ref}`)).body;
+    assert.deepEqual(after.tasks.map((t: any) => t.status), ['done', 'open']);
+    assert.match(after.tasks[0].note, /successful/);
+  });
+
+  test('a webhook task is sent with a single-use callback token; the callback completes it', async () => {
+    const hook = await admin.post('/api/webhooks', { name: 'Provisioning', url: receiverUrl, events: ['request.task'] });
+    assert.equal(hook.status, 201, JSON.stringify(hook.body));
+    const item = (await pm.post('/api/request-items', {
+      service, name: 'Mailbox', form: [{ key: 'size', label: 'Size', type: 'choice', required: true, choices: ['S', 'L'] }, { key: 'why', label: 'Why', type: 'textarea' }],
+      fulfilment_tasks: [{ title: 'Create the mailbox', kind: 'webhook', webhook_id: hook.body.id, team_id: team }],
+    })).body;
+    const r = (await analyst.post('/api/requests', { item_id: item.id, requester: { id: people.bo }, answers: { size: 'L', why: 'Sales' } })).body;
+    ok(await analyst.post(`/api/requests/${r.ref}/comments`, { body: 'Internal: VIP, be quick' }));
+    await (await import('../../src/webhooks.js')).processDeliveries();
+    const sent = received.find((x) => x.body.event === 'request.task' && x.body.request.ref === r.ref);
+    assert.ok(sent, 'delivered');
+    assert.ok(sent.headers['webhook-signature'], 'signed');
+    assert.deepEqual(sent.body.answers, { size: 'L', why: 'Sales' });
+    assert.ok(!JSON.stringify(sent.body).includes('VIP'), 'never comments');
+    const { token, url, header } = sent.body.callback;
+    assert.equal(header, 'X-Kernel-Task-Token');
+    const stored = (await ownerQuery('SELECT callback_hash FROM request_tasks WHERE id = $1', [sent.body.task.id])).rows[0].callback_hash;
+    assert.ok(!stored.toString('base64url').includes(token), 'a hash only');
+    const path = new URL(url, k.base).pathname;
+    const call = (t: string, body: object = {}) => fetch(`${k.base}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Kernel-Task-Token': t }, body: JSON.stringify(body) });
+    assert.equal((await call('not-the-token')).status, 403);
+    assert.equal((await fetch(`${k.base}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status, 401, 'no token, no session');
+    const done = await call(token, { status: 'done', note: 'Mailbox created' });
+    assert.equal(done.status, 200, await done.text());
+    assert.equal((await call(token)).status, 403, 'single use');
+    const after = (await analyst.get(`/api/requests/${r.ref}`)).body;
+    assert.equal(after.status, 'fulfilled');
+    assert.ok(after.activity.some((a: any) => a.kind === 'task' && a.channel === 'webhook'));
+  });
+
+  test('the requester hears about it by mail in plain words, with an unsubscribe link, and never internal notes', async () => {
+    const person = (await analyst.post('/api/people', { name: 'Cecilia Mail', email: 'cecilia@example.org', manager_id: people.pm })).body.id;
+    const r = (await analyst.post('/api/requests', { item_id: accessItem, requester: { id: person }, answers: { system: vm, level: 'read', why: 'Secret project Falcon' } })).body;
+    ok(await analyst.post(`/api/requests/${r.ref}/comments`, { body: 'Internal note: double-check her badge' }));
+    ok(await pm.post(`/api/requests/${r.ref}/approval`, { decision: 'reject', comment: 'Internal: budget freeze' }));
+    const { processRequestMail } = await import('../../src/requests.js');
+    await processRequestMail();
+    const mails = n.capturedMail.filter((m) => m.to === 'cecilia@example.org');
+    assert.deepEqual(mails.map((m) => m.subject), [`Your request ${r.ref}: we have received it`, `Your request ${r.ref}: not approved`]);
+    for (const m of mails) {
+      assert.ok(m.text.includes(r.title), 'its own title');
+      for (const secret of ['Falcon', 'badge', 'budget', 'fulfil', 'incident']) assert.ok(!m.text.includes(secret), `no "${secret}"`);
+      assert.match(m.text, /Unsubscribe: \S*\/status\/unsubscribe\?r=\d+&token=/);
+    }
+    const unsub = mails[0].text.match(/Unsubscribe: (\S+)/)![1];
+    const u = new URL(unsub, k.base);
+    const res = await fetch(`${k.base}${u.pathname}${u.search}`, { method: 'POST' });
+    assert.equal(res.status, 200);
+    assert.equal((await ownerQuery('SELECT request_mail FROM people WHERE id = $1', [person])).rows[0].request_mail, false);
+    const again = (await analyst.post('/api/requests', { item_id: accountItem, requester: { id: person }, answers: { name: 'C' } })).body;
+    await processRequestMail();
+    assert.ok(!n.capturedMail.some((m) => m.to === 'cecilia@example.org' && m.subject.includes(again.ref)), 'unsubscribed');
   });
 });

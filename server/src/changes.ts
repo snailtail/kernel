@@ -517,6 +517,8 @@ export async function transitionChangeLean(user: User, ref: string, input: z.inf
       await logActivity(db, c.problem_id, user.id, 'link', `Change ${c.ref} implemented: ${input.outcome?.replace('_', ' ')}`, { kind: 'change', reference: c.ref, outcome: input.outcome });
     }
   });  await statusOnPullRequests(ref);
+  // A standard change for a service request (#44): its outcome completes the request's task.
+  if (input.to === 'review' || input.to === 'cancelled') await (await import('./requests.js')).changeOutcome(ref);
 }
 
 /** Dev platforms (#32): the change's status on its linked pull requests; best effort, never blocks the change. */

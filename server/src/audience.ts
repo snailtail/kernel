@@ -105,3 +105,16 @@ export async function outsideNames(db: Queryable | null, refs: string[]) {
   );
   return rows.map((r) => r.public_name as string);
 }
+
+/**
+ * The requester of a service request (#44), who may have no Kernel account: they hear only their request's own ref,
+ * title and whether it needs an approval, never notes, answers or who works on it. A restricted request goes out as
+ * its ref only. Everything Kernel mails a requester is built from this.
+ */
+export async function forRequester(db: Queryable | null, requestId: number) {
+  db ??= { query };
+  const { rows } = await db.query("SELECT ref, title, restricted, approval <> 'none' AS approval FROM requests WHERE id = $1", [requestId]);
+  const r = rows[0];
+  if (!r) return null;
+  return { ref: r.ref as string, title: r.restricted ? null : (r.title as string), approval: !!r.approval };
+}

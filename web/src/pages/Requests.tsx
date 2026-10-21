@@ -27,15 +27,19 @@ const STATUSES = Object.keys(REQUEST_STATUS) as Status[];
 type FieldType = 'text' | 'textarea' | 'choice' | 'person' | 'ci' | 'date';
 const FIELD_TYPE: Record<FieldType, string> = { text: 'Short text', textarea: 'Long text', choice: 'Choice', person: 'Person', ci: 'CI', date: 'Date' };
 interface Field { key: string; label: string; type: FieldType; required: boolean; choices: string[] }
+type TaskKind = 'manual' | 'change' | 'webhook';
+interface TaskSpec { title: string; team_id: number | null; kind?: TaskKind; webhook_id?: number | null }
+const TASK_KIND: Record<TaskKind, string> = { manual: 'By a person', change: 'Standard change', webhook: 'Webhook' };
 interface Item {
-  id: number; name: string; description: string; form: Field[]; approval: string; approval_label: string; fulfilment_tasks: { title: string; team_id: number | null }[];
+  id: number; name: string; description: string; form: Field[]; approval: string; approval_label: string; fulfilment_tasks: TaskSpec[];
+  standard_change_template_id: number | null; logger_may_approve: boolean;
   sla_id: number | null; sla: string | null; active: boolean; service: { ref: string; name: string };
 }
 interface Row {
   ref: string; title: string; status: Status; priority: number; item: string; service_ref: string; service_name: string; requester: string;
   created_at: string; updated_at: string; resolution_due_at: string | null; at_risk: boolean; open_task: string | null; open_task_team: string | null; open_task_assignee: string | null;
 }
-interface Task { id: number; position: number; title: string; status: 'pending' | 'open' | 'done' | 'cancelled'; note: string | null; team_id: number | null; team: string | null; assignee_id: number | null; assignee: string | null; done_at: string | null; done_by: string | null; may_complete: boolean }
+interface Task { kind: TaskKind; change_ref: string | null; webhook: string | null; by_change: boolean; id: number; position: number; title: string; status: 'pending' | 'open' | 'done' | 'cancelled'; note: string | null; team_id: number | null; team: string | null; assignee_id: number | null; assignee: string | null; done_at: string | null; done_by: string | null; may_complete: boolean }
 interface Clock { state: string; due_at: string | null; remaining_minutes: number | null; target_minutes: number | null }
 interface Detail {
   id: number; ref: string; title: string; status: Status; priority: number; item: { id: number; name: string }; service: { ref: string; name: string };
@@ -267,10 +271,13 @@ function TaskList({ r, onRun }: { r: Detail; onRun: (fn: () => Promise<Detail>) 
             <span className={`tag task-${t.status}`}>{t.status === 'pending' ? 'Waiting' : t.status === 'open' ? 'Open' : t.status === 'done' ? 'Done' : 'Cancelled'}</span>
           </div>
           <div className="muted small">
+            {t.kind === 'change' && <>{t.change_ref ? <Link to={`/changes/${t.change_ref}`} className="mono">{t.change_ref}</Link> : 'Standard change'} · </>}
+            {t.kind === 'webhook' && <>Automatic{t.webhook ? ` (${t.webhook})` : ''} · </>}
             {t.team ?? 'Anyone'}{t.assignee ? ` · ${t.assignee}` : ''}
             {t.done_at && ` · done ${relativeTime(t.done_at)}${t.done_by ? ` by ${t.done_by}` : ''}`}
           </div>
           {t.note && <p className="small">{t.note}</p>}
+          {t.status === 'open' && t.by_change && <p className="muted small">Recording the outcome on {t.change_ref} completes this task.</p>}
           {t.status === 'open' && t.may_complete && (
             <div className="actions">
               {t.assignee_id !== user.id && <button className="btn small" onClick={() => onRun(() => api.patch(`/api/requests/${r.ref}/tasks/${t.id}`, { assignee_id: user.id }))}>Take it</button>}
@@ -445,21 +452,24 @@ function ItemModal({ item, onClose, onDone }: { item: Item | null; onClose: () =
   const { data: slas } = useApi<{ id: number; name: string }[]>('/api/slas');
   const [form, setForm] = useState({
     service: item?.service.ref ?? '', name: item?.name ?? '', description: item?.description ?? '', approval: item?.approval ?? 'none',
-    sla_id: item?.sla_id ? String(item.sla_id) : '', active: item?.active ?? true,
+    sla_id: item?.sla_id ? String(item.sla_id) : '', active: item?.active ?? true, logger_may_approve: item?.logger_may_approve ?? false,
+    standard_change_template_id: item?.standard_change_template_id ? String(item.standard_change_template_id) : '',
   });
+  const { data: options } = useApi<{ templates: { id: number; name: string }[]; webhooks: { id: number; name: string }[] }>('/api/request-items/options');
   const [fields, setFields] = useState<Field[]>(item?.form ?? []);
-  const [tasks, setTasks] = useState(item?.fulfilment_tasks ?? [{ title: '', team_id: null }]);
+  const [tasks, setTasks] = useState<TaskSpec[]>(item?.fulfilment_tasks ?? [{ title: '', team_id: null, kind: 'manual' }]);
   const [error, setError] = useState<string | null>(null);
   const approvalKind = form.approval.startsWith('team:') ? 'team' : form.approval;
   const setField = (n: number, patch: Partial<Field>) => setFields(fields.map((f, i) => (i === n ? { ...f, ...patch } : f)));
-  const setTask = (n: number, patch: Partial<{ title: string; team_id: number | null }>) => setTasks(tasks.map((t, i) => (i === n ? { ...t, ...patch } : t)));
+  const setTask = (n: number, patch: Partial<TaskSpec>) => setTasks(tasks.map((t, i) => (i === n ? { ...t, ...patch } : t)));
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
     const body = {
-      ...form, sla_id: form.sla_id ? Number(form.sla_id) : null,
+      ...form, sla_id: form.sla_id ? Number(form.sla_id) : null, standard_change_template_id: form.standard_change_template_id ? Number(form.standard_change_template_id) : null,
       form: fields.map((f) => ({ ...f, key: f.key || keyOf(f.label), choices: f.type === 'choice' ? f.choices : [] })),
       fulfilment_tasks: tasks.filter((t) => t.title.trim()),
+      ...(tasks.some((t) => t.kind === 'change') ? {} : { standard_change_template_id: null }),
     };
     try {
       if (item) await api.put(`/api/request-items/${item.id}`, body);
@@ -518,11 +528,26 @@ function ItemModal({ item, onClose, onDone }: { item: Item | null; onClose: () =
               <select aria-label="Team" value={t.team_id ?? ''} onChange={(e) => setTask(n, { team_id: e.target.value ? Number(e.target.value) : null })}>
                 <option value="">Anyone</option>{teams.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
               </select>
+              <select aria-label="How it is done" value={t.kind ?? 'manual'} onChange={(e) => setTask(n, { kind: e.target.value as TaskKind, webhook_id: e.target.value === 'webhook' ? options?.webhooks[0]?.id ?? null : null })}>
+                {(Object.keys(TASK_KIND) as TaskKind[]).filter((k) => k === 'manual' || (k === 'change' ? !!options?.templates.length : !!options?.webhooks.length)).map((k) => <option key={k} value={k}>{TASK_KIND[k]}</option>)}
+              </select>
+              {t.kind === 'webhook' && (
+                <select aria-label="Webhook" value={t.webhook_id ?? ''} onChange={(e) => setTask(n, { webhook_id: Number(e.target.value) })}>{options?.webhooks.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select>
+              )}
               {tasks.length > 1 && <button type="button" className="btn-link small" aria-label={`Remove task ${n + 1}`} onClick={() => setTasks(tasks.filter((_, i) => i !== n))}>Remove</button>}
             </div>
           ))}
-          {tasks.length < 20 && <button type="button" className="btn small" onClick={() => setTasks([...tasks, { title: '', team_id: null }])}>+ Task</button>}
+          {tasks.length < 20 && <button type="button" className="btn small" onClick={() => setTasks([...tasks, { title: '', team_id: null, kind: 'manual' }])}>+ Task</button>}
+          {tasks.some((t) => t.kind === 'change') && (
+            <label>Standard change template
+              <select required value={form.standard_change_template_id} onChange={(e) => setForm({ ...form, standard_change_template_id: e.target.value })}>
+                <option value="">Choose…</option>{options?.templates.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+              </select>
+            </label>
+          )}
+          <p className="muted small">A standard change task is completed by the change's outcome; a webhook task by the webhook calling back.</p>
         </fieldset>
+        {form.approval !== 'none' && <label className="check full"><input type="checkbox" checked={form.logger_may_approve} onChange={(e) => setForm({ ...form, logger_may_approve: e.target.checked })} /> The person who logs a request may also approve it (the history shows it)</label>}
         {item && <label className="check full"><input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> In the catalogue (untick to retire it; existing requests keep it)</label>}
         {error && <div className="error full">{error}</div>}
         <div className="actions full"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary">Save</button></div>

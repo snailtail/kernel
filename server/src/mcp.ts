@@ -1067,7 +1067,7 @@ function buildServer(user: User, scopes?: string[]) {
     notice: requestNotice,
     type: 'request', ref: r.ref, url: r.url, status: r.status, priority: r.priority, item: r.item, service: r.service.ref, requester_id: r.requester.id,
     approval: { kind: r.approval.kind, approvers: r.approval.approvers, decided_at: r.approval.decided_at, note: 'Approving is a person\'s decision in the web UI: agents cannot approve or reject.' },
-    tasks: r.tasks.map((t: any) => ({ id: t.id, position: t.position, status: t.status, team: t.team, assignee: t.assignee, done_at: t.done_at })),
+    tasks: r.tasks.map((t: any) => ({ id: t.id, position: t.position, status: t.status, kind: t.kind, change: t.change_ref ?? undefined, team: t.team, assignee: t.assignee, done_at: t.done_at, may_complete: t.may_complete })),
     sla: r.sla ? { name: r.sla.name, resolution: r.sla.resolution.state, due_at: r.sla.resolution.due_at, paused: r.sla.paused } : null,
     transitions: r.transitions.filter((t: string) => t === 'cancelled'),
     next_steps: r.next_steps,
@@ -1108,7 +1108,7 @@ function buildServer(user: User, scopes?: string[]) {
   tool('transition_request', 'Cancel a request (needs the reason). Agents cannot approve or reject: the approver decides in the web UI.', { ref: z.string(), to: z.enum(['cancelled']), reason: z.string() }, false, async ({ ref, ...args }) =>
     requestForAgent(await requests.transitionRequest(user, ref, requests.transitionRequestSchema.parse(args))),
   );
-  tool('complete_request_task', 'Mark the open fulfilment task of a request done (tasks go in order); after the last one the request is fulfilled. Only for work that was really done.', { ref: z.string(), task_id: z.number().int(), note: z.string().optional() }, false, async ({ ref, task_id, note }) =>
+  tool('complete_request_task', 'Mark the open fulfilment task of a request done (tasks go in order); after the last one the request is fulfilled. Only for work that was really done. A standard change task is completed by its change\'s outcome, a webhook task by its webhook.', { ref: z.string(), task_id: z.number().int(), note: z.string().optional() }, false, async ({ ref, task_id, note }) =>
     requestForAgent(await requests.completeRequestTask(user, ref, task_id, requests.completeTaskSchema.parse({ note }))),
   );
   tool('get_change_schedule', 'Planned changes and change freezes in a period (default the next 30 days), with collisions on the same CI.', { from: z.string().optional().describe('YYYY-MM-DD'), to: z.string().optional() }, true, async (args) => {

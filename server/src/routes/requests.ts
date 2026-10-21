@@ -10,6 +10,7 @@ type TaskParams = { Params: { ref: string; id: string } };
 export async function requestRoutes(app: FastifyInstance) {
   // The catalogue.
   app.get('/api/request-items', async (req) => rq.listRequestItems(requireUser(req), rq.listItemsSchema.parse(req.query)));
+  app.get('/api/request-items/options', async (req) => rq.itemOptions(requireUser(req)));
   app.get<{ Params: { id: string } }>('/api/request-items/:id', async (req) => rq.getRequestItem(requireUser(req), Number(req.params.id)));
   app.post('/api/request-items', async (req, reply) => {
     const created = await rq.saveRequestItem(requireUser(req), null, rq.requestItemSchema.parse(req.body));
@@ -37,9 +38,12 @@ export async function requestRoutes(app: FastifyInstance) {
     if (req.headers.authorization) throw forbidden('Approvals are decided by a person in the web UI');
     return rq.decideRequest(requireUser(req), req.params.ref, rq.decisionSchema.parse(req.body));
   });
-  app.post<TaskParams>('/api/requests/:ref/tasks/:id/complete', async (req) =>
-    rq.completeRequestTask(requireUser(req), req.params.ref, Number(req.params.id), rq.completeTaskSchema.parse(req.body ?? {})),
-  );
+  app.post<TaskParams>('/api/requests/:ref/tasks/:id/complete', async (req) => {
+    // A webhook task's receiver calls back with the task's token instead of signing in (#44).
+    const token = req.headers['x-kernel-task-token'];
+    if (!req.user && typeof token === 'string') return rq.completeTaskByToken(req, req.params.ref, Number(req.params.id), token, rq.callbackSchema.parse(req.body ?? {}));
+    return rq.completeRequestTask(requireUser(req), req.params.ref, Number(req.params.id), rq.completeTaskSchema.parse(req.body ?? {}));
+  });
   app.patch<TaskParams>('/api/requests/:ref/tasks/:id', async (req) => rq.assignRequestTask(requireUser(req), req.params.ref, Number(req.params.id), rq.assignTaskSchema.parse(req.body)));
   app.post<RefParams>('/api/requests/:ref/comments', { config: { idempotent: 'request.write' } }, async (req) =>
     rq.addRequestComment(requireUser(req), req.params.ref, z.object({ body: z.string().max(20000) }).parse(req.body).body),

@@ -4,14 +4,22 @@
 // for a person by the user who logs it, may wait for its approver, and is fulfilled when its last task is done. The
 // item's SLA runs from submission to fulfilment and pauses while the request waits for approval. Shared by REST, MCP
 // and the web UI; agents may log and follow requests, but only a person approves.
+import { createHash, randomBytes } from 'node:crypto';
+import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import type { User } from './auth.js';
+import { audienceOf, forRequester, startNarrow } from './audience.js';
+import { USER_COLUMNS, type User } from './auth.js';
 import { audit } from './audit.js';
+import { createChange, createChangeSchema } from './changes.js';
 import { assertMayWriteText, textFilterSql } from './confidential.js';
-import { currentContext } from './context.js';
+import { asSystem, contextStore, currentContext } from './context.js';
 import { pool, query, tx } from './db.js';
-import { badRequest, conflict, forbidden, notFound } from './errors.js';
-import { notify } from './notifications.js';
+import { badRequest, conflict, forbidden, HttpError, notFound } from './errors.js';
+import { moduleEnabled } from './modules.js';
+import { absoluteUrl, notify, sendOutsideMail } from './notifications.js';
+import { rateLimit } from './ratelimit.js';
+import { securityEvent } from './security-events.js';
+import { unsubscribeUrl } from './status-subscriptions.js';
 import { authorize, can } from './policy.js';
 import type { Db } from './problems.js';
 import { recordUrl, registerRecordType, typeForRef, type RecordType } from './records.js';
@@ -23,6 +31,9 @@ export const REQUEST_STATUSES = ['submitted', 'awaiting_approval', 'in_fulfilmen
 type Status = (typeof REQUEST_STATUSES)[number];
 const DONE: Status[] = ['fulfilled', 'rejected', 'cancelled'];
 export const FIELD_TYPES = ['text', 'textarea', 'choice', 'person', 'ci', 'date'] as const;
+export const TASK_KINDS = ['manual', 'change', 'webhook'] as const;
+/** How long a webhook task's callback token works. */
+export const CALLBACK_DAYS = 7;
 export const REQUEST_LINK_KINDS = ['incident', 'change', 'problem', 'ci', 'document'] as const;
 const FREE_TEXT = new Set(['text', 'textarea']);
 
@@ -47,18 +58,33 @@ export const requestItemSchema = z.object({
     .refine((f) => new Set(f.map((x) => x.key)).size === f.length, 'Each field needs its own key'),
   /** none, requester_manager, service_owner or team:<id>. */
   approval: z.string().regex(/^(none|requester_manager|service_owner|team:\d{1,9})$/, 'Approval is none, requester_manager, service_owner or team:<id>').default('none'),
-  fulfilment_tasks: z.array(z.object({ title: z.string().trim().min(1).max(200), team_id: z.number().int().nullable().default(null) })).min(1, 'Add at least one fulfilment task').max(20),
+  fulfilment_tasks: z.array(z.object({
+    title: z.string().trim().min(1).max(200),
+    team_id: z.number().int().nullable().default(null),
+    /** manual: a person does it; change: the standard change from the template, its outcome completes it; webhook: an outgoing webhook does it and calls back. */
+    kind: z.enum(TASK_KINDS).default('manual'),
+    webhook_id: z.number().int().nullable().default(null),
+  })).min(1, 'Add at least one fulfilment task').max(20),
   sla_id: z.number().int().nullable().default(null),
-  /** Part 2 of #44: the standard change an approved request makes. */
+  /** The standard change template a "change" task is carried out with. */
   standard_change_template_id: z.number().int().nullable().default(null),
+  /** May the user who logs a request also approve it? Off by default (separation of duties). */
+  logger_may_approve: z.boolean().default(false),
   active: z.boolean().default(true),
+}).superRefine((i, ctx) => {
+  const changes = i.fulfilment_tasks.filter((t) => t.kind === 'change').length;
+  if (changes > 1) ctx.addIssue({ code: 'custom', path: ['fulfilment_tasks'], message: 'At most one task is the standard change' });
+  if (changes && i.standard_change_template_id === null) ctx.addIssue({ code: 'custom', path: ['standard_change_template_id'], message: 'A standard change task needs the template to use' });
+  if (!changes && i.standard_change_template_id !== null) ctx.addIssue({ code: 'custom', path: ['fulfilment_tasks'], message: 'Add the task the standard change carries out (kind change), or remove the template' });
+  if (i.fulfilment_tasks.some((t) => t.kind === 'webhook' && t.webhook_id === null)) ctx.addIssue({ code: 'custom', path: ['fulfilment_tasks'], message: 'A webhook task needs the webhook to call' });
 });
 export const listItemsSchema = z.object({ service: z.string().trim().max(30).optional(), inactive: z.preprocess((v) => v === 'true' || v === true, z.boolean()).default(false) });
 
 const ITEM_SELECT = `
-  SELECT i.id, i.name, i.description, i.form, i.approval, i.approval_team_id, i.fulfilment_tasks, i.sla_id, i.standard_change_template_id, i.active,
-         i.created_at, i.updated_at, c.ref AS service_ref, c.name AS service_name, s.name AS sla, t.name AS approval_team
-  FROM request_items i JOIN configuration_items c ON c.id = i.service_id LEFT JOIN slas s ON s.id = i.sla_id LEFT JOIN teams t ON t.id = i.approval_team_id`;
+  SELECT i.id, i.name, i.description, i.form, i.approval, i.approval_team_id, i.fulfilment_tasks, i.sla_id, i.standard_change_template_id, i.logger_may_approve, i.active,
+         i.created_at, i.updated_at, c.ref AS service_ref, c.name AS service_name, s.name AS sla, t.name AS approval_team, ct.name AS standard_change_template
+  FROM request_items i JOIN configuration_items c ON c.id = i.service_id LEFT JOIN slas s ON s.id = i.sla_id LEFT JOIN teams t ON t.id = i.approval_team_id
+  LEFT JOIN change_templates ct ON ct.id = i.standard_change_template_id`;
 
 const itemOut = (i: any) => {
   const { approval, approval_team_id, service_ref, service_name, ...rest } = i;
@@ -77,6 +103,16 @@ export async function listRequestItems(user: User, f: z.infer<typeof listItemsSc
   if (f.service) { params.push(f.service.toUpperCase()); where.push(`c.ref = $${params.length}`); }
   const { rows } = await query(`${ITEM_SELECT} WHERE ${where.join(' AND ')} ORDER BY c.name, i.name`, params);
   return rows.map(itemOut);
+}
+
+/** What the catalogue editor offers for automated tasks: standard change templates and JSON webhooks (names only). */
+export async function itemOptions(user: User) {
+  authorize(user, 'request.manage');
+  const [templates, webhooks] = await Promise.all([
+    query('SELECT id, name, max_risk FROM change_templates WHERE active ORDER BY name'),
+    query("SELECT id, name FROM webhooks WHERE active AND format = 'json' ORDER BY name"),
+  ]);
+  return { templates: moduleEnabled('change') ? templates.rows : [], webhooks: webhooks.rows };
 }
 
 export async function getRequestItem(user: User, id: number) {
@@ -98,24 +134,29 @@ export async function saveRequestItem(user: User, id: number | null, input: z.in
       if (rows[0].n !== teamIds.length) throw badRequest('Unknown or inactive team');
     }
     if (input.sla_id !== null && !(await db.query('SELECT 1 FROM slas WHERE id = $1', [input.sla_id])).rows[0]) throw badRequest('Unknown SLA');
-    if (input.standard_change_template_id !== null && !(await db.query('SELECT 1 FROM change_templates WHERE id = $1', [input.standard_change_template_id])).rows[0]) throw badRequest('Unknown standard change template');
-    const values = [svc[0].id, input.name, input.description, JSON.stringify(input.form), approval, team ? Number(team) : null, JSON.stringify(input.fulfilment_tasks), input.sla_id, input.standard_change_template_id, input.active];
+    if (input.standard_change_template_id !== null && !(await db.query('SELECT 1 FROM change_templates WHERE id = $1 AND active', [input.standard_change_template_id])).rows[0]) throw badRequest('Unknown or inactive standard change template');
+    const hooks = [...new Set(input.fulfilment_tasks.map((t) => t.webhook_id).filter((w): w is number => w !== null))];
+    // A task's webhook gets JSON with a callback: chat formats (Slack, Teams) cannot answer.
+    if (hooks.length && (await db.query("SELECT count(*)::int AS n FROM webhooks WHERE id = ANY($1) AND active AND format = 'json'", [hooks])).rows[0].n !== hooks.length) throw badRequest('Unknown or inactive webhook, or not a JSON webhook');
+    // Only what the kind uses is kept: a manual task has no webhook.
+    const tasks = input.fulfilment_tasks.map((t) => ({ title: t.title, team_id: t.team_id, kind: t.kind, webhook_id: t.kind === 'webhook' ? t.webhook_id : null }));
+    const values = [svc[0].id, input.name, input.description, JSON.stringify(input.form), approval, team ? Number(team) : null, JSON.stringify(tasks), input.sla_id, input.standard_change_template_id, input.active, input.logger_may_approve];
     const before = id ? (await db.query('SELECT * FROM request_items WHERE id = $1 FOR UPDATE', [id])).rows[0] : null;
     if (id && !before) throw notFound('Request item not found');
     try {
       const { rows } = id
         ? await db.query(
             `UPDATE request_items SET service_id = $2, name = $3, description = $4, form = $5, approval = $6, approval_team_id = $7, fulfilment_tasks = $8,
-               sla_id = $9, standard_change_template_id = $10, active = $11, updated_at = now() WHERE id = $1 RETURNING id`,
+               sla_id = $9, standard_change_template_id = $10, active = $11, logger_may_approve = $12, updated_at = now() WHERE id = $1 RETURNING id`,
             [id, ...values],
           )
         : await db.query(
-            `INSERT INTO request_items (service_id, name, description, form, approval, approval_team_id, fulfilment_tasks, sla_id, standard_change_template_id, active, created_by)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
+            `INSERT INTO request_items (service_id, name, description, form, approval, approval_team_id, fulfilment_tasks, sla_id, standard_change_template_id, active, logger_may_approve, created_by)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id`,
             [...values, user.id],
           );
       // The catalogue's history is the audit trail: what each version of the item asked and who changed it.
-      await audit(db, { entity_type: 'request_item', entity_ref: `#${rows[0].id}`, action: id ? 'update' : 'create', changes: { ...input, ...(before ? { before: { name: before.name, form: before.form, approval: before.approval, fulfilment_tasks: before.fulfilment_tasks, active: before.active } } : {}) } });
+      await audit(db, { entity_type: 'request_item', entity_ref: `#${rows[0].id}`, action: id ? 'update' : 'create', changes: { ...input, ...(before ? { before: { name: before.name, form: before.form, approval: before.approval, fulfilment_tasks: before.fulfilment_tasks, logger_may_approve: before.logger_may_approve, active: before.active } } : {}) } });
       return rows[0].id as number;
     } catch (err: any) {
       if (err.code === '23505') throw conflict('The service already has a request item with that name');
@@ -201,33 +242,48 @@ async function answersOut(form: FormField[], answers: Record<string, string | nu
 
 // ---- Approval --------------------------------------------------------------------------------
 
-/**
- * The approvers of a new request, resolved when it is submitted and stored with it: the requester's manager (their
- * Kernel account), the service owner, or the members of a team. The requester never approves their own request.
- */
-async function resolveApprovers(db: Db, item: any, requester: { id: number; user_id: number | null; name: string }) {
-  if (item.approval === 'none') return [];
-  let ids: number[] = [];
-  let who = '';
+/** Who may approve requests for this item right now: the requester's manager, the service owner, or the team's members. */
+async function currentApprovers(db: Db, item: { approval: string; service_id: number; approval_team_id: number | null }, requester: { id: number; name: string }) {
   if (item.approval === 'requester_manager') {
     const { rows } = await db.query(
       `SELECT m.name, u.id FROM people p JOIN people m ON m.id = p.manager_id AND m.erased_at IS NULL LEFT JOIN users u ON u.id = m.user_id AND u.active WHERE p.id = $1`,
       [requester.id],
     );
-    if (!rows[0]) throw badRequest(`${requester.name} has no manager in Kernel, and this request needs their manager's approval. Add the manager to the contact first.`);
-    ids = rows[0].id ? [rows[0].id] : [];
-    who = `${rows[0].name}, ${requester.name}'s manager,`;
-  } else if (item.approval === 'service_owner') {
-    const { rows } = await db.query('SELECT u.id, c.name FROM configuration_items c LEFT JOIN users u ON u.id = c.owner_id AND u.active WHERE c.id = $1', [item.service_id]);
-    ids = rows[0]?.id ? [rows[0].id] : [];
-    who = `the owner of ${rows[0]?.name ?? 'the service'}`;
-  } else {
-    ids = await teamMembers(db, item.approval_team_id);
-    who = 'no one in the approving team';
+    if (!rows[0]) return { ids: [] as number[], who: '', noManager: true };
+    return { ids: rows[0].id ? [rows[0].id as number] : [], who: `${rows[0].name}, ${requester.name}'s manager,`, noManager: false };
   }
-  ids = ids.filter((id) => id !== requester.user_id);
-  if (!ids.length) throw badRequest(`This request needs approval, but ${who} cannot approve it (no Kernel account, or it is the requester). Ask an administrator to fix the catalogue item.`);
+  if (item.approval === 'service_owner') {
+    const { rows } = await db.query('SELECT u.id, c.name FROM configuration_items c LEFT JOIN users u ON u.id = c.owner_id AND u.active WHERE c.id = $1', [item.service_id]);
+    return { ids: rows[0]?.id ? [rows[0].id as number] : [], who: `the owner of ${rows[0]?.name ?? 'the service'}`, noManager: false };
+  }
+  if (item.approval === 'team' && item.approval_team_id) return { ids: await teamMembers(db, item.approval_team_id), who: 'no one in the approving team', noManager: false };
+  return { ids: [] as number[], who: '', noManager: false };
+}
+
+/**
+ * The approvers of a new request, resolved when it is submitted and stored with it. The requester never approves
+ * their own request, and unless the item allows it, neither does the user who logged it (separation of duties).
+ */
+async function resolveApprovers(db: Db, item: any, requester: { id: number; user_id: number | null; name: string }, loggerId: number) {
+  if (item.approval === 'none') return [];
+  const found = await currentApprovers(db, item, requester);
+  if (found.noManager) throw badRequest(`${requester.name} has no manager in Kernel, and this request needs their manager's approval. Add the manager to the contact first.`);
+  const ids = found.ids.filter((id) => id !== requester.user_id && (item.logger_may_approve || id !== loggerId));
+  if (!ids.length) {
+    const logger = found.ids.includes(loggerId) && loggerId !== requester.user_id && !item.logger_may_approve;
+    throw badRequest(logger
+      ? `This request needs approval, and you are its only approver: someone else must log it, or a manager allows "the person who logs it may approve" on the catalogue item.`
+      : `This request needs approval, but ${found.who} cannot approve it (no Kernel account, or it is the requester). Ask an administrator to fix the catalogue item.`);
+  }
   return ids;
+}
+
+/** At the decision, the approver must still be one (review of #44): still the manager, the service owner, in the team. */
+async function stillApprover(db: Db, r: { item_id: number; requester_id: number; approver_ids: number[] }, userId: number) {
+  if (!r.approver_ids.includes(userId)) return false;
+  const { rows } = await db.query('SELECT i.approval, i.service_id, i.approval_team_id, p.name FROM request_items i, people p WHERE i.id = $1 AND p.id = $2', [r.item_id, r.requester_id]);
+  if (!rows[0]) return false;
+  return (await currentApprovers(db, rows[0], { id: r.requester_id, name: rows[0].name })).ids.includes(userId);
 }
 
 // ---- Reading ---------------------------------------------------------------------------------
@@ -257,8 +313,10 @@ export async function getRequest(user: User, ref: string) {
       [r.id],
     ),
     query(
-      `SELECT t.id, t.position, t.title, t.status, t.note, t.team_id, tm.name AS team, t.assignee_id, a.display_name AS assignee, t.opened_at, t.done_at, d.display_name AS done_by
+      `SELECT t.id, t.position, t.title, t.status, t.note, t.team_id, tm.name AS team, t.assignee_id, a.display_name AS assignee, t.opened_at, t.done_at, d.display_name AS done_by,
+              t.kind, ch.ref AS change_ref, ch.status AS change_status, ch.outcome AS change_outcome, w.name AS webhook, t.callback_used_at IS NOT NULL AS called_back
        FROM request_tasks t LEFT JOIN teams tm ON tm.id = t.team_id LEFT JOIN users a ON a.id = t.assignee_id LEFT JOIN users d ON d.id = t.done_by
+       LEFT JOIN changes ch ON ch.id = t.change_id LEFT JOIN webhooks w ON w.id = t.webhook_id
        WHERE t.request_id = $1 ORDER BY t.position`,
       [r.id],
     ),
@@ -268,7 +326,7 @@ export async function getRequest(user: User, ref: string) {
   ]);
   const myTeams = (await query('SELECT team_id FROM team_members WHERE user_id = $1', [user.id])).rows.map((t) => t.team_id as number);
   const mayWork = can(user.role, 'request.write');
-  const mayDecide = r.status === 'awaiting_approval' && r.approver_ids.includes(user.id) && byPerson();
+  const mayDecide = r.status === 'awaiting_approval' && r.approver_ids.includes(user.id) && byPerson() && (await stillApprover(pool, r, user.id));
   const detail = {
     type: 'request',
     id: r.id,
@@ -291,9 +349,11 @@ export async function getRequest(user: User, ref: string) {
       may_decide: mayDecide,
     },
     cancel_reason: r.cancel_reason || null,
-    tasks: tasks.rows.map((t) => ({
+    tasks: tasks.rows.map(({ change_status, change_outcome, ...t }) => ({
       ...t,
-      may_complete: t.status === 'open' && mayWork && (!t.team_id || t.assignee_id === user.id || myTeams.includes(t.team_id) || can(user.role, 'request.manage')),
+      // A standard change completes its task; by hand only when it was cancelled or did not work.
+      by_change: t.kind === 'change' && !!t.change_ref && change_status !== 'cancelled' && !['failed', 'rolled_back'].includes(change_outcome),
+      may_complete: t.status === 'open' && mayWork && !(t.kind === 'change' && t.change_ref && change_status !== 'cancelled' && !['failed', 'rolled_back'].includes(change_outcome)) && (!t.team_id || t.assignee_id === user.id || myTeams.includes(t.team_id) || can(user.role, 'request.manage')),
     })),
     sla,
     links: links.rows,
@@ -442,21 +502,26 @@ async function findRequester(db: Db, user: User, p: z.infer<typeof personRefSche
 /** Creates the item's fulfilment tasks, in order, with the first one open, and tells its team. */
 async function startFulfilment(db: Db, r: { id: number; ref: string; title: string; item_id: number }, actorId: number | null) {
   const { rows } = await db.query('SELECT fulfilment_tasks FROM request_items WHERE id = $1', [r.item_id]);
-  const tasks = rows[0].fulfilment_tasks as { title: string; team_id: number | null }[];
+  const tasks = rows[0].fulfilment_tasks as { title: string; team_id: number | null; kind?: string; webhook_id?: number | null }[];
   for (const [n, t] of tasks.entries()) {
     await db.query(
-      'INSERT INTO request_tasks (request_id, position, title, team_id, status, opened_at) VALUES ($1, $2, $3, $4, $5, $6)',
-      [r.id, n + 1, t.title, t.team_id, n === 0 ? 'open' : 'pending', n === 0 ? new Date() : null],
+      'INSERT INTO request_tasks (request_id, position, title, team_id, status, opened_at, kind, webhook_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+      [r.id, n + 1, t.title, t.team_id, n === 0 ? 'open' : 'pending', n === 0 ? new Date() : null, t.kind ?? 'manual', t.webhook_id ?? null],
     );
   }
   await db.query("UPDATE requests SET status = 'in_fulfilment' WHERE id = $1", [r.id]);
   await openedTask(db, r, actorId);
 }
 
-/** The open task lands in its team's queue: the members hear about it. */
+/**
+ * The open task lands in its team's queue: the members hear about it. A webhook task is sent to its webhook (the
+ * callback token is minted when the delivery is sent); a standard change task is carried out after the commit
+ * (runAutomation).
+ */
 async function openedTask(db: Db, r: { id: number; ref: string; title: string }, actorId: number | null) {
-  const { rows } = await db.query("SELECT t.id, t.title, t.team_id, tm.name AS team FROM request_tasks t LEFT JOIN teams tm ON tm.id = t.team_id WHERE t.request_id = $1 AND t.status = 'open' ORDER BY t.position LIMIT 1", [r.id]);
+  const { rows } = await db.query("SELECT t.id, t.title, t.team_id, t.kind, t.webhook_id, tm.name AS team FROM request_tasks t LEFT JOIN teams tm ON tm.id = t.team_id WHERE t.request_id = $1 AND t.status = 'open' ORDER BY t.position LIMIT 1", [r.id]);
   const t = rows[0];
+  if (t?.kind === 'webhook' && t.webhook_id) await queueTaskWebhook(db, r.id, t);
   if (!t?.team_id) return;
   await notify(db, {
     users: await teamMembers(db, t.team_id), event: 'team_queue', ref: r.ref, title: r.title, summary: `${t.title}: new in the ${t.team} queue.`,
@@ -472,7 +537,7 @@ export async function createRequest(user: User, input: z.infer<typeof createRequ
     if (!item) throw notFound('Request item not found');
     const requester = await findRequester(db, user, input.requester);
     const answers = await validateAnswers(db, item.form, input.answers);
-    const approvers = await resolveApprovers(db, item, requester);
+    const approvers = await resolveApprovers(db, item, requester, user.id);
     const { rows } = await db.query(
       `INSERT INTO requests (item_id, title, requester_id, answers, priority, approval, approver_ids, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, ref, title, item_id`,
       [item.id, input.title ?? `${item.name} for ${requester.name}`, requester.id, JSON.stringify(answers), input.priority, item.approval, approvers, user.id],
@@ -492,8 +557,10 @@ export async function createRequest(user: User, input: z.infer<typeof createRequ
       await startFulfilment(db, r, user.id);
       await logRequest(db, r.id, null, 'status', 'In fulfilment', { status: { from: 'submitted', to: 'in_fulfilment' } });
     }
+    await tellRequester(db, r.id, 'received', user.id);
     return r.ref as string;
   });
+  await runAutomation(ref, user);
   return getRequest(user, ref);
 }
 
@@ -550,15 +617,20 @@ export async function decideRequest(user: User, ref: string, input: z.infer<type
     if (!r.approver_ids.includes(user.id)) throw forbidden(`You are not an approver of ${r.ref}`);
     const { rows: me } = await db.query('SELECT 1 FROM people WHERE id = $1 AND user_id = $2', [r.requester_id, user.id]);
     if (me[0]) throw forbidden('You cannot approve your own request');
+    // The approvers were resolved at submission: someone who has since left the team, or is no longer the manager or
+    // the service owner, no longer decides.
+    if (!(await stillApprover(db, r, user.id))) throw forbidden(`You are no longer an approver of ${r.ref}: the approving manager, owner or team has changed`);
     const to: Status = input.decision === 'approve' ? 'in_fulfilment' : 'rejected';
+    // Allowed by the item, but shown: the history and the audit say when one person logged and approved it.
+    const samePerson = r.created_by === user.id;
     await db.query(
       `UPDATE requests SET decided_by = $2, decided_at = now(), responded_at = coalesce(responded_at, now()),
          reject_reason = CASE WHEN $3 THEN $4 ELSE reject_reason END, status = CASE WHEN $3 THEN 'rejected' ELSE status END,
          resolved_at = CASE WHEN $3 THEN now() ELSE resolved_at END WHERE id = $1`,
       [r.id, user.id, to === 'rejected', input.comment],
     );
-    await logRequest(db, r.id, user.id, 'approval', to === 'rejected' ? `Rejected: ${input.comment}` : `Approved${input.comment ? `: ${input.comment}` : ''}`, {
-      status: { from: r.status, to }, decision: input.decision, ...(input.comment ? { comment: input.comment } : {}),
+    await logRequest(db, r.id, user.id, 'approval', `${to === 'rejected' ? `Rejected: ${input.comment}` : `Approved${input.comment ? `: ${input.comment}` : ''}`}${samePerson ? ' (logged and decided by the same person)' : ''}`, {
+      status: { from: r.status, to }, decision: input.decision, ...(input.comment ? { comment: input.comment } : {}), ...(samePerson ? { same_person: true } : {}),
     });
     // The other approvers' links stop working (approval-links.ts revokes per request on use; this covers the web UI).
     await db.query('UPDATE approval_links SET revoked_at = now() WHERE request_id = $1 AND used_at IS NULL AND revoked_at IS NULL', [r.id]);
@@ -572,7 +644,9 @@ export async function decideRequest(user: User, ref: string, input: z.infer<type
       users: [r.created_by], event: 'decision', ref: r.ref, title: `${r.ref} ${to === 'rejected' ? 'rejected' : 'approved'}`, summary: r.title,
       path: `/requests/${r.ref}`, dedupe: `request-decision:${r.ref}`, actorId: user.id,
     });
+    await tellRequester(db, r.id, to === 'rejected' ? 'rejected' : 'approved', user.id);
   });
+  await runAutomation(ref, user);
   return getRequest(user, ref);
 }
 
@@ -593,6 +667,7 @@ export async function transitionRequestLean(user: User, ref: string, input: z.in
     await db.query('UPDATE approval_links SET revoked_at = now() WHERE request_id = $1 AND used_at IS NULL AND revoked_at IS NULL', [r.id]);
     await slaOnTransition(db, r.id, 'cancelled', new Date(), 'request');
     await logRequest(db, r.id, user.id, 'status', `Cancelled: ${input.reason}`, { status: { from: r.status, to: 'cancelled' }, reason: input.reason });
+    await tellRequester(db, r.id, 'cancelled', user.id);
   });
 }
 
@@ -623,23 +698,36 @@ export async function completeRequestTask(user: User, ref: string, taskId: numbe
     if (r.status !== 'in_fulfilment') throw conflict(`${r.ref} is ${r.status.replace('_', ' ')}`);
     if (t.status !== 'open') throw conflict(t.status === 'pending' ? 'Tasks are done in order: this one is not open yet' : `This task is already ${t.status}`);
     await assertMayWorkTask(db, user, t);
-    await db.query("UPDATE request_tasks SET status = 'done', note = $2, done_by = $3, done_at = now() WHERE id = $1", [t.id, input.note, user.id]);
-    await db.query('UPDATE requests SET responded_at = coalesce(responded_at, now()) WHERE id = $1', [r.id]);
-    await logRequest(db, r.id, user.id, 'task', `Done: ${t.title}${input.note ? ` (${input.note})` : ''}`, { task: t.id, status: { from: 'open', to: 'done' }, ...(input.note ? { note: input.note } : {}) });
-    const { rows: next } = await db.query("SELECT id FROM request_tasks WHERE request_id = $1 AND status = 'pending' ORDER BY position LIMIT 1", [r.id]);
-    if (next[0]) {
-      await db.query("UPDATE request_tasks SET status = 'open', opened_at = now() WHERE id = $1", [next[0].id]);
-      await openedTask(db, r, user.id);
-      return;
+    // The change's outcome completes its task; by hand only when no change could be made.
+    if (t.kind === 'change' && t.change_id) {
+      // Unless the change was cancelled or did not work: then the team decides how to finish.
+      const { rows: c } = await db.query('SELECT ref, status, outcome FROM changes WHERE id = $1', [t.change_id]);
+      if (c[0] && c[0].status !== 'cancelled' && !['failed', 'rolled_back'].includes(c[0].outcome)) throw conflict(`Record the outcome on ${c[0].ref}: it completes this task`);
     }
-    await db.query("UPDATE requests SET status = 'fulfilled', resolved_at = now() WHERE id = $1", [r.id]);
-    await slaOnTransition(db, r.id, 'fulfilled', new Date(), 'request');
-    await logRequest(db, r.id, null, 'status', 'Fulfilled', { status: { from: 'in_fulfilment', to: 'fulfilled' } });
-    await notify(db, {
-      users: [r.created_by], event: 'watched_update', ref: r.ref, title: `${r.ref} fulfilled`, summary: r.title, path: `/requests/${r.ref}`, dedupe: `request-fulfilled:${r.ref}`, actorId: user.id,
-    });
+    await finishTask(db, r, t, user.id, input.note);
   });
+  await runAutomation(ref, user);
   return getRequest(user, ref);
+}
+
+/** The open task is done (by a person, its change or its webhook): the next opens, or the request is fulfilled. */
+async function finishTask(db: Db, r: any, t: { id: number; title: string }, doneBy: number | null, note: string) {
+  await db.query("UPDATE request_tasks SET status = 'done', note = $2, done_by = $3, done_at = now() WHERE id = $1", [t.id, note, doneBy]);
+  await db.query('UPDATE requests SET responded_at = coalesce(responded_at, now()) WHERE id = $1', [r.id]);
+  await logRequest(db, r.id, doneBy, 'task', `Done: ${t.title}${note ? ` (${note})` : ''}`, { task: t.id, status: { from: 'open', to: 'done' }, ...(note ? { note } : {}) });
+  const { rows: next } = await db.query("SELECT id FROM request_tasks WHERE request_id = $1 AND status = 'pending' ORDER BY position LIMIT 1", [r.id]);
+  if (next[0]) {
+    await db.query("UPDATE request_tasks SET status = 'open', opened_at = now() WHERE id = $1", [next[0].id]);
+    await openedTask(db, r, doneBy);
+    return;
+  }
+  await db.query("UPDATE requests SET status = 'fulfilled', resolved_at = now() WHERE id = $1", [r.id]);
+  await slaOnTransition(db, r.id, 'fulfilled', new Date(), 'request');
+  await logRequest(db, r.id, null, 'status', 'Fulfilled', { status: { from: 'in_fulfilment', to: 'fulfilled' } });
+  await notify(db, {
+    users: [r.created_by], event: 'watched_update', ref: r.ref, title: `${r.ref} fulfilled`, summary: r.title, path: `/requests/${r.ref}`, dedupe: `request-fulfilled:${r.ref}`, actorId: doneBy,
+  });
+  await tellRequester(db, r.id, 'fulfilled', doneBy);
 }
 
 /** Takes a task (or gives it to a member of its team). */
@@ -723,6 +811,234 @@ export async function removeRequestLink(user: User, ref: string, linkId: number)
   return getRequest(user, ref);
 }
 
+// ---- Automation (part 2 of #44): the standard change and webhook tasks ---------------------------
+
+/**
+ * After a commit that may have opened a task: a standard change task makes its change from the item's template, as
+ * narrow as the request (#117), on the CIs the form names (else the service). Done as the acting person when they may
+ * create changes, else as the user who logged the request. If the change cannot be made (the module is off, the
+ * template's scope refuses it, a change freeze), the history says why and the team does the task by hand.
+ */
+export async function runAutomation(ref: string, actor?: User) {
+  const { rows } = await query(
+    `SELECT t.id, t.title, t.team_id, r.id AS request_id, r.ref, r.created_by, r.answers, i.form, i.name AS item, i.standard_change_template_id, c.ref AS service_ref
+     FROM request_tasks t JOIN requests r ON r.id = t.request_id JOIN request_items i ON i.id = r.item_id JOIN configuration_items c ON c.id = i.service_id
+     WHERE r.ref = $1 AND t.status = 'open' AND t.kind = 'change' AND t.change_id IS NULL AND r.status = 'in_fulfilment'`,
+    [ref.toUpperCase()],
+  );
+  const t = rows[0];
+  if (!t) return;
+  const log = (body: string, data: object) => tx((db) => logRequest(db, t.request_id, null, 'task', body, data));
+  try {
+    if (!moduleEnabled('change')) throw badRequest('Changes are turned off');
+    if (!t.standard_change_template_id) throw badRequest('The catalogue item no longer names a standard change template');
+    const { rows: u } = await query(`SELECT ${USER_COLUMNS} FROM users u WHERE u.id = $1 AND u.active`, [t.created_by]);
+    const by: User | undefined = actor && can(actor.role, 'change.create') ? actor : u[0];
+    if (!by) throw badRequest('Nobody can make the change: the user who logged the request is gone');
+    const cis = (t.form as FormField[]).filter((f) => f.type === 'ci' && t.answers[f.key]).map((f) => String(t.answers[f.key]));
+    const change = await createChange(by, createChangeSchema.parse({
+      title: `${t.item}: ${t.title} (${t.ref})`, description: `Carries out service request ${t.ref}.`, template_id: t.standard_change_template_id,
+      cis: cis.length ? cis : [t.service_ref], ...(t.team_id ? { team_id: t.team_id } : {}),
+    }), undefined, startNarrow(await audienceOf(null, t.ref)));
+    await tx(async (db) => {
+      const { rowCount } = await db.query('UPDATE request_tasks SET change_id = $2 WHERE id = $1 AND change_id IS NULL', [t.id, change.id]);
+      if (!rowCount) return;
+      await db.query("INSERT INTO request_links (request_id, kind, reference, system, created_by) VALUES ($1, 'change', $2, 'Kernel', $3) ON CONFLICT DO NOTHING", [t.request_id, change.ref, by.id]);
+      await logRequest(db, t.request_id, null, 'task', `Standard change ${change.ref} made for: ${t.title}. Its outcome completes the task.`, { task: t.id, change: change.ref });
+    });
+  } catch (err) {
+    if (!(err instanceof HttpError) || err.statusCode >= 500) throw err;
+    await log(`The standard change could not be made (${err.message}). Do this task by hand.`, { task: t.id, change_error: err.message });
+  }
+}
+
+/** A change's outcome completes the request task it carries out; a failed or rolled back change leaves it open. */
+export async function changeOutcome(changeRef: string) {
+  const refs = await asSystem(() => tx(async (db) => {
+    const { rows } = await db.query(
+      `SELECT t.id AS task_id, t.title AS task_title, t.team_id AS task_team_id, c.ref AS change_ref, c.status AS change_status, c.outcome, r.*
+       FROM request_tasks t JOIN changes c ON c.id = t.change_id JOIN requests r ON r.id = t.request_id
+       WHERE c.ref = $1 AND t.status = 'open' AND t.kind = 'change' FOR UPDATE OF t, r`,
+      [changeRef.toUpperCase()],
+    );
+    for (const r of rows) {
+      const t = { id: r.task_id as number, title: r.task_title as string };
+      if (r.outcome === 'successful') await finishTask(db, r, t, null, `${r.change_ref} successful`);
+      else {
+        const what = r.change_status === 'cancelled' ? 'was cancelled' : `was ${String(r.outcome ?? r.change_status).replace('_', ' ')}`;
+        await logRequest(db, r.id, null, 'task', `${r.change_ref} ${what}: "${t.title}" stays open. Raise a new change, or do it by hand.`, { task: t.id, change: r.change_ref, outcome: r.outcome });
+        if (r.task_team_id) await notify(db, { users: await teamMembers(db, r.task_team_id), event: 'team_queue', ref: r.ref, title: r.title, summary: `${r.change_ref} ${what}: ${t.title} needs you.`, path: `/requests/${r.ref}`, dedupe: `request-change:${t.id}:${r.change_ref}:${r.outcome ?? r.change_status}` });
+      }
+    }
+    return rows.map((x) => x.ref as string);
+  }));
+  for (const ref of new Set(refs)) await asSystem(() => runAutomation(ref));
+}
+
+/**
+ * A webhook task is queued for its webhook with the request's ref, item and answers: never comments or task notes,
+ * no free-text answers from a confidential request, and only the ref of a restricted one. The callback token is added
+ * when the delivery is sent (withCallback), so the queue never holds it.
+ */
+async function queueTaskWebhook(db: Db, requestId: number, t: { id: number; title: string; webhook_id: number }) {
+  const { rows } = await db.query(
+    `SELECT r.ref, r.title, r.status, r.answers, r.restricted, r.classification, i.name AS item, i.form, c.ref AS service_ref, c.name AS service_name, t.position
+     FROM requests r JOIN request_items i ON i.id = r.item_id JOIN configuration_items c ON c.id = i.service_id JOIN request_tasks t ON t.id = $2 WHERE r.id = $1`,
+    [requestId, t.id],
+  );
+  const r = rows[0];
+  const answers = r.restricted ? {} : Object.fromEntries((r.form as FormField[]).filter((f) => r.answers[f.key] !== undefined && !(FREE_TEXT.has(f.type) && r.classification === 'confidential')).map((f) => [f.key, r.answers[f.key]]));
+  const payload = {
+    event: 'request.task', occurred_at: new Date().toISOString(),
+    request: r.restricted ? { ref: r.ref, restricted: true, url: requestUrl(r.ref) } : { ref: r.ref, title: r.title, item: r.item, service: { ref: r.service_ref, name: r.service_name }, url: requestUrl(r.ref) },
+    task: { id: t.id, title: t.title, position: r.position },
+    answers,
+    problem: null, actor: null, summary: `Task: ${t.title}`, data: { request_task_id: t.id },
+  };
+  await db.query("INSERT INTO webhook_deliveries (webhook_id, event, payload) VALUES ($1, 'request.task', $2)", [t.webhook_id, JSON.stringify(payload)]);
+  await logRequest(db, requestId, null, 'task', `Sent to its webhook: ${t.title}`, { task: t.id, webhook: t.webhook_id });
+}
+
+const sha256 = (token: string) => createHash('sha256').update(token).digest();
+
+/**
+ * Called by the webhook worker as it sends a request.task delivery: mints the task's callback token (256 random bits,
+ * only the SHA-256 kept, single use, expires) and adds where to call back. A retry mints a new one, so the token in a
+ * failed attempt stops working. Null when the task is no longer open: nothing is sent.
+ */
+export async function withCallback(payload: any) {
+  const token = randomBytes(32).toString('base64url');
+  const { rows } = await query(
+    `UPDATE request_tasks SET callback_hash = $2, callback_expires_at = now() + $3 * interval '1 day', callback_used_at = NULL
+     WHERE id = $1 AND status = 'open' AND kind = 'webhook' RETURNING callback_expires_at`,
+    [payload?.task?.id, sha256(token), CALLBACK_DAYS],
+  );
+  if (!rows[0]) return null;
+  return {
+    ...payload,
+    callback: {
+      url: absoluteUrl(`/api/requests/${payload.request.ref}/tasks/${payload.task.id}/complete`), method: 'POST', header: 'X-Kernel-Task-Token', token,
+      expires_at: new Date(rows[0].callback_expires_at).toISOString(), body: '{ "status": "done" | "failed", "note": "…" }',
+    },
+  };
+}
+
+export const callbackSchema = z.object({ status: z.enum(['done', 'failed']).default('done'), note: z.string().trim().max(2000).default('') });
+
+/** The webhook's receiver reports back with the task's token: done completes the task, failed hands it to the team. */
+export async function completeTaskByToken(req: FastifyRequest, ref: string, taskId: number, token: string, input: z.infer<typeof callbackSchema>) {
+  rateLimit(`task-callback:ip:${req.ip}`, 60, 60_000);
+  const refuse = (reason: string) => {
+    securityEvent({ action: 'request_task.callback_refused', category: 'authentication', outcome: 'denied', message: `Task callback refused: ${reason}`, detail: { reason, task_id: taskId } }, req);
+    return new HttpError(403, 'This callback token is not valid for that task, or it was used or has expired');
+  };
+  if (!token || token.length > 100) throw refuse('missing');
+  const ctx = { userId: null, userName: 'webhook', actorType: 'system' as const, channel: 'webhook', tokenPrefix: '', ip: req.ip, userAgent: String(req.headers['user-agent'] ?? '').slice(0, 300), requestId: String(req.id), viewer: 'system' };
+  await contextStore.run(ctx, () => tx(async (db) => {
+    const { rows } = await db.query(
+      `SELECT t.*, t.callback_expires_at < now() AS expired, r.ref AS request_ref FROM request_tasks t JOIN requests r ON r.id = t.request_id
+       WHERE t.id = $1 AND r.ref = $2 AND t.callback_hash = $3 FOR UPDATE OF t`,
+      [taskId, ref.toUpperCase(), sha256(token)],
+    );
+    const t = rows[0];
+    if (!t) throw refuse('invalid');
+    if (t.callback_used_at) throw refuse('used');
+    if (t.expired) throw refuse('expired');
+    if (t.status !== 'open') throw refuse('not_open');
+    await db.query('UPDATE request_tasks SET callback_used_at = now() WHERE id = $1', [t.id]);
+    const r = await loadRequest(db, ref);
+    if (input.status === 'done') await finishTask(db, r, t, null, input.note);
+    else {
+      await logRequest(db, r.id, null, 'task', `The webhook reports it could not do "${t.title}"${input.note ? `: ${input.note}` : ''}. The task stays open for a person.`, { task: t.id, webhook: 'failed', ...(input.note ? { note: input.note } : {}) });
+      if (t.team_id) await notify(db, { users: await teamMembers(db, t.team_id), event: 'team_queue', ref: r.ref, title: r.title, summary: `Automation failed: ${t.title} needs a person.`, path: `/requests/${r.ref}`, dedupe: `request-webhook-failed:${t.id}` });
+    }
+  }));
+  await asSystem(() => runAutomation(ref));
+  return { ok: true, status: input.status };
+}
+
+// ---- The requester hears about it (part 2 of #44) ----------------------------------------------
+
+type Notice = 'received' | 'approved' | 'rejected' | 'fulfilled' | 'cancelled';
+
+/**
+ * The requester hears about their request: a person with an account through their notifications (unless they logged
+ * it and hear about it already), everyone else by mail through the outbox, unless they unsubscribed.
+ */
+async function tellRequester(db: Db, requestId: number, kind: Notice, actorId: number | null) {
+  const { rows } = await db.query(
+    'SELECT r.ref, r.title, r.created_by, p.id AS person_id, p.user_id, p.email, p.request_mail, p.active, p.erased_at FROM requests r JOIN people p ON p.id = r.requester_id WHERE r.id = $1',
+    [requestId],
+  );
+  const p = rows[0];
+  if (!p) return;
+  if (p.user_id) {
+    if (p.user_id === p.created_by || kind === 'received') return;
+    await notify(db, {
+      users: [p.user_id], event: kind === 'approved' || kind === 'rejected' ? 'decision' : 'watched_update', ref: p.ref, title: `${p.ref} ${kind}`, summary: p.title,
+      path: `/requests/${p.ref}`, dedupe: `request-requester:${p.ref}:${kind}`, actorId,
+    });
+    return;
+  }
+  if (!p.email || !p.request_mail || !p.active || p.erased_at) return;
+  await db.query('INSERT INTO request_mail (request_id, person_id, kind) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [requestId, p.person_id, kind]);
+}
+
+/** What the mail says, in plain words: only the request's own title (not for a restricted one) and where it stands. */
+function requesterLines(kind: Notice, r: { ref: string; title: string | null; approval: boolean }) {
+  const what = r.title ? `"${r.title}" (${r.ref})` : r.ref;
+  const lines: Record<Notice, [string, string[]]> = {
+    received: ['we have received it', [`We have received your request ${what}.`, r.approval ? 'It needs an approval first. We will tell you when it is approved and when it is done.' : 'We will tell you when it is done.']],
+    approved: ['approved', [`Your request ${what} has been approved. We are working on it now.`]],
+    rejected: ['not approved', [`Your request ${what} was not approved.`, 'If you have questions, contact your service desk.']],
+    fulfilled: ['done', [`Your request ${what} is done.`]],
+    cancelled: ['cancelled', [`Your request ${what} has been cancelled.`, 'If you still need it, contact your service desk.']],
+  };
+  const [subject, body] = lines[kind];
+  return { subject: `Your request ${r.ref}: ${subject}`, lines: body };
+}
+
+/** Sends due requester mail; claimed with a lease so replicas never send the same one twice. */
+export async function processRequestMail(limit = 20) {
+  const { rows } = await query(
+    `UPDATE request_mail m SET status = 'sending', lease_until = now() + interval '2 minutes'
+     FROM (SELECT id FROM request_mail WHERE (status = 'pending' OR (status = 'sending' AND lease_until < now())) AND next_attempt_at <= now()
+           ORDER BY id LIMIT $1 FOR UPDATE SKIP LOCKED) due
+     WHERE m.id = due.id RETURNING m.*`,
+    [limit],
+  );
+  let sent = 0;
+  for (const m of rows) {
+    let error = '';
+    let outcome = 'sent';
+    try {
+      const { rows: p } = await query("SELECT email FROM people WHERE id = $1 AND request_mail AND active AND erased_at IS NULL AND coalesce(email, '') <> ''", [m.person_id]);
+      const r = await forRequester(null, m.request_id);
+      if (!p[0] || !r) outcome = 'skipped';
+      else {
+        const { subject, lines } = requesterLines(m.kind, r);
+        await sendOutsideMail(p[0].email, subject, lines, unsubscribeUrl('r', m.person_id));
+      }
+    } catch (err) {
+      error = (err as Error).message.slice(0, 500);
+    }
+    const attempts = m.attempts + 1;
+    if (!error) {
+      if (outcome === 'sent') sent++;
+      await query("UPDATE request_mail SET status = $2, sent_at = CASE WHEN $2 = 'sent' THEN now() END, attempts = $3, lease_until = NULL, error = '' WHERE id = $1", [m.id, outcome, attempts]);
+    } else if (attempts >= 5 || /not configured/.test(error)) {
+      await query("UPDATE request_mail SET status = 'failed', attempts = $2, error = $3, lease_until = NULL WHERE id = $1", [m.id, attempts, error]);
+    } else {
+      await query("UPDATE request_mail SET status = 'pending', attempts = $2, error = $3, lease_until = NULL, next_attempt_at = now() + $4 * interval '1 minute' WHERE id = $1", [m.id, attempts, error, 2 ** attempts]);
+    }
+  }
+  return sent;
+}
+
+export function startRequestWorker(log: (msg: string) => void) {
+  setInterval(() => moduleEnabled('request') && asSystem(() => processRequestMail()).catch((err) => log(`request mail failed: ${err.message}`)), 15_000).unref();
+}
+
 // ---- Approval by link (#48) ------------------------------------------------------------------
 
 /** What an approver is asked to decide, for an approval link: null when there is nothing for them to decide. */
@@ -733,7 +1049,7 @@ export async function requestForApprover(user: User, requestId: number) {
   return {
     ref: r.ref as string,
     title: r.title as string,
-    open: r.status === 'awaiting_approval' && r.approver_ids.includes(user.id) && r.requester_user_id !== user.id && can(user.role, 'request.read'),
+    open: r.status === 'awaiting_approval' && r.requester_user_id !== user.id && can(user.role, 'request.read') && (await stillApprover(pool, r, user.id)),
     // What was asked for: a change to the answers means the approver should look again.
     version: JSON.stringify([r.item_id, r.answers, r.requester_id]),
     facts: [['Item', `${r.item_name} (${r.service_name})`], ['For', r.requester_name], ['Logged by', r.created_by_name ?? '']] as [string, string][],
