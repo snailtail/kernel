@@ -28,6 +28,7 @@ import { addChangeComment } from './changes.js';
 import { addArticleComment } from './knowledge.js';
 import { addCiComment } from './cmdb.js';
 import { addImprovementComment, addImprovementLink, improvementLinkSchema, myImprovements } from './improvements.js';
+import { addRequestComment, addRequestLink, myRequestWork, requestLinkSchema, teamRequestTasks } from './requests.js';
 
 export const searchSchema = z.object({
   q: z.string().trim().min(1).max(200),
@@ -91,6 +92,7 @@ export async function addComment(user: User, ref: string, body: string) {
   else if (type === 'article') await addArticleComment(user, ref, body);
   else if (type === 'review') await addReviewComment(user, ref, body);
   else if (type === 'improvement') await addImprovementComment(user, ref, body);
+  else if (type === 'request') await addRequestComment(user, ref, body);
   else await addCiComment(user, ref, body);
 }
 
@@ -110,6 +112,14 @@ export async function linkRecords(user: User, from: string, to: string, options:
   // An improvement (#52) keeps the links to what carries it out, whichever side the link starts from.
   if (source.type === 'improvement') {
     return (await addImprovementLink(user, from, improvementLinkSchema.parse({ kind, reference: to, system: options.system, url: options.url, note: options.note }))).links;
+  }
+  // A service request (#44) keeps its own links: the incident, change or problem it relates to, a CI, a document.
+  if (source.type === 'request') {
+    return (await addRequestLink(user, from, requestLinkSchema.parse({ kind: kind === 'service' ? 'ci' : kind, reference: to, system: options.system, url: options.url, note: options.note }))).links;
+  }
+  if (kind === 'request' && kernelRef) {
+    if (!['problem', 'change', 'incident', 'ci', 'service'].includes(source.type)) throw badRequest(`A request links to incidents, changes, problems and CIs, not a ${source.type}`);
+    return (await addRequestLink(user, to, requestLinkSchema.parse({ kind: source.type === 'service' ? 'ci' : source.type, reference: from, note: options.note }))).links;
   }
   if (kind === 'improvement' && kernelRef) {
     if (!['problem', 'change', 'incident', 'review'].includes(source.type)) throw badRequest(`An improvement links to the problems, changes, incidents and reviews that carry it out, not a ${source.type}`);
@@ -209,6 +219,8 @@ export async function myWork(user: User) {
     : [];
   const reviews = can(user.role, 'incident.read') ? await myReviews(user.id) : [];
   const improvements = can(user.role, 'improvement.read') ? await myImprovements(user.id) : [];
+  // Service requests (#44), when the module is on: my tasks, my teams' open tasks and what waits for my approval.
+  const requests = can(user.role, 'request.read') ? await myRequestWork(user.id) : null;
   const problemType = recordTypes().find((t) => t.type === 'problem')!;
   const teams = can(user.role, 'team.read') ? await myTeams(user.id) : [];
   const teamQueue = can(user.role, 'incident.read') && teams.length
@@ -226,6 +238,9 @@ export async function myWork(user: User) {
     major_updates: majorUpdates,
     reviews,
     improvements,
+    request_tasks: requests?.tasks ?? [],
+    request_approvals: requests?.approvals ?? [],
+    request_queue: requests && teams.length ? (await teamRequestTasks(teams.map((t) => t.id))).filter((t) => !t.assignee_id) : [],
     change_votes: changeVotes.rows,
     changes: myChanges.rows,
     actions: actions.rows,
@@ -254,5 +269,13 @@ export async function navCounts(user: User) {
     n("SELECT count(*) AS n FROM problem_actions WHERE status = 'open' AND due_date < current_date"),
   ]);
   const reviews = can(user.role, 'incident.read') && moduleEnabled('incident') ? await attentionCount(user.id) : 0;
-  return { my_work: myProblems + myIncidents + myActions, events: alerts, incidents: queue, kedb: decisions, actions: overdue, reviews };
+  // Service requests (#44): unassigned tasks in my teams, and requests waiting for my approval.
+  const requests = can(user.role, 'request.read')
+    ? await n(
+        `SELECT (SELECT count(*) FROM request_tasks t WHERE t.status = 'open' AND t.assignee_id IS NULL AND t.team_id IN (SELECT team_id FROM team_members WHERE user_id = $1))
+              + (SELECT count(*) FROM requests WHERE status = 'awaiting_approval' AND $1 = ANY(approver_ids)) AS n`,
+        [user.id],
+      )
+    : 0;
+  return { my_work: myProblems + myIncidents + myActions, events: alerts, incidents: queue, kedb: decisions, actions: overdue, reviews, requests };
 }

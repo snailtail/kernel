@@ -1,6 +1,7 @@
 // Service level management (#43): SLAs with response and resolution targets per priority in business time, and
-// the SLA clock on incidents. The clock pauses while on hold (and between resolved and a reopen); due and breach
-// times are stored for queries and recomputed on every state change; warnings and breaches fire once.
+// the SLA clock on incidents and service requests (#44). The clock pauses while on hold (and between resolved and a
+// reopen), and for a request while it waits for approval; due and breach times are stored for queries and recomputed
+// on every state change; warnings and breaches fire once.
 import { z } from 'zod';
 import type { User } from './auth.js';
 import { audit } from './audit.js';
@@ -17,6 +18,29 @@ import type { Db } from './problems.js';
 
 const MINUTE = 60_000;
 type Target = 'response' | 'resolution';
+
+/**
+ * The record kinds with an SLA clock. Both carry the same clock columns (sla_id, response_due_at, resolution_due_at,
+ * responded_at, resolved_at, sla_paused_since, sla_paused_minutes, *_breached_at); for a request resolved_at is when
+ * it was fulfilled, rejected or cancelled.
+ */
+export type ClockKind = 'incident' | 'request';
+const CLOCKS: Record<ClockKind, { table: string; events: string; fk: string; path: string; open: string; pausing: string[]; module: 'incident' | 'request' }> = {
+  incident: {
+    table: 'incidents', events: 'sla_events', fk: 'incident_id', path: '/incidents/', module: 'incident',
+    open: "status NOT IN ('resolved', 'closed')", pausing: ['on_hold', 'resolved', 'closed'],
+  },
+  request: {
+    table: 'requests', events: 'request_sla_events', fk: 'request_id', path: '/requests/', module: 'request',
+    open: "status NOT IN ('fulfilled', 'rejected', 'cancelled')", pausing: ['awaiting_approval', 'fulfilled', 'rejected', 'cancelled'],
+  },
+};
+
+/** An SLA entry in the record's history. */
+async function logClock(db: Db, kind: ClockKind, id: number, body: string, data: object) {
+  if (kind === 'incident') return logIncident(db, id, null, 'sla', body, data);
+  await db.query("INSERT INTO request_activity (request_id, kind, body, data, channel) VALUES ($1, 'sla', $2, $3, 'system')", [id, body, JSON.stringify(data)]);
+}
 
 // ---- Calendars ---------------------------------------------------------------------------------
 
@@ -137,14 +161,25 @@ async function chooseSla(db: Db, incidentId: number): Promise<number | null> {
   return rows[0]?.id ?? null;
 }
 
-/** Recomputes the SLA (when asked), due times and breach times of an incident; logs moved targets. */
-export async function recomputeSla(db: Db, incidentId: number, options: { reselect?: boolean; reason?: string } = {}) {
+/** A request's SLA: its catalogue item's, else its service's, else the default. */
+async function chooseRequestSla(db: Db, requestId: number): Promise<number | null> {
+  const { rows } = await db.query(
+    `SELECT coalesce(i.sla_id, c.sla_id, (SELECT id FROM slas WHERE is_default)) AS sla_id
+     FROM requests r JOIN request_items i ON i.id = r.item_id JOIN configuration_items c ON c.id = i.service_id WHERE r.id = $1`,
+    [requestId],
+  );
+  return rows[0]?.sla_id ?? null;
+}
+
+/** Recomputes the SLA (when asked), due times and breach times of an incident or request; logs moved targets. */
+export async function recomputeSla(db: Db, incidentId: number, options: { reselect?: boolean; reason?: string } = {}, kind: ClockKind = 'incident') {
   if (!moduleEnabled('sla')) return;
-  const { rows } = await db.query('SELECT * FROM incidents WHERE id = $1', [incidentId]);
+  const { table } = CLOCKS[kind];
+  const { rows } = await db.query(`SELECT * FROM ${table} WHERE id = $1`, [incidentId]);
   const i = rows[0];
-  const slaId = options.reselect || i.sla_id === null ? await chooseSla(db, incidentId) : i.sla_id;
+  const slaId = options.reselect || i.sla_id === null ? await (kind === 'incident' ? chooseSla : chooseRequestSla)(db, incidentId) : i.sla_id;
   if (!slaId) {
-    await db.query('UPDATE incidents SET sla_id = NULL, response_due_at = NULL, resolution_due_at = NULL WHERE id = $1', [incidentId]);
+    await db.query(`UPDATE ${table} SET sla_id = NULL, response_due_at = NULL, resolution_due_at = NULL WHERE id = $1`, [incidentId]);
     return;
   }
   const { rows: s } = await db.query('SELECT * FROM slas WHERE id = $1', [slaId]);
@@ -154,34 +189,36 @@ export async function recomputeSla(db: Db, incidentId: number, options: { resele
   const res = s[0].resolution_minutes[String(i.priority)];
   const responseDue = resp ? new Date(addBusinessMinutes(cal, created, resp)) : null;
   const resolutionDue = res ? new Date(addBusinessMinutes(cal, created, res + i.sla_paused_minutes)) : null;
-  await db.query('UPDATE incidents SET sla_id = $2, response_due_at = $3, resolution_due_at = $4 WHERE id = $1', [incidentId, slaId, responseDue, resolutionDue]);
+  await db.query(`UPDATE ${table} SET sla_id = $2, response_due_at = $3, resolution_due_at = $4 WHERE id = $1`, [incidentId, slaId, responseDue, resolutionDue]);
   const moved = (a: Date | null, b: Date | null) => (a?.getTime() ?? null) !== (b?.getTime() ?? null);
   if (options.reason && (slaId !== i.sla_id || moved(i.resolution_due_at, resolutionDue) || moved(i.response_due_at, responseDue))) {
     const fmt = (d: Date | null) => (d ? d.toISOString() : 'none');
-    await logIncident(db, incidentId, null, 'sla', `${options.reason}: resolution target moved from ${fmt(i.resolution_due_at)} to ${fmt(resolutionDue)}`, {
+    await logClock(db, kind, incidentId, `${options.reason}: resolution target moved from ${fmt(i.resolution_due_at)} to ${fmt(resolutionDue)}`, {
       sla: { from: i.sla_id, to: slaId }, resolution_due_at: { from: i.resolution_due_at, to: resolutionDue }, response_due_at: { from: i.response_due_at, to: responseDue },
     });
   }
 }
 
 /**
- * Pauses and resumes the clock on status changes: on hold and resolved pause the resolution clock; leaving them
- * adds the paused business time, so the clock resumes exactly where it stopped (a reopen keeps the response).
+ * Pauses and resumes the clock on status changes: on hold and resolved (for a request: awaiting approval and done)
+ * pause the resolution clock; leaving them adds the paused business time, so the clock resumes exactly where it
+ * stopped (a reopen keeps the response).
  */
-export async function slaOnTransition(db: Db, incidentId: number, to: string, now = new Date()) {
-  const { rows } = await db.query('SELECT sla_id, sla_paused_since, priority FROM incidents WHERE id = $1', [incidentId]);
+export async function slaOnTransition(db: Db, incidentId: number, to: string, now = new Date(), kind: ClockKind = 'incident') {
+  const { table } = CLOCKS[kind];
+  const { rows } = await db.query(`SELECT sla_id, sla_paused_since, priority FROM ${table} WHERE id = $1`, [incidentId]);
   const i = rows[0];
-  const pausing = to === 'on_hold' || to === 'resolved' || to === 'closed';
+  const pausing = CLOCKS[kind].pausing.includes(to);
   if (pausing && !i.sla_paused_since) {
-    await db.query('UPDATE incidents SET sla_paused_since = $2 WHERE id = $1', [incidentId, now]);
+    await db.query(`UPDATE ${table} SET sla_paused_since = $2 WHERE id = $1`, [incidentId, now]);
   } else if (!pausing && i.sla_paused_since) {
     let paused = 0;
     if (i.sla_id) {
       const { rows: s } = await db.query('SELECT calendar_id FROM slas WHERE id = $1', [i.sla_id]);
       if (s[0]) paused = Math.round(businessMinutes(await loadCalendar(db, s[0].calendar_id), new Date(i.sla_paused_since).getTime(), now.getTime()));
     }
-    await db.query('UPDATE incidents SET sla_paused_since = NULL, sla_paused_minutes = sla_paused_minutes + $2 WHERE id = $1', [incidentId, paused]);
-    await recomputeSla(db, incidentId);
+    await db.query(`UPDATE ${table} SET sla_paused_since = NULL, sla_paused_minutes = sla_paused_minutes + $2 WHERE id = $1`, [incidentId, paused]);
+    await recomputeSla(db, incidentId, {}, kind);
   }
 }
 
@@ -215,9 +252,30 @@ export async function slaClock(db: Db, i: any, now = Date.now()) {
 }
 
 /** Raises each 75 % warning and breach once (sla_events primary key), logs it, and records breach times. */
-export async function checkSlaEvents(now = Date.now()) {
+export async function checkSlaEvents(now = Date.now(), kinds: ClockKind[] = ['incident', 'request']) {
+  let fired = 0;
+  for (const kind of kinds) if (moduleEnabled(CLOCKS[kind].module)) fired += await checkKind(kind, now);
+  return fired;
+}
+
+/** Who hears about a warning or breach: the person on it; the team lead when no one is (and on a breach); else the managers. */
+async function escalateTo(db: Db, kind: ClockKind, i: any, breach: boolean): Promise<number[]> {
+  let person: number | null = i.assignee_id ?? null;
+  let teamId: number | null = i.team_id ?? null;
+  if (kind === 'request') {
+    // A request is worked through its open task.
+    const { rows } = await db.query("SELECT assignee_id, team_id FROM request_tasks WHERE request_id = $1 AND status = 'open' ORDER BY position LIMIT 1", [i.id]);
+    person = rows[0]?.assignee_id ?? null;
+    teamId = rows[0]?.team_id ?? null;
+  }
+  const leads = teamId ? await teamMembers(db, teamId, 'lead') : [];
+  return person ? [person, ...(breach ? leads : [])] : leads.length ? leads : await managers(db);
+}
+
+async function checkKind(kind: ClockKind, now: number) {
+  const def = CLOCKS[kind];
   const { rows } = await query(
-    `SELECT * FROM incidents WHERE sla_id IS NOT NULL AND status NOT IN ('resolved', 'closed') AND sla_paused_since IS NULL
+    `SELECT * FROM ${def.table} WHERE sla_id IS NOT NULL AND ${def.open} AND sla_paused_since IS NULL
        AND (resolution_due_at IS NOT NULL OR (response_due_at IS NOT NULL AND responded_at IS NULL))`,
   );
   let fired = 0;
@@ -228,22 +286,21 @@ export async function checkSlaEvents(now = Date.now()) {
       for (const target of ['response', 'resolution'] as Target[]) {
         const c = clock[target];
         if (!c.target_minutes || c.met_at || (target === 'response' && i.responded_at)) continue;
-        const kinds = c.elapsed_minutes > c.target_minutes ? ['warning', 'breach'] : c.elapsed_minutes >= c.target_minutes * 0.75 ? ['warning'] : [];
-        for (const kind of kinds) {
-          const { rowCount } = await db.query('INSERT INTO sla_events (incident_id, target, kind) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [i.id, target, kind]);
+        const events = c.elapsed_minutes > c.target_minutes ? ['warning', 'breach'] : c.elapsed_minutes >= c.target_minutes * 0.75 ? ['warning'] : [];
+        for (const event of events) {
+          const { rowCount } = await db.query(`INSERT INTO ${def.events} (${def.fk}, target, kind) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, [i.id, target, event]);
           if (!rowCount) continue;
           fired++;
-          if (kind === 'breach') await db.query(`UPDATE incidents SET ${target}_breached_at = now() WHERE id = $1 AND ${target}_breached_at IS NULL`, [i.id]);
-          // Escalation (#42): the assignee; the team lead when no one is assigned (and on a breach); else the managers.
-          const leads = i.team_id ? await teamMembers(db, i.team_id, 'lead') : [];
-          const recipients: number[] = i.assignee_id ? [i.assignee_id as number, ...(kind === 'breach' ? leads : [])] : leads.length ? leads : await managers(db);
+          if (event === 'breach') await db.query(`UPDATE ${def.table} SET ${target}_breached_at = now() WHERE id = $1 AND ${target}_breached_at IS NULL`, [i.id]);
+          // Escalation (#42).
+          const recipients = await escalateTo(db, kind, i, event === 'breach');
           await notify(db, {
-            users: [...new Set(recipients)], event: kind === 'breach' ? 'sla_breach' : 'sla_warning', ref: i.ref, title: i.title,
-            summary: `${target === 'response' ? 'Response' : 'Resolution'} target ${kind === 'breach' ? 'breached' : 'at risk (75 % used)'}.`,
-            path: `/incidents/${i.ref}`, dedupe: `sla:${kind}:${i.ref}:${target}`,
+            users: [...new Set(recipients)], event: event === 'breach' ? 'sla_breach' : 'sla_warning', ref: i.ref, title: i.title,
+            summary: `${target === 'response' ? 'Response' : 'Resolution'} target ${event === 'breach' ? 'breached' : 'at risk (75 % used)'}.`,
+            path: `${def.path}${i.ref}`, dedupe: `sla:${event}:${i.ref}:${target}`,
           });
-          await logIncident(db, i.id, null, 'sla', kind === 'breach' ? `${target === 'response' ? 'Response' : 'Resolution'} target breached` : `${target === 'response' ? 'Response' : 'Resolution'} target at risk: 75 % used`, {
-            target, kind, sla: clock.name, due_at: c.due_at, elapsed_minutes: c.elapsed_minutes, target_minutes: c.target_minutes,
+          await logClock(db, kind, i.id, event === 'breach' ? `${target === 'response' ? 'Response' : 'Resolution'} target breached` : `${target === 'response' ? 'Response' : 'Resolution'} target at risk: 75 % used`, {
+            target, kind: event, sla: clock.name, due_at: c.due_at, elapsed_minutes: c.elapsed_minutes, target_minutes: c.target_minutes,
           });
         }
       }
@@ -261,7 +318,7 @@ export async function backfillSla() {
 
 export function startSlaWorker(log: (msg: string) => void) {
   backfillSla().catch((err) => log(`SLA backfill failed: ${err.message}`));
-  setInterval(() => moduleEnabled('sla') && moduleEnabled('incident') && checkSlaEvents().catch((err) => log(`SLA check failed: ${err.message}`)), 60_000).unref();
+  setInterval(() => moduleEnabled('sla') && checkSlaEvents().catch((err) => log(`SLA check failed: ${err.message}`)), 60_000).unref();
 }
 
 // ---- Catalogue and reports ---------------------------------------------------------------------

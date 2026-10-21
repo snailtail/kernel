@@ -74,7 +74,8 @@ async function refuseOpenWork(db: Db, teamId: number, what: string) {
   const { rows } = await db.query(
     `SELECT (SELECT count(*) FROM incidents WHERE team_id = $1 AND status NOT IN ('resolved', 'closed'))
           + (SELECT count(*) FROM problems WHERE team_id = $1 AND status NOT IN ('resolved', 'closed'))
-          + (SELECT count(*) FROM changes WHERE team_id = $1 AND status NOT IN ('closed', 'rejected', 'cancelled')) AS n`,
+          + (SELECT count(*) FROM changes WHERE team_id = $1 AND status NOT IN ('closed', 'rejected', 'cancelled'))
+          + (SELECT count(*) FROM request_tasks WHERE team_id = $1 AND status IN ('open', 'pending')) AS n`,
     [teamId],
   );
   if (Number(rows[0].n) > 0) throw conflict(`The team has ${rows[0].n} open records; reassign them before it is ${what}`);
@@ -138,6 +139,8 @@ export async function teamQueue(user: User, id: number) {
     mine: rows.filter((r) => r.assignee_id === user.id),
     at_risk: rows.filter((r) => r.at_risk),
     all: rows,
+    // Service request tasks (#44) wait in the same queue when the module is on.
+    request_tasks: can(user.role, 'request.read') ? await (await import('./requests.js')).teamRequestTasks([id]) : [],
   };
 }
 

@@ -21,7 +21,7 @@ export interface AuditEntry {
   reason: string;
 }
 
-const PATH: Record<string, string> = { PRB: '/problems', INC: '/incidents', CHG: '/changes', KB: '/knowledge', PIR: '/reviews', IMP: '/improvements', CI: '/cis', SVC: '/cis' };
+const PATH: Record<string, string> = { PRB: '/problems', INC: '/incidents', CHG: '/changes', KB: '/knowledge', PIR: '/reviews', IMP: '/improvements', REQ: '/requests', CI: '/cis', SVC: '/cis' };
 /** The page of a record ref (PRB000001, CI000012…), or null for anything else. */
 export function recordPath(ref: string): string | null {
   const m = /^([A-Z]{2,3})\d{3,}$/.exec(ref);

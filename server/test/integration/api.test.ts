@@ -465,6 +465,8 @@ describe('REST API', { skip }, () => {
 
   describe('OpenAPI', () => {
     test('describes every registered API route', async () => {
+      // Every module on: a module that is off leaves the document, and service requests (#44) are off by default.
+      await (await k.login('admin')).put('/api/admin/modules', { request: true, reason: 'OpenAPI covers every module' });
       const doc = (await new Client(k.base).get('/api/openapi.json')).body;
       assert.equal(doc.openapi, '3.1.0');
       const missing = k.routes

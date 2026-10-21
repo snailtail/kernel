@@ -10,10 +10,13 @@ export const MODULES = {
   cmdb: { label: 'CMDB', description: 'Configuration items and services, relationships and impact analysis.' },
   sla: { label: 'Service levels', description: 'SLAs, business hours and the service catalogue; SLA clocks on incidents.' },
   knowledge: { label: 'Knowledge', description: 'Articles from known errors and resolutions, suggested while logging incidents.' },
+  request: { label: 'Service requests', description: 'A catalogue of things people can ask for (accounts, access, VMs), with approval and fulfilment tasks, kept apart from incidents.' },
 } as const;
 export type Module = keyof typeof MODULES;
 
-let state: Record<Module, boolean> = { incident: true, change: true, event: true, cmdb: true, sla: true, knowledge: true };
+// Service requests (#44) are off until someone turns them on: existing installations keep the menus they know.
+export const MODULE_DEFAULTS: Record<Module, boolean> = { incident: true, change: true, event: true, cmdb: true, sla: true, knowledge: true, request: false };
+let state: Record<Module, boolean> = { ...MODULE_DEFAULTS };
 let loadedAt = 0;
 
 /** Reloads the module switches (on start, after a change, and every 30 s so replicas follow). */
@@ -34,7 +37,7 @@ export const moduleEnabled = (m: Module) => modules()[m] !== false;
 /** The module an action belongs to; problem management and administration belong to none (always on). */
 export function moduleOfAction(action: string): Module | null {
   const prefix = action.split('.')[0];
-  if (prefix === 'incident' || prefix === 'change' || prefix === 'event' || prefix === 'sla') return prefix;
+  if (prefix === 'incident' || prefix === 'change' || prefix === 'event' || prefix === 'sla' || prefix === 'request') return prefix;
   if (prefix === 'ci') return 'cmdb';
   if (prefix === 'article') return 'knowledge';
   return null;
@@ -46,4 +49,4 @@ export const actionEnabled = (action: string) => {
 };
 
 /** OpenAPI tags and MCP prompts per module, so the documentation and agent surface follow the switches too. */
-export const MODULE_TAGS: Record<string, Module> = { Incidents: 'incident', Changes: 'change', Events: 'event', CMDB: 'cmdb', 'Service levels': 'sla' };
+export const MODULE_TAGS: Record<string, Module> = { Incidents: 'incident', Changes: 'change', Events: 'event', CMDB: 'cmdb', 'Service levels': 'sla', 'Service requests': 'request' };

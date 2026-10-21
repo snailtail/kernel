@@ -13,6 +13,7 @@ import { RISKS, changePolicy, getChange, voteOnChange } from './changes.js';
 import { config } from './config.js';
 import { asSystem, contextStore, type RequestContext } from './context.js';
 import { query } from './db.js';
+import { decideRequest, requestForApprover } from './requests.js';
 import { badRequest, HttpError } from './errors.js';
 import { mfaRequiredFor } from './mfapolicy.js';
 import { APPROVAL_LINK_HOURS } from './notifications.js';
@@ -36,7 +37,7 @@ async function asApprover<T>(user: User, base: Partial<RequestContext>, fn: () =
 }
 
 interface Subject {
-  kind: 'change' | 'mcp';
+  kind: 'change' | 'mcp' | 'request';
   ref: string;
   title: string;
   /** Still waiting for this approver's decision. */
@@ -53,7 +54,13 @@ const fingerprint = (v: unknown) => createHash('sha256').update(JSON.stringify(v
 const when = (d: string | Date | null) => (d ? new Date(d).toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : 'not planned');
 
 /** What the approver is asked to decide, read as the approver (null when they cannot see it). */
-async function subjectOf(user: User, target: { change_id?: number | null; approval_id?: number | null }): Promise<Subject | null> {
+async function subjectOf(user: User, target: { change_id?: number | null; approval_id?: number | null; request_id?: number | null }): Promise<Subject | null> {
+  if (target.request_id) {
+    // A service request (#44) waiting for this approver.
+    const r = await requestForApprover(user, target.request_id);
+    if (!r) return null;
+    return { kind: 'request', ref: r.ref, title: r.title, open: r.open, version: fingerprint(r.version), deadline: null, signIn: false, facts: r.facts, path: `/requests/${r.ref}` };
+  }
   if (target.change_id) {
     const { rows } = await query('SELECT ref FROM changes WHERE id = $1', [target.change_id]);
     if (!rows[0] || !can(user.role, 'change.read')) return null;
@@ -103,8 +110,12 @@ export interface ApprovalLinks { approve: string; reject: string }
  * 'sign_in' when the decision needs a signed-in approver, or null when there is nothing for this person to decide.
  */
 export async function mintApprovalLink(n: { ref: string; approval_id: number | null }, userId: number, channel: 'email' | 'chat', deliveryId: number): Promise<ApprovalLinks | 'sign_in' | null> {
-  const target = n.approval_id ? { approval_id: n.approval_id } : n.ref.startsWith('CHG') ? { change_id: (await query('SELECT id FROM changes WHERE ref = $1', [n.ref])).rows[0]?.id } : null;
-  if (!target || !(target.approval_id || target.change_id)) return null;
+  const target: { approval_id?: number; change_id?: number; request_id?: number } | null = n.approval_id
+    ? { approval_id: n.approval_id }
+    : n.ref.startsWith('CHG') ? { change_id: (await query('SELECT id FROM changes WHERE ref = $1', [n.ref])).rows[0]?.id }
+    : n.ref.startsWith('REQ') ? { request_id: (await query('SELECT id FROM requests WHERE ref = $1', [n.ref])).rows[0]?.id }
+    : null;
+  if (!target || !(target.approval_id || target.change_id || target.request_id)) return null;
   const { rows: u } = await query(`SELECT ${USER_COLUMNS} FROM users u WHERE u.id = $1 AND u.active`, [userId]);
   if (!u[0]) return null;
   const user = u[0] as User;
@@ -116,8 +127,8 @@ export async function mintApprovalLink(n: { ref: string; approval_id: number | n
   const token = randomBytes(32).toString('base64url');
   const expires = new Date(Math.min(Date.now() + APPROVAL_LINK_HOURS * 3600_000, s.deadline?.getTime() ?? Infinity));
   await query(
-    'INSERT INTO approval_links (token_hash, user_id, change_id, approval_id, version, channel, delivery_id, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
-    [hashOf(token), user.id, target.change_id ?? null, target.approval_id ?? null, s.version, channel, deliveryId, expires],
+    'INSERT INTO approval_links (token_hash, user_id, change_id, approval_id, request_id, version, channel, delivery_id, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
+    [hashOf(token), user.id, target.change_id ?? null, target.approval_id ?? null, target.request_id ?? null, s.version, channel, deliveryId, expires],
   );
   const base = `${(config.publicUrl ?? '').replace(/\/$/, '')}/api/public/approval-links?token=${token}`;
   return { approve: `${base}&decision=approve`, reject: `${base}&decision=reject` };
@@ -141,7 +152,7 @@ const REFUSALS: Record<Refusal, string> = {
 };
 
 export type LinkState =
-  | { ok: true; id: number; user: User; subject: Subject; target: { change_id: number | null; approval_id: number | null }; channel: 'email' | 'chat'; formToken: string }
+  | { ok: true; id: number; user: User; subject: Subject; target: { change_id: number | null; approval_id: number | null; request_id: number | null }; channel: 'email' | 'chat'; formToken: string }
   | { ok: false; reason: Refusal; message: string; path?: string };
 
 /** Checks a link without changing anything; refusals are security events. */
@@ -160,23 +171,23 @@ export async function checkApprovalLink(req: FastifyRequest, token: string): Pro
   // The link is looked up as the system: an anonymous request sees no restricted rows. What it may show is then read
   // as the approver.
   const { rows } = await asSystem(() => query(
-    `SELECT l.id AS link_id, l.change_id, l.approval_id, l.version, l.channel, l.expires_at < now() AS expired, l.used_at IS NOT NULL AS used,
+    `SELECT l.id AS link_id, l.change_id, l.approval_id, l.request_id, l.version, l.channel, l.expires_at < now() AS expired, l.used_at IS NOT NULL AS used,
             l.revoked_at IS NOT NULL AS revoked, u.active, ${USER_COLUMNS}
      FROM approval_links l JOIN users u ON u.id = l.user_id WHERE l.token_hash = $1`,
     [hash],
   ));
   const l = rows[0];
   if (!l) return refuse('invalid');
-  const { link_id, change_id, approval_id, version, channel, expired, used, revoked, active, ...user } = l;
+  const { link_id, change_id, approval_id, request_id, version, channel, expired, used, revoked, active, ...user } = l;
   const id = Number(link_id);
   if (used) return refuse('used', id, user.id);
   if (revoked || !active) return refuse('decided', id, user.id);
   if (expired) return refuse('expired', id, user.id);
-  const subject = await asApprover(user, { ip: req.ip }, () => subjectOf(user, { change_id, approval_id }));
+  const subject = await asApprover(user, { ip: req.ip }, () => subjectOf(user, { change_id, approval_id, request_id }));
   if (!subject?.open) return refuse('decided', id, user.id);
   if (subject.version !== version) return refuse('changed', id, user.id, subject.path);
   if (subject.signIn || (await needsSession(user))) return refuse('sign_in', id, user.id, subject.path);
-  return { ok: true, id, user, subject, target: { change_id, approval_id }, channel, formToken: formTokenOf(token, id) };
+  return { ok: true, id, user, subject, target: { change_id, approval_id, request_id }, channel, formToken: formTokenOf(token, id) };
 }
 
 /**
@@ -205,9 +216,10 @@ export async function useApprovalLink(req: FastifyRequest, token: string, input:
   try {
     await asApprover(user, ctx, async () => {
       if (subject.kind === 'change') await voteOnChange(user, subject.ref, { decision: input.decision as 'approve' | 'reject', comment });
+      else if (subject.kind === 'request') await decideRequest(user, subject.ref, { decision: input.decision as 'approve' | 'reject', comment });
       else await decideApproval(req, user, state.target.approval_id!, input.decision === 'approve', comment || undefined);
       // The link's id, never the token: enough to find the delivery it came with.
-      await audit(null, { entity_type: subject.kind === 'change' ? 'change' : 'problem', entity_ref: subject.ref, action: 'decided_by_link', changes: { link_id: state.id, decision: input.decision, channel: ctx.channel } });
+      await audit(null, { entity_type: subject.kind === 'mcp' ? 'problem' : subject.kind, entity_ref: subject.ref, action: 'decided_by_link', changes: { link_id: state.id, decision: input.decision, channel: ctx.channel } });
     });
   } catch (err) {
     // Nothing was decided: the link may be used again (e.g. after a refusal the approver can correct).
@@ -217,8 +229,8 @@ export async function useApprovalLink(req: FastifyRequest, token: string, input:
   }
   // The same request may have reached this approver by email and chat: those copies stop working too.
   await asSystem(() => query(
-    'UPDATE approval_links SET revoked_at = now() WHERE user_id = $1 AND id <> $2 AND used_at IS NULL AND revoked_at IS NULL AND (change_id = $3 OR approval_id = $4)',
-    [user.id, state.id, target.change_id, target.approval_id],
+    'UPDATE approval_links SET revoked_at = now() WHERE user_id = $1 AND id <> $2 AND used_at IS NULL AND revoked_at IS NULL AND (change_id = $3 OR approval_id = $4 OR request_id = $5)',
+    [user.id, state.id, target.change_id, target.approval_id, target.request_id],
   ));
   return { ok: true as const, message: input.decision === 'approve' ? `You approved ${subject.ref}.` : `You rejected ${subject.ref}.`, path: subject.path };
 }

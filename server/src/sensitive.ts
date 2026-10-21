@@ -247,7 +247,7 @@ export async function scanInbound(path: string, body: unknown): Promise<InboundR
   return { secrets: [...seen.secrets], personal: policy.flag_personal ? [...seen.personal] : [], body: out };
 }
 
-const PERSONAL_TABLES: Record<string, string> = { PRB: 'problems', INC: 'incidents', CHG: 'changes', IMP: 'improvements' };
+const PERSONAL_TABLES: Record<string, string> = { PRB: 'problems', INC: 'incidents', CHG: 'changes', IMP: 'improvements', REQ: 'requests' };
 
 /** Marks a record as holding personal data (for retention, #53, and AI handling, #64). */
 export async function markPersonalData(ref: string) {

@@ -16,6 +16,7 @@ import * as oc from './oncall.js';
 import * as events from './events.js';
 import * as ch from './changes.js';
 import * as imp from './improvements.js';
+import * as rq from './requests.js';
 import * as slaMod from './sla.js';
 import * as notif from './notifications.js';
 import * as setupMod from './setup.js';
@@ -68,7 +69,7 @@ const user = z.object({
 });
 const ids = candidates.candidateIdsSchema.extend({ key: z.string().optional() });
 
-const BULK_TAG: Record<bulkMod.Practice, string> = { incidents: 'Incidents', problems: 'Problems', changes: 'Changes', alerts: 'Events', actions: 'Actions', articles: 'Knowledge', cis: 'CMDB', improvements: 'Improvements' };
+const BULK_TAG: Record<bulkMod.Practice, string> = { incidents: 'Incidents', problems: 'Problems', changes: 'Changes', alerts: 'Events', actions: 'Actions', articles: 'Knowledge', cis: 'CMDB', improvements: 'Improvements', requests: 'Service requests' };
 
 export const OPERATIONS: Op[] = [
   { method: 'post', path: '/api/auth/login', tag: 'Authentication', summary: 'Sign in with username and password (sets a session cookie)', body: z.object({ username: z.string(), password: z.string() }), public: true },
@@ -330,6 +331,21 @@ export const OPERATIONS: Op[] = [
   { method: 'post', path: '/api/improvements/:ref/links', tag: 'Improvements', summary: 'Link a change, problem, action (by id), incident, review or document that carries it out', body: imp.improvementLinkSchema },
   { method: 'delete', path: '/api/improvements/:ref/links/:id', tag: 'Improvements', summary: 'Remove a link' },
   { method: 'post', path: '/api/problems/:ref/improvement', tag: 'Improvements', summary: 'Lessons learned → improvement, from a resolved or closed problem', body: imp.fromProblemSchema },
+  { method: 'get', path: '/api/request-items', tag: 'Service requests', summary: 'The request catalogue: items per service with their form, approval, fulfilment tasks and SLA', query: rq.listItemsSchema },
+  { method: 'get', path: '/api/request-items/:id', tag: 'Service requests', summary: 'One catalogue item' },
+  { method: 'post', path: '/api/request-items', tag: 'Service requests', summary: 'Add a catalogue item (managers): a form of at most 10 fields, an approval and ordered fulfilment tasks', body: rq.requestItemSchema },
+  { method: 'put', path: '/api/request-items/:id', tag: 'Service requests', summary: 'Change a catalogue item (managers); kept in the audit trail', body: rq.requestItemSchema },
+  { method: 'get', path: '/api/requests', tag: 'Service requests', summary: 'Service requests (open by default); task=mine|my_teams for the work waiting on you', query: rq.listRequestsSchema },
+  { method: 'post', path: '/api/requests', tag: 'Service requests', summary: 'Submit a request for a person: the answers are checked against the item\'s form. Supports Idempotency-Key', body: rq.createRequestSchema },
+  { method: 'get', path: '/api/requests/:ref', tag: 'Service requests', summary: 'A request with its answers, approval, tasks in order, SLA clock, history and next steps' },
+  { method: 'patch', path: '/api/requests/:ref', tag: 'Service requests', summary: 'Update the title, priority, or (before fulfilment starts) the answers', body: rq.updateRequestSchema },
+  { method: 'post', path: '/api/requests/:ref/transition', tag: 'Service requests', summary: 'Cancel (with a reason); approved and rejected are the approver\'s decision, signed in, never by token', body: rq.transitionRequestSchema },
+  { method: 'post', path: '/api/requests/:ref/approval', tag: 'Service requests', summary: 'The approver approves or rejects (with a reason); signed in only, never by token or MCP', body: rq.decisionSchema },
+  { method: 'post', path: '/api/requests/:ref/tasks/:id/complete', tag: 'Service requests', summary: 'Mark the open task done; the next opens, and after the last the request is fulfilled', body: rq.completeTaskSchema },
+  { method: 'patch', path: '/api/requests/:ref/tasks/:id', tag: 'Service requests', summary: 'Take a task, or give it to a member of its team', body: rq.assignTaskSchema },
+  { method: 'post', path: '/api/requests/:ref/comments', tag: 'Service requests', summary: 'Add a note', body: z.object({ body: z.string() }) },
+  { method: 'post', path: '/api/requests/:ref/links', tag: 'Service requests', summary: 'Link an incident, change, problem, CI or document', body: rq.requestLinkSchema },
+  { method: 'delete', path: '/api/requests/:ref/links/:id', tag: 'Service requests', summary: 'Remove a link' },
   { method: 'post', path: '/api/events', tag: 'Events', summary: 'Report normalised events (token with ingest scope, or a session); deduplicated into alerts', body: events.reportEventsSchema },
   { method: 'post', path: '/api/event-hooks/:id', tag: 'Events', summary: "Inbound webhook for a configured event source (Alertmanager, Uptime Kuma, Azure Monitor, OP5, generic). Authenticate with the source token (Authorization: Bearer, X-Kernel-Token, or ?token=); a signed generic source also needs Standard Webhooks headers" },
   { method: 'get', path: '/api/alerts', tag: 'Events', summary: 'Alerts (open by default), most severe first', query: events.listAlertsSchema },

@@ -6,8 +6,8 @@ import type { Meta, User } from './api';
 import { canEdit, isManager } from './session';
 
 export type Module = keyof Meta['modules'];
-export type IconName = 'home' | 'events' | 'incidents' | 'status' | 'candidates' | 'problems' | 'kedb' | 'changes' | 'actions' | 'improvements' | 'knowledge' | 'review' | 'pir' | 'dashboard' | 'reports' | 'services' | 'cmdb' | 'teams' | 'people' | 'help' | 'admin';
-export type BadgeKey = 'my_work' | 'events' | 'incidents' | 'kedb' | 'actions' | 'reviews';
+export type IconName = 'home' | 'events' | 'incidents' | 'status' | 'candidates' | 'problems' | 'kedb' | 'changes' | 'actions' | 'improvements' | 'requests' | 'knowledge' | 'review' | 'pir' | 'dashboard' | 'reports' | 'services' | 'cmdb' | 'teams' | 'people' | 'help' | 'admin';
+export type BadgeKey = 'my_work' | 'events' | 'incidents' | 'kedb' | 'actions' | 'reviews' | 'requests';
 
 export interface NavItem {
   to: string;
@@ -34,6 +34,7 @@ export const NAV: NavGroup[] = [
     items: [
       { to: '/events', label: 'Events', icon: 'events', hint: 'Alerts from monitoring', module: 'event', badge: 'events', key: 'e' },
       { to: '/incidents', label: 'Incidents', icon: 'incidents', hint: 'Restore service', module: 'incident', badge: 'incidents', key: 't' },
+      { to: '/requests', label: 'Service requests', icon: 'requests', hint: 'Accounts, access, new VMs: approved and fulfilled task by task', module: 'request', badge: 'requests', key: 'q', match: ['/requests/'] },
       { to: '/service-status', label: 'Service status', icon: 'status', hint: 'Tell people what is happening', module: 'cmdb' },
     ],
   },
@@ -95,6 +96,7 @@ export function newItems(user: User, meta: Meta, path = '/'): NewItem[] {
     { to: '/changes?new=1', label: 'Change', module: 'change' },
     { to: '/knowledge?new=1', label: 'Article', module: 'knowledge' },
     { to: '/improvements?new=1', label: 'Improvement' },
+    { to: '/requests?new=1', label: 'Request', module: 'request' },
   ];
   const all = candidates.filter((i) => on(i.module));
   // On a practice's pages, its own record comes first; elsewhere what the role logs most (managers problems, others
@@ -103,6 +105,7 @@ export function newItems(user: User, meta: Meta, path = '/'): NewItem[] {
     : path.startsWith('/changes') ? 'Change'
     : path.startsWith('/knowledge') ? 'Article'
     : path.startsWith('/improvements') ? 'Improvement'
+    : path.startsWith('/requests') ? 'Request'
     : /^\/(problems|kedb|candidates|actions|review)/.test(path) ? 'Problem'
     : isManager(user) ? 'Problem' : 'Incident';
   const first = all.find((i) => i.label === here) ?? all[0];

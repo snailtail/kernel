@@ -1,7 +1,7 @@
 // Talking to POST /api/<practice>/bulk (#110): chunks, totals, partial failures and undo. No React here, so the
 // rules are tested on their own (test/bulk.test.ts); the list toolkit renders them.
 
-export type Practice = 'incidents' | 'problems' | 'changes' | 'alerts' | 'actions' | 'articles' | 'cis' | 'improvements';
+export type Practice = 'incidents' | 'problems' | 'changes' | 'alerts' | 'actions' | 'articles' | 'cis' | 'improvements' | 'requests';
 export type OpName = 'assign' | 'status' | 'priority' | 'tags' | 'link_problem' | 'set_parent' | 'acknowledge' | 'close';
 export type Operation = { op: OpName } & Record<string, unknown>;
 export interface ItemResult { id: string; title?: string; outcome: 'changed' | 'would_change' | 'unchanged' | 'skipped' | 'failed'; reason?: string }

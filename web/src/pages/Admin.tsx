@@ -11,6 +11,7 @@ import { Modal } from '../components/Modal';
 import { askReason } from '../components/Ask';
 import { ConnectorsCard } from '../components/Connectors';
 import { Link } from 'react-router';
+import { RequestCatalogueCard } from './Requests';
 
 interface AdminUser {
   mfa_enabled: boolean;
@@ -52,6 +53,7 @@ export function AdminPage() {
       {user.role === 'admin' && <UsersCard />}
       <CategoriesCard />
       <TemplatesCard />
+      {meta.modules?.request && <RequestCatalogueCard />}
     </>
   );
 }
