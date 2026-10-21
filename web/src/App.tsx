@@ -39,6 +39,8 @@ const IncidentReviewsPage = lazy(() => import('./pages/IncidentReviews').then((m
 const IncidentReviewPage = lazy(() => import('./pages/IncidentReview').then((m) => ({ default: m.IncidentReviewPage })));
 const ImprovementsPage = lazy(() => import('./pages/Improvements').then((m) => ({ default: m.ImprovementsPage })));
 const ImprovementPage = lazy(() => import('./pages/Improvements').then((m) => ({ default: m.ImprovementPage })));
+const RequestsPage = lazy(() => import('./pages/Requests').then((m) => ({ default: m.RequestsPage })));
+const RequestPage = lazy(() => import('./pages/Requests').then((m) => ({ default: m.RequestPage })));
 const ArticlePage = lazy(() => import('./pages/Knowledge').then((m) => ({ default: m.ArticlePage })));
 const ServiceReportPage = lazy(() => import('./pages/ServiceReport').then((m) => ({ default: m.ServiceReportPage })));
 const StatusBoardPage = lazy(() => import('./pages/StatusBoard').then((m) => ({ default: m.StatusBoardPage })));
@@ -148,6 +150,8 @@ export function App() {
             <Route path="/cis/:ref" element={<CiPage />} />
             <Route path="/improvements" element={<ImprovementsPage />} />
             <Route path="/improvements/:ref" element={<ImprovementPage />} />
+            <Route path="/requests" element={<RequestsPage />} />
+            <Route path="/requests/:ref" element={<RequestPage />} />
             <Route path="/knowledge" element={<KnowledgePage />} />
             <Route path="/knowledge/:ref" element={<ArticlePage />} />
             <Route path="/service-status" element={<StatusBoardPage />} />

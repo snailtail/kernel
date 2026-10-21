@@ -177,6 +177,16 @@ problems and actions that carry it out, and can watch a dashboard KPI: its page 
 confidential sources make restricted and confidential improvements. Guided mode shows the continual improvement model
 in four lines. API: `/api/improvements` (+ `/:ref/transition`, `/links`, `/comments`), `/api/problems/:ref/improvement`;
 MCP: `list_improvements`, `get_improvement`, `create_improvement`, `update_improvement`, `transition_improvement`.
+**Service requests** (an optional module, off until an administrator turns it on): Respond → *Service requests* keeps
+what people ask for ("a new account", "access to a system", "a new VM") out of incident numbers. Managers keep a
+catalogue under Administration: per service, a short form (at most 10 fields: text, choice, person, CI, date), who
+approves (nobody, the requester's manager, the service owner or a team) and the fulfilment tasks in order, each for a
+team. A request (`REQ000012`) is logged for a person, waits for its approver (by link from email or chat too, never by
+an agent), then its tasks open one after the other in the teams' queues and My work; the last one fulfils it. The
+item's SLA runs from submission to fulfilment and pauses while the request waits for approval; the dashboard gets a
+*Requests fulfilled* tile. API: `/api/request-items`, `/api/requests` (+ `/:ref/approval`, `/transition`,
+`/tasks/:id/complete`, `/links`, `/comments`); MCP: `list_request_items`, `list_requests`, `get_request`,
+`create_request`, `update_request`, `transition_request` (cancel only), `complete_request_task`.
 Viewers stay strictly read-only (auditors, stakeholders): end users report incidents through the service desk or,
 later, the self-service portal (#45), not with a viewer account.
 

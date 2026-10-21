@@ -1430,6 +1430,45 @@ ol.timeline.compact li { grid-template-columns: 8rem 1fr; padding: 5px 0; font-s
 .matrix-axis { color: var(--text-3); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
 .matrix-y { writing-mode: vertical-rl; transform: rotate(180deg); text-align: right; align-self: start; }
 .matrix-x { grid-column: 2; text-align: right; }
+/* Service requests (#44): status badges, the task sequence, the catalogue picker and the item builder. */
+.req-submitted { color: var(--s-new); background: var(--s-new-bg); }
+.req-awaiting_approval { color: var(--s-known); background: var(--s-known-bg); }
+.req-in_fulfilment { color: var(--s-analysis); background: var(--s-analysis-bg); }
+.req-fulfilled { color: var(--s-resolved); background: var(--s-resolved-bg); }
+.req-rejected, .req-cancelled { color: var(--s-closed); background: var(--s-closed-bg); }
+.card.flush > h2.card-pad { padding: 14px 16px 4px; margin: 0; }
+.task-steps { list-style: none; margin: 0; padding: 0; counter-reset: step; display: flex; flex-direction: column; gap: 8px; }
+.task-step { counter-increment: step; position: relative; padding: 8px 10px 8px 40px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.task-step::before { content: counter(step); position: absolute; left: 10px; top: 8px; width: 20px; height: 20px; border-radius: 50%; background: var(--surface-2); color: var(--text-2); font-size: 12px; font-weight: 600; display: grid; place-items: center; }
+.task-step.open { border-color: var(--accent); }
+.task-step.open::before { background: var(--accent); color: var(--surface); }
+.task-step.done::before { content: '✓'; background: var(--success-soft); color: var(--success); }
+.task-step.pending, .task-step.cancelled { opacity: 0.7; }
+.task-step-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.task-step .actions { margin-top: 6px; display: flex; gap: 6px; }
+.tag.task-open { color: var(--accent); background: var(--accent-soft); border-color: transparent; }
+.tag.task-done { color: var(--success); background: var(--success-soft); border-color: transparent; }
+.kv.answers { display: block; }
+.kv.answers .kv-row { display: grid; grid-template-columns: minmax(120px, 35%) 1fr; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.kv.answers .kv-row:last-child { border-bottom: 0; }
+.kv.answers dd { text-align: left; font-weight: 500; }
+.form .field { display: flex; flex-direction: column; gap: 5px; }
+.form .field > .label { font-weight: 550; font-size: 13px; }
+.form .field > p { margin: 0; }
+.kv.answers dd p { margin: 0; }
+.catalogue-picker h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-2); margin: 14px 0 6px; }
+.catalogue-items { display: grid; gap: 6px; }
+.catalogue-item { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; text-align: left; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); cursor: pointer; }
+.catalogue-item:hover, .catalogue-item:focus-visible { border-color: var(--accent); background: var(--accent-soft); }
+.builder { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px 12px; display: flex; flex-direction: column; gap: 8px; }
+.builder legend { padding: 0 4px; font-weight: 600; }
+.builder-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.builder-row > input:not([type='checkbox']) { flex: 1 1 160px; min-width: 0; }
+.builder-row > select { flex: 0 1 140px; }
+.builder-choices { flex-basis: 100% !important; }
+@media (max-width: 720px) {
+  .kv.answers .kv-row { grid-template-columns: 1fr; gap: 2px; }
+}
 @media (max-width: 720px) {
   .kanban { grid-template-columns: 1fr; overflow-x: visible; }
   .kanban-col { min-height: 0; }

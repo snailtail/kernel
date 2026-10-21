@@ -153,6 +153,10 @@ describe('service reports (#54)', { skip }, () => {
       // The improvement register (#52): read by everyone who reads problems, written by those who comment on them.
       assert.equal(actions.has('improvement.read'), actions.has('problem.read'), `${role}: improvement.read`);
       assert.equal(actions.has('improvement.write'), actions.has('problem.comment'), `${role}: improvement.write`);
+      // Service requests (#44): read and logged like improvements; the catalogue is the managers'.
+      assert.equal(actions.has('request.read'), actions.has('problem.read'), `${role}: request.read`);
+      assert.equal(actions.has('request.write'), actions.has('problem.comment'), `${role}: request.write`);
+      assert.equal(actions.has('request.manage'), actions.has('improvement.approve'), `${role}: request.manage`);
     }
 
     // MCP parity: get_dashboard carries the same KPIs.

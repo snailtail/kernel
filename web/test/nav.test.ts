@@ -7,7 +7,7 @@ import { FOOTER, HOME, NAV, PALETTE_ONLY, SHORTCUTS, navFor, newItems } from '..
 const routes = [...readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8').matchAll(/<Route path="([^"]+)"/g)].map((m) => m[1]);
 const all = [HOME, ...NAV.flatMap((g) => g.items), ...FOOTER, ...PALETTE_ONLY];
 const user = (role: User['role']) => ({ id: 1, role, preferences: {} }) as unknown as User;
-const meta = (modules: Partial<Meta['modules']>) => ({ modules: { incident: true, change: true, event: true, cmdb: true, sla: true, knowledge: true, ...modules } }) as unknown as Meta;
+const meta = (modules: Partial<Meta['modules']>) => ({ modules: { incident: true, change: true, event: true, cmdb: true, sla: true, knowledge: true, request: false, ...modules } }) as unknown as Meta;
 
 test('every menu and palette destination is a real page', () => {
   for (const item of all) assert.ok(routes.includes(item.to.split('?')[0]), `${item.label}: no route for ${item.to}`);
@@ -31,6 +31,8 @@ test('with only problem management on, the menu shows Improve and Learn', () => 
   const groups = navFor(user('analyst'), meta({ incident: false, change: false, event: false, cmdb: false, sla: false, knowledge: false }));
   assert.deepEqual(groups.map((g) => g.id), ['improve', 'learn']);
   assert.ok(!groups.flatMap((g) => g.items).some((i) => i.to === '/changes'));
+  assert.ok(!navFor(user('analyst'), meta({})).flatMap((g) => g.items).some((i) => i.to === '/requests'), 'service requests only when the module is on');
+  assert.ok(navFor(user('analyst'), meta({ request: true })).flatMap((g) => g.items).some((i) => i.to === '/requests'));
 });
 
 test('"+ New" offers what the role may create', () => {
@@ -42,4 +44,7 @@ test('"+ New" offers what the role may create', () => {
   assert.equal(newItems(user('problem_manager'), meta({}), '/incidents/INC000004')[0].label, 'Incident');
   assert.equal(newItems(user('analyst'), meta({}), '/changes')[0].label, 'Change');
   assert.equal(newItems(user('analyst'), meta({}), '/kedb')[0].label, 'Problem');
+  // Service requests (#44) are an optional module, off by default.
+  assert.ok(!newItems(user('analyst'), meta({})).some((i) => i.label === 'Request'));
+  assert.equal(newItems(user('analyst'), meta({ request: true }), '/requests')[0].label, 'Request');
 });

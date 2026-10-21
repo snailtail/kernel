@@ -39,6 +39,7 @@ export const BULK: Record<string, BulkSpec> = {
   actions: { practice: 'actions', noun: ['action', 'actions'], ops: ['assign', 'status'], statuses: { open: 'Open', done: 'Done', cancelled: 'Cancelled' }, owner: 'owner' },
   knowledge: { practice: 'articles', noun: ['article', 'articles'], ops: ['assign', 'status'], statuses: { draft: 'Draft', published: 'Published', retired: 'Retired' }, owner: 'owner' },
   improvements: { practice: 'improvements', noun: ['improvement', 'improvements'], ops: ['assign', 'status'], statuses: { idea: 'Idea', approved: 'Approved', in_progress: 'In progress', done: 'Done', rejected: 'Rejected' }, owner: 'owner' },
+  requests: { practice: 'requests', noun: ['request', 'requests'], ops: ['status'], statuses: { cancelled: 'Cancelled' } },
   cis: { practice: 'cis', noun: ['CI', 'CIs'], ops: ['tags', 'status'], statuses: { planned: 'Planned', active: 'Active', maintenance: 'Maintenance', retired: 'Retired', missing: 'Missing' } },
 };
 
@@ -332,7 +333,7 @@ function BulkDialog({ spec, op, ids, filter, onClose, onApplied }: {
       case 'status': {
         if (!form.to) return 'Choose the status';
         const details: Record<string, string> = {};
-        for (const k of ['comment', 'resolution_code', 'resolution', 'hold_reason', 'closure_code', 'root_cause', 'cancel_reason', 'note']) if (form[k]?.trim()) details[k] = form[k].trim();
+        for (const k of ['comment', 'resolution_code', 'resolution', 'hold_reason', 'closure_code', 'root_cause', 'cancel_reason', 'note', 'reason']) if (form[k]?.trim()) details[k] = form[k].trim();
         return { op, to: form.to, details };
       }
       case 'priority': {
@@ -450,6 +451,7 @@ function BulkDialog({ spec, op, ids, filter, onClose, onApplied }: {
               )}
               {spec.practice === 'problems' && form.to === 'resolved' && <label className="full">Resolution<textarea rows={2} value={form.resolution ?? ''} onChange={set('resolution')} /></label>}
               {spec.practice === 'changes' && form.to === 'cancelled' && <label className="full">Why cancelled<input value={form.cancel_reason ?? ''} onChange={set('cancel_reason')} /></label>}
+              {spec.practice === 'requests' && form.to === 'cancelled' && <label className="full">Why cancelled<input value={form.reason ?? ''} onChange={set('reason')} /></label>}
               {spec.practice === 'articles'
                 ? <label className="full">Note <span className="muted small">(optional)</span><input value={form.note ?? ''} onChange={set('note')} /></label>
                 : spec.practice !== 'actions' && <label className="full">Comment <span className="muted small">(optional, on each record)</span><input value={form.comment ?? ''} onChange={set('comment')} /></label>}

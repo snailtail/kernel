@@ -11,7 +11,7 @@ import { query, tx } from './db.js';
 import { badRequest, conflict, notFound } from './errors.js';
 import { createSource } from './event-hooks.js';
 import { createIncident } from './incidents.js';
-import { moduleEnabled, MODULES, refreshModules, type Module } from './modules.js';
+import { MODULE_DEFAULTS, moduleEnabled, MODULES, refreshModules, type Module } from './modules.js';
 import { authorize } from './policy.js';
 import { createProblem, logActivity, transitionProblem } from './problems.js';
 import { logIncident } from './incident-log.js';
@@ -21,7 +21,7 @@ export const modulesSchema = z.object(Object.fromEntries(Object.keys(MODULES).ma
 export async function getModules() {
   const { rows } = await query("SELECT value FROM settings WHERE key = 'modules'");
   const on = rows[0]?.value ?? {};
-  return Object.entries(MODULES).map(([key, m]) => ({ key, ...m, enabled: on[key] !== false }));
+  return Object.entries(MODULES).map(([key, m]) => ({ key, ...m, enabled: on[key] ?? MODULE_DEFAULTS[key as Module] }));
 }
 
 export async function setModules(user: User, input: z.infer<typeof modulesSchema>, reason?: string) {
@@ -31,7 +31,7 @@ export async function setModules(user: User, input: z.infer<typeof modulesSchema
     const before = rows[0]?.value ?? {};
     const after = { ...before, ...Object.fromEntries(Object.entries(input).filter(([, v]) => v !== undefined)) };
     await db.query("INSERT INTO settings (key, value) VALUES ('modules', $1) ON CONFLICT (key) DO UPDATE SET value = excluded.value", [after]);
-    const changes = Object.fromEntries(Object.keys(after).filter((k) => before[k] !== after[k]).map((k) => [k, { from: before[k] ?? true, to: after[k] }]));
+    const changes = Object.fromEntries(Object.keys(after).filter((k) => before[k] !== after[k]).map((k) => [k, { from: before[k] ?? MODULE_DEFAULTS[k as Module], to: after[k] }]));
     if (Object.keys(changes).length) await audit(db, { entity_type: 'setting', entity_ref: 'modules', action: 'update', changes, reason });
   });
   await refreshModules();

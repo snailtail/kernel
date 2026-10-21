@@ -12,14 +12,22 @@ import { badRequest, forbidden, notFound } from './errors.js';
 import { authorize } from './policy.js';
 import { typeForRef } from './records.js';
 
-type Kind = 'problem' | 'incident' | 'change' | 'improvement';
-const TABLE: Record<Kind, string> = { problem: 'problems', incident: 'incidents', change: 'changes', improvement: 'improvements' };
-const LOG: Record<Kind, [string, string]> = { problem: ['problem_activity', 'problem_id'], incident: ['incident_activity', 'incident_id'], change: ['change_activity', 'change_id'], improvement: ['improvement_activity', 'improvement_id'] };
-const PREFIX: Record<string, Kind> = { PRB: 'problem', INC: 'incident', CHG: 'change', IMP: 'improvement' };
-/** Who works on a record of each kind: improvements (#52) have an owner and no team. */
-const PEOPLE: Record<Kind, { assignee: string; team: string | null }> = {
+type Kind = 'problem' | 'incident' | 'change' | 'improvement' | 'request';
+const TABLE: Record<Kind, string> = { problem: 'problems', incident: 'incidents', change: 'changes', improvement: 'improvements', request: 'requests' };
+const LOG: Record<Kind, [string, string]> = { problem: ['problem_activity', 'problem_id'], incident: ['incident_activity', 'incident_id'], change: ['change_activity', 'change_id'], improvement: ['improvement_activity', 'improvement_id'], request: ['request_activity', 'request_id'] };
+const PREFIX: Record<string, Kind> = { PRB: 'problem', INC: 'incident', CHG: 'change', IMP: 'improvement', REQ: 'request' };
+/**
+ * Who works on a record of each kind: improvements (#52) have an owner and no team; a service request (#44) is
+ * worked through its tasks, so their assignees and teams read it.
+ */
+interface People { assignee: string | null; team: string | null; extra?: (a: string, u: string) => string }
+const PEOPLE: Record<Kind, People> = {
   problem: { assignee: 'assignee_id', team: 'team_id' }, incident: { assignee: 'assignee_id', team: 'team_id' }, change: { assignee: 'assignee_id', team: 'team_id' },
   improvement: { assignee: 'owner_id', team: null },
+  request: {
+    assignee: null, team: null,
+    extra: (a, u) => `EXISTS (SELECT 1 FROM request_tasks t WHERE t.request_id = ${a}.id AND (t.assignee_id = ${u}::int OR EXISTS (SELECT 1 FROM team_members m WHERE m.user_id = ${u}::int AND m.team_id = t.team_id)))`,
+  },
 };
 export const REVEAL_MINUTES = 15;
 
@@ -32,6 +40,8 @@ export const MASKED_FIELDS = new Set([
   'what_happened', 'impact_summary', 'went_well', 'was_hard', 'lucky', 'attendees', 'waived_reason',
   // Improvements (#52).
   'benefit', 'reject_reason',
+  // Service requests (#44): free-text answers to the item's form.
+  'answer_text',
 ]);
 
 const kindOfRef = (ref: string) => PREFIX[ref.toUpperCase().match(/^[A-Z]+/)?.[0] ?? ''] as Kind | undefined;
@@ -43,16 +53,17 @@ const maskable = (ref: string) => !!kindOfRef(ref) || isReviewRef(ref);
  * The one read rule for confidential text, as SQL: the user (`u`, null for agents) is the assignee, the creator, in
  * the record's team, or has an active reveal of record `a` of kind `k`. maskedRefs and textFilterSql both use it.
  */
-const mayReadSql = (a: string, u: string, k: string, people = PEOPLE.problem) =>
-  `(${u}::int IS NOT NULL AND (${a}.${people.assignee} = ${u}::int OR ${a}.created_by = ${u}::int
+const mayReadSql = (a: string, u: string, k: string, people: People = PEOPLE.problem) =>
+  `(${u}::int IS NOT NULL AND (${people.assignee ? `${a}.${people.assignee} = ${u}::int OR ` : ''}${a}.created_by = ${u}::int
      ${people.team ? `OR EXISTS (SELECT 1 FROM team_members m WHERE m.user_id = ${u}::int AND m.team_id = ${a}.${people.team})` : ''}
+     ${people.extra ? `OR ${people.extra(a, u)}` : ''}
      OR EXISTS (SELECT 1 FROM record_reveals v WHERE v.user_id = ${u}::int AND v.record_type = ${k}::text AND v.record_id = ${a}.id AND v.expires_at > now())))`;
 
 let anyConfidential: { at: number; value: boolean } | null = null;
 /** Most installations have none, and then nothing is parsed or looked up. */
 async function confidentialExists() {
   if (anyConfidential && Date.now() - anyConfidential.at < 15_000) return anyConfidential.value;
-  const { rows } = await query("SELECT EXISTS (SELECT 1 FROM problems WHERE classification = 'confidential') OR EXISTS (SELECT 1 FROM incidents WHERE classification = 'confidential') OR EXISTS (SELECT 1 FROM changes WHERE classification = 'confidential') OR EXISTS (SELECT 1 FROM improvements WHERE classification = 'confidential') AS any");
+  const { rows } = await query("SELECT EXISTS (SELECT 1 FROM problems WHERE classification = 'confidential') OR EXISTS (SELECT 1 FROM incidents WHERE classification = 'confidential') OR EXISTS (SELECT 1 FROM changes WHERE classification = 'confidential') OR EXISTS (SELECT 1 FROM improvements WHERE classification = 'confidential') OR EXISTS (SELECT 1 FROM requests WHERE classification = 'confidential') AS any");
   anyConfidential = { at: Date.now(), value: rows[0].any };
   return anyConfidential.value;
 }
@@ -174,7 +185,7 @@ export async function setClassification(user: User, ref: string, input: z.infer<
   authorize(user, 'record.restrict');
   const reason = requireReason(input.reason);
   const kind = kindOfRef(ref);
-  if (!kind) throw badRequest('Only problems, incidents, changes and improvements can be confidential');
+  if (!kind) throw badRequest('Only problems, incidents, changes, improvements and requests can be confidential');
   const result = await tx(async (db) => {
     const { rows } = await db.query(`SELECT id, ref, classification FROM ${TABLE[kind]} WHERE ref = $1 FOR UPDATE`, [ref.toUpperCase()]);
     const r = rows[0];
@@ -206,7 +217,7 @@ export async function setClassification(user: User, ref: string, input: z.infer<
 export async function reveal(user: User, ref: string, reasonInput: string | undefined) {
   const reason = requireReason(reasonInput);
   const kind = kindOfRef(ref);
-  if (!kind) throw badRequest('Only problems, incidents, changes and improvements can be confidential');
+  if (!kind) throw badRequest('Only problems, incidents, changes, improvements and requests can be confidential');
   typeForRef(ref);
   return tx(async (db) => {
     const { rows } = await db.query(`SELECT id, ref, classification FROM ${TABLE[kind]} WHERE ref = $1`, [ref.toUpperCase()]);

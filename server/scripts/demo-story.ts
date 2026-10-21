@@ -19,7 +19,9 @@ import * as oncall from '../src/oncall.js';
 import * as people from '../src/people.js';
 import * as problems from '../src/problems.js';
 import * as improvements from '../src/improvements.js';
+import * as requests from '../src/requests.js';
 import * as reviews from '../src/reviews.js';
+import * as setup from '../src/setup.js';
 import * as sla from '../src/sla.js';
 import * as status from '../src/status.js';
 import * as teams from '../src/teams.js';
@@ -317,6 +319,49 @@ export async function seedStory(p: People) {
   // The certificate work is carried out by the gateway certificate change (rolled back once).
   const certChange = (await query("SELECT ref FROM changes WHERE title = 'Rotate the payment gateway certificate'")).rows[0].ref as string;
   await improvements.addImprovementLink(jonas, (await query("SELECT ref FROM improvements WHERE title LIKE 'Automatic certificate%'")).rows[0].ref, { kind: 'change', reference: certChange, system: 'Kernel', url: '', note: '' });
+
+  // ---- Service requests (#44): an optional module, on in the demo; a small catalogue and requests in every stage ----
+  await setup.setModules(admin, { request: true }, 'Demo story');
+  await query('UPDATE configuration_items SET owner_id = $2 WHERE ref = $1', [webshop, anna.id]);
+  // Anna has a contact of her own and manages the customer service staff, so she approves their access requests.
+  const annaPerson = (await people.createPerson(admin, { name: 'Anna Lind', email: 'anna.lind@example.com', title: 'Service manager', department: 'IT' } as any)).id as number;
+  await query('UPDATE people SET user_id = $2 WHERE id = $1', [annaPerson, anna.id]);
+  await query("UPDATE people SET manager_id = $1 WHERE email IN ('maria.svensson@example.com', 'johan.ek@example.com')", [annaPerson]);
+  const karin = (await people.createPerson(admin, { name: 'Karin Holm', email: 'karin.holm@example.com', title: 'New hire', department: 'Customer service', manager_id: annaPerson } as any)).id as number;
+  const personId = async (email: string) => (await query('SELECT id FROM people WHERE email = $1', [email])).rows[0].id as number;
+  const item = (input: Partial<Parameters<typeof requests.saveRequestItem>[2]> & { name: string; fulfilment_tasks: { title: string; team_id: number | null }[] }) =>
+    requests.saveRequestItem(anna, null, requests.requestItemSchema.parse({ service: webshop, ...input }));
+  const account = await item({
+    name: 'New account', description: 'An account for the shop admin and the order system, for a new colleague.',
+    form: [{ key: 'full_name', label: 'Full name', type: 'text', required: true }, { key: 'start', label: 'Start date', type: 'date', required: true }, { key: 'role', label: 'Role', type: 'choice', required: true, choices: ['Customer service', 'Content editor', 'Warehouse'] }],
+    fulfilment_tasks: [{ title: 'Create the account', team_id: web!.id }, { title: 'Send the welcome email', team_id: null }],
+  });
+  const access = await item({
+    name: 'Access to a system', description: 'Read or write access to a system you need for your work.',
+    form: [
+      { key: 'system', label: 'System', type: 'ci', required: true },
+      { key: 'level', label: 'Access level', type: 'choice', required: true, choices: ['Read', 'Write'] },
+      { key: 'why', label: 'Why do you need it?', type: 'textarea', required: true },
+      { key: 'until', label: 'Until', type: 'date' },
+    ],
+    approval: 'requester_manager', fulfilment_tasks: [{ title: 'Grant the access', team_id: web!.id }, { title: 'Tell the requester', team_id: null }],
+  });
+  await item({
+    name: 'New VM', description: 'A virtual machine for the webshop platform. Becomes a standard change when approved.',
+    form: [{ key: 'size', label: 'Size', type: 'choice', required: true, choices: ['Small (2 vCPU)', 'Medium (4 vCPU)', 'Large (8 vCPU)'] }, { key: 'purpose', label: 'What is it for?', type: 'textarea', required: true }],
+    approval: 'service_owner', fulfilment_tasks: [{ title: 'Provision the VM', team_id: web!.id }, { title: 'Add monitoring', team_id: web!.id }],
+  });
+  // Waiting for Anna's approval.
+  await requests.createRequest(sara, { item_id: access.id, requester: { id: await personId('maria.svensson@example.com') }, answers: { system: db, level: 'Read', why: 'To look up orders when customers call about a failed checkout.' }, priority: 3 });
+  // In fulfilment: approved, the first task waits in the Web platform queue.
+  await requests.createRequest(sara, { item_id: account.id, requester: { id: karin }, answers: { full_name: 'Karin Holm', start: new Date(Date.now() + 7 * D * 60_000).toISOString().slice(0, 10), role: 'Customer service' }, priority: 3 });
+  // Fulfilled last week, both tasks done.
+  const done = await requests.createRequest(sara, { item_id: access.id, requester: { id: await personId('johan.ek@example.com') }, answers: { system: frontend, level: 'Write', why: 'Publishing the campaign pages for the spring sale.' }, priority: 3 });
+  await requests.decideRequest(anna, done.ref, { decision: 'approve', comment: 'For the campaign.' });
+  for (const t of (await requests.getRequest(erik, done.ref)).tasks) await requests.completeRequestTask(erik, done.ref, t.id, { note: t.position === 1 ? 'Editor role in the CMS.' : '' });
+  // Rejected, with the reason.
+  const rejected = await requests.createRequest(sara, { item_id: access.id, requester: { id: await personId('johan.ek@example.com') }, answers: { system: db, level: 'Write', why: 'Fix prices directly in the database.' }, priority: 4 });
+  await requests.decideRequest(anna, rejected.ref, { decision: 'reject', comment: 'Prices are changed in the shop admin, which keeps the history. Ask for the price editor role there.' });
 
   // The pages the story queued (the worker is not running while seeding).
   await oncall.deliverPages();

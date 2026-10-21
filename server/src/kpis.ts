@@ -8,7 +8,7 @@ import { moduleEnabled } from './modules.js';
 import { authorize, can } from './policy.js';
 import { hiddenRecordsExist } from './visibility.js';
 
-export const TILES = ['mttr', 'sla', 'change_success', 'recurring', 'problems_resolved', 'major_open'] as const;
+export const TILES = ['mttr', 'sla', 'change_success', 'recurring', 'problems_resolved', 'major_open', 'requests_fulfilled'] as const;
 export type TileId = (typeof TILES)[number];
 const PERIODS = 6;
 
@@ -39,12 +39,14 @@ export async function kpis(user: User, { period }: z.infer<typeof kpiSchema>) {
   const incident = moduleEnabled('incident') && can(user.role, 'incident.read');
   const change = moduleEnabled('change') && can(user.role, 'change.read');
   const problem = can(user.role, 'problem.read');
+  // Service requests (#44) never count in the incident tiles; they get their own tile when the module is on.
+  const request = moduleEnabled('request') && can(user.role, 'request.read');
   // The last six periods, the current (partial) one last. $1 = 'month' | 'week'.
   const P = `WITH p AS (
     SELECT gs AS start, gs + ('1 ' || $1)::interval AS stop
     FROM generate_series(date_trunc($1, now()) - ('1 ' || $1)::interval * ${PERIODS - 1}, date_trunc($1, now()), ('1 ' || $1)::interval) gs)`;
   const none = { rows: [] as any[] };
-  const [periods, resolved, changes, recurring, problems, knownErrors, major] = await Promise.all([
+  const [periods, resolved, changes, recurring, problems, knownErrors, major, requests] = await Promise.all([
     query(`${P} SELECT start::date::text AS start FROM p ORDER BY start`, [period]),
     incident
       ? query(
@@ -95,6 +97,16 @@ export async function kpis(user: User, { period }: z.infer<typeof kpiSchema>) {
           `${P} SELECT p.start::date::text AS start, count(i.id)::int AS declared,
              (SELECT count(*) FROM incidents o WHERE o.is_major AND o.status NOT IN ('resolved', 'closed'))::int AS open_now
            FROM p LEFT JOIN incidents i ON i.is_major AND coalesce(i.major_declared_at, i.created_at) >= p.start AND coalesce(i.major_declared_at, i.created_at) < p.stop
+           GROUP BY 1`,
+          [period],
+        )
+      : none,
+    request
+      ? query(
+          `${P} SELECT p.start::date::text AS start, count(r.id)::int AS fulfilled,
+             count(r.id) FILTER (WHERE r.resolution_due_at IS NOT NULL)::int AS with_target,
+             count(r.id) FILTER (WHERE r.resolution_due_at IS NOT NULL AND r.resolution_breached_at IS NULL AND r.resolved_at <= r.resolution_due_at)::int AS met
+           FROM p LEFT JOIN requests r ON r.status = 'fulfilled' AND r.resolved_at >= p.start AND r.resolved_at < p.stop
            GROUP BY 1`,
           [period],
         )
@@ -165,6 +177,16 @@ export async function kpis(user: User, { period }: z.infer<typeof kpiSchema>) {
       detail: `${last(declared)} declared this ${unit}.`,
       basis: `Major incidents not yet resolved, now. The trend counts major incidents declared per ${unit}.`,
       link: '/incidents?major=true',
+    });
+  }
+  if (request) {
+    const fulfilled = per(requests.rows, (rs) => rs[0]?.fulfilled ?? 0);
+    const now = requests.rows.find((r) => r.start === last(starts));
+    tiles.push({
+      id: 'requests_fulfilled', label: 'Requests fulfilled', value: last(fulfilled), unit: 'count', trend: fulfilled, trend_label: `per ${unit}`, lower_is_better: false,
+      detail: now?.with_target ? `${now.met} of ${now.with_target} within their SLA.` : `No requests with a target fulfilled this ${unit}.`,
+      basis: `Service requests fulfilled in the ${unit}, and how many within their SLA. Requests never count as incidents.`,
+      link: '/requests?status=fulfilled',
     });
   }
   return {

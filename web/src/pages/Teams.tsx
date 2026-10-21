@@ -14,7 +14,8 @@ export interface Team {
   open_incidents: number; unassigned: number; mine: boolean;
 }
 interface QueueRow { ref: string; title: string; status: string; priority: number; assignee: string | null; created_at: string; at_risk: boolean }
-interface Queue { team: { id: number; name: string }; unassigned: QueueRow[]; mine: QueueRow[]; at_risk: QueueRow[]; all: QueueRow[] }
+interface RequestTaskRow { ref: string; title: string; task_id: number; task: string; assignee: string | null; opened_at: string; at_risk: boolean }
+interface Queue { team: { id: number; name: string }; unassigned: QueueRow[]; mine: QueueRow[]; at_risk: QueueRow[]; all: QueueRow[]; request_tasks?: RequestTaskRow[] }
 
 let cache: { at: number; teams: Team[] } | null = null;
 /** Teams for selects and labels, shared between pages for a minute. */
@@ -125,6 +126,26 @@ function TeamDetail({ team: t, canEdit, canMembers, onEdit, onMembers }: { team:
           </div>
         )}
       </section>
+      {!!q?.request_tasks?.length && (
+        <section className="card flush">
+          <h2 className="card-pad">Service request tasks <span className="count">{q.request_tasks.length}</span></h2>
+          <div className="table-wrap">
+            <table className="table">
+              <thead><tr><th>Ref</th><th>Task</th><th className="hide-sm">Assignee</th><th className="hide-sm">Open since</th></tr></thead>
+              <tbody>
+                {q.request_tasks.map((r) => (
+                  <tr key={r.task_id} className={r.at_risk ? 'row-risk' : ''}>
+                    <td className="mono nowrap"><Link to={`/requests/${r.ref}`}>{r.ref}</Link></td>
+                    <td className="title-cell"><Link to={`/requests/${r.ref}`}>{r.task}</Link><div className="muted small">{r.title}</div></td>
+                    <td className="hide-sm muted">{r.assignee ?? '–'}</td>
+                    <td className="hide-sm muted nowrap">{relativeTime(r.opened_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
     </div>
   );
 }

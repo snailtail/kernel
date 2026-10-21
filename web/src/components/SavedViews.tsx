@@ -7,7 +7,7 @@ import { isManager, useSession } from '../session';
 import { columnStore } from './ListToolkit';
 import { Modal } from './Modal';
 
-export type ListName = 'problems' | 'actions' | 'incidents' | 'changes' | 'alerts' | 'known_errors' | 'knowledge' | 'cis' | 'candidates' | 'improvements';
+export type ListName = 'problems' | 'actions' | 'incidents' | 'changes' | 'alerts' | 'known_errors' | 'knowledge' | 'cis' | 'candidates' | 'improvements' | 'requests';
 
 export interface ListView {
   key: string;

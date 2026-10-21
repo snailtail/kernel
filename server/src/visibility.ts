@@ -49,8 +49,8 @@ export async function viewerFor(user: { id: number; role: Role }, channel: strin
 // ---- Restricting records, break-glass ----------------------------------------------------------------------------
 
 
-const TABLES: Record<string, string> = { problem: 'problems', incident: 'incidents', change: 'changes', improvement: 'improvements' };
-const LOG: Record<string, [string, string]> = { problem: ['problem_activity', 'problem_id'], incident: ['incident_activity', 'incident_id'], change: ['change_activity', 'change_id'], improvement: ['improvement_activity', 'improvement_id'] };
+const TABLES: Record<string, string> = { problem: 'problems', incident: 'incidents', change: 'changes', improvement: 'improvements', request: 'requests' };
+const LOG: Record<string, [string, string]> = { problem: ['problem_activity', 'problem_id'], incident: ['incident_activity', 'incident_id'], change: ['change_activity', 'change_id'], improvement: ['improvement_activity', 'improvement_id'], request: ['request_activity', 'request_id'] };
 
 export const visibilitySchema = z.object({
   restricted: z.boolean(),
@@ -63,7 +63,7 @@ export async function setVisibility(user: User, ref: string, input: z.infer<type
   authorize(user, 'record.restrict');
   const type = typeForRef(ref).type;
   const table = TABLES[type];
-  if (!table) throw badRequest('Only problems, incidents, changes and improvements can be restricted');
+  if (!table) throw badRequest('Only problems, incidents, changes, improvements and requests can be restricted');
   await tx(async (db) => {
     // The caller must see the record (row-level security), so no one restricts or opens what they cannot see.
     const { rows } = await db.query(`SELECT id, ref, restricted, restricted_teams FROM ${table} WHERE ref = $1 FOR UPDATE`, [ref.toUpperCase()]);
@@ -141,6 +141,6 @@ export async function saveVisibilitySettings(actor: User, value: { team_scoped: 
 /** A Kernel ref the caller may not see answers exactly like one that does not exist (no existence oracle). */
 export async function assertVisibleRef(ref: string) {
   const { rows } = await query('SELECT (SELECT kind FROM kernel_record_lookup($1)) AS kind, kernel_ref_hidden($1) AS hidden', [ref.toUpperCase()]);
-  if (rows[0].hidden || (/^(PRB|INC|CHG|IMP)\d{6}$/i.test(ref) && !rows[0].kind)) throw notFound(`${ref.toUpperCase()} not found`);
+  if (rows[0].hidden || (/^(PRB|INC|CHG|IMP|REQ)\d{6}$/i.test(ref) && !rows[0].kind)) throw notFound(`${ref.toUpperCase()} not found`);
   if (/^PIR\d{6}$/i.test(ref) && !(await query('SELECT 1 FROM incident_reviews WHERE ref = $1', [ref.toUpperCase()])).rows[0]) throw notFound(`${ref.toUpperCase()} not found`);
 }

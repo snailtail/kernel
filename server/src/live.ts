@@ -20,9 +20,9 @@ import { badRequest, forbidden, HttpError, notFound } from './errors.js';
 import { moduleEnabled, type Module } from './modules.js';
 import { viewerFor } from './visibility.js';
 
-const KINDS = { problem: 'problems', incident: 'incidents', change: 'changes', ci: 'configuration_items', improvement: 'improvements' } as const;
+const KINDS = { problem: 'problems', incident: 'incidents', change: 'changes', ci: 'configuration_items', improvement: 'improvements', request: 'requests' } as const;
 type Kind = keyof typeof KINDS;
-const MODULE_OF: Partial<Record<Kind, Module>> = { incident: 'incident', change: 'change', ci: 'cmdb' };
+const MODULE_OF: Partial<Record<Kind, Module>> = { incident: 'incident', change: 'change', ci: 'cmdb', request: 'request' };
 
 export const LIMITS = {
   perUser: Number(process.env.KERNEL_LIVE_PER_USER ?? 6),
@@ -197,8 +197,8 @@ export async function openStream(req: FastifyRequest, reply: FastifyReply, user:
 }
 
 export const subscribeSchema = z.object({
-  topics: z.array(z.string().regex(/^(problem|incident|change|ci|improvement):(\d{1,10}|\*)$/)).max(LIMITS.maxTopics),
-  editing: z.string().regex(/^(problem|incident|change|ci|improvement):\d{1,10}$/).nullable().optional(),
+  topics: z.array(z.string().regex(/^(problem|incident|change|ci|improvement|request):(\d{1,10}|\*)$/)).max(LIMITS.maxTopics),
+  editing: z.string().regex(/^(problem|incident|change|ci|improvement|request):\d{1,10}$/).nullable().optional(),
 });
 
 /** Replaces what a stream follows. Record topics the user cannot see are dropped without a word. */

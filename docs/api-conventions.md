@@ -30,6 +30,7 @@ Registered types:
 | service | `SVC000003` | cmdb | `/api/cis` | `get_ci` |
 | article | `KB000007` | knowledge | `/api/articles` | `get_article` |
 | improvement | `IMP000012` | always on | `/api/improvements` | `get_improvement` |
+| request (service request) | `REQ000012` | request (off by default) | `/api/requests` | `get_request` |
 
 A post-incident review also answers to its incident's ref (`/api/incidents/INC000123/review`, `get_review` with
 `INC000123`), and shares its incident's links: linking from or to a review links the incident. Its comments are kept
@@ -40,6 +41,12 @@ An improvement (continual improvement register, #52) keeps the links to the chan
 incidents and reviews that carry it out, whichever side the link starts from: linking a problem to an improvement
 stores the link on the improvement. One made from a review, a problem or a service review names it in `source_ref` and
 starts as narrow as that record (restricted, confidential).
+
+A service request (#44) is made from a catalogue item (`/api/request-items`, `list_request_items`) for a person in
+People, by the user who logs it. Its `answers` are checked against the item's form on the server; free-text answers
+come back as `answer_text` and are masked like other free text on a confidential request. Approving and rejecting are
+a person's decision: `POST /api/requests/:ref/approval` signed in, or the approval link (#48), never an API token or
+MCP. Tasks are done in order (`POST /api/requests/:ref/tasks/:id/complete`, `complete_request_task`).
 
 ## REST
 

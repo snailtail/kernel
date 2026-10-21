@@ -31,6 +31,7 @@ import { incidentRoutes } from './routes/incidents.js';
 import { eventRoutes } from './routes/events.js';
 import { changeRoutes } from './routes/changes.js';
 import { improvementRoutes } from './routes/improvements.js';
+import { requestRoutes } from './routes/requests.js';
 import { slaRoutes } from './routes/sla.js';
 import { refreshModules } from './modules.js';
 import { notificationRoutes } from './routes/notifications.js';
@@ -140,6 +141,7 @@ export async function buildApp(options: { logLevel?: string; serveWeb?: boolean 
   await app.register(eventRoutes);
   await app.register(changeRoutes);
   await app.register(improvementRoutes);
+  await app.register(requestRoutes);
   await app.register(slaRoutes);
   await app.register(notificationRoutes);
   await app.register(setupRoutes);
@@ -187,7 +189,7 @@ export async function buildApp(options: { logLevel?: string; serveWeb?: boolean 
   app.addHook('onSend', async (req, reply, payload) => {
     if (!req.user || reply.statusCode >= 300 || typeof payload !== 'string' || !payload.includes('"ref"')) return payload;
     if (!String(reply.getHeader('content-type') ?? '').includes('application/json')) return payload;
-    const pageRef = /^\/api\/(problems|incidents|changes|reviews|improvements|records)\/[^/]+/.test(req.url) ? (req.params as { ref?: string } | undefined)?.ref : undefined;
+    const pageRef = /^\/api\/(problems|incidents|changes|reviews|improvements|requests|records)\/[^/]+/.test(req.url) ? (req.params as { ref?: string } | undefined)?.ref : undefined;
     let parsed: unknown;
     try { parsed = JSON.parse(payload); } catch { return payload; }
     const before = payload.length;

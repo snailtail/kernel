@@ -81,10 +81,12 @@ describe('visibility and restricted records (#53)', { skip }, () => {
   const leaks = (body: unknown) => JSON.stringify(body ?? '').includes(MARKER);
   const around = (body: unknown) => { const t = JSON.stringify(body ?? ''); const i = t.indexOf(MARKER); return t.slice(Math.max(0, i - 200), i + 40); };
 
-  test('every table attached to a problem, incident, change or improvement has row-level security, or is a reviewed exception', async () => {
+  test('every table attached to a problem, incident, change, improvement or request has row-level security, or is a reviewed exception', async () => {
     const { rows } = await ownerQuery(
       `SELECT DISTINCT c.table_name FROM information_schema.columns c JOIN pg_class t ON t.relname = c.table_name AND t.relkind = 'r'
-       WHERE c.table_schema = 'public' AND c.column_name IN ('incident_id', 'problem_id', 'change_id', 'review_id', 'improvement_id') AND NOT t.relrowsecurity ORDER BY 1`,
+       WHERE c.table_schema = 'public' AND c.column_name IN ('incident_id', 'problem_id', 'change_id', 'review_id', 'improvement_id', 'request_id') AND NOT t.relrowsecurity
+         -- In the audit trail and security events, request_id is the HTTP request's id, not a service request.
+         AND NOT (c.column_name = 'request_id' AND c.table_name IN ('audit_log', 'security_events')) ORDER BY 1`,
     );
     // Monitoring alerts are operational data shared by everyone on call; external records are references to other tools.
     assert.deepEqual(rows.map((r: any) => r.table_name), ['alerts', 'external_records'], 'a new table that belongs to a record gets an RLS policy like 119_visibility.sql');

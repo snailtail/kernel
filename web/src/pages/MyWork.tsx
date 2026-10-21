@@ -14,6 +14,10 @@ interface MyWork {
   incidents: { ref: string; title: string; status: string; priority: number; is_major: boolean; created_at: string; update_overdue?: boolean }[];
   reviews?: { ref: string; incident_ref: string; title: string; status: string; due: string | null; overdue: boolean }[];
   improvements?: { ref: string; title: string; status: string; value: number | null; effort: number | null }[];
+  /** Service requests (#44), when the module is on. */
+  request_tasks?: { ref: string; title: string; task_id: number; task: string; resolution_due_at: string | null }[];
+  request_approvals?: { ref: string; title: string; created_at: string }[];
+  request_queue?: { ref: string; title: string; task_id: number; task: string; team: string; at_risk: boolean }[];
   major_updates?: { ref: string; title: string; priority: number; next_update_at: string | null; update_overdue: boolean; role: string }[];
   teams?: { id: number; name: string; role: string; unassigned: number }[];
   team_queue?: { ref: string; title: string; status: string; priority: number; is_major: boolean; created_at: string; team: string }[];
@@ -35,7 +39,7 @@ export function MyWorkPage() {
     await api.post<ProblemDetail>(`/api/approvals/${id}/${approve ? 'approve' : 'reject'}`, {});
     reload();
   };
-  const nothing = !data.reviews?.length && !data.improvements?.length && !data.major_updates?.length && !data.problems.length && !data.incidents.length && !data.team_queue?.length && !data.change_votes.length && !data.changes.length && !data.actions.length && !data.decisions.length && !data.approvals.length;
+  const nothing = !data.request_tasks?.length && !data.request_approvals?.length && !data.request_queue?.length && !data.reviews?.length && !data.improvements?.length && !data.major_updates?.length && !data.problems.length && !data.incidents.length && !data.team_queue?.length && !data.change_votes.length && !data.changes.length && !data.actions.length && !data.decisions.length && !data.approvals.length;
   return (
     <>
       <header className="page-head">
@@ -174,6 +178,32 @@ export function MyWorkPage() {
               <li key={i.ref}>
                 <div><Link to={`/incidents/${i.ref}`} className="mono">{i.ref}</Link> <Link to={`/incidents/${i.ref}`} className="work-title">{i.title}</Link></div>
                 <span className="work-meta">{i.is_major && <span className="badge major">Major</span>}<PriorityBadge priority={i.priority} /><span className="muted small">{i.team}</span></span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {(!!data.request_approvals?.length || !!data.request_tasks?.length || !!data.request_queue?.length) && (
+        <section className="card">
+          <h2>Service requests <span className="count">{(data.request_approvals?.length ?? 0) + (data.request_tasks?.length ?? 0) + (data.request_queue?.length ?? 0)}</span> <Link to="/requests" className="btn-link small">All requests</Link></h2>
+          <ul className="work-list">
+            {data.request_approvals?.map((r) => (
+              <li key={`a${r.ref}`}>
+                <div><Link to={`/requests/${r.ref}`} className="mono">{r.ref}</Link> <Link to={`/requests/${r.ref}`} className="work-title">{r.title}</Link></div>
+                <span className="work-meta"><span className="badge req-awaiting_approval">Needs your approval</span></span>
+              </li>
+            ))}
+            {data.request_tasks?.map((r) => (
+              <li key={`t${r.task_id}`}>
+                <div><Link to={`/requests/${r.ref}`} className="mono">{r.ref}</Link> <Link to={`/requests/${r.ref}`} className="work-title">{r.task}</Link></div>
+                <span className="work-meta"><span className="muted small">{r.title}</span></span>
+              </li>
+            ))}
+            {data.request_queue?.map((r) => (
+              <li key={`q${r.task_id}`}>
+                <div><Link to={`/requests/${r.ref}`} className="mono">{r.ref}</Link> <Link to={`/requests/${r.ref}`} className="work-title">{r.task}</Link></div>
+                <span className="work-meta">{r.at_risk && <span className="badge overdue">SLA</span>}<span className="muted small">{r.team} queue</span></span>
               </li>
             ))}
           </ul>

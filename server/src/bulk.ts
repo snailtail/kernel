@@ -16,6 +16,7 @@ import * as changes from './changes.js';
 import * as cmdb from './cmdb.js';
 import * as events from './events.js';
 import * as improvements from './improvements.js';
+import * as requests from './requests.js';
 import * as incidents from './incidents.js';
 import * as knowledge from './knowledge.js';
 import { logger } from './log.js';
@@ -26,7 +27,7 @@ import { authorize, can, type Action } from './policy.js';
 import * as problems from './problems.js';
 
 export const BULK_LIMIT = 500;
-export const PRACTICES = ['incidents', 'problems', 'changes', 'alerts', 'actions', 'articles', 'cis', 'improvements'] as const;
+export const PRACTICES = ['incidents', 'problems', 'changes', 'alerts', 'actions', 'articles', 'cis', 'improvements', 'requests'] as const;
 export type Practice = (typeof PRACTICES)[number];
 
 const ref = z.string().trim().min(1).max(30);
@@ -220,6 +221,21 @@ const DEFS: Record<Practice, PracticeDef> = {
       assign: { action: 'improvement.write', noop: assignNoop('owner_id'), undo: assignUndo('owner_id'), apply: (u, r, op) => improvements.updateImprovementLean(u, r.id, op.assignee_id !== undefined ? { owner_id: op.assignee_id } : {}) },
       // Approving and rejecting take a manager (transitionImprovement checks); rejecting needs details.reason.
       status: { action: 'improvement.write', noop: statusNoop, apply: (u, r, op) => improvements.transitionImprovementLean(u, r.id, improvements.transitionImprovementSchema.parse({ ...op.details, to: op.to })) },
+    },
+  },
+  requests: {
+    read: 'request.read',
+    rows: requests.requestRows,
+    select: async (user, f, limit) => (await requests.listRequests(user, requests.listRequestsSchema.parse(params(f, limit)))).map((r) => r.ref),
+    ops: {
+      // Only cancelling (with details.reason): an approval is each approver's own decision, one request at a time.
+      status: {
+        action: 'request.write', noop: statusNoop,
+        apply: (u, r, op) => {
+          if (op.to !== 'cancelled') throw badRequest('Requests can only be cancelled in bulk; approvals are decided one at a time');
+          return requests.transitionRequestLean(u, r.id, requests.transitionRequestSchema.parse({ ...op.details, to: op.to }));
+        },
+      },
     },
   },
 };
