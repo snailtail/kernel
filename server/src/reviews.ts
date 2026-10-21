@@ -7,7 +7,7 @@ import { insertAction } from './actions.js';
 import { audit } from './audit.js';
 import type { User } from './auth.js';
 import { audienceOf, copyText, mayCopyText, startNarrow, titleAudience, whyNotForEveryone } from './audience.js';
-import { assertMayWriteText, maskedRefs } from './confidential.js';
+import { assertMayWriteText, maskedRefs, notCopied, readableText } from './confidential.js';
 import { currentContext } from './context.js';
 import { query, tx } from './db.js';
 import { badRequest, conflict, forbidden, notFound } from './errors.js';
@@ -355,9 +355,12 @@ export async function itemToProblem(user: User, ref: string, itemId: number, inp
       // A confidential record's title stays readable to everyone (#61), so the factor's words become one only when the
       // title is as narrow as the factor.
       const narrow = startNarrow(from);
+      const fallback = `Contributing factor from the post-incident review of ${r.ref}`;
+      // Only words the caller may read come along (#158): the new problem's creator always reads it.
+      const text = await readableText(db, user, r.review_ref, { body: item.body }, 'review-factor-to-problem');
       problemRef = await createProblemInTx(db, user, {
-        title: (await copyText(db, from, titleAudience({ ...from, ref: null }), item.body.split('\n')[0], `Contributing factor from the post-incident review of ${r.ref}`, 'review factor → problem title')).slice(0, 300),
-        description: `Contributing factor from the post-incident review of ${r.ref} (${r.incident_title}):\n\n${item.body}`,
+        title: (text ? await copyText(db, from, titleAudience({ ...from, ref: null }), text.body.split('\n')[0], fallback, 'review factor → problem title') : fallback).slice(0, 300),
+        description: text ? `${fallback} (${r.incident_title}):\n\n${text.body}` : `${fallback} (${r.incident_title}). ${notCopied(r.review_ref)}`,
         impact: r.impact, urgency: r.urgency, ...(r.category_id ? { category_id: r.category_id } : {}),
       }, narrow);
     }
@@ -402,9 +405,12 @@ export async function itemToAction(user: User, ref: string, itemId: number, inpu
     // On a problem more people can read, the action says where it came from but not what the review said.
     const wide = !mayCopyText(await audienceOf(db, r.ref), await audienceOf(db, p[0].ref));
     if (wide && !input.title) throw badRequest(`${p[0].ref} is readable by more people than ${r.ref}: give the action a title of its own`);
+    // Words the caller cannot read stay behind too (#158), so the action needs a title of its own.
+    const text = wide ? null : await readableText(db, user, r.review_ref, { body: item.body }, 'review-item-to-action');
+    if (!wide && !text && !input.title) throw badRequest(`${r.review_ref} is confidential and you cannot read this follow-up: give the action a title of its own`);
     const actionId = await insertAction(db, user, p[0], {
-      title: (input.title ?? item.body.split('\n')[0]).slice(0, 300),
-      description: wide ? `Follow-up from the post-incident review of ${r.ref}.` : `Follow-up from the post-incident review of ${r.ref}:\n\n${item.body}`,
+      title: (input.title ?? text!.body.split('\n')[0]).slice(0, 300),
+      description: text ? `Follow-up from the post-incident review of ${r.ref}:\n\n${text.body}` : `Follow-up from the post-incident review of ${r.ref}.${wide ? '' : ` ${notCopied(r.review_ref)}`}`,
       ...(input.owner_id !== undefined ? { owner_id: input.owner_id } : {}),
       ...(input.due_date !== undefined ? { due_date: input.due_date } : {}),
     });
@@ -431,9 +437,11 @@ export async function itemToImprovement(user: User, ref: string, itemId: number,
     if (item.action_id) throw conflict('This follow-up already has an action');
     if (item.improvement_id) throw conflict('This follow-up already became an improvement');
     const narrow = startNarrow({ ...(await audienceOf(db, r.ref)), ref: r.review_ref });
+    // Only words the caller may read come along (#158): the new improvement's creator always reads it.
+    const text = await readableText(db, user, r.review_ref, { body: item.body }, 'review-item-to-improvement');
     const m = await createImprovementInTx(db, user, {
-      title: (input.title ?? item.body.split('\n')[0]).slice(0, 300),
-      description: `Follow-up from the post-incident review of ${r.ref} (${r.incident_title}):\n\n${item.body}`,
+      title: (input.title ?? text?.body.split('\n')[0] ?? `Follow-up from the post-incident review of ${r.ref}`).slice(0, 300),
+      description: text ? `Follow-up from the post-incident review of ${r.ref} (${r.incident_title}):\n\n${text.body}` : `Follow-up from the post-incident review of ${r.ref} (${r.incident_title}). ${notCopied(r.review_ref)}`,
       source: 'review', source_ref: r.review_ref, owner_id: input.owner_id,
     }, narrow);
     await db.query('UPDATE incident_review_items SET improvement_id = $2 WHERE id = $1', [item.id, m.id]);

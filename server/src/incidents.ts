@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { audienceOf, copyText, startNarrow, titleAudience } from './audience.js';
 import type { User } from './auth.js';
 import { loadCi, logCi, registerCiExtra } from './cmdb.js';
-import { assertMayWriteText, textFilterSql } from './confidential.js';
+import { assertMayWriteText, notCopied, readableText, textFilterSql } from './confidential.js';
 import { currentContext } from './context.js';
 import { query, tx } from './db.js';
 import { badRequest, conflict, notFound } from './errors.js';
@@ -572,9 +572,11 @@ export const problemFromIncidentSchema = z.object({ ...problemFields }).partial(
 /** Logs a problem prefilled from the incident (and links it); the usual route for major or recurring incidents. */
 export async function createProblemFromIncident(user: User, ref: string, overrides: z.infer<typeof problemFromIncidentSchema>) {
   const inc = await getIncident(user, ref);
+  // Only text the caller may read comes along (#158): the new problem's creator always reads it.
+  const text = await readableText(null, user, inc.ref, { description: inc.description }, 'incident-to-problem');
   const prefill = {
     title: inc.title,
-    description: `${inc.description}\n\nRaised from incident ${inc.ref}.`.trim(),
+    description: text ? `${text.description}\n\nRaised from incident ${inc.ref}.`.trim() : `Raised from incident ${inc.ref}. ${notCopied(inc.ref)}`,
     impact: inc.impact,
     urgency: inc.urgency,
     category_id: inc.category_id,
