@@ -79,6 +79,34 @@ describe('confidential records (#61)', { skip }, () => {
     assert.equal((await analyst2.get('/api/problems/similar?text=forwarding rule compromised')).body.some((h: any) => h.ref === ref), false);
   });
 
+  test('no blind overwrites over any channel: REST transitions, actions and agents (#156)', async () => {
+    const text = async () => (await ownerQuery('SELECT description, root_cause, resolution FROM problems WHERE ref = $1', [ref])).rows[0];
+    const was = await text();
+    assert.equal(was.description, SECRET_TEXT);
+    // REST: a transition or an action carrying masked text, by someone not on the record.
+    assert.equal((await analyst2.post(`/api/problems/${ref}/transition`, { to: 'analysis', root_cause: 'overwritten' })).status, 403);
+    const action = await analyst.post(`/api/problems/${ref}/actions`, { title: 'Remove the rule', description: SECRET_TEXT });
+    ok(action);
+    assert.equal((await analyst2.patch(`/api/problems/${ref}/actions/${action.body.id}`, { description: 'overwritten' })).status, 403);
+    ok(await analyst2.patch(`/api/problems/${ref}/actions/${action.body.id}`, { due_date: '2030-01-01' }));
+    ok(await analyst2.post(`/api/problems/${ref}/comments`, { body: 'Can I help?' }));
+    // Agents never read the text, so they cannot change it, even with the creator's token.
+    const plain = await analyst.post('/api/problems', { title: 'Printer queue stuck', description: 'first' });
+    ok(plain);
+    const mcp = new McpClient({ name: 'conf-write', version: '1' });
+    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
+    const call = async (name: string, args: Record<string, unknown>) => (await mcp.callTool({ name, arguments: args })) as any;
+    assert.equal((await call('update_problem', { ref: plain.body.ref, description: 'second' })).isError, undefined, 'positive control: a normal record');
+    for (const [name, args] of [['update_problem', { description: 'overwritten' }], ['transition_problem', { to: 'analysis', resolution: 'overwritten' }]] as const) {
+      const res = await call(name, { ref, ...args });
+      assert.equal(res.isError, true, name);
+      assert.match(res.content[0].text, /confidential/);
+    }
+    await mcp.close();
+    assert.deepEqual(await text(), was, 'the text is unchanged');
+    assert.equal((await ownerQuery('SELECT description FROM problem_actions WHERE id = $1', [action.body.id])).rows[0].description, SECRET_TEXT);
+  });
+
   test('list filters are not an oracle either: problems, the KEDB, incidents and changes (MCP too)', async () => {
     const inc = await analyst.post('/api/incidents', { title: 'VIP mailbox alert', description: SECRET_TEXT });
     ok(inc);

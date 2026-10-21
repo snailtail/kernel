@@ -1,6 +1,6 @@
 // Problem record service. Shared by the REST API and the MCP server so both
 // enforce the same rules, permissions and audit trail.
-import { forgetExists, onlyTitleMatches, textFilterSql } from './confidential.js';
+import { assertMayWriteText, forgetExists, onlyTitleMatches, textFilterSql } from './confidential.js';
 import { z } from 'zod';
 import type pg from 'pg';
 import type { User } from './auth.js';
@@ -349,6 +349,8 @@ export async function trackProposals(db: Db, problemId: number, fields: string[]
 export async function confirmProposals(user: User, ref: string, fields: string[]) {
   authorize(user, 'problem.update');
   if (currentContext().channel === 'mcp') throw forbidden('Proposals can only be confirmed by a person in the web UI or REST API');
+  // No blind overwrites of masked text (#61, #156).
+  await assertMayWriteText(user, ref, Object.fromEntries(fields.map((f) => [f, true])));
   await tx(async (db) => {
     const p = await loadForUpdate(db, ref);
     const confirm = fields.filter((f) => p.mcp_proposed.includes(f));
@@ -379,6 +381,8 @@ export async function checkBase(db: Db, problemId: number, current: Record<strin
 
 export async function updateProblemLean(user: User, ref: string, { base, ...input }: z.infer<typeof updateProblemSchema>): Promise<void> {
   authorize(user, 'problem.update');
+  // No blind overwrites of masked text (#61, #156).
+  await assertMayWriteText(user, ref, input);
   await tx(async (db) => {
     const current = await loadForUpdate(db, ref);
     await checkBase(db, current.id, current, input, base);
@@ -408,6 +412,8 @@ export async function updateProblem(...args: Parameters<typeof updateProblemLean
 
 export async function transitionProblemLean(user: User, ref: string, input: z.infer<typeof transitionSchema>): Promise<void> {
   authorize(user, 'problem.transition');
+  // No blind overwrites of masked text (#61, #156).
+  await assertMayWriteText(user, ref, { ...input, comment: undefined });
   await tx(async (db) => {
     const current = await loadForUpdate(db, ref);
     const fields = {
@@ -577,6 +583,8 @@ const ASSESSMENT_LABELS: Record<string, string> = {
 export async function assessProblem(user: User, ref: string, { base, ...input }: z.infer<typeof assessmentSchema>) {
   authorize(user, 'problem.assess');
   if (input.ec_decision === 'accept' || input.ec_decision === 'defer') authorize(user, 'problem.accept_risk');
+  // No blind overwrites of masked text (#61, #156).
+  await assertMayWriteText(user, ref, input);
   await tx(async (db) => {
     const current = await loadForUpdate(db, ref);
     if (current.status === 'closed') throw conflict('Reopen the problem before changing its assessment');

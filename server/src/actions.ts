@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { User } from './auth.js';
 import { query, tx } from './db.js';
 import { badRequest, notFound } from './errors.js';
+import { assertMayWriteText } from './confidential.js';
 import { authorize } from './policy.js';
 import { getProblem, loadForUpdate, logActivity, SELECT_ACTION, type Db } from './problems.js';
 
@@ -88,6 +89,8 @@ export async function insertAction(db: Db, user: User, problem: { id: number; re
 
 export async function updateAction(user: User, ref: string, actionId: number, input: z.infer<typeof updateActionSchema>) {
   authorize(user, 'action.write');
+  // No blind overwrites of masked text (#61, #156).
+  await assertMayWriteText(user, ref, input);
   await tx(async (db) => {
     const problem = await loadForUpdate(db, ref);
     const { rows } = await db.query('SELECT * FROM problem_actions WHERE id = $1 AND problem_id = $2', [actionId, problem.id]);

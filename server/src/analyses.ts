@@ -5,6 +5,7 @@ import { query, tx } from './db.js';
 import { badRequest, conflict, forbidden, notFound } from './errors.js';
 import { currentContext } from './context.js';
 import { checkAnalysis } from './analysis-checks.js';
+import { assertMayWriteText } from './confidential.js';
 import { authorize } from './policy.js';
 import { getProblem, loadForUpdate, logActivity } from './problems.js';
 
@@ -134,6 +135,8 @@ export async function createAnalysis(user: User, ref: string, input: z.infer<typ
 
 export async function updateAnalysis(user: User, ref: string, id: number, input: z.infer<typeof updateAnalysisSchema>) {
   authorize(user, 'analysis.write');
+  // No blind overwrites of masked text (#61, #156).
+  await assertMayWriteText(user, ref, input);
   await tx(async (db) => {
     const problem = await loadForUpdate(db, ref);
     if (problem.status === 'closed') throw conflict('Reopen the problem before editing analyses');

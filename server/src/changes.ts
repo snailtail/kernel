@@ -9,7 +9,7 @@ import type { User } from './auth.js';
 import { audit } from './audit.js';
 import { computeImpact, impactSchema } from './cmdb-graph.js';
 import { loadCi, logCi, registerCiExtra } from './cmdb.js';
-import { forgetExists, textFilterSql } from './confidential.js';
+import { assertMayWriteText, forgetExists, textFilterSql } from './confidential.js';
 import { currentContext } from './context.js';
 import { query, tx } from './db.js';
 import { badRequest, conflict, forbidden, notFound } from './errors.js';
@@ -424,6 +424,8 @@ async function linkToProblem(db: Db, user: User, change: { id: number; ref: stri
 
 export async function updateChangeLean(user: User, ref: string, { base, ...input }: z.infer<typeof updateChangeSchema>): Promise<void> {
   authorize(user, 'change.update');
+  // No blind overwrites of masked text (#61, #156).
+  await assertMayWriteText(user, ref, input);
   await tx(async (db) => {
     const current = await loadChange(db, ref);
     if (base) {
@@ -459,6 +461,8 @@ export async function updateChange(...args: Parameters<typeof updateChangeLean>)
 
 export async function transitionChangeLean(user: User, ref: string, input: z.infer<typeof transitionChangeSchema>): Promise<void> {
   authorize(user, 'change.update');
+  // No blind overwrites of masked text (#61, #156).
+  await assertMayWriteText(user, ref, { ...input, comment: undefined });
   const before = await getChange(user, ref);
   await tx(async (db) => {
     const c = await loadChange(db, ref);

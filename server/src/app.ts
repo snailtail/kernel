@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { assertMayWriteText, maskForViewer } from './confidential.js';
+import { maskForViewer } from './confidential.js';
 import { sensitiveRoutes } from './routes/sensitive.js';
 import { markPersonalData, scanInbound } from './sensitive.js';
 import { liveRoutes } from './routes/live.js';
@@ -193,12 +193,6 @@ export async function buildApp(options: { logLevel?: string; serveWeb?: boolean 
     const before = payload.length;
     const out = JSON.stringify(await maskForViewer(req.user, parsed, pageRef));
     return out.length === before && out === payload ? payload : out;
-  });
-  app.addHook('preHandler', async (req) => {
-    // No blind overwrites: changing a masked field needs the right to read it.
-    if (!['PATCH', 'PUT'].includes(req.method) || !/^\/api\/(problems|incidents|changes|reviews|improvements)\/[^/]+(\/review)?$/.test(req.url.split('?')[0])) return;
-    const ref = (req.params as { ref?: string } | undefined)?.ref;
-    if (ref) await assertMayWriteText(req, ref, req.body);
   });
   app.addHook('onReady', async () => startLive((msg) => app.log.warn(msg)));
   app.addHook('onClose', async () => stopLive());

@@ -7,7 +7,7 @@ import { insertAction } from './actions.js';
 import { audit } from './audit.js';
 import type { User } from './auth.js';
 import { audienceOf, copyText, mayCopyText, startNarrow, titleAudience, whyNotForEveryone } from './audience.js';
-import { maskedRefs } from './confidential.js';
+import { assertMayWriteText, maskedRefs } from './confidential.js';
 import { currentContext } from './context.js';
 import { query, tx } from './db.js';
 import { badRequest, conflict, forbidden, notFound } from './errors.js';
@@ -279,6 +279,8 @@ export async function openReview(user: User, ref: string) {
 export async function updateReview(user: User, ref: string, input: z.infer<typeof updateReviewSchema>) {
   ref = await incidentRefOf(ref);
   authorize(user, 'incident.update');
+  // No blind overwrites of masked text (#61, #156).
+  await assertMayWriteText(user, ref, input);
   await ensureFilled(user, ref);
   await tx(async (db) => {
     const r = await loadReview(db, ref, true);
@@ -461,6 +463,8 @@ export async function publishReview(user: User, ref: string) {
 export async function waiveReview(user: User, ref: string, input: z.infer<typeof waiveSchema>) {
   ref = await incidentRefOf(ref);
   authorize(user, 'incident.flag_major');
+  // No blind overwrites of masked text (#61, #156).
+  await assertMayWriteText(user, ref, { waived_reason: input.reason });
   await tx(async (db) => {
     const r = await loadReview(db, ref, true);
     if (!isOpenReview(r)) throw conflict(`The review is already ${r.status}`);
