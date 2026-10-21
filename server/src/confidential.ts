@@ -238,3 +238,20 @@ export async function assertMayWriteText(user: { id: number }, ref: string, fiel
     throw forbidden(reader ? `${ref.toUpperCase()} is confidential. Reveal its text before you change it.` : `${ref.toUpperCase()} is confidential: agents cannot change its text. Ask a person working on it.`);
   }
 }
+
+/**
+ * Text copied from record `ref` into a new one ("create from", #158): only what the caller may read. A record made
+ * from a confidential one starts confidential, but its creator always reads it, so copying text the caller cannot see
+ * would hand that text over. Returns the fields, or null when they are withheld (audited, so the trace shows it);
+ * the caller keeps the rest (title, impact, the link) and says the text was left out. Agents (MCP) never read it.
+ */
+export async function readableText<T extends Record<string, unknown>>(db: Parameters<typeof audit>[0], user: { id: number }, ref: string, fields: T, path: string): Promise<T | null> {
+  const reader = currentContext().channel === 'mcp' ? null : user;
+  if (!(await maskedRefs(reader, [ref])).has(ref.toUpperCase())) return fields;
+  const withheld = Object.keys(fields).filter((k) => String(fields[k] ?? '').trim());
+  if (withheld.length) await audit(db, { entity_type: 'copy_text', entity_ref: ref.toUpperCase(), action: 'withheld', changes: { path, fields: withheld, reason: 'confidential' } });
+  return null;
+}
+
+/** What a new record says instead of the text it could not copy (#158). */
+export const notCopied = (ref: string) => `Copied from ${ref.toUpperCase()} (confidential, its text is not included).`;

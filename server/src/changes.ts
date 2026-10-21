@@ -9,7 +9,7 @@ import type { User } from './auth.js';
 import { audit } from './audit.js';
 import { computeImpact, impactSchema } from './cmdb-graph.js';
 import { loadCi, logCi, registerCiExtra } from './cmdb.js';
-import { assertMayWriteText, forgetExists, textFilterSql } from './confidential.js';
+import { assertMayWriteText, forgetExists, notCopied, readableText, textFilterSql } from './confidential.js';
 import { currentContext } from './context.js';
 import { query, tx } from './db.js';
 import { badRequest, conflict, forbidden, notFound } from './errors.js';
@@ -618,9 +618,11 @@ export async function addChangeLink(user: User, ref: string, input: z.infer<type
 export async function raiseChangeForProblem(user: User, problemRef: string, overrides: Partial<z.infer<typeof createChangeSchema>> = {}) {
   const p: any = await getProblem(problemRef);
   const from = await audienceOf(null, p.ref);
+  // Only text the caller may read comes along (#158): the new change's creator always reads it.
+  const text = await readableText(null, user, p.ref, { root_cause: p.root_cause, resolution: p.resolution }, 'problem-to-change');
   const change = await createChange(user, createChangeSchema.parse({
     title: `Fix: ${p.title}`.slice(0, 300),
-    description: [p.root_cause && `Root cause:\n${p.root_cause}`, p.resolution && `Proposed fix:\n${p.resolution}`, `Raised from problem ${p.ref}.`].filter(Boolean).join('\n\n'),
+    description: [text?.root_cause && `Root cause:\n${text.root_cause}`, text?.resolution && `Proposed fix:\n${text.resolution}`, `Raised from problem ${p.ref}.`, !text && notCopied(p.ref)].filter(Boolean).join('\n\n'),
     change_type: 'normal',
     cis: p.affected_cis.map((c: any) => c.ref),
     problem: p.ref,
