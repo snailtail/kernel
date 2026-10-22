@@ -4,9 +4,9 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNod
 import { Link, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { api, ApiError } from '../api';
 import { Markdown } from '../components/Markdown';
-import { AFFECTED, TEXT } from './text';
+import { AFFECTED, NEWS_PHASE, RATINGS, SERVICE_STATE, TEXT } from './text';
 
-interface Me { name: string; report_problem: boolean; requests: boolean }
+interface Me { name: string; report_problem: boolean; requests: boolean; status: boolean }
 interface Update { at: string; from: 'you' | 'it'; by: string; body: string }
 interface Ticket {
   kind: 'problem_report' | 'request';
@@ -17,7 +17,8 @@ interface Ticket {
   handled_by: string;
   created_at: string;
   updated_at: string;
-  can: { add_information: boolean; confirm: boolean };
+  can: { add_information: boolean; confirm: boolean; rate: boolean };
+  rating: 'good' | 'okay' | 'bad' | null;
   updates?: Update[];
 }
 
@@ -51,6 +52,9 @@ export function PortalApp() {
             {me === null ? <Route path="*" element={<SignIn />} /> : <>
               <Route path="/portal" element={<Home me={me} />} />
               <Route path="/portal/report" element={<Report />} />
+              <Route path="/portal/ask" element={<Catalogue />} />
+              <Route path="/portal/ask/:id" element={<Ask />} />
+              <Route path="/portal/status" element={<ServiceStatus />} />
               <Route path="/portal/tickets/:ref" element={<TicketPage />} />
               <Route path="/portal/help/:ref" element={<Article />} />
               <Route path="*" element={<p>{TEXT.notFound} <Link to="/portal">{TEXT.back}</Link></p>} />
@@ -149,6 +153,18 @@ function Home({ me }: { me: Me }) {
           <span>{TEXT.reportHint}</span>
         </Link>
       )}
+      {me.requests && (
+        <Link to="/portal/ask" className="portal-action secondary">
+          <strong>{TEXT.askButton}</strong>
+          <span>{TEXT.askHint}</span>
+        </Link>
+      )}
+      {me.status && (
+        <Link to="/portal/status" className="portal-action secondary">
+          <strong>{TEXT.statusButton}</strong>
+          <span>{TEXT.statusHint}</span>
+        </Link>
+      )}
       <section aria-labelledby="tickets-title">
         <h2 id="tickets-title">{TEXT.myTickets}</h2>
         {error && <Notice kind="error">{error}</Notice>}
@@ -196,7 +212,7 @@ function Report() {
     setError('');
     try {
       const t = await api.post<Ticket>('/api/portal/problems', { service: service || null, what, affected });
-      navigate(`/portal/tickets/${t.ref}`, { state: { sent: true } });
+      navigate(`/portal/tickets/${t.ref}`, { state: { sent: 'problem' } });
     } catch (err) {
       setError(errorText(err));
       setBusy(false);
@@ -243,7 +259,8 @@ function TicketPage() {
   const location = useLocation();
   const [t, setT] = useState<Ticket | null>(null);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState<string>((location.state as { sent?: boolean } | null)?.sent ? TEXT.sent : '');
+  const sent = (location.state as { sent?: 'problem' | 'request' } | null)?.sent;
+  const [notice, setNotice] = useState<string>(sent === 'request' ? TEXT.askSent : sent ? TEXT.sent : '');
   const [info, setInfo] = useState('');
   const [still, setStill] = useState<string | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
@@ -292,6 +309,8 @@ function TicketPage() {
           )}
         </section>
       )}
+      {t.can.rate && <Rate ticket={t} onDone={(n) => { setT(n); setNotice(TEXT.rateThanks); }} />}
+      {t.rating && <p className="portal-muted">{TEXT.rated(RATINGS.find((r) => r.value === t.rating)?.label ?? t.rating)}</p>}
       <section aria-labelledby="messages-title">
         <h2 id="messages-title">{TEXT.conversation}</h2>
         {t.title === null ? <p className="portal-muted">{TEXT.restricted}</p>
@@ -336,6 +355,185 @@ function Article() {
           <p className="portal-muted">{TEXT.articleFooter} <Link to="/portal/report">{TEXT.reportButton}</Link></p>
         </article>
       )}
+    </>
+  );
+}
+
+/** One click on how it went, once it is closed; a comment is optional. */
+function Rate({ ticket, onDone }: { ticket: Ticket; onDone: (t: Ticket) => void }) {
+  const [rating, setRating] = useState<string | null>(null);
+  const [comment, setComment] = useState('');
+  const [error, setError] = useState('');
+  const send = async (value: string, text: string) => {
+    try {
+      onDone(await api.post<Ticket>(`/api/portal/tickets/${ticket.ref}/rating`, { rating: value, comment: text }));
+    } catch (err) {
+      setError(errorText(err));
+    }
+  };
+  return (
+    <section className="portal-card portal-rate" aria-labelledby="rate-title">
+      <h2 id="rate-title">{TEXT.rateQuestion}</h2>
+      {error && <Notice kind="error">{error}</Notice>}
+      <div className="portal-buttons" role="group" aria-labelledby="rate-title">
+        {RATINGS.map((r) => (
+          <button key={r.value} type="button" className={`portal-button portal-face ${rating === r.value ? 'on' : ''}`} aria-pressed={rating === r.value} onClick={() => setRating(r.value)}>
+            <span aria-hidden="true">{r.face}</span> {r.label}
+          </button>
+        ))}
+      </div>
+      {rating && (
+        <form className="portal-form" onSubmit={(e) => { e.preventDefault(); send(rating, comment); }}>
+          <label htmlFor="portal-rate-comment">{TEXT.rateComment}</label>
+          <textarea id="portal-rate-comment" rows={2} maxLength={2000} value={comment} onChange={(e) => setComment(e.target.value)} />
+          <button className="portal-button primary">{TEXT.rateSend}</button>
+        </form>
+      )}
+    </section>
+  );
+}
+
+interface CatalogueItem { id: number; name: string; description: string; needs_approval: boolean; service: string | null; form?: { key: string; label: string; type: 'text' | 'textarea' | 'choice' | 'date'; required: boolean; choices: string[] }[] }
+
+function Catalogue() {
+  const [items, setItems] = useState<CatalogueItem[] | null>(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    api.get<CatalogueItem[]>('/api/portal/catalogue').then(setItems, (err) => setError(errorText(err)));
+  }, []);
+  const groups = new Map<string, CatalogueItem[]>();
+  for (const i of items ?? []) groups.set(i.service ?? TEXT.askOther, [...(groups.get(i.service ?? TEXT.askOther) ?? []), i]);
+  return (
+    <>
+      <p><Link to="/portal">← {TEXT.back}</Link></p>
+      <h1>{TEXT.askTitle}</h1>
+      {error && <Notice kind="error">{error}</Notice>}
+      {items === null ? !error && <p className="portal-muted" role="status">{TEXT.loading}</p>
+        : !items.length ? <p className="portal-muted">{TEXT.askEmpty}</p>
+        : [...groups].map(([service, list]) => (
+          <section key={service} aria-label={service}>
+            <h2>{service}</h2>
+            <ul className="portal-tickets">
+              {list.map((i) => (
+                <li key={i.id}>
+                  <Link to={`/portal/ask/${i.id}`}>
+                    <span className="portal-ticket-title">{i.name}</span>
+                    {i.needs_approval ? <span className="portal-status waiting">{TEXT.needsApproval}</span> : <span />}
+                    {i.description && <span className="portal-muted small">{i.description.split('\n')[0]}</span>}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))}
+    </>
+  );
+}
+
+function Ask() {
+  const { id = '' } = useParams();
+  const navigate = useNavigate();
+  const [item, setItem] = useState<CatalogueItem | null>(null);
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    api.get<CatalogueItem>(`/api/portal/catalogue/${id}`).then(setItem, (err) => setError(err instanceof ApiError && err.status === 404 ? TEXT.notFound : errorText(err)));
+  }, [id]);
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError('');
+    try {
+      const filled = Object.fromEntries(Object.entries(answers).filter(([, v]) => v.trim()));
+      const t = await api.post<Ticket>('/api/portal/requests', { item_id: Number(id), answers: filled });
+      navigate(`/portal/tickets/${t.ref}`, { state: { sent: 'request' } });
+    } catch (err) {
+      setError(errorText(err));
+      setBusy(false);
+    }
+  };
+  if (!item) return <>{error ? <Notice kind="error">{error}</Notice> : <p className="portal-muted" role="status">{TEXT.loading}</p>}<p><Link to="/portal/ask">← {TEXT.back}</Link></p></>;
+  const set = (key: string, value: string) => setAnswers((a) => ({ ...a, [key]: value }));
+  return (
+    <>
+      <p><Link to="/portal/ask">← {TEXT.back}</Link></p>
+      <h1>{item.name}</h1>
+      {item.description && <Markdown text={item.description} />}
+      {item.needs_approval && <p className="portal-muted">{TEXT.needsApproval}</p>}
+      <form className="portal-card portal-form" onSubmit={submit}>
+        {error && <Notice kind="error">{error}</Notice>}
+        {item.form!.map((f) => {
+          const fid = `portal-f-${f.key}`;
+          const label = <label htmlFor={fid}>{f.label} {!f.required && <span className="portal-muted">{TEXT.optional}</span>}</label>;
+          const value = answers[f.key] ?? '';
+          return (
+            <div key={f.key} className="portal-field">
+              {label}
+              {f.type === 'textarea' ? <textarea id={fid} rows={4} required={f.required} maxLength={10000} value={value} onChange={(e) => set(f.key, e.target.value)} />
+                : f.type === 'choice' ? (
+                  <select id={fid} required={f.required} value={value} onChange={(e) => set(f.key, e.target.value)}>
+                    <option value="">{TEXT.choose}</option>
+                    {f.choices.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                )
+                : <input id={fid} type={f.type === 'date' ? 'date' : 'text'} required={f.required} maxLength={500} value={value} onChange={(e) => set(f.key, e.target.value)} />}
+            </div>
+          );
+        })}
+        <button className="portal-button primary" disabled={busy}>{busy ? TEXT.sending : TEXT.askSend}</button>
+      </form>
+    </>
+  );
+}
+
+interface StatusPage { services: { name: string; description: string; status: string }[]; updates: { phase: string; status: string | null; message: string; created_at: string; services: string[] }[]; sign_up: boolean }
+
+function ServiceStatus() {
+  const [page, setPage] = useState<StatusPage | null>(null);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  useEffect(() => {
+    api.get<StatusPage>('/api/portal/status').then(setPage, (err) => setError(errorText(err)));
+  }, []);
+  const signUp = async () => {
+    try {
+      await api.post('/api/portal/status/subscribe');
+      setNotice(TEXT.statusSignedUp);
+    } catch (err) {
+      setError(errorText(err));
+    }
+  };
+  return (
+    <>
+      <p><Link to="/portal">← {TEXT.back}</Link></p>
+      <h1>{TEXT.statusTitle}</h1>
+      {error && <Notice kind="error">{error}</Notice>}
+      {notice && <Notice kind="ok">{notice}</Notice>}
+      {!page ? !error && <p className="portal-muted" role="status">{TEXT.loading}</p> : !page.services.length ? <p className="portal-muted">{TEXT.statusNone}</p> : <>
+        <ul className="portal-services">
+          {page.services.map((s) => (
+            <li key={s.name}>
+              <span><strong>{s.name}</strong>{s.description && <span className="portal-muted small"> {s.description}</span>}</span>
+              <span className={`portal-status svc-${s.status}`}>{SERVICE_STATE[s.status] ?? s.status}</span>
+            </li>
+          ))}
+        </ul>
+        <section aria-labelledby="news-title">
+          <h2 id="news-title">{TEXT.statusNews}</h2>
+          {!page.updates.length ? <p className="portal-muted">{TEXT.statusNoNews}</p> : (
+            <ol className="portal-messages">
+              {page.updates.map((u, i) => (
+                <li key={i}>
+                  <p className="portal-muted small"><strong>{NEWS_PHASE[u.phase] ?? u.phase}</strong> · {u.services.join(', ')} · <time dateTime={u.created_at}>{when(u.created_at)}</time></p>
+                  <p>{u.message}</p>
+                </li>
+              ))}
+            </ol>
+          )}
+        </section>
+        {page.sign_up && !notice && <button type="button" className="portal-button portal-spaced" onClick={signUp}>{TEXT.statusSignUp}</button>}
+      </>}
     </>
   );
 }

@@ -139,7 +139,9 @@ export interface PortalTicket {
   handled_by: string;
   created_at: string;
   updated_at: string;
-  can: { add_information: boolean; confirm: boolean };
+  can: { add_information: boolean; confirm: boolean; rate: boolean };
+  /** The person's one-click rating once it is closed (part 2 of #45), or null. */
+  rating: 'good' | 'okay' | 'bad' | null;
   /** Only with a ref: the replies to the requester and the requester's own messages, oldest first. */
   updates?: { at: string; from: 'you' | 'it'; by: string; body: string }[];
 }
@@ -148,8 +150,8 @@ export interface PortalTicket {
  * Everything the portal shows (#45) is built here. A person outside IT sees only incidents where they are the caller
  * and requests where they are the requester: the ref, title, status in plain words and who handles it (the IT service
  * desk or the team's name, never a person), and only the updates written for them plus their own messages. Never
- * internal notes, assignees, categories, CIs, other people or SLA internals. A restricted or confidential record shows
- * its ref and status only.
+ * internal notes, assignees, categories, CIs, other people or SLA internals. A restricted problem report or a
+ * confidential record shows its ref and status only; a restricted request is the requester's own and shows in full.
  */
 export async function forPortal(db: Queryable | null, personId: number, ref?: string): Promise<PortalTicket[]> {
   db ??= { query };
@@ -157,11 +159,14 @@ export async function forPortal(db: Queryable | null, personId: number, ref?: st
   const { rows } = await db.query(
     `SELECT 'problem_report' AS kind, i.id, i.ref, i.title, i.status, i.restricted OR i.classification = 'confidential' AS narrow,
             CASE WHEN i.restricted THEN NULL ELSE t.name END AS team, i.created_at, i.updated_at,
-            i.status = 'resolved' AND i.resolved_at > now() - $3 * interval '1 day' AS confirmable
+            i.status = 'resolved' AND i.resolved_at > now() - $3 * interval '1 day' AS confirmable,
+            (SELECT f.rating FROM portal_feedback f WHERE f.incident_id = i.id) AS rating
      FROM incidents i LEFT JOIN teams t ON t.id = i.team_id
      WHERE i.caller_id = $1 AND ($2::text IS NULL OR i.ref = $2)
      UNION ALL
-     SELECT 'request', r.id, r.ref, r.title, r.status, r.restricted OR r.classification = 'confidential', NULL, r.created_at, r.updated_at, false
+     -- A restricted request is still the requester's own (#160): only a confidential one is narrowed for them.
+     SELECT 'request', r.id, r.ref, r.title, r.status, r.classification = 'confidential', NULL, r.created_at, r.updated_at, false,
+            (SELECT f.rating FROM portal_feedback f WHERE f.request_id = r.id)
      FROM requests r WHERE r.requester_id = $1 AND ($2::text IS NULL OR r.ref = $2)
      ORDER BY updated_at DESC LIMIT 200`,
     [personId, one, PORTAL_REOPEN_DAYS],
@@ -175,7 +180,8 @@ export async function forPortal(db: Queryable | null, personId: number, ref?: st
       kind: r.kind, ref: r.ref, title: r.narrow ? null : r.title, status: r.status,
       status_label: (incident ? PORTAL_INCIDENT_STATUS : PORTAL_REQUEST_STATUS)[r.status] ?? r.status, handled_by: handledBy,
       created_at: new Date(r.created_at).toISOString(), updated_at: new Date(r.updated_at).toISOString(),
-      can: { add_information: open, confirm: !!r.confirmable },
+      can: { add_information: open, confirm: !!r.confirmable, rate: !open && !r.rating },
+      rating: r.rating ?? null,
     };
     if (one) {
       // Replies to the requester and the requester's own messages; nothing at all from a narrow record.

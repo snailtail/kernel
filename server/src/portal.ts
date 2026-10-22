@@ -21,11 +21,11 @@ import { absoluteUrl, mailConfigured, notify, sendOutsideMail } from './notifica
 import { syncPaging } from './oncall.js';
 import type { Db } from './problems.js';
 import { rateLimit } from './ratelimit.js';
-import { logRequest } from './requests.js';
+import { logRequest, runAutomation, submitRequest } from './requests.js';
 import { checkSameOrigin } from './security.js';
 import { securityEvent } from './security-events.js';
 import { slaOnTransition } from './sla.js';
-import { unsubscribeUrl } from './status-subscriptions.js';
+import { signUp as statusSignUp, signUpOpen, unsubscribeUrl } from './status-subscriptions.js';
 import { notifyTeamQueue } from './teams.js';
 
 export const PORTAL_COOKIE = 'kernel_portal';
@@ -141,7 +141,7 @@ export async function signInWithLink(req: FastifyRequest, reply: FastifyReply, t
 // ---- What the person sees --------------------------------------------------------------------------------------
 
 export async function me(person: PortalPerson) {
-  return { name: person.name, report_problem: moduleEnabled('incident'), requests: moduleEnabled('request') };
+  return { name: person.name, report_problem: moduleEnabled('incident'), requests: moduleEnabled('request'), status: (await serviceStatus(person)).services.length > 0 };
 }
 
 export const myTickets = (person: PortalPerson) => forPortal(null, person.id);
@@ -153,17 +153,19 @@ export async function ticket(person: PortalPerson, ref: string) {
 }
 
 /**
- * Services the person can choose when reporting: their organisation's services and the service catalogue, under a
- * name meant for people outside IT (the public name, else the catalogue's own name). An internal service with neither
- * is left out.
+ * How a service is named for people outside IT: its public name, else the catalogue's own name. An internal service
+ * with neither has no such name and is left out. (configuration_items c, service_status st joined on public.)
  */
+const PORTAL_NAME = "coalesce(nullif(st.public_name, ''), CASE WHEN c.in_catalogue THEN c.name END)";
+
+/** Services the person can choose when reporting: their organisation's services and the service catalogue. */
 export async function services(person: PortalPerson) {
   const { rows } = await query(
-    `SELECT c.ref, coalesce(nullif(st.public_name, ''), CASE WHEN c.in_catalogue THEN c.name END) AS name FROM configuration_items c
+    `SELECT c.ref, ${PORTAL_NAME} AS name FROM configuration_items c
      LEFT JOIN service_status st ON st.ci_id = c.id AND st.public
      WHERE c.class = 'service' AND c.status <> 'retired'
        AND (c.in_catalogue OR EXISTS (SELECT 1 FROM organisation_services os WHERE os.ci_id = c.id AND os.organisation_id = $1))
-       AND (c.in_catalogue OR coalesce(st.public_name, '') <> '')
+       AND ${PORTAL_NAME} IS NOT NULL
      ORDER BY 2 LIMIT 200`,
     [person.organisation_id ?? 0],
   );
@@ -305,6 +307,104 @@ export async function confirm(person: PortalPerson, ref: string, input: z.infer<
   return ticket(person, ref);
 }
 
+// ---- Asking for something (part 2) ----------------------------------------------------------------------------
+
+// Fields people outside IT can answer. A person or CI field would need Kernel's directory or CMDB: such items are
+// ordered inside Kernel instead.
+const PORTAL_FIELDS = ['text', 'textarea', 'choice', 'date'];
+
+async function catalogueRows(itemId: number | null) {
+  if (!moduleEnabled('request')) throw notFound('Not found');
+  const { rows } = await query(
+    `SELECT i.id, i.name, i.description, i.form, i.approval <> 'none' AS needs_approval, ${PORTAL_NAME} AS service
+     FROM request_items i JOIN configuration_items c ON c.id = i.service_id LEFT JOIN service_status st ON st.ci_id = c.id AND st.public
+     WHERE i.active AND ($1::int IS NULL OR i.id = $1)
+       AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(i.form) f WHERE NOT (f->>'type' = ANY($2)))
+     ORDER BY 6 NULLS LAST, i.name LIMIT 300`,
+    [itemId, PORTAL_FIELDS],
+  );
+  return rows.map(({ form, ...i }) => ({ ...i, form: (form as any[]).map((f) => ({ key: f.key, label: f.label, type: f.type, required: !!f.required, choices: f.choices ?? [] })) }));
+}
+
+/** The catalogue as the person sees it: what they can ask for, grouped by the service's name for them. */
+export const catalogue = async () => (await catalogueRows(null)).map(({ form: _form, ...i }) => i);
+
+export async function catalogueItem(id: number) {
+  const [item] = await catalogueRows(id);
+  if (!item) throw notFound('Not found');
+  return item;
+}
+
+export const orderSchema = z.object({ item_id: z.number().int(), answers: z.record(z.string(), z.unknown()).default({}) });
+
+/**
+ * The person asks for something: the same form check and flow as inside Kernel (submitRequest), with the person as
+ * the requester and no Kernel user as the one who logged it.
+ */
+export async function order(person: PortalPerson, input: z.infer<typeof orderSchema>) {
+  await catalogueItem(input.item_id);
+  const ref = await tx(async (db) => {
+    const { rows } = await db.query('SELECT id, name, user_id FROM people WHERE id = $1', [person.id]);
+    return submitRequest(db, input.item_id, rows[0], input.answers, { loggerId: null });
+  });
+  await runAutomation(ref);
+  return ticket(person, ref);
+}
+
+// ---- Service status (part 2) -----------------------------------------------------------------------------------
+
+/**
+ * The status of the services the person's organisation uses, as the status page publishes them (#46): public names,
+ * the published status and published, unretracted updates of the last 14 days. Nothing else about the services.
+ */
+export async function serviceStatus(person: PortalPerson) {
+  const { rows: services } = await query(
+    `SELECT st.ci_id, st.public_name AS name, st.public_description AS description, st.public_status AS status
+     FROM service_status st JOIN organisation_services os ON os.ci_id = st.ci_id AND os.organisation_id = $1
+     WHERE st.public AND coalesce(st.public_name, '') <> '' ORDER BY st.public_name`,
+    [person.organisation_id ?? 0],
+  );
+  const ids = services.map((s) => s.ci_id);
+  const { rows: updates } = ids.length ? await query(
+    `SELECT su.phase, su.status, su.message, su.created_at,
+            (SELECT array_agg(st.public_name ORDER BY st.public_name) FROM service_status st WHERE st.public AND st.ci_id = ANY(su.ci_ids) AND st.ci_id = ANY($1)) AS services
+     FROM status_updates su WHERE su.public AND su.retracted_at IS NULL AND su.ci_ids && $1 AND su.created_at > now() - interval '14 days'
+     ORDER BY su.created_at DESC LIMIT 20`,
+    [ids],
+  ) : { rows: [] as any[] };
+  return {
+    services: services.map(({ ci_id: _id, ...s }) => s),
+    updates: updates.filter((u) => u.services?.length).map((u) => ({ ...u, created_at: new Date(u.created_at).toISOString() })),
+    sign_up: services.length > 0 && !!person.email && (await signUpOpen()),
+  };
+}
+
+/** Email about these services (#46's sign-up): the person's own address, confirmed by mail like every sign-up. */
+export async function subscribe(person: PortalPerson, ip: string) {
+  const { services: mine, sign_up } = await serviceStatus(person);
+  if (!sign_up) throw notFound('Not found');
+  return statusSignUp({ email: person.email!, services: mine.map((s) => s.name) }, ip);
+}
+
+// ---- How did it go (part 2) ------------------------------------------------------------------------------------
+
+export const RATINGS = { good: 'Good', okay: 'Okay', bad: 'Not good' } as const;
+export const rateSchema = z.object({ rating: z.enum(['good', 'okay', 'bad']), comment: z.string().trim().max(2000).default('') });
+
+/** One click once it is closed, once per ticket. The rating and any comment go into the record's history too. */
+export async function rate(person: PortalPerson, ref: string, input: z.infer<typeof rateSchema>) {
+  await tx(async (db) => {
+    const t = await own(db, person, ref);
+    const [view] = await forPortal(db, person.id, t.ref);
+    if (!view.can.rate) throw conflict(view.rating ? 'You have already told us. Thank you.' : 'You can tell us how it went once it is closed.');
+    await db.query(`INSERT INTO portal_feedback (person_id, ${t.kind}_id, rating, comment) VALUES ($1, $2, $3, $4)`, [person.id, t.id, input.rating, input.comment]);
+    const log = t.kind === 'incident' ? logIncident : logRequest;
+    await log(db, t.id, null, 'update', `Rated in the portal: ${RATINGS[input.rating]}`, { rating: input.rating, by_requester: true });
+    if (input.comment) await log(db, t.id, null, 'comment', input.comment, { from_requester: true, person_id: person.id, rating: input.rating });
+  });
+  return ticket(person, ref);
+}
+
 // ---- Replies to the requester (staff side) ---------------------------------------------------------------------
 
 /**
@@ -312,8 +412,9 @@ export async function confirm(person: PortalPerson, ref: string, input: z.infer<
  * transaction. Nothing goes to someone who unsubscribed, has no email, or is no longer active.
  */
 export async function queueReply(db: Db, kind: 'incident' | 'request', recordId: number) {
-  // The portal shows a restricted or confidential record as its ref and status only, so a reply would never be read.
-  const { rows: rec } = await db.query(`SELECT ref, restricted OR classification = 'confidential' AS narrow FROM ${kind}s WHERE id = $1`, [recordId]);
+  // The portal shows a confidential record, or a restricted problem report, as its ref and status only (forPortal),
+  // so a reply would never be read. A restricted request is the requester's own and is shown.
+  const { rows: rec } = await db.query(`SELECT ref, ${kind === 'incident' ? 'restricted OR ' : ''}classification = 'confidential' AS narrow FROM ${kind}s WHERE id = $1`, [recordId]);
   if (rec[0]?.narrow) throw badRequest(`${rec[0].ref} is restricted or confidential, so the requester sees only its status: contact them directly instead`);
   const { rows } = await db.query(
     kind === 'incident'

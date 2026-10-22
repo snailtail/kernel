@@ -6,7 +6,7 @@ import { Client, ownerQuery, skip, startKernel, type Harness } from './harness.j
 
 const ok = (r: { status: number; body: unknown }) => assert.ok(r.status >= 200 && r.status < 300, `${r.status} ${JSON.stringify(r.body)}`);
 
-describe('self-service portal (#45, part 1)', { skip }, () => {
+describe('self-service portal (#45)', { skip }, () => {
   let k: Harness;
   let admin: Client, pm: Client, analyst: Client;
   let n: typeof import('../../src/notifications.js');
@@ -249,6 +249,81 @@ describe('self-service portal (#45, part 1)', { skip }, () => {
     assert.ok(req.activity.some((a: any) => a.body === 'March, please.' && a.data.from_requester));
   });
 
+  test('asking for something: the catalogue items people can answer, the same form check, the person as requester', async () => {
+    const c = eva;
+    const laptop = (await pm.post('/api/request-items', {
+      service: services.payroll, name: 'A new laptop', description: 'For new starters and broken machines.', approval: 'none',
+      form: [{ key: 'model', label: 'Model', type: 'choice', choices: ['13 inch', '15 inch'], required: true }, { key: 'why', label: 'Why', type: 'textarea' }],
+      fulfilment_tasks: [{ title: 'Order it', team_id: team }],
+    })).body.id;
+    const vmItem = (await pm.post('/api/request-items', { service: services.secret, name: 'Database access', form: [{ key: 'db', label: 'Database', type: 'ci', required: true }], fulfilment_tasks: [{ title: 'Grant', team_id: team }] })).body.id;
+    const list = (await c.get('/api/portal/catalogue')).body;
+    assert.ok(list.some((i: any) => i.id === laptop && i.service === 'Payroll'), 'under the catalogue name');
+    assert.ok(!list.some((i: any) => i.id === vmItem), 'a CI field needs Kernel: not in the portal');
+    assert.equal((await c.get(`/api/portal/catalogue/${vmItem}`)).status, 404);
+    assert.equal((await c.post('/api/portal/requests', { item_id: vmItem, answers: { db: services.secret } })).status, 404);
+    const item = (await c.get(`/api/portal/catalogue/${laptop}`)).body;
+    assert.deepEqual(item.form.map((f: any) => f.key), ['model', 'why']);
+    assert.ok(!('fulfilment_tasks' in item) && !('approval' in item), 'no internals');
+    assert.equal((await c.post('/api/portal/requests', { item_id: laptop, answers: { model: '17 inch' } })).status, 400, 'the same validator');
+    assert.equal((await c.post('/api/portal/requests', { item_id: laptop, answers: {} })).status, 400, 'required');
+    const t = await c.post('/api/portal/requests', { item_id: laptop, answers: { model: '13 inch', why: 'Mine is broken' } });
+    ok(t);
+    assert.equal(t.body.kind, 'request');
+    assert.equal(t.body.status_label, 'Being worked on');
+    const r = (await analyst.get(`/api/requests/${t.body.ref}`)).body;
+    assert.equal(r.requester.id, people.eva);
+    const created = r.activity.find((a: any) => a.kind === 'created');
+    assert.deepEqual([created.body, created.channel, created.data.via], ['Submitted in the portal', 'portal', 'portal']);
+    const { rows } = await ownerQuery('SELECT created_by FROM requests WHERE ref = $1', [t.body.ref]);
+    assert.equal(rows[0].created_by, null, 'no Kernel user logged it');
+    // Her own restricted request is hers to see, in full; a confidential one shows its status only.
+    await ownerQuery('UPDATE requests SET restricted = true, restricted_teams = $2 WHERE ref = $1', [t.body.ref, [team]]);
+    ok(await analyst.post(`/api/requests/${t.body.ref}/comments`, { body: 'The 13 inch model ships Monday.', to_requester: true }));
+    const mine = (await c.get(`/api/portal/tickets/${t.body.ref}`)).body;
+    assert.equal(mine.title, 'A new laptop for Eva Enduser');
+    assert.deepEqual(mine.updates.map((u: any) => u.body), ['The 13 inch model ships Monday.']);
+    await ownerQuery("UPDATE requests SET classification = 'confidential' WHERE ref = $1", [t.body.ref]);
+    assert.equal((await c.get(`/api/portal/tickets/${t.body.ref}`)).body.title, null);
+  });
+
+  test('service status: the organisation\'s public services and published news only, and a sign-up by mail', async () => {
+    const c = eva;
+    ok(await admin.put('/api/admin/status-page', { public_enabled: true, title: 'Acme status', reason: 'Public page' }));
+    ok(await pm.put(`/api/status/${services.mail}`, { status: 'degraded', publish: true }));
+    ok(await pm.post('/api/status/updates', { services: [services.mail], phase: 'investigating', status: 'degraded', message: 'Mail is slow to arrive. We are on it.', public: true }));
+    ok(await pm.post('/api/status/updates', { services: [services.mail], phase: 'identified', message: 'Internal: the relay queue on mx2 is full.', public: false }));
+    const s = (await c.get('/api/portal/status')).body;
+    assert.deepEqual(s.services, [{ name: 'Email', description: '', status: 'degraded' }]);
+    assert.deepEqual(s.updates.map((u: any) => [u.phase, u.message, u.services]), [['investigating', 'Mail is slow to arrive. We are on it.', ['Email']]]);
+    assert.ok(!JSON.stringify(s).includes(services.mail) && !JSON.stringify(s).includes('mx2'), 'no CI refs, nothing unpublished');
+    assert.equal(s.sign_up, true);
+    assert.equal((await c.get('/api/portal/me')).body.status, true);
+    ok(await c.post('/api/portal/status/subscribe'));
+    const { rows } = await ownerQuery('SELECT pending_ci_ids, confirmed_at FROM status_subscribers WHERE email = $1', ['eva@example.org']);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].confirmed_at, null, 'confirmed by mail like every sign-up');
+  });
+
+  test('how did it go: one click once it is closed, once per ticket, and the satisfaction tile', async () => {
+    const c = eva;
+    const tickets = (await c.get('/api/portal/tickets')).body;
+    const closed = tickets.find((t: any) => t.status === 'closed');
+    const open = tickets.find((t: any) => t.status !== 'closed' && t.kind === 'problem_report');
+    assert.equal(closed.can.rate, true);
+    assert.equal(open.can.rate, false);
+    assert.equal((await c.post(`/api/portal/tickets/${open.ref}/rating`, { rating: 'good' })).status, 409);
+    const rated = (await c.post(`/api/portal/tickets/${closed.ref}/rating`, { rating: 'good', comment: 'Quick and friendly.' })).body;
+    assert.deepEqual([rated.rating, rated.can.rate], ['good', false]);
+    assert.equal((await c.post(`/api/portal/tickets/${closed.ref}/rating`, { rating: 'bad' })).status, 409, 'once per ticket');
+    const inc = (await analyst.get(`/api/incidents/${closed.ref}`)).body;
+    assert.ok(inc.activity.some((a: any) => a.body === 'Rated in the portal: Good'));
+    assert.ok(inc.activity.some((a: any) => a.body === 'Quick and friendly.' && a.data.from_requester));
+    const tile = (await pm.get('/api/dashboard/kpis')).body.tiles.find((t: any) => t.id === 'satisfaction');
+    assert.equal(tile.value, 100);
+    assert.match(tile.detail, /1 good, 0 okay, 0 not good, of 1 ratings/);
+  });
+
   test('signing out ends the session, and turning the module off closes the portal', async () => {
     const c = eva;
     ok(await c.post('/api/portal/auth/logout'));
@@ -257,5 +332,6 @@ describe('self-service portal (#45, part 1)', { skip }, () => {
     ok(await admin.put('/api/admin/modules', { portal: false, reason: 'Testing' }));
     assert.equal((await d.get('/api/portal/me')).status, 404);
     assert.equal((await d.get('/portal')).status, 404);
+    assert.ok(!(await pm.get('/api/dashboard/kpis')).body.tiles.some((t: any) => t.id === 'satisfaction'), 'the tile only with the portal on');
   });
 });

@@ -48,5 +48,13 @@ export async function portalRoutes(app: FastifyInstance) {
     scope.get('/api/portal/suggestions', signedIn(async (_person, req) => portal.suggest(String((req.query as { q?: string }).q ?? '').slice(0, 500))));
     scope.get<RefParams>('/api/portal/articles/:ref', signedIn(async (_person, req) => portal.article((req.params as { ref: string }).ref)));
     scope.post('/api/portal/problems', signedIn(async (person, req) => portal.reportProblem(person, portal.reportSchema.parse(req.body))));
+    // Part 2: asking for something, service status, and how it went.
+    scope.get('/api/portal/catalogue', signedIn(async () => portal.catalogue()));
+    scope.get('/api/portal/catalogue/:id', signedIn(async (_person, req) => portal.catalogueItem(Number((req.params as { id: string }).id))));
+    scope.post('/api/portal/requests', signedIn(async (person, req) => portal.order(person, portal.orderSchema.parse(req.body))));
+    scope.get('/api/portal/status', signedIn(async (person) => portal.serviceStatus(person)));
+    scope.post('/api/portal/status/subscribe', signedIn(async (person, req) => portal.subscribe(person, req.ip)));
+    scope.post<RefParams>('/api/portal/tickets/:ref/rating', signedIn(async (person, req) =>
+      portal.rate(person, (req.params as { ref: string }).ref, portal.rateSchema.parse(req.body))));
   });
 }

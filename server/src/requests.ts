@@ -534,36 +534,52 @@ async function openedTask(db: Db, r: { id: number; ref: string; title: string },
 export async function createRequest(user: User, input: z.infer<typeof createRequestSchema>) {
   authorize(user, 'request.write');
   const ref = await tx(async (db) => {
-    const { rows: items } = await db.query('SELECT * FROM request_items WHERE id = $1 AND active', [input.item_id]);
-    const item = items[0];
-    if (!item) throw notFound('Request item not found');
     const requester = await findRequester(db, user, input.requester);
-    const answers = await validateAnswers(db, item.form, input.answers);
-    const approvers = await resolveApprovers(db, item, requester, user.id);
-    const { rows } = await db.query(
-      `INSERT INTO requests (item_id, title, requester_id, answers, priority, approval, approver_ids, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, ref, title, item_id`,
-      [item.id, input.title ?? `${item.name} for ${requester.name}`, requester.id, JSON.stringify(answers), input.priority, item.approval, approvers, user.id],
-    );
-    const r = rows[0];
-    await logRequest(db, r.id, user.id, 'created', requester.user_id === user.id ? 'Submitted' : `Submitted for ${requester.name}`, { item: item.name, requester: requester.id });
-    await recomputeSla(db, r.id, { reselect: true }, 'request');
-    if (approvers.length) {
-      await db.query("UPDATE requests SET status = 'awaiting_approval' WHERE id = $1", [r.id]);
-      await slaOnTransition(db, r.id, 'awaiting_approval', new Date(), 'request');
-      await logRequest(db, r.id, null, 'status', 'Waiting for approval', { status: { from: 'submitted', to: 'awaiting_approval' } });
-      await notify(db, {
-        users: approvers, event: 'approval_needed', ref: r.ref, title: r.title, summary: `${requester.name} asks for ${item.name}. It waits for your approval.`,
-        path: `/requests/${r.ref}`, dedupe: `request-approval:${r.ref}`, actorId: user.id,
-      });
-    } else {
-      await startFulfilment(db, r, user.id);
-      await logRequest(db, r.id, null, 'status', 'In fulfilment', { status: { from: 'submitted', to: 'in_fulfilment' } });
-    }
-    await tellRequester(db, r.id, 'received', user.id);
-    return r.ref as string;
+    return submitRequest(db, input.item_id, requester, input.answers, { title: input.title, priority: input.priority, loggerId: user.id });
   });
   await runAutomation(ref, user);
   return getRequest(user, ref);
+}
+
+/**
+ * A request submitted: the item's form checked by validateAnswers, approvers resolved, then approval or fulfilment.
+ * Kernel's own form logs it as a user (loggerId); the portal (#45) as the requester themselves (loggerId null).
+ */
+export async function submitRequest(
+  db: Db,
+  itemId: number,
+  requester: { id: number; name: string; user_id: number | null },
+  rawAnswers: Record<string, unknown>,
+  opts: { title?: string; priority?: number; loggerId: number | null },
+) {
+  const { rows: items } = await db.query('SELECT * FROM request_items WHERE id = $1 AND active', [itemId]);
+  const item = items[0];
+  if (!item) throw notFound('Request item not found');
+  const answers = await validateAnswers(db, item.form, rawAnswers);
+  // No user id is 0: from the portal nobody is a logger who could also approve.
+  const approvers = await resolveApprovers(db, item, requester, opts.loggerId ?? 0);
+  const { rows } = await db.query(
+    `INSERT INTO requests (item_id, title, requester_id, answers, priority, approval, approver_ids, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, ref, title, item_id`,
+    [item.id, opts.title ?? `${item.name} for ${requester.name}`, requester.id, JSON.stringify(answers), opts.priority ?? 3, item.approval, approvers, opts.loggerId],
+  );
+  const r = rows[0];
+  const how = opts.loggerId === null ? 'Submitted in the portal' : requester.user_id === opts.loggerId ? 'Submitted' : `Submitted for ${requester.name}`;
+  await logRequest(db, r.id, opts.loggerId, 'created', how, { item: item.name, requester: requester.id, ...(opts.loggerId === null ? { via: 'portal' } : {}) });
+  await recomputeSla(db, r.id, { reselect: true }, 'request');
+  if (approvers.length) {
+    await db.query("UPDATE requests SET status = 'awaiting_approval' WHERE id = $1", [r.id]);
+    await slaOnTransition(db, r.id, 'awaiting_approval', new Date(), 'request');
+    await logRequest(db, r.id, null, 'status', 'Waiting for approval', { status: { from: 'submitted', to: 'awaiting_approval' } });
+    await notify(db, {
+      users: approvers, event: 'approval_needed', ref: r.ref, title: r.title, summary: `${requester.name} asks for ${item.name}. It waits for your approval.`,
+      path: `/requests/${r.ref}`, dedupe: `request-approval:${r.ref}`, actorId: opts.loggerId,
+    });
+  } else {
+    await startFulfilment(db, r, opts.loggerId);
+    await logRequest(db, r.id, null, 'status', 'In fulfilment', { status: { from: 'submitted', to: 'in_fulfilment' } });
+  }
+  await tellRequester(db, r.id, 'received', opts.loggerId);
+  return r.ref as string;
 }
 
 export async function updateRequestLean(user: User, ref: string, input: z.infer<typeof updateRequestSchema>): Promise<void> {
