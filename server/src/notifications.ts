@@ -33,6 +33,7 @@ export const EVENTS = {
   major_update_due: { label: 'A stakeholder update I am responsible for is overdue', email: false, chat: true },
   watched_update: { label: 'An update on something I watch', email: false, chat: false },
   service_status: { label: 'A status update on a service I follow', email: true, chat: true },
+  automation: { label: 'An automation rule tells me about a record, or a rule I own was turned off by its safety limit', email: false, chat: true },
 } as const;
 export type NotificationEvent = keyof typeof EVENTS;
 

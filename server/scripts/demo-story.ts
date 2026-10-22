@@ -21,6 +21,8 @@ import * as portal from '../src/portal.js';
 import * as problems from '../src/problems.js';
 import * as improvements from '../src/improvements.js';
 import * as requests from '../src/requests.js';
+import * as rules from '../src/rules.js';
+import { contextStore, currentContext } from '../src/context.js';
 import * as reviews from '../src/reviews.js';
 import * as setup from '../src/setup.js';
 import * as sla from '../src/sla.js';
@@ -397,6 +399,23 @@ export async function seedStory(p: People) {
   await incidents.transitionIncident(sara, printer.ref, { to: 'resolved', resolution_code: 'fixed', resolution: 'Replaced the worn pickup roller.' });
   await asMaria(() => portal.confirm(maria, printer.ref, { works: true, body: '' }));
   await asMaria(() => portal.rate(maria, printer.ref, { rating: 'good', comment: 'Fixed the same morning, thank you!' }));
+
+  // ---- Automation rules (#49): Anna's VIP rule has already run once; Erik proposed another ----
+  const asAnna = <T>(fn: () => Promise<T>) => contextStore.run({ ...currentContext(), userId: anna.id, userName: anna.display_name, actorType: 'user', channel: 'web', viewer: 'system' }, fn);
+  await asAnna(() => rules.saveRule(anna, null, {
+    name: 'VIP callers first', kind: 'incident', trigger: { type: 'created' }, conditions: [{ field: 'caller_vip', op: 'is', value: true }, { field: 'priority', op: 'gt', value: 2 }],
+    actions: [{ type: 'set_field', field: 'priority', value: 2 }, { type: 'add_comment', text: 'VIP caller: priority raised to P2. Call them back within the hour.' }],
+  }, true));
+  await asAnna(() => rules.saveRule(anna, null, {
+    name: 'Payments to the Payments team', kind: 'incident', trigger: { type: 'created' }, conditions: [{ field: 'service', op: 'is', value: webshop }, { field: 'team', op: 'is_empty' }],
+    actions: [{ type: 'assign_team', team_id: pay!.id }],
+  }));
+  await rules.proposeRule(erik, {
+    name: 'High priority on hold needs a reason', kind: 'incident', trigger: { type: 'status_changed', to: 'on_hold' }, conditions: [{ field: 'priority', op: 'lt', value: 3 }],
+    actions: [{ type: 'add_comment', text: 'A P1 or P2 is on hold: say what it waits for and when work resumes.' }],
+  });
+  await incidents.createIncident(sara, { title: 'Order history page is blank', description: 'Johan cannot see his orders in the shop admin.', impact: 3, urgency: 3, caller: { email: 'johan.ek@example.com' } });
+  await rules.processRuleRuns();
 
   // The pages the story queued (the worker is not running while seeding).
   await oncall.deliverPages();

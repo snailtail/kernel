@@ -42,6 +42,7 @@ import { peopleRoutes } from './routes/people.js';
 import { attachmentRoutes } from './routes/attachments.js';
 import { knowledgeRoutes } from './routes/knowledge.js';
 import { teamRoutes } from './routes/teams.js';
+import { ruleRoutes } from './routes/rules.js';
 import { viewRoutes } from './routes/views.js';
 import { bulkRoutes } from './routes/bulk.js';
 import { onCallRoutes } from './routes/oncall.js';
@@ -151,6 +152,7 @@ export async function buildApp(options: { logLevel?: string; serveWeb?: boolean 
   await app.register(attachmentRoutes);
   await app.register(knowledgeRoutes);
   await app.register(teamRoutes);
+  await app.register(ruleRoutes);
   await app.register(viewRoutes);
   await app.register(bulkRoutes);
   await app.register(onCallRoutes);

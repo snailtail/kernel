@@ -4,6 +4,7 @@
 import { checkAssigneeInTeam, validTeam } from './teams.js';
 import { deploymentSummary, postChangeStatus, pullRequestSummary } from './dev.js';
 import { z } from 'zod';
+import { queueRuleRuns } from './rule-queue.js';
 import { audienceOf, startNarrow } from './audience.js';
 import type { User } from './auth.js';
 import { audit } from './audit.js';
@@ -119,6 +120,7 @@ export async function logChange(db: Db, changeId: number, userId: number | null,
   ]);
   const { rows } = await db.query('UPDATE changes SET updated_at = now() WHERE id = $1 RETURNING ref', [changeId]);
   await audit(db, { entity_type: 'change', entity_ref: rows[0].ref, action: kind, changes: kind === 'comment' ? { body } : (data as Record<string, unknown>) });
+  await queueRuleRuns(db, 'change', rows[0].ref, kind, data);
 }
 
 /** Comparable form of a field value: timestamps as ISO strings, so '…+02:00' and a Date compare equal. */
@@ -228,7 +230,7 @@ export async function getChange(user: User, ref: string) {
     ),
     query('SELECT v.decision, v.comment, v.created_at, u.id AS user_id, u.display_name AS approver FROM change_votes v JOIN users u ON u.id = v.user_id WHERE v.change_id = $1 ORDER BY v.created_at', [c.id]),
     query(
-      `SELECT a.id, a.kind, a.body, a.data, a.channel, a.created_at, u.display_name AS user_name
+      `SELECT a.id, a.kind, a.body, a.data, a.channel, a.created_at, coalesce(u.display_name, (SELECT 'Rule ''' || r.name || '''' FROM automation_rules r WHERE a.channel = 'rule:' || r.id)) AS user_name
        FROM change_activity a LEFT JOIN users u ON u.id = a.user_id WHERE a.change_id = $1 ORDER BY a.created_at DESC, a.id DESC`,
       [c.id],
     ),

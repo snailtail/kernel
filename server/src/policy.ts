@@ -7,12 +7,12 @@ import { actionEnabled, moduleEnabled, moduleOfAction, MODULES } from './modules
 
 export const ACTIONS = [
   // Reading
-  'meta.read', 'problem.read', 'kedb.read', 'report.read', 'review.read', 'candidate.read', 'system.read', 'ci.read', 'incident.read', 'event.read', 'change.read', 'person.read', 'article.read', 'team.read', 'improvement.read', 'request.read',
+  'meta.read', 'problem.read', 'kedb.read', 'report.read', 'review.read', 'candidate.read', 'system.read', 'ci.read', 'incident.read', 'event.read', 'change.read', 'person.read', 'article.read', 'team.read', 'improvement.read', 'request.read', 'rule.read',
   // Problem work
   'problem.create', 'problem.update', 'problem.transition', 'problem.comment', 'problem.link', 'problem.watch',
-  'problem.assess', 'action.write', 'improvement.write', 'analysis.write', 'candidate.act', 'ci.annotate', 'incident.create', 'incident.update', 'event.ack', 'event.ingest', 'change.create', 'change.update', 'change.register', 'person.write', 'person.contact', 'attachment.add', 'article.write', 'article.publish', 'record.restrict', 'status.set', 'request.write',
+  'problem.assess', 'action.write', 'improvement.write', 'analysis.write', 'candidate.act', 'ci.annotate', 'incident.create', 'incident.update', 'event.ack', 'event.ingest', 'change.create', 'change.update', 'change.register', 'person.write', 'person.contact', 'attachment.add', 'article.write', 'article.publish', 'record.restrict', 'status.set', 'request.write', 'rule.propose',
   // Problem management decisions
-  'view.share', 'improvement.approve', 'request.manage',
+  'view.share', 'improvement.approve', 'request.manage', 'rule.manage',
   'problem.close', 'problem.reopen_closed', 'problem.flag_major', 'problem.accept_risk', 'problem.mark_duplicate',
   'candidate.rule', 'category.manage', 'system.manage', 'backup.read', 'ci.manage', 'incident.flag_major', 'event.manage', 'change.approve', 'change.manage', 'sla.manage', 'organisation.manage', 'article.publish_public', 'status.publish', 'record.redact',
   // Administration
@@ -22,9 +22,9 @@ export const ACTIONS = [
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 
-const READ: Action[] = ['request.read', 'improvement.read', 'meta.read', 'problem.read', 'kedb.read', 'report.read', 'review.read', 'candidate.read', 'system.read', 'ci.read', 'incident.read', 'event.read', 'change.read', 'person.read', 'article.read', 'team.read'];
-const WORK: Action[] = ['request.write', 'improvement.write', 'problem.create', 'problem.update', 'problem.transition', 'problem.comment', 'problem.link', 'problem.watch', 'problem.assess', 'action.write', 'analysis.write', 'candidate.act', 'candidate.report', 'record.ingest', 'ci.annotate', 'incident.create', 'incident.update', 'event.ack', 'event.ingest', 'change.create', 'change.update', 'change.register', 'person.write', 'person.contact', 'attachment.add', 'article.write', 'article.publish', 'record.restrict', 'status.set'];
-const MANAGE: Action[] = ['request.manage', 'improvement.approve', 'view.share', 'problem.close', 'problem.reopen_closed', 'problem.flag_major', 'problem.accept_risk', 'problem.mark_duplicate', 'candidate.rule', 'category.manage', 'system.manage', 'backup.read', 'ci.manage', 'ci.ingest', 'incident.flag_major', 'event.manage', 'change.approve', 'change.manage', 'sla.manage', 'organisation.manage', 'article.publish_public', 'status.publish', 'record.redact'];
+const READ: Action[] = ['rule.read', 'request.read', 'improvement.read', 'meta.read', 'problem.read', 'kedb.read', 'report.read', 'review.read', 'candidate.read', 'system.read', 'ci.read', 'incident.read', 'event.read', 'change.read', 'person.read', 'article.read', 'team.read'];
+const WORK: Action[] = ['rule.propose', 'request.write', 'improvement.write', 'problem.create', 'problem.update', 'problem.transition', 'problem.comment', 'problem.link', 'problem.watch', 'problem.assess', 'action.write', 'analysis.write', 'candidate.act', 'candidate.report', 'record.ingest', 'ci.annotate', 'incident.create', 'incident.update', 'event.ack', 'event.ingest', 'change.create', 'change.update', 'change.register', 'person.write', 'person.contact', 'attachment.add', 'article.write', 'article.publish', 'record.restrict', 'status.set'];
+const MANAGE: Action[] = ['rule.manage', 'request.manage', 'improvement.approve', 'view.share', 'problem.close', 'problem.reopen_closed', 'problem.flag_major', 'problem.accept_risk', 'problem.mark_duplicate', 'candidate.rule', 'category.manage', 'system.manage', 'backup.read', 'ci.manage', 'ci.ingest', 'incident.flag_major', 'event.manage', 'change.approve', 'change.manage', 'sla.manage', 'organisation.manage', 'article.publish_public', 'status.publish', 'record.redact'];
 const ADMIN: Action[] = ['user.manage', 'webhook.manage', 'audit.read', 'security.read', 'mfa.policy', 'team.manage', 'record.break_glass'];
 
 export const PERMISSIONS: Record<Role, ReadonlySet<Action>> = {
@@ -48,6 +48,7 @@ const MESSAGES: Partial<Record<Action, string>> = {
   'view.share': 'Only a problem manager can share a view with everyone',
   'improvement.approve': 'Only a problem manager can approve or reject improvements',
   'request.manage': 'Only a problem manager can change the request catalogue',
+  'rule.manage': 'Only a problem manager can write, enable or remove automation rules',
   'team.manage': 'Only an administrator can create, rename or remove teams',
   'change.approve': 'Only the change authority (problem managers and administrators) can approve changes',
 };

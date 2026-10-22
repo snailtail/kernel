@@ -68,12 +68,12 @@ export function ChangeList({ changes }: { changes: Record<string, unknown> }) {
 }
 
 const CHANNEL: Record<string, string> = { web: 'web', api: 'API', mcp: 'an AI agent (MCP)', system: 'Kernel', email: 'email', email_link: 'an approval link in email', chat_link: 'an approval link in chat', github: 'GitHub' };
-const ACTOR_FALLBACK: Record<string, string> = { system: 'Kernel', integration: 'An integration', anonymous: 'Someone' };
+const ACTOR_FALLBACK: Record<string, string> = { system: 'Kernel', integration: 'An integration', anonymous: 'Someone', rule: 'An automation rule' };
 
 const VERB: Record<string, string> = {
   create: 'created it', created: 'created it', comment: 'added a note', delete: 'deleted it', classification: 'changed its classification',
   reveal: 'revealed its confidential text', redact_history: 'removed sensitive text', key_moment: 'marked a key moment',
-  communication: 'posted a stakeholder update', page: 'paged on-call', source_override: 'overrode a synced value',
+  communication: 'posted a stakeholder update', rule_stopped: 'stopped: too many rules in a row on this record (the loop guard)', page: 'paged on-call', source_override: 'overrode a synced value',
 };
 const label = (k: string) => FIELD_LABEL[k] ?? k.replace(/_/g, ' ');
 const words = (v: unknown) => String(v).replace(/_/g, ' ');
@@ -136,7 +136,7 @@ export function HistoryPanel({ recordRef, version }: { recordRef: string; versio
                 <span>{describeEntry(e)}</span>
                 <span className="muted small">
                   <time dateTime={e.at} title={formatDate(e.at)}>{relativeTime(e.at)}</time>
-                  {e.channel !== 'system' && <>{' · via '}{CHANNEL[e.channel] ?? (e.channel || e.actor_type)}{e.token_prefix ? ` (${e.token_prefix}…)` : ''}</>}
+                  {e.channel !== 'system' && <>{' · via '}{e.channel.startsWith('rule:') ? 'an automation rule' : CHANNEL[e.channel] ?? (e.channel || e.actor_type)}{e.token_prefix ? ` (${e.token_prefix}…)` : ''}</>}
                 </span>
                 {e.reason && <span className="small">Reason: {e.reason}</span>}
               </button>

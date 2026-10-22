@@ -1560,3 +1560,38 @@ ol.timeline.compact li { grid-template-columns: 8rem 1fr; padding: 5px 0; font-s
 .portal-status.svc-degraded, .portal-status.svc-partial_outage { color: var(--s-known); background: var(--s-known-bg); }
 .portal-status.svc-major_outage { color: var(--danger); background: var(--danger-soft); }
 .portal-spaced { margin-top: 16px; }
+
+/* Automation rules (#49) */
+.rule-sentence strong { font-weight: 650; }
+.rule-table td:nth-child(2) { color: var(--text-2); }
+.rule-table .num, .rule-table th.num { text-align: right; white-space: nowrap; }
+.tag.rule-on { color: var(--success); background: var(--success-soft); }
+.tag.run-matched { color: var(--success); background: var(--success-soft); }
+.tag.run-failed { color: var(--danger); background: var(--danger-soft); }
+.tag.run-skipped { color: var(--warn); background: var(--s-known-bg); }
+.error-text { color: var(--danger); }
+.rule-lead { font-size: 15px; margin: 6px 0; }
+.rule-layout { display: grid; grid-template-columns: 1fr minmax(240px, 300px); gap: 16px; align-items: start; margin-top: 12px; }
+@media (max-width: 800px) { .rule-layout { grid-template-columns: 1fr; } }
+.rule-layout .banner, .page-head + .banner, .page-head + .hint-box { margin-bottom: 12px; }
+.other-rules li { padding: 4px 0; }
+.rule-editor { display: flex; flex-direction: column; gap: 12px; min-width: min(640px, 100%); }
+.rule-name { display: flex; flex-direction: column; gap: 4px; font-weight: 550; }
+.rule-part { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px 10px; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.rule-part legend { font-weight: 650; padding: 0 4px; }
+.rule-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.rule-line select, .rule-line textarea { max-width: 100%; }
+.rule-line textarea { flex: 1 1 260px; }
+.rule-multi { min-height: 5.5em; }
+.rule-part .btn-link { align-self: flex-start; }
+.rule-preview { margin: 0; padding: 10px 12px; background: var(--surface-2); border-radius: 8px; }
+.rule-editor .dry-run { margin: 0; }
+.dry-run-result p { margin: 6px 0; }
+.rule-editor .rule-line select { width: auto; flex: 0 1 auto; min-width: 0; }
+.rule-editor .rule-line select.rule-multi { flex: 1 1 180px; }
+.rule-layout aside { display: flex; flex-direction: column; gap: 16px; }
+.rule-layout aside .card { margin: 0; }
+@media (max-width: 700px) {
+  .rule-table th:nth-child(4), .rule-table td:nth-child(4), .rule-table th:nth-child(5), .rule-table td:nth-child(5) { display: none; }
+  .rule-table td:first-child { min-width: 7em; }
+}

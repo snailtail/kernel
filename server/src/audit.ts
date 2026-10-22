@@ -220,7 +220,8 @@ export async function queryAudit(f: Partial<z.infer<typeof auditQuerySchema>> & 
     where.push(sql.replace('?', `$${params.length}`));
   };
   // Names come from users (an erased user shows as "deleted user #id"); IP and user agent from audit_context while kept.
-  const actorName = "coalesce(nullif(a.actor_name, ''), u.display_name, CASE WHEN a.actor_user_id IS NOT NULL THEN 'deleted user #' || a.actor_user_id END)";
+  // An automation rule (#49) is named by its current name: "Rule 'Payroll routing'".
+  const actorName = "coalesce(nullif(a.actor_name, ''), u.display_name, CASE WHEN a.actor_user_id IS NOT NULL THEN 'deleted user #' || a.actor_user_id END, CASE WHEN a.actor_type = 'rule' THEN 'Rule ''' || coalesce(rl.name, '#' || substr(a.channel, 6)) || '''' END)";
   if (f.actor) add(`${actorName} ILIKE ?`, `%${f.actor}%`);
   if (f.actor_type) add('a.actor_type = ?', f.actor_type);
   if (f.entity_type) add('a.entity_type = ?', f.entity_type);
@@ -244,6 +245,7 @@ export async function queryAudit(f: Partial<z.infer<typeof auditQuerySchema>> & 
             coalesce(nullif(a.ip, ''), x.ip) AS ip, coalesce(nullif(a.user_agent, ''), x.user_agent) AS user_agent, a.request_id,
             a.entity_type, a.entity_ref, a.action, a.changes, a.reason
      FROM audit_log a LEFT JOIN users u ON u.id = a.actor_user_id AND u.erased_at IS NULL LEFT JOIN audit_context x ON x.audit_id = a.id
+     LEFT JOIN automation_rules rl ON a.actor_type = 'rule' AND a.channel = 'rule:' || rl.id
      ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY a.id DESC LIMIT $${params.length}`,
     params,
   );

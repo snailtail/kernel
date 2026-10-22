@@ -45,6 +45,8 @@ const ArticlePage = lazy(() => import('./pages/Knowledge').then((m) => ({ defaul
 const ServiceReportPage = lazy(() => import('./pages/ServiceReport').then((m) => ({ default: m.ServiceReportPage })));
 const StatusBoardPage = lazy(() => import('./pages/StatusBoard').then((m) => ({ default: m.StatusBoardPage })));
 const TeamsPage = lazy(() => import('./pages/Teams').then((m) => ({ default: m.TeamsPage })));
+const RulesPage = lazy(() => import('./pages/Rules').then((m) => ({ default: m.RulesPage })));
+const RulePage = lazy(() => import('./pages/Rules').then((m) => ({ default: m.RulePage })));
 const PeoplePage = lazy(() => import('./pages/People').then((m) => ({ default: m.PeoplePage })));
 const PersonPage = lazy(() => import('./pages/People').then((m) => ({ default: m.PersonPage })));
 const AuditPage = lazy(() => import('./pages/Audit').then((m) => ({ default: m.AuditPage })));
@@ -157,6 +159,8 @@ export function App() {
             <Route path="/service-status" element={<StatusBoardPage />} />
             <Route path="/services/:ref/report" element={<ServiceReportPage />} />
             <Route path="/teams" element={<TeamsPage />} />
+            <Route path="/rules" element={<RulesPage />} />
+            <Route path="/rules/:id" element={<RulePage />} />
             <Route path="/people" element={<PeoplePage />} />
             <Route path="/people/:id" element={<PersonPage />} />
             <Route path="/actions" element={<ActionsPage />} />

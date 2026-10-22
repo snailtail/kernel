@@ -6,7 +6,7 @@ import type { Meta, User } from './api';
 import { canEdit, isManager } from './session';
 
 export type Module = keyof Meta['modules'];
-export type IconName = 'home' | 'events' | 'incidents' | 'status' | 'candidates' | 'problems' | 'kedb' | 'changes' | 'actions' | 'improvements' | 'requests' | 'knowledge' | 'review' | 'pir' | 'dashboard' | 'reports' | 'services' | 'cmdb' | 'teams' | 'people' | 'help' | 'admin';
+export type IconName = 'home' | 'events' | 'incidents' | 'status' | 'candidates' | 'problems' | 'kedb' | 'changes' | 'actions' | 'improvements' | 'requests' | 'knowledge' | 'review' | 'pir' | 'dashboard' | 'reports' | 'services' | 'cmdb' | 'teams' | 'people' | 'rules' | 'help' | 'admin';
 export type BadgeKey = 'my_work' | 'events' | 'incidents' | 'kedb' | 'actions' | 'reviews' | 'requests';
 
 export interface NavItem {
@@ -65,6 +65,7 @@ export const NAV: NavGroup[] = [
       { to: '/services', label: 'Services & SLAs', icon: 'services', hint: 'Service catalogue and service levels', module: 'sla', key: 'l', match: ['/services/'] },
       { to: '/cis', label: 'Configuration items', icon: 'cmdb', hint: 'CMDB: CIs, relationships and groups', module: 'cmdb', key: 'i', match: ['/cis/'] },
       { to: '/teams', label: 'Teams', icon: 'teams', module: 'incident' },
+      { to: '/rules', label: 'Automation rules', icon: 'rules', hint: 'When / if / then: routing, priorities, reminder notes', module: 'incident', match: ['/rules/'] },
       { to: '/people', label: 'People & organisations', icon: 'people', module: 'incident', match: ['/people/'] },
     ],
   },

@@ -31,6 +31,7 @@ export const icons = {
   knowledge: <Icon><path d="M12 6.5C10 5 7 4.5 4 5v13c3-.5 6 0 8 1.5 2-1.5 5-2 8-1.5V5c-3-.5-6 0-8 1.5Z" /><path d="M12 6.5V19" /></Icon>,
   status: <Icon><path d="M3 12h4l2-5 4 10 2-5h6" /><circle cx="12" cy="12" r="10" /></Icon>,
   teams: <Icon><circle cx="12" cy="7" r="3" /><circle cx="5" cy="10" r="2.2" /><circle cx="19" cy="10" r="2.2" /><path d="M7 20a5 5 0 0 1 10 0" /><path d="M1.5 19a3.6 3.6 0 0 1 5-3.2" /><path d="M22.5 19a3.6 3.6 0 0 0-5-3.2" /></Icon>,
+  rules: <Icon><path d="M4 6h9" /><path d="M4 12h6" /><path d="M4 18h9" /><path d="M17 4l-2 5h4l-3 6" /></Icon>,
   people: <Icon><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20a6.5 6.5 0 0 1 13 0" /><path d="M16 4.5a3.5 3.5 0 0 1 0 7" /><path d="M18.5 14.5A6.5 6.5 0 0 1 21.5 20" /></Icon>,
   search: <Icon><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></Icon>,
   help: <Icon><circle cx="12" cy="12" r="9" /><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3" /><path d="M12 17h.01" /></Icon>,

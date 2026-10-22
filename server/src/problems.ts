@@ -2,6 +2,7 @@
 // enforce the same rules, permissions and audit trail.
 import { assertMayWriteText, forgetExists, onlyTitleMatches, textFilterSql } from './confidential.js';
 import { z } from 'zod';
+import { queueRuleRuns } from './rule-queue.js';
 import type pg from 'pg';
 import type { User } from './auth.js';
 import { afterCommit, query, tx } from './db.js';
@@ -142,6 +143,7 @@ export async function logActivity(db: Db, problemId: number, userId: number, kin
   const p = rows[0];
   // The unified audit trail (#57): same transaction, full before/after values.
   await audit(db, { entity_type: 'problem', entity_ref: p?.ref ?? String(problemId), action: kind, changes: kind === 'comment' ? { body } : { ...(data as object), ...(body && kind !== 'update' ? { summary: body } : {}) } });
+  if (p) await queueRuleRuns(db, 'problem', p.ref, kind, data);
   // People: watchers hear about notes and status changes (in-app by default), assignees about assignments.
   if (p && (kind === 'comment' || kind === 'status')) {
     const { rows: watchers } = await db.query('SELECT user_id FROM problem_watchers WHERE problem_id = $1', [problemId]);
@@ -262,7 +264,7 @@ export async function getProblem(ref: string) {
       [problem.id],
     ),
     query(
-      `SELECT a.id, a.kind, a.body, a.data, a.channel, a.created_at, u.display_name AS user_name
+      `SELECT a.id, a.kind, a.body, a.data, a.channel, a.created_at, coalesce(u.display_name, (SELECT 'Rule ''' || r.name || '''' FROM automation_rules r WHERE a.channel = 'rule:' || r.id)) AS user_name
        FROM problem_activity a LEFT JOIN users u ON u.id = a.user_id WHERE a.problem_id = $1 ORDER BY a.created_at DESC, a.id DESC`,
       [problem.id],
     ),
