@@ -27,9 +27,10 @@ test('the groups follow the process: respond, improve, learn, then the directory
   }
 });
 
-test('with only problem management on, the menu shows Improve and Learn', () => {
+test('with only problem management on, the menu shows Improve, Learn and the automation rules', () => {
   const groups = navFor(user('analyst'), meta({ incident: false, change: false, event: false, cmdb: false, sla: false, knowledge: false }));
-  assert.deepEqual(groups.map((g) => g.id), ['improve', 'learn']);
+  assert.deepEqual(groups.map((g) => g.id), ['improve', 'learn', 'directory']);
+  assert.deepEqual(groups.find((g) => g.id === 'directory')!.items.map((i) => i.to), ['/rules'], 'rules apply to problems too');
   assert.ok(!groups.flatMap((g) => g.items).some((i) => i.to === '/changes'));
   assert.ok(!navFor(user('analyst'), meta({})).flatMap((g) => g.items).some((i) => i.to === '/requests'), 'service requests only when the module is on');
   assert.ok(navFor(user('analyst'), meta({ request: true })).flatMap((g) => g.items).some((i) => i.to === '/requests'));
