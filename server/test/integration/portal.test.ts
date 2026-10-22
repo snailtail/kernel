@@ -121,8 +121,11 @@ describe('self-service portal (#45, part 1)', { skip }, () => {
 
   test('report a problem: services from the organisation and the catalogue, a fixed priority, the person as caller', async () => {
     const c = eva;
+    // An organisation's service without a public name stays internal; with one, it shows under that name.
+    assert.deepEqual((await c.get('/api/portal/services')).body.map((s: any) => s.name), ['Payroll']);
+    ok(await pm.put(`/api/status/${services.mail}/public`, { public: true, public_name: 'Email' }));
     const svc = (await c.get('/api/portal/services')).body.map((s: any) => s.name).sort();
-    assert.deepEqual(svc, ['Mail', 'Payroll']);
+    assert.deepEqual(svc, ['Email', 'Payroll']);
     assert.equal((await c.post('/api/portal/problems', { service: services.secret, what: 'Billing is down', affected: 'me' })).status, 400);
     const t = await c.post('/api/portal/problems', { service: services.mail, what: 'My mail does not arrive\nSince this morning nothing comes in.', affected: 'many' });
     ok(t);

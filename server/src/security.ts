@@ -152,6 +152,8 @@ export async function securityStatus(): Promise<{ checks: SecurityCheck[] }> {
              AND c.relkind IN ('r', 'p', 'v', 'm') AND has_table_privilege(r.oid, c.oid, 'SELECT')) AS public_tables
            FROM pg_roles r WHERE r.rolname = $1`, [config.reportingDbUser]),
   ]);
+  const { rows: ssoRows } = await query("SELECT value FROM settings WHERE key = 'sso'");
+  const sso = (ssoRows[0]?.value ?? {}) as { enabled?: boolean; trust_email_claim?: boolean };
   const usedPct = Math.round((attachmentUse.bytes / attachmentUse.quota_bytes) * 100);
   // Key rotation (#63): which keys are in use, and whether any is missing from the keyring.
   const usage = await keyUsage();
@@ -176,6 +178,14 @@ export async function securityStatus(): Promise<{ checks: SecurityCheck[] }> {
   const https = config.secureCookies || /^https:\/\//i.test(config.publicUrl ?? '');
   return {
     checks: [
+      ...(sso.enabled ? [{
+        id: 'sso_email',
+        label: 'Single sign-on email addresses',
+        ok: sso.trust_email_claim !== true,
+        detail: sso.trust_email_claim === true
+          ? 'Email addresses without email_verified are trusted. The portal signs people in by email and new accounts are linked to people by it: make sure the provider never lets users set their own address (for Entra, use a verified claim or a single-tenant app).'
+          : 'Only email addresses the provider marks as verified (email_verified: true) identify a person.',
+      }] : []),
       {
         id: 'https',
         label: 'HTTPS',

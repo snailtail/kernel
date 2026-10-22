@@ -3,7 +3,7 @@ import { api } from '../api';
 import { askReason } from './Ask';
 import { useTeams } from '../pages/Teams';
 
-interface Sso { enabled: boolean; issuer: string; client_id: string; has_secret: boolean; scopes: string; groups_claim: string; role_map: { group: string; role: string }[]; team_map: { group: string; team_id: number }[]; default_role: string | null; local_login: 'all' | 'admins'; label: string; trust_idp_mfa: boolean; mfa_acr_values: string[]; redirect_uri: string }
+interface Sso { enabled: boolean; issuer: string; client_id: string; has_secret: boolean; scopes: string; groups_claim: string; role_map: { group: string; role: string }[]; team_map: { group: string; team_id: number }[]; default_role: string | null; local_login: 'all' | 'admins'; label: string; trust_idp_mfa: boolean; mfa_acr_values: string[]; trust_email_claim?: boolean; redirect_uri: string }
 
 /** Administration: OpenID Connect (Entra ID, Google, Keycloak, Authentik, Okta…) and Cloudflare Access (#41). */
 export function SsoAdminSection() {
@@ -29,7 +29,7 @@ export function SsoAdminSection() {
         enabled: form.enabled, issuer: form.issuer, client_id: form.client_id, ...(form.client_secret ? { client_secret: form.client_secret } : {}),
         scopes: form.scopes, groups_claim: form.groups_claim, role_map: pairs(form.roles).map(([group, role]) => ({ group, role })),
         team_map: pairs(form.teamsMap).map(([group, team]) => ({ group, team_id: Number(team) || teams.find((t) => t.name === team)?.id })),
-        default_role: form.default_role || null, local_login: form.local_login, label: form.label, trust_idp_mfa: form.trust_idp_mfa, mfa_acr_values: form.mfa_acr_values, reason,
+        default_role: form.default_role || null, local_login: form.local_login, label: form.label, trust_idp_mfa: form.trust_idp_mfa, mfa_acr_values: form.mfa_acr_values, trust_email_claim: !!form.trust_email_claim, reason,
       });
       setMessage('Saved.');
     } catch (err) {
@@ -62,6 +62,8 @@ export function SsoAdminSection() {
         <label className="full">Group = team, one per line<textarea rows={2} value={form.teamsMap} onChange={set('teamsMap')} placeholder={'servicedesk = Service desk'} /></label>
         <label>People in no mapped group<select value={form.default_role ?? ''} onChange={(e) => setForm({ ...form, default_role: e.target.value || null })}><option value="">May not sign in</option><option value="viewer">Viewer</option><option value="analyst">Analyst</option></select></label>
         <label>Password sign-in<select value={form.local_login} onChange={(e) => setForm({ ...form, local_login: e.target.value as 'all' | 'admins' })}><option value="all">Still allowed for everyone</option><option value="admins">Administrators only (break-glass)</option></select></label>
+        <label className="check full"><input type="checkbox" checked={!!form.trust_email_claim} onChange={(e) => setForm({ ...form, trust_email_claim: e.target.checked })} /> Trust email addresses the provider does not mark as verified (no email_verified claim)</label>
+        {form.trust_email_claim && <p className="warn-box full">The self-service portal signs people in by their email, and new accounts are linked to people by it. Only turn this on if users can never set their own address at the provider. For Microsoft Entra, use a verified email claim or a single-tenant app instead.</p>}
         <label className="check full"><input type="checkbox" checked={form.trust_idp_mfa} onChange={(e) => setForm({ ...form, trust_idp_mfa: e.target.checked })} /> Accept the provider's second factor when the ID token proves it ("mfa" in amr, or one of these acr values); otherwise Kernel asks for its own</label>
         <label className="full">Accepted acr values<input value={(form.mfa_acr_values ?? []).join(', ')} onChange={(e) => setForm({ ...form, mfa_acr_values: e.target.value.split(/[\s,]+/).filter(Boolean) })} placeholder="e.g. urn:okta:loa:2fa:any" /></label>
         <div className="actions full"><button type="button" className="btn primary" onClick={save}>Save</button></div>

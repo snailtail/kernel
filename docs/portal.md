@@ -14,8 +14,12 @@ not in People cannot use the portal. Two ways in:
 
 - **Single sign-on**, if it is set up (Administration → Single sign-on). The portal uses the same provider and the
   same redirect URL; the provider's email address must belong to exactly one active person. Groups and roles do not
-  matter here and no Kernel account is created. As for Kernel's own sign-in, an address the provider marks as not
-  verified (`email_verified: false`) is refused.
+  matter here and no Kernel account is created. The address must be **verified** by the provider
+  (`email_verified: true`): the email alone decides who someone becomes, and some providers let users set their own
+  (Microsoft Entra's "nOAuth"). For a provider that never sends the claim, an administrator can turn on **Trust email
+  addresses the provider does not mark as verified** (`trust_email_claim`, off by default, flagged in the security
+  status); `email_verified: false` is always refused. For Entra, prefer a verified email claim or a single-tenant app.
+  The same rule decides which person a new SSO account is linked to.
 - **A link by email**, if Kernel can send mail (`SMTP_URL`). The person enters their address and gets a link that
   works **once, for 15 minutes**. It is 256 random bits, of which Kernel stores only the SHA-256, and it is made when
   the mail is sent. Opening the link only shows a **Sign in** button; pressing it signs in (mail scanners open every
@@ -53,8 +57,8 @@ marked `from_requester`.
 
 ## Reporting a problem
 
-Three questions: what it is about (the person's organisation's services and the services in the catalogue, or
-"I am not sure"), what is happening, and who is affected. The answer to the last one sets impact and urgency through
+Three questions: what it is about (the person's organisation's services under their public name, and the services in
+the catalogue, or "I am not sure"; a service with no name meant for people outside IT is left out), what is happening, and who is affected. The answer to the last one sets impact and urgency through
 a fixed mapping, never chosen by the person:
 
 | Who is affected | Impact | Urgency |

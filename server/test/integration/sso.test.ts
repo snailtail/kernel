@@ -213,6 +213,53 @@ describe('single sign-on (#41)', { skip }, () => {
     assert.ok(!withTotp.cookies.some((c) => c.startsWith('kernel_session=')));
     await query("UPDATE users SET mfa_enabled_at = NULL, mfa_secret = NULL WHERE username = 'analyst'");
   });
+
+  test('only a verified email identifies a person: the portal and linking accounts to people (#45)', async () => {
+    const { query } = await import('../../src/db.js');
+    const sso = (trust: boolean) => admin.put('/api/admin/sso', {
+      enabled: true, issuer, client_id: 'kernel', role_map: [{ group: 'kernel-pm', role: 'problem_manager' }], default_role: null, trust_email_claim: trust, reason: 'Testing email trust',
+    });
+    assert.equal((await sso(false)).status, 200);
+    assert.equal((await admin.put('/api/admin/modules', { portal: true, reason: 'Portal SSO' })).status, 200);
+    const pia = (await analyst.post('/api/people', { name: 'Pia Portal', email: 'pia@example.com' })).body.id;
+    /** The portal's sign-in through the provider; where it lands and whether a portal session was made. */
+    const portal = async (who: Record<string, unknown>) => {
+      identity = who;
+      const start = await fetch(`${k.base}/api/portal/auth/sso`, { redirect: 'manual' });
+      assert.equal(start.status, 302);
+      const auth = new URL(start.headers.get('location')!);
+      const code = Math.random().toString(36).slice(2);
+      pending.set(code, { challenge: auth.searchParams.get('code_challenge')!, nonce: auth.searchParams.get('nonce')! });
+      const res = await fetch(`${k.base}/api/auth/sso/callback?code=${code}&state=${auth.searchParams.get('state')}&iss=${encodeURIComponent(issuer)}`, { redirect: 'manual' });
+      return { to: res.headers.get('location'), session: res.headers.getSetCookie().some((c) => c.startsWith('kernel_portal=')) };
+    };
+    const refused = { to: '/portal?signin=unknown', session: false };
+    const accepted = { to: '/portal', session: true };
+    assert.deepEqual(await portal({ sub: 'p-1', email: 'pia@example.com' }), refused, 'no email_verified, not trusted');
+    assert.deepEqual(await portal({ sub: 'p-1', email: 'pia@example.com', email_verified: false }), refused);
+    assert.deepEqual(await portal({ sub: 'p-1', email: 'Pia@Example.com', email_verified: true }), accepted);
+    const { rows: ev } = await query("SELECT count(*)::int AS n FROM security_events WHERE action = 'portal.sso_refused'");
+    assert.ok(ev[0].n >= 2);
+    // A new account is linked to its person only by a verified address.
+    const linked = async (sub: string, email: string, verified?: boolean) => {
+      const person = (await analyst.post('/api/people', { name: `Person ${sub}`, email })).body.id;
+      await signIn({ sub, email, name: sub, groups: ['kernel-pm'], ...(verified === undefined ? {} : { email_verified: verified }) });
+      return (await query('SELECT user_id FROM people WHERE id = $1', [person])).rows[0].user_id !== null;
+    };
+    assert.equal(await linked('l-1', 'l1@example.com'), false, 'no claim, not trusted');
+    assert.equal(await linked('l-2', 'l2@example.com', true), true);
+    // An administrator may trust providers that never send the claim; false is still refused.
+    assert.equal((await sso(true)).status, 200);
+    assert.deepEqual(await portal({ sub: 'p-1', email: 'pia@example.com' }), accepted);
+    assert.deepEqual(await portal({ sub: 'p-1', email: 'pia@example.com', email_verified: false }), refused);
+    assert.equal(await linked('l-3', 'l3@example.com'), true);
+    assert.equal(await linked('l-4', 'l4@example.com', false), false);
+    const check = (await admin.get('/api/admin/security')).body.checks.find((c: any) => c.id === 'sso_email');
+    assert.equal(check.ok, false);
+    assert.equal((await sso(false)).status, 200);
+    assert.equal((await admin.get('/api/admin/security')).body.checks.find((c: any) => c.id === 'sso_email').ok, true);
+    assert.ok(pia);
+  });
 });
 
 describe('test-only hooks', () => {
