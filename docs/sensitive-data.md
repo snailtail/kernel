@@ -55,7 +55,7 @@ Administrators set the policy under **Administration → Security status → Sen
 
 ## Removing text that is already stored
 
-Secrets written before the scanner existed, or personal details that should not have been written at all, can be removed from a record afterwards. Open the record, go to **Visibility → Remove sensitive text…**, and choose what to remove:
+Secrets written before the scanner existed, or personal details that should not have been written at all, can be removed from a record afterwards: a problem, incident, change, improvement or service request. Open the record, go to **Visibility → Remove sensitive text…**, and choose what to remove:
 
 - everything the scanner recognises as a secret;
 - an exact text, such as a name or an account number;
@@ -65,10 +65,11 @@ Only problem managers and administrators can do this. It requires step-up and a 
 
 The text is replaced with `[REDACTED]` everywhere on the record:
 
-- its fields;
-- comments and history entries, including the old and new values in them;
-- actions and analyses;
+- its fields, including a request's form answers;
+- comments and history entries, including the old and new values in them and the requester's replies from the portal;
+- actions and analyses, and a request's task notes;
 - link notes and URLs;
+- the requester's feedback comment from the portal;
 - text attachments.
 
 Kernel's own copies are cleaned too: in-app notifications and stored webhook payloads. Queued webhook payloads therefore go out clean.
