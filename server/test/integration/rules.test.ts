@@ -30,6 +30,8 @@ describe('automation rules (#49)', { skip }, () => {
   };
 
   before(async () => {
+    // Outgoing webhooks keep their signing secret encrypted.
+    process.env.KERNEL_SECRET_KEY = 'test-secret-key-0123456789abcdefghijklmnop';
     k = await startKernel();
     [admin, pm, analyst, analyst2, viewer] = await Promise.all([k.login('admin'), k.login('pm'), k.login('analyst'), k.login('analyst2'), k.login('viewer')]);
     db = await import('../../src/db.js');
@@ -44,7 +46,10 @@ describe('automation rules (#49)', { skip }, () => {
     await admin.put(`/api/teams/${ops.id}/members`, { members: [{ user_id: ids.analyst2 }] });
     cat = (await db.query('SELECT id FROM categories ORDER BY id LIMIT 1')).rows[0].id;
   });
-  after(() => k?.close());
+  after(async () => {
+    delete process.env.KERNEL_SECRET_KEY;
+    await k?.close();
+  });
 
   test('only allowlisted fields, operators and actions are accepted; only problem managers write rules', async () => {
     assert.equal((await pm.post('/api/rules', rule({ conditions: [{ field: 'description', op: 'is', value: 'x' }] }))).status, 400, 'free text is never a condition');
@@ -233,6 +238,95 @@ describe('automation rules (#49)', { skip }, () => {
     const log = ok(await analyst2.get(`/api/rules/${r.id}`));
     assert.ok(!log.runs.some((x: any) => x.record_ref === i.ref), 'the run log hides runs on records the reader cannot see');
     assert.ok(ok(await analyst.get(`/api/rules/${r.id}`)).runs.some((x: any) => x.record_ref === i.ref), 'positive control');
+    await disableAll();
+  });
+
+  // ---- Part 2: time triggers, recommended rules, the webhook action ----
+
+  const recommended = async (key: string) => (await pm.get('/api/rules')).body.rules.find((r: any) => r.recommended === key);
+  const backdate = (table: string, fk: string, ref: string, kind: string, minutes: number) =>
+    db.query(`UPDATE ${table} SET created_at = created_at - $3 * interval '1 minute' WHERE ${fk} = (SELECT id FROM ${kind} WHERE ref = $1) AND ($2 = '' OR kind = $2)`, [ref, table.endsWith('activity') ? 'status' : '', minutes]);
+
+  test('time triggers are allowlisted like everything else', async () => {
+    assert.equal((await pm.post('/api/rules', rule({ trigger: { type: 'in_status_for', status: 'parked', hours: 2 } }))).status, 400, 'an unknown status');
+    assert.equal((await pm.post('/api/rules', rule({ trigger: { type: 'in_status_for', status: 'new', hours: 0.1 } }))).status, 400, 'at least 15 minutes');
+    assert.equal((await pm.post('/api/rules', rule({ trigger: { type: 'due_in', hours: 24 } }))).status, 400, 'incidents have no due actions');
+    assert.equal((await pm.post('/api/rules', rule({ actions: [{ type: 'notify', roles: ['owner'] }] }))).status, 400, 'the owner only with a due date');
+    assert.equal((await pm.post('/api/rules', rule({ actions: [{ type: 'notify', roles: ['approvers'] }] }))).status, 400, 'incidents have no approvers');
+    assert.equal((await pm.post('/api/rules', rule({ actions: [{ type: 'webhook', webhook_id: 99999 }] }))).status, 400, 'only a webhook that is set up');
+    assert.equal((await pm.post('/api/rules', rule({ actions: [{ type: 'webhook', url: 'https://evil.example' }] }))).status, 400, 'never a URL of its own');
+  });
+
+  test('recommended rules ship disabled; closing resolved incidents respects "still a problem" and runs once per window', async () => {
+    const rec = (await pm.get('/api/rules')).body.rules.filter((r: any) => r.recommended);
+    assert.deepEqual(rec.map((r: any) => r.recommended).sort(), ['close_resolved', 'escalate_p1', 'remind_actions', 'remind_approver']);
+    assert.ok(rec.every((r: any) => !r.enabled), 'all off until someone turns them on');
+    const close = await recommended('close_resolved');
+    ok(await pm.put(`/api/rules/${close.id}/enabled`, { enabled: true }));
+    const resolve = async (title: string) => {
+      const i = ok(await analyst.post('/api/incidents', { title }), 201);
+      ok(await analyst.post(`/api/incidents/${i.ref}/transition`, { to: 'resolved', resolution_code: 'fixed', resolution: 'Restarted it' }));
+      return i.ref as string;
+    };
+    const old = await resolve('Resolved a week ago');
+    const fresh = await resolve('Resolved just now');
+    const reopened = await resolve('Caller said still a problem');
+    await backdate('incident_activity', 'incident_id', old, 'incidents', 6 * 24 * 60);
+    // The caller said "still a problem" in the portal (#45), and it was resolved again later.
+    await db.query(`INSERT INTO incident_activity (incident_id, kind, body, data, channel, created_at)
+      SELECT id, 'status', 'The caller says it is still a problem (portal)', '{"from": "resolved", "to": "in_progress", "by_requester": true}', 'portal', now() - interval '8 days' FROM incidents WHERE ref = $1`, [reopened]);
+    await backdate('incident_activity', 'incident_id', reopened, 'incidents', 6 * 24 * 60);
+    assert.equal(await rules.scanTimeTriggers(), 2, 'the week-old ones, not the fresh one');
+    assert.equal(await rules.scanTimeTriggers(), 0, 'a second scan queues nothing: once per record and window');
+    await run();
+    assert.equal(ok(await analyst.get(`/api/incidents/${old}`)).status, 'closed');
+    assert.equal(ok(await analyst.get(`/api/incidents/${fresh}`)).status, 'resolved');
+    assert.equal(ok(await analyst.get(`/api/incidents/${reopened}`)).status, 'resolved', 'the caller said it was still a problem: a person closes it');
+    assert.equal((await db.query("SELECT status FROM rule_runs WHERE rule_id = $1 AND record_ref = $2", [close.id, reopened])).rows[0].status, 'not_matched');
+    await disableAll();
+  });
+
+  test('reminders go to the people the record names, once: the action owner and the team lead', async () => {
+    const remind = await recommended('remind_actions');
+    const escalate = await recommended('escalate_p1');
+    ok(await pm.put(`/api/rules/${remind.id}/enabled`, { enabled: true }));
+    ok(await pm.put(`/api/rules/${escalate.id}/enabled`, { enabled: true }));
+    const p = ok(await analyst.post('/api/problems', { title: 'Backups fail on Sundays' }), 201);
+    const tomorrow = new Date(Date.now() + 86400_000).toISOString().slice(0, 10);
+    ok(await analyst.post(`/api/problems/${p.ref}/actions`, { title: 'Ask the vendor', owner_id: ids.analyst2, due_date: tomorrow }), 201);
+    ok(await analyst.post(`/api/problems/${p.ref}/actions`, { title: 'Later', owner_id: ids.analyst2, due_date: new Date(Date.now() + 10 * 86400_000).toISOString().slice(0, 10) }), 201);
+    const p1 = ok(await analyst2.post('/api/incidents', { title: 'Payroll down', impact: 1, urgency: 1, team_id: hr.id }), 201);
+    const p1late = ok(await analyst2.post('/api/incidents', { title: 'Payroll slow', impact: 1, urgency: 1, team_id: hr.id }), 201);
+    await db.query("UPDATE incidents SET created_at = now() - interval '20 minutes' WHERE ref = $1", [p1late.ref]);
+    await rules.scanTimeTriggers();
+    await rules.scanTimeTriggers();
+    await run();
+    const told = (await db.query("SELECT user_id, ref, summary FROM notifications WHERE event = 'automation' AND ref = ANY($1)", [[p.ref, p1.ref, p1late.ref]])).rows;
+    assert.deepEqual(told.filter((t: any) => t.ref === p.ref).map((t: any) => t.user_id), [ids.analyst2], 'the owner, once, for the action due tomorrow only');
+    assert.match(told.find((t: any) => t.ref === p.ref).summary, new RegExp(`due ${tomorrow}`));
+    assert.deepEqual(told.filter((t: any) => t.ref === p1late.ref).map((t: any) => t.user_id), [ids.analyst], 'the lead of HR-Systems after 15 minutes');
+    assert.ok(!told.some((t: any) => t.ref === p1.ref), 'not before');
+    await disableAll();
+  });
+
+  test('the webhook action sends to a configured webhook through the signed outbox, with no record text', async () => {
+    const hook = ok(await admin.post('/api/webhooks', { name: 'Chat ops', url: 'https://hooks.example.com/kernel', events: ['problem.created'] }), 201);
+    assert.equal((await pm.post('/api/rules', rule({ actions: [{ type: 'webhook', webhook_id: hook.id }], extra: 1 }))).status, 400);
+    const listed = ok(await pm.get('/api/rules'));
+    assert.deepEqual(listed.webhooks, [{ id: hook.id, name: 'Chat ops' }], 'managers pick from the webhooks by name');
+    assert.deepEqual(ok(await analyst.get('/api/rules')).webhooks, [], 'others do not see them');
+    await enabled(rule({ name: 'To chat', conditions: [{ field: 'priority', op: 'is', value: 1 }], actions: [{ type: 'webhook', webhook_id: hook.id }] }));
+    const open = ok(await analyst.post('/api/incidents', { title: 'Checkout down', description: 'SECRET-TEXT', impact: 1, urgency: 1 }), 201);
+    const hidden = ok(await analyst.post('/api/incidents', { title: 'HR breach', impact: 1, urgency: 1 }), 201);
+    ok(await analyst.put(`/api/records/${hidden.ref}/visibility`, { restricted: true, reason: 'HR case' }));
+    await run();
+    const sent = (await db.query("SELECT payload FROM webhook_deliveries WHERE webhook_id = $1 AND event = 'rule.matched' ORDER BY id", [hook.id])).rows.map((r: any) => r.payload);
+    const a = sent.find((x: any) => x.record.ref === open.ref);
+    assert.equal(a.record.title, 'Checkout down');
+    assert.equal(a.rule.name, 'To chat');
+    assert.ok(!JSON.stringify(sent).includes('SECRET-TEXT'));
+    const b = sent.find((x: any) => x.record.ref === hidden.ref);
+    assert.deepEqual(Object.keys(b.record).sort(), ['kind', 'ref', 'restricted', 'url'], 'a restricted record leaves only as its ref');
     await disableAll();
   });
 

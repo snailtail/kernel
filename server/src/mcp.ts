@@ -1176,7 +1176,8 @@ function buildServer(user: User, scopes?: string[]) {
     'propose_rule',
     `Propose an automation rule. It lands disabled and marked "proposed by agent"; a problem manager reviews it and enables it in Kernel (an agent never can). Dry-run it first.
 Conditions read only structured fields: incident: ${rules.CONDITION_FIELDS.incident.join(', ')}; problem: ${rules.CONDITION_FIELDS.problem.join(', ')}; change: ${rules.CONDITION_FIELDS.change.join(', ')}; request: ${rules.CONDITION_FIELDS.request.join(', ')}. Operators: is, is_not, in (a list), is_empty (no value), gt, lt (priority). Values: service and ci are CI refs, team, assignee and category ids, priority 1-5.
-Actions: set_field (priority, category, team or assignee where the kind has it), assign_team, add_comment (an internal note), notify (user and team ids), transition (incident only: closed from resolved, in_progress from on hold).`,
+Triggers: created, field_changed (field), status_changed (to), in_status_for (status, hours from 0.25), due_in (hours; problem follow-up actions).
+Actions: set_field (priority, category, team or assignee where the kind has it), assign_team, add_comment (an internal note), notify (user and team ids, and roles: assignee, team_lead, approvers for requests, owner of the due action), transition (incident only: closed from resolved, in_progress from on hold), webhook (the id of an outgoing webhook an administrator set up).`,
     rules.ruleSchema.shape,
     false,
     (args) => rules.proposeRule(user, args),

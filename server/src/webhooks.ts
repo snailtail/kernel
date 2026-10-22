@@ -28,6 +28,8 @@ export const EVENTS = [
   'status.published',
   // A service request's webhook task (#44): only to the webhook a catalogue item names for that task, with a callback.
   'request.task',
+  // An automation rule's webhook action (#49): only to the webhook the rule names.
+  'rule.matched',
 ] as const;
 export type EventType = (typeof EVENTS)[number];
 export const FORMATS = ['json', 'slack', 'teams_workflow', 'teams'] as const;
@@ -84,6 +86,18 @@ export async function enqueue(db: Db, event: EventType, problemId: number, actor
   for (const h of hooks) {
     await db.query('INSERT INTO webhook_deliveries (webhook_id, event, payload) VALUES ($1, $2, $3)', [h.id, event, JSON.stringify(payload)]);
   }
+}
+
+/**
+ * Queues one delivery to one named webhook (a request task, a rule's action) if it is still active, in the caller's
+ * transaction; the worker signs and sends it like every other delivery. Returns whether it was queued.
+ */
+export async function enqueueTo(db: Db, webhookId: number, event: EventType, payload: object) {
+  const { rowCount } = await db.query(
+    'INSERT INTO webhook_deliveries (webhook_id, event, payload) SELECT id, $2, $3 FROM webhooks WHERE id = $1 AND active',
+    [webhookId, event, JSON.stringify(payload)],
+  );
+  return !!rowCount;
 }
 
 /** Formats the payload for the webhook's target (generic JSON, Slack or Teams incoming webhooks). */
