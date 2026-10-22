@@ -8,6 +8,8 @@
 //   notifications, the audit trail) with an analyst's permissions, so it can never do more than an analyst.
 // - Loops stop: a chain is at most 3 rules deep, a rule fires at most once per record in 10 minutes, and a rule that
 //   takes more than 50 actions in a minute is turned off (the circuit breaker) and its owner is told.
+// - Time triggers ("resolved for 5 days", "an action is due within a day") are found by a scan every minute and queued
+//   in the same rule_runs, once per record and window, so a reminder is never repeated.
 // Event rules (#30) and candidate rules (#5/#31) stay where they are; the list shows them as their own sections.
 import { z } from 'zod';
 import { audit } from './audit.js';
@@ -20,6 +22,9 @@ import { notify } from './notifications.js';
 import { authorize, can } from './policy.js';
 import { onRulesQueued, RULE_KINDS, type RuleKind } from './rule-queue.js';
 import { moduleEnabled } from './modules.js';
+import { audienceOf } from './audience.js';
+import { config } from './config.js';
+import { enqueueTo } from './webhooks.js';
 import type { Db } from './problems.js';
 
 export { RULE_KINDS, type RuleKind };
@@ -50,14 +55,25 @@ const SOURCES: Partial<Record<RuleKind, readonly string[]>> = {
 type FieldType = 'ci' | 'category' | 'team' | 'user' | 'priority' | 'enum' | 'bool';
 const FIELD_TYPES: Record<string, FieldType> = {
   service: 'ci', ci: 'ci', priority: 'priority', category: 'category', team: 'team', assignee: 'user', status: 'enum', source: 'enum', caller_vip: 'bool', is_major: 'bool',
+  requester_reopened: 'bool',
 };
 /** The structured fields a condition may read, per kind. Never free text. */
 export const CONDITION_FIELDS: Record<RuleKind, readonly string[]> = {
-  incident: ['service', 'ci', 'priority', 'category', 'team', 'assignee', 'status', 'caller_vip', 'source', 'is_major'],
+  // requester_reopened: the caller said "still a problem" in the portal (#45) at some point.
+  incident: ['service', 'ci', 'priority', 'category', 'team', 'assignee', 'status', 'caller_vip', 'source', 'is_major', 'requester_reopened'],
   problem: ['service', 'ci', 'priority', 'category', 'team', 'assignee', 'status', 'is_major'],
   change: ['service', 'ci', 'team', 'assignee', 'status', 'source'],
   request: ['service', 'priority', 'status', 'caller_vip'],
 };
+/** Who a notification can go to besides named people and teams: people the record itself names. */
+export const NOTIFY_ROLES: Record<RuleKind, readonly string[]> = {
+  incident: ['assignee', 'team_lead'],
+  problem: ['assignee', 'team_lead', 'owner'],
+  change: ['assignee', 'team_lead'],
+  request: ['approvers'],
+};
+/** The kinds whose follow-ups have due dates (problem actions), for the due_in trigger. */
+const DUE_KINDS: readonly RuleKind[] = ['problem'];
 const OPERATORS: Record<FieldType, readonly string[]> = {
   ci: ['is', 'is_not', 'in', 'is_empty'],
   category: ['is', 'is_not', 'in', 'is_empty'],
@@ -94,6 +110,9 @@ const triggerSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('created') }).strict(),
   z.object({ type: z.literal('field_changed'), field: z.string().max(30) }).strict(),
   z.object({ type: z.literal('status_changed'), to: z.string().max(30).optional() }).strict(),
+  // Time triggers: in a status for a while (from 15 minutes to a year), or a follow-up action due within a while.
+  z.object({ type: z.literal('in_status_for'), status: z.string().max(30), hours: z.number().min(0.25).max(8760).multipleOf(0.25) }).strict(),
+  z.object({ type: z.literal('due_in'), hours: z.number().min(1).max(720).int() }).strict(),
 ]);
 const id = z.number().int().positive();
 const actionSchema = z.discriminatedUnion('type', [
@@ -101,9 +120,13 @@ const actionSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('assign_team'), team_id: id }).strict(),
   // An internal note in the rule author's fixed words, never a reply to the requester.
   z.object({ type: z.literal('add_comment'), text: z.string().trim().min(1).max(2000) }).strict(),
-  z.object({ type: z.literal('notify'), users: z.array(id).max(20).default([]), teams: z.array(id).max(10).default([]) }).strict()
-    .refine((a) => a.users.length + a.teams.length > 0, 'Say who to notify'),
+  z.object({
+    type: z.literal('notify'), users: z.array(id).max(20).default([]), teams: z.array(id).max(10).default([]),
+    roles: z.array(z.enum(['assignee', 'team_lead', 'approvers', 'owner'])).max(4).default([]),
+  }).strict().refine((a) => a.users.length + a.teams.length + a.roles.length > 0, 'Say who to notify'),
   z.object({ type: z.literal('transition'), to: z.string().max(30) }).strict(),
+  // Only to an outgoing webhook an administrator has already set up (#11): signed, retried, SSRF-safe.
+  z.object({ type: z.literal('webhook'), webhook_id: id }).strict(),
 ]);
 export const ruleSchema = z.object({
   name: z.string().trim().min(1).max(120),
@@ -125,6 +148,8 @@ function checkAllowed(r: RuleInput) {
   const kind = r.kind;
   if (r.trigger.type === 'field_changed' && !TRIGGER_FIELDS[kind].includes(r.trigger.field)) fail(`A ${kind} rule cannot start when ${r.trigger.field} changes. Choose one of: ${TRIGGER_FIELDS[kind].join(', ')}`);
   if (r.trigger.type === 'status_changed' && r.trigger.to !== undefined && !STATUSES[kind].includes(r.trigger.to)) fail(`A ${kind} has no status ${r.trigger.to}`);
+  if (r.trigger.type === 'in_status_for' && !STATUSES[kind].includes(r.trigger.status)) fail(`A ${kind} has no status ${r.trigger.status}`);
+  if (r.trigger.type === 'due_in' && !DUE_KINDS.includes(kind)) fail(`Only ${DUE_KINDS.join(', ')} rules can start from a due date (follow-up actions)`);
   for (const c of r.conditions) {
     if (!CONDITION_FIELDS[kind].includes(c.field)) fail(`A ${kind} rule cannot check ${c.field}. It can check: ${CONDITION_FIELDS[kind].join(', ')}`);
     const type = FIELD_TYPES[c.field];
@@ -152,6 +177,12 @@ function checkAllowed(r: RuleInput) {
       if (a.field === 'team' && a.value === null) fail('Choose a team');
     }
     if (a.type === 'assign_team' && !SETTABLE[kind].includes('team')) fail(`A ${kind} has no team`);
+    if (a.type === 'notify') {
+      for (const role of a.roles) {
+        if (!NOTIFY_ROLES[kind].includes(role)) fail(`A ${kind} has no ${role.replace('_', ' ')} to notify`);
+        if (role === 'owner' && r.trigger.type !== 'due_in') fail('The owner is the owner of the action that is due: only with a due date trigger');
+      }
+    }
     if (a.type === 'transition' && TRANSITIONS[kind]?.[a.to] === undefined) {
       fail(kind === 'incident' ? 'A rule can only close a resolved incident or take one back from on hold' : `A rule cannot move a ${kind}`);
     }
@@ -193,6 +224,9 @@ async function checkRefs(r: RuleInput) {
   if (c.length) throw badRequest(`No such category: ${c.join(', ')}`);
   const ci = await missing('SELECT ref AS id FROM configuration_items WHERE ref = ANY($1)', [...cis]);
   if (ci.length) throw badRequest(`No such CI or service: ${ci.join(', ')}`);
+  const hooks = r.actions.flatMap((a) => (a.type === 'webhook' ? [a.webhook_id] : []));
+  const w = await missing('SELECT id FROM webhooks WHERE id = ANY($1) AND active', hooks);
+  if (w.length) throw badRequest(`No such active outgoing webhook: ${w.join(', ')}. An administrator sets webhooks up first.`);
 }
 
 /** CI refs are kept upper case, so a condition matches however it was typed. */
@@ -217,6 +251,7 @@ export interface Facts {
   assignee: number | null;
   status: string;
   caller_vip: boolean;
+  requester_reopened: boolean;
   source: string | null;
   is_major: boolean;
 }
@@ -228,7 +263,8 @@ const CIS_OF: Record<RuleKind, string> = {
   request: 'SELECT c.id, c.ref, c.class FROM request_items i JOIN configuration_items c ON c.id = i.service_id WHERE i.id = t.item_id',
 };
 const FACTS: Record<RuleKind, string> = {
-  incident: `t.priority, t.category_id AS category, t.team_id AS team, t.assignee_id AS assignee, t.source, t.is_major, coalesce(p.is_vip, false) AS caller_vip
+  incident: `t.priority, t.category_id AS category, t.team_id AS team, t.assignee_id AS assignee, t.source, t.is_major, coalesce(p.is_vip, false) AS caller_vip,
+             EXISTS (SELECT 1 FROM incident_activity x WHERE x.incident_id = t.id AND x.kind = 'status' AND x.data->>'by_requester' = 'true' AND x.data->>'to' = 'in_progress') AS requester_reopened
              FROM incidents t LEFT JOIN people p ON p.id = t.caller_id`,
   problem: 't.priority, t.category_id AS category, t.team_id AS team, t.assignee_id AS assignee, NULL AS source, t.is_major, false AS caller_vip FROM problems t',
   change: 'NULL::int AS priority, NULL::int AS category, t.team_id AS team, t.assignee_id AS assignee, t.source, false AS is_major, false AS caller_vip FROM changes t',
@@ -278,7 +314,7 @@ async function factsOf(kind: RuleKind, where: { refs?: string[]; days?: number }
     out.push({
       ref: r.ref, title: r.title, ci: kind === 'request' ? [] : cis.filter((c) => c.class !== 'service').map((c) => c.ref),
       service: withServices ? (kind === 'request' ? cis.map((c) => c.ref) : await servicesOf(cis.map((c) => c.id))) : [],
-      priority: r.priority, category: r.category, team: r.team, assignee: r.assignee, status: r.status, caller_vip: !!r.caller_vip, source: r.source, is_major: !!r.is_major,
+      priority: r.priority, category: r.category, team: r.team, assignee: r.assignee, status: r.status, caller_vip: !!r.caller_vip, requester_reopened: !!r.requester_reopened, source: r.source, is_major: !!r.is_major,
     });
   }
   return out;
@@ -310,7 +346,7 @@ const SELECT = `SELECT r.*, o.display_name AS owner, c.display_name AS created_b
 
 const shape = (r: any) => ({
   id: r.id, name: r.name, kind: r.kind, trigger: r.trigger, conditions: r.conditions, actions: r.actions, enabled: r.enabled,
-  proposed_by_agent: r.proposed_by_agent, owner_id: r.owner_id, owner: r.owner, created_by: r.created_by_name, tripped_at: r.tripped_at,
+  proposed_by_agent: r.proposed_by_agent, recommended: r.recommended, owner_id: r.owner_id, owner: r.owner, created_by: r.created_by_name, tripped_at: r.tripped_at,
   created_at: r.created_at, updated_at: r.updated_at, sentence: describeRule(r),
 });
 
@@ -321,7 +357,7 @@ export async function listRules(user: User) {
     `${SELECT.replace('SELECT r.*', `SELECT r.*, (SELECT count(*)::int FROM rule_runs x WHERE x.rule_id = r.id AND x.status = 'matched' AND x.finished_at > now() - interval '30 days') AS matched_30d,
        (SELECT count(*)::int FROM rule_runs x WHERE x.rule_id = r.id AND x.status = 'failed' AND x.finished_at > now() - interval '30 days') AS failed_30d,
        (SELECT max(finished_at) FROM rule_runs x WHERE x.rule_id = r.id AND x.status = 'matched') AS last_matched_at`)}
-     ORDER BY r.kind, r.name`,
+     ORDER BY r.recommended IS NOT NULL AND NOT r.enabled, r.kind, r.name`,
   );
   const others: { kind: string; label: string; count: number; enabled: number; path: string }[] = [];
   if (moduleEnabled('event') && can(user.role, 'event.read')) {
@@ -332,7 +368,10 @@ export async function listRules(user: User) {
     const { rows: c } = await query('SELECT count(*)::int AS n, count(*) FILTER (WHERE enabled)::int AS on FROM candidate_rules');
     others.push({ kind: 'candidate', label: 'Candidate rules: which patterns suggest a problem', count: c[0].n, enabled: c[0].on, path: '/candidates?tab=rules' });
   }
-  return { rules: rows.map((r) => ({ ...shape(r), matched_30d: r.matched_30d, failed_30d: r.failed_30d, last_matched_at: r.last_matched_at })), other_rules: others, can_manage: can(user.role, 'rule.manage') };
+  const manage = can(user.role, 'rule.manage');
+  // The outgoing webhooks a rule may send to, by name only, for those who write rules.
+  const webhooks = manage ? (await query('SELECT id, name FROM webhooks WHERE active ORDER BY name')).rows : [];
+  return { rules: rows.map((r) => ({ ...shape(r), matched_30d: r.matched_30d, failed_30d: r.failed_30d, last_matched_at: r.last_matched_at })), other_rules: others, can_manage: manage, webhooks };
 }
 
 /** A rule with its latest runs (only those on records the reader may see). */
@@ -485,6 +524,9 @@ export async function dryRunRule(user: User, raw: unknown) {
 // ---- Plain sentences -------------------------------------------------------------------------
 
 const words = (s: string) => s.replace(/_/g, ' ');
+/** 0.25 → "15 minutes", 24 → "1 day", 120 → "5 days". */
+export const duration = (hours: number) =>
+  hours < 1 ? `${Math.round(hours * 60)} minutes` : hours % 24 === 0 ? `${hours / 24} day${hours === 24 ? '' : 's'}` : `${hours} hour${hours === 1 ? '' : 's'}`;
 const OP_WORDS: Record<string, string> = { is: 'is', is_not: 'is not', in: 'is one of', is_empty: 'is empty', gt: 'is greater than', lt: 'is less than' };
 
 /** "When an incident is created, if service is SVC000003, then assign to team #4" – names are resolved in the UI. */
@@ -492,7 +534,9 @@ export function describeRule(r: { kind: string; trigger: any; conditions: any[];
   const a = r.kind === 'incident' ? 'an incident' : `a ${r.kind}`;
   const when = r.trigger.type === 'created' ? `${a} is created`
     : r.trigger.type === 'field_changed' ? `the ${words(r.trigger.field)} of ${a} changes`
-      : r.trigger.to ? `${a} moves to ${words(r.trigger.to)}` : `${a} changes status`;
+      : r.trigger.type === 'in_status_for' ? `${a} has been ${words(r.trigger.status)} for ${duration(r.trigger.hours)}`
+        : r.trigger.type === 'due_in' ? `an action on ${a} is due within ${duration(r.trigger.hours)}`
+          : r.trigger.to ? `${a} moves to ${words(r.trigger.to)}` : `${a} changes status`;
   const value = (v: unknown) => (Array.isArray(v) ? v.join(', ') : String(v));
   const ifs = r.conditions.map((c) => `${words(c.field)} ${OP_WORDS[c.op]}${c.op === 'is_empty' ? '' : ` ${value(c.value)}`}`);
   const thens = r.actions.map((x) => {
@@ -500,8 +544,9 @@ export function describeRule(r: { kind: string; trigger: any; conditions: any[];
       case 'set_field': return x.value === null ? `clear ${x.field}` : `set ${x.field} to ${x.field === 'priority' ? `P${x.value}` : `#${x.value}`}`;
       case 'assign_team': return `assign to team #${x.team_id}`;
       case 'add_comment': return 'add an internal note';
-      case 'notify': return `notify ${[...x.users.map((u: number) => `person #${u}`), ...x.teams.map((t: number) => `team #${t}`)].join(', ')}`;
+      case 'notify': return `notify ${[...(x.roles ?? []).map((r: string) => `the ${words(r)}`), ...x.users.map((u: number) => `person #${u}`), ...x.teams.map((t: number) => `team #${t}`)].join(', ')}`;
       case 'transition': return `move it to ${words(x.to)}`;
+      case 'webhook': return `send it to webhook #${x.webhook_id}`;
       default: return x.type;
     }
   });
@@ -521,7 +566,50 @@ const actorOf = (rule: { id: number; name: string }): User => ({
   id: null as unknown as number, username: `rule:${rule.id}`, display_name: `Rule '${rule.name}'`, email: '', role: RULE_ROLE, preferences: {}, must_change_password: false, mfa_enabled: true,
 });
 
-async function runAction(kind: RuleKind, ref: string, a: RuleAction, rule: { id: number; name: string }, runId: number, facts: Facts) {
+/** The record's page, for notifications and webhook payloads. */
+const pathOf = (kind: RuleKind, ref: string) => `/${kind === 'incident' ? 'incidents' : `${kind}s`}/${ref}`;
+
+/** One line saying why the rule fired, with no record text. */
+function why(rule: { name: string }, event: any) {
+  if (event?.type === 'due_in') return `Rule '${rule.name}': a follow-up action is due ${event.due}.`;
+  if (event?.type === 'in_status_for') return `Rule '${rule.name}': ${words(event.status)} for ${duration(event.hours)}.`;
+  return `Rule '${rule.name}' matched.`;
+}
+
+/** The people a notify action reaches through the record: its assignee, its team's leads, approvers, an action's owner. */
+async function recipients(db: Db, kind: RuleKind, ref: string, a: Extract<RuleAction, { type: 'notify' }>, facts: Facts, event: any) {
+  const users: (number | null)[] = [...a.users];
+  const { rows: members } = await db.query('SELECT user_id FROM team_members WHERE team_id = ANY($1)', [a.teams]);
+  users.push(...members.map((x) => x.user_id));
+  for (const role of a.roles) {
+    if (role === 'assignee') users.push(facts.assignee);
+    if (role === 'owner') users.push(event?.owner_id ?? null);
+    if (role === 'team_lead' && facts.team) {
+      const { rows } = await db.query("SELECT user_id FROM team_members WHERE team_id = $1 AND role = 'lead'", [facts.team]);
+      users.push(...rows.map((x) => x.user_id));
+    }
+    if (role === 'approvers' && kind === 'request') {
+      const { rows } = await db.query('SELECT approver_ids FROM requests WHERE ref = $1', [ref]);
+      users.push(...(rows[0]?.approver_ids ?? []));
+    }
+  }
+  return users;
+}
+
+/**
+ * What a rule's webhook receives: the record as a ref, title, status and priority, never its text. A restricted record
+ * leaves Kernel only as its ref (#53), like the problem webhooks.
+ */
+async function webhookPayload(kind: RuleKind, ref: string, rule: { id: number; name: string }, facts: Facts, event: any) {
+  const a = await audienceOf(null, ref);
+  const url = config.publicUrl ? `${config.publicUrl.replace(/\/$/, '')}${pathOf(kind, ref)}` : null;
+  const base = { event: 'rule.matched', occurred_at: new Date().toISOString(), rule: { id: rule.id, name: rule.name }, trigger: event?.type ?? null };
+  return a.restricted
+    ? { ...base, record: { kind, ref, restricted: true, url }, summary: 'A restricted record matched a rule.' }
+    : { ...base, record: { kind, ref, title: facts.title, status: facts.status, priority: facts.priority, url }, summary: why(rule, event) };
+}
+
+async function runAction(kind: RuleKind, ref: string, a: RuleAction, rule: { id: number; name: string }, run: { id: number; event: any }, facts: Facts) {
   const actor = actorOf(rule);
   const fields = (field: string, value: number | null): Record<string, unknown> =>
     field === 'priority' ? (kind === 'request' ? { priority: value } : LEVELS[value!]) : { [{ category: 'category_id', team: 'team_id', assignee: 'assignee_id' }[field]!]: value };
@@ -548,13 +636,18 @@ async function runAction(kind: RuleKind, ref: string, a: RuleAction, rule: { id:
     case 'notify': {
       // Only people who may see the record are told (notify checks each one), and only its ref and title: never text.
       return tx(async (db) => {
-        const { rows } = await db.query('SELECT user_id FROM team_members WHERE team_id = ANY($1)', [a.teams]);
         const sent = await notify(db, {
-          users: [...a.users, ...rows.map((x) => x.user_id)], event: 'automation', ref, title: facts.title, summary: `Rule '${rule.name}' matched.`,
-          path: `/${kind === 'incident' ? 'incidents' : `${kind}s`}/${ref}`, dedupe: `rule:${rule.id}:${runId}`,
+          users: await recipients(db, kind, ref, a, facts, run.event), event: 'automation', ref, title: facts.title, summary: why(rule, run.event),
+          path: pathOf(kind, ref), dedupe: `rule:${rule.id}:${run.id}`,
         });
         return `${sent} notified`;
       });
+    }
+    case 'webhook': {
+      const payload = await webhookPayload(kind, ref, rule, facts, run.event);
+      const queued = await tx((db) => enqueueTo(db, a.webhook_id, 'rule.matched', payload));
+      if (!queued) throw new Error('The webhook is turned off or removed');
+      return 'queued';
     }
   }
 }
@@ -581,8 +674,15 @@ async function runOne(run: any) {
   }
   const [facts] = await factsOf(kind, { refs: [run.record_ref] }, needsServices(rule.conditions));
   if (!facts) return finish(run.id, 'skipped', 'The record no longer exists');
+  // A time trigger is checked again when it runs: the record may have moved on since the scan.
+  if (run.event.type === 'in_status_for' && facts.status !== run.event.status) return finish(run.id, 'skipped', `No longer ${words(run.event.status)}`);
+  if (run.event.type === 'due_in') {
+    const { rows: open } = await query("SELECT 1 FROM problem_actions WHERE id = $1 AND status = 'open' AND due_date = $2::date", [run.event.action_id, run.event.due]);
+    if (!open[0]) return finish(run.id, 'skipped', 'The action is done or its due date moved');
+  }
   if (!matches(rule.conditions, facts)) return finish(run.id, 'not_matched');
-  const { rows: recent } = await query(
+  // A time trigger fires once per window already (window_key); the 10-minute rule is for chains of changes.
+  const { rows: recent } = run.window_key ? { rows: [] } : await query(
     `SELECT 1 FROM rule_runs WHERE rule_id = $1 AND record_ref = $2 AND status = 'matched' AND finished_at > now() - $3 * interval '1 minute' AND id <> $4 LIMIT 1`,
     [rule.id, run.record_ref, REFIRE_MINUTES, run.id],
   );
@@ -600,7 +700,7 @@ async function runOne(run: any) {
   await contextStore.run(ruleContext(rule, run), async () => {
     for (const a of rule.actions as RuleAction[]) {
       try {
-        const note = await runAction(kind, run.record_ref, a, rule, run.id, facts);
+        const note = await runAction(kind, run.record_ref, a, rule, run, facts);
         results.push({ type: a.type, ok: true, ...(typeof note === 'string' ? { note } : {}) });
       } catch (err) {
         results.push({ type: a.type, ok: false, error: (err as Error).message.slice(0, 300) });
@@ -625,6 +725,62 @@ async function trip(rule: any, run: any) {
     });
   });
   logger.warn({ event: { dataset: 'kernel.rules', action: 'rule.tripped' }, rule: rule.id }, 'automation rule turned off by its circuit breaker');
+}
+
+// ---- Time triggers ---------------------------------------------------------------------------
+// #173: the scan queues into rule_runs like a change does; it moves with the shared outbox helper when that comes.
+
+const RECORD_TABLES: Record<RuleKind, { table: string; activity: string; fk: string }> = {
+  incident: { table: 'incidents', activity: 'incident_activity', fk: 'incident_id' },
+  problem: { table: 'problems', activity: 'problem_activity', fk: 'problem_id' },
+  change: { table: 'changes', activity: 'change_activity', fk: 'change_id' },
+  request: { table: 'requests', activity: 'request_activity', fk: 'request_id' },
+};
+/** At most this many runs per rule and scan; the rest come in the next minute. */
+const SCAN_BATCH = 200;
+
+/**
+ * Finds what the enabled time rules are waiting for and queues one run per record and window: the moment the record
+ * entered the status, or the action and its due date. One replica scans at a time (an advisory lock as the lease);
+ * the unique window key makes a second scan harmless anyway. Returns how many runs were queued.
+ */
+export async function scanTimeTriggers(): Promise<number> {
+  return tx(async (db) => {
+    const { rows: lock } = await db.query('SELECT pg_try_advisory_xact_lock(4949) AS ok');
+    if (!lock[0].ok) return 0;
+    const { rows: rules } = await db.query("SELECT id, kind, trigger FROM automation_rules WHERE enabled AND trigger->>'type' IN ('in_status_for', 'due_in')");
+    let queued = 0;
+    for (const r of rules) {
+      const kind = r.kind as RuleKind;
+      const t = RECORD_TABLES[kind];
+      const { rowCount } = (r.trigger.type === 'in_status_for'
+        ? await db.query(
+          // When it entered the status: its latest move there, or its creation if it never moved.
+          `INSERT INTO rule_runs (rule_id, kind, record_ref, event, window_key)
+           SELECT $1, $2, x.ref, jsonb_build_object('type', 'in_status_for', 'status', $3::text, 'hours', $4::numeric, 'since', x.since),
+                  'in:' || $3 || ':' || extract(epoch FROM x.since)::bigint
+           FROM (SELECT r.ref, coalesce((SELECT max(a.created_at) FROM ${t.activity} a WHERE a.${t.fk} = r.id AND a.kind = 'status'
+                                           AND coalesce(a.data->>'to', a.data->'status'->>'to') = $3), r.created_at) AS since
+                 FROM ${t.table} r WHERE r.status = $3) x
+           WHERE x.since <= now() - $4 * interval '1 hour'
+           ORDER BY x.since LIMIT ${SCAN_BATCH}
+           ON CONFLICT (rule_id, record_ref, window_key) WHERE window_key IS NOT NULL DO NOTHING`,
+          [r.id, kind, r.trigger.status, r.trigger.hours],
+        )
+        : await db.query(
+          `INSERT INTO rule_runs (rule_id, kind, record_ref, event, window_key)
+           SELECT $1, 'problem', p.ref, jsonb_build_object('type', 'due_in', 'hours', $2::int, 'action_id', a.id, 'owner_id', a.owner_id, 'due', a.due_date::text),
+                  'due:' || a.id || ':' || a.due_date::text
+           FROM problem_actions a JOIN problems p ON p.id = a.problem_id
+           WHERE a.status = 'open' AND a.due_date >= current_date AND a.due_date::timestamptz <= now() + $2 * interval '1 hour'
+           ORDER BY a.due_date LIMIT ${SCAN_BATCH}
+           ON CONFLICT (rule_id, record_ref, window_key) WHERE window_key IS NOT NULL DO NOTHING`,
+          [r.id, r.trigger.hours],
+        )) as { rowCount: number | null };
+      queued += rowCount ?? 0;
+    }
+    return queued;
+  });
 }
 
 let running: Promise<number> | null = null;
@@ -667,6 +823,8 @@ export function startRuleWorker(log: (msg: string) => void) {
   // Woken right after a change commits; the interval picks up what another replica queued or a crash left behind.
   onRulesQueued(() => setImmediate(run));
   setInterval(run, 5_000).unref();
+  // Time triggers are looked for every minute; what they queue runs right away.
+  setInterval(() => asWorker(() => scanTimeTriggers()).then((n) => n && run()).catch((err) => log(`automation time triggers failed: ${err.message}`)), 60_000).unref();
   // The log keeps what a rule did for a year; runs that did not match only for a week.
   setInterval(() => asWorker(() => query(
     "DELETE FROM rule_runs WHERE (status = 'not_matched' AND created_at < now() - interval '7 days') OR created_at < now() - interval '365 days'",

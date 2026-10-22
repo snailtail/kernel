@@ -1595,3 +1595,4 @@ ol.timeline.compact li { grid-template-columns: 8rem 1fr; padding: 5px 0; font-s
   .rule-table th:nth-child(4), .rule-table td:nth-child(4), .rule-table th:nth-child(5), .rule-table td:nth-child(5) { display: none; }
   .rule-table td:first-child { min-width: 7em; }
 }
+.rule-table td .btn.small { margin-left: 6px; }

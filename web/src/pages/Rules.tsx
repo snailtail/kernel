@@ -10,23 +10,25 @@ import { canEdit, useSession } from '../session';
 import { useTeams } from './Teams';
 
 type Kind = 'incident' | 'problem' | 'change' | 'request';
-type Trigger = { type: 'created' } | { type: 'field_changed'; field: string } | { type: 'status_changed'; to?: string };
+type Trigger = { type: 'created' } | { type: 'field_changed'; field: string } | { type: 'status_changed'; to?: string } | { type: 'in_status_for'; status: string; hours: number } | { type: 'due_in'; hours: number };
 type Value = string | number | boolean;
 interface Condition { field: string; op: string; value?: Value | Value[] }
 type Action =
   | { type: 'set_field'; field: string; value: number | null }
   | { type: 'assign_team'; team_id: number }
   | { type: 'add_comment'; text: string }
-  | { type: 'notify'; users: number[]; teams: number[] }
-  | { type: 'transition'; to: string };
+  | { type: 'notify'; users: number[]; teams: number[]; roles?: Role[] }
+  | { type: 'transition'; to: string }
+  | { type: 'webhook'; webhook_id: number };
+type Role = 'assignee' | 'team_lead' | 'approvers' | 'owner';
 interface RuleDraft { name: string; kind: Kind; trigger: Trigger; conditions: Condition[]; actions: Action[] }
 interface Rule extends RuleDraft {
-  id: number; enabled: boolean; proposed_by_agent: boolean; owner: string | null; created_by: string | null; tripped_at: string | null; updated_at: string;
+  id: number; enabled: boolean; proposed_by_agent: boolean; recommended: string | null; owner: string | null; created_by: string | null; tripped_at: string | null; updated_at: string;
   matched_30d?: number; failed_30d?: number; last_matched_at?: string | null;
 }
 interface Run { id: number; record_ref: string; event: Trigger; depth: number; status: string; detail: string; results: { type: string; ok: boolean; note?: string; error?: string }[]; created_at: string; finished_at: string | null }
 interface RuleDetail extends Rule { runs: Run[]; stats_30d: { matched: number; not_matched: number; skipped: number; failed: number } }
-interface RuleList { rules: Rule[]; other_rules: { kind: string; label: string; count: number; enabled: number; path: string }[]; can_manage: boolean }
+interface RuleList { rules: Rule[]; other_rules: { kind: string; label: string; count: number; enabled: number; path: string }[]; can_manage: boolean; webhooks: { id: number; name: string }[] }
 interface DryRun { days: number; checked: number; matched: number; latest: { ref: string; title: string }[]; note: string }
 
 // The allowlists, as the server has them (rules.ts); the server checks again.
@@ -42,27 +44,34 @@ const STATUSES: Record<Kind, string[]> = {
 };
 const SOURCES: Partial<Record<Kind, string[]>> = { incident: ['user', 'event', 'api', 'mcp', 'email', 'portal'], change: ['user', 'api', 'mcp', 'pipeline'] };
 const CONDITION_FIELDS: Record<Kind, string[]> = {
-  incident: ['service', 'ci', 'priority', 'category', 'team', 'assignee', 'status', 'caller_vip', 'source', 'is_major'],
+  incident: ['service', 'ci', 'priority', 'category', 'team', 'assignee', 'status', 'caller_vip', 'source', 'is_major', 'requester_reopened'],
   problem: ['service', 'ci', 'priority', 'category', 'team', 'assignee', 'status', 'is_major'],
   change: ['service', 'ci', 'team', 'assignee', 'status', 'source'],
   request: ['service', 'priority', 'status', 'caller_vip'],
 };
 const TRIGGER_FIELDS: Record<Kind, string[]> = { incident: ['priority', 'category', 'team', 'assignee'], problem: ['priority', 'category', 'team', 'assignee'], change: ['team', 'assignee'], request: ['priority'] };
 const SETTABLE = TRIGGER_FIELDS;
-const FIELD_LABEL: Record<string, string> = { service: 'service', ci: 'CI', priority: 'priority', category: 'category', team: 'team', assignee: 'assignee', status: 'status', caller_vip: 'the caller is a VIP', source: 'source', is_major: 'it is a major incident' };
+const NOTIFY_ROLES: Record<Kind, Role[]> = { incident: ['assignee', 'team_lead'], problem: ['assignee', 'team_lead', 'owner'], change: ['assignee', 'team_lead'], request: ['approvers'] };
+const ROLE_LABEL: Record<Role, string> = { assignee: 'the assignee', team_lead: "the team's leads", approvers: 'the approvers', owner: "the action's owner" };
+const DURATIONS = [0.25, 0.5, 1, 2, 4, 8, 24, 48, 72, 120, 168, 336, 720];
+/** 0.25 → "15 minutes", 24 → "1 day", 120 → "5 days". */
+const duration = (hours: number) =>
+  hours < 1 ? `${Math.round(hours * 60)} minutes` : hours % 24 === 0 ? `${hours / 24} day${hours === 24 ? '' : 's'}` : `${hours} hour${hours === 1 ? '' : 's'}`;
+const FIELD_LABEL: Record<string, string> = { service: 'service', ci: 'CI', priority: 'priority', category: 'category', team: 'team', assignee: 'assignee', status: 'status', caller_vip: 'the caller is a VIP', source: 'source', is_major: 'it is a major incident', requester_reopened: 'the caller said it was still a problem' };
 const OPS: Record<string, { op: string; label: string }[]> = {
   ref: [{ op: 'is', label: 'is' }, { op: 'is_not', label: 'is not' }, { op: 'in', label: 'is one of' }, { op: 'is_empty', label: 'is empty' }],
   priority: [{ op: 'is', label: 'is' }, { op: 'is_not', label: 'is not' }, { op: 'in', label: 'is one of' }, { op: 'lt', label: 'is more urgent than' }, { op: 'gt', label: 'is less urgent than' }],
   enum: [{ op: 'is', label: 'is' }, { op: 'is_not', label: 'is not' }, { op: 'in', label: 'is one of' }],
   bool: [{ op: 'is', label: 'is' }],
 };
-const typeOf = (field: string) => (field === 'priority' ? 'priority' : field === 'status' || field === 'source' ? 'enum' : field === 'caller_vip' || field === 'is_major' ? 'bool' : 'ref');
+const NOT_LABEL: Record<string, string> = { caller_vip: 'the caller is not a VIP', is_major: 'it is not a major incident', requester_reopened: 'the caller never said it was still a problem' };
+const typeOf = (field: string) => (field === 'priority' ? 'priority' : field === 'status' || field === 'source' ? 'enum' : field === 'caller_vip' || field === 'is_major' || field === 'requester_reopened' ? 'bool' : 'ref');
 const words = (s: string) => s.replace(/_/g, ' ');
 const RUN_STATUS: Record<string, string> = { matched: 'Ran', skipped: 'Stopped', failed: 'Failed', not_matched: 'Did not match' };
 
-interface Lookups { team: (id: number) => string; user: (id: number) => string; category: (id: number) => string; ci: (ref: string) => string }
+interface Lookups { team: (id: number) => string; user: (id: number) => string; category: (id: number) => string; ci: (ref: string) => string; webhook?: (id: number) => string }
 
-function useLookups(): Lookups & { services: { ref: string; name: string }[]; cis: { ref: string; name: string }[] } {
+function useLookups(webhooks: { id: number; name: string }[] = []): Lookups & { services: { ref: string; name: string }[]; cis: { ref: string; name: string }[] } {
   const { meta } = useSession();
   const teams = useTeams();
   const { data: services } = useApi<{ ref: string; name: string }[]>('/api/cis?class=service&limit=200');
@@ -77,6 +86,7 @@ function useLookups(): Lookups & { services: { ref: string; name: string }[]; ci
     user: (id) => name(meta.assignees, (u) => u.id === id, (u) => u.display_name, `person #${id}`),
     category: (id) => name(meta.categories, (c) => c.id === id, (c) => c.name, `category #${id}`),
     ci: (ref) => name([...(services ?? []), ...(cis ?? [])], (c) => c.ref === ref, (c) => c.name, ref),
+    webhook: (id) => name(webhooks, (w) => w.id === id, (w) => w.name, `#${id}`),
   };
 }
 
@@ -95,9 +105,11 @@ export function sentence(r: RuleDraft, l: Lookups) {
   const a = KINDS.find((k) => k.kind === r.kind)?.label ?? r.kind;
   const when = r.trigger.type === 'created' ? `${a} is created`
     : r.trigger.type === 'field_changed' ? `the ${FIELD_LABEL[r.trigger.field]} of ${a} changes`
-      : r.trigger.to ? `${a} moves to ${words(r.trigger.to)}` : `${a} changes status`;
+      : r.trigger.type === 'in_status_for' ? `${a} has been ${words(r.trigger.status)} for ${duration(r.trigger.hours)}`
+        : r.trigger.type === 'due_in' ? `a follow-up action on ${a} is due within ${duration(r.trigger.hours)}`
+          : r.trigger.to ? `${a} moves to ${words(r.trigger.to)}` : `${a} changes status`;
   const ifs = r.conditions.map((c) => {
-    if (typeOf(c.field) === 'bool') return c.value ? FIELD_LABEL[c.field] : `not ${FIELD_LABEL[c.field]}`;
+    if (typeOf(c.field) === 'bool') return c.value ? FIELD_LABEL[c.field] : NOT_LABEL[c.field];
     const op = OPS[typeOf(c.field)].find((o) => o.op === c.op)?.label ?? c.op;
     const v = c.value === undefined ? '' : ` ${(Array.isArray(c.value) ? c.value : [c.value]).map((x) => valueLabel(c.field, x, l)).join(', ')}`;
     return `${FIELD_LABEL[c.field]} ${op}${v}`;
@@ -107,8 +119,9 @@ export function sentence(r: RuleDraft, l: Lookups) {
       case 'set_field': return x.value === null ? `clear the ${x.field}` : `set ${x.field} to ${valueLabel(x.field, x.value, l)}`;
       case 'assign_team': return x.team_id ? `assign to team ${l.team(x.team_id)}` : 'assign to a team (choose one)';
       case 'add_comment': return `add the note “${x.text.length > 60 ? `${x.text.slice(0, 59)}…` : x.text}”`;
-      case 'notify': return `notify ${[...x.users.map(l.user), ...x.teams.map((t) => `team ${l.team(t)}`)].join(', ') || 'nobody'}`;
+      case 'notify': return `notify ${[...(x.roles ?? []).map((r) => ROLE_LABEL[r]), ...x.users.map(l.user), ...x.teams.map((t) => `team ${l.team(t)}`)].join(', ') || 'nobody'}`;
       case 'transition': return x.to === 'closed' ? 'close it' : 'take it off hold';
+      case 'webhook': return `send it to the webhook ${l.webhook?.(x.webhook_id) ?? `#${x.webhook_id}`}`;
     }
   });
   return { when, ifs, thens };
@@ -127,14 +140,25 @@ function RuleState({ rule }: { rule: Rule }) {
   if (rule.enabled) return <span className="tag rule-on">On</span>;
   if (rule.tripped_at) return <span className="tag warn-tag" title={`Turned off by its safety limit ${formatDate(rule.tripped_at)}`}>Off: safety limit</span>;
   if (rule.proposed_by_agent) return <span className="tag channel">Proposed by agent</span>;
+  if (rule.recommended) return <span className="tag">Recommended, off</span>;
   return <span className="tag">Off</span>;
 }
 
 export function RulesPage() {
   const { user } = useSession();
   const { data, reload } = useApi<RuleList>('/api/rules');
-  const lookups = useLookups();
+  const lookups = useLookups(data?.webhooks);
   const [editing, setEditing] = useState<'new' | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const turnOn = async (r: Rule) => {
+    try {
+      await api.put(`/api/rules/${r.id}/enabled`, { enabled: true });
+      setError(null);
+      reload();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
   const navigate = useNavigate();
   const manage = data?.can_manage ?? false;
   return (
@@ -146,6 +170,7 @@ export function RulesPage() {
         </div>
         <div className="head-actions">{canEdit(user) && <button className="btn primary" onClick={() => setEditing('new')}>{manage ? 'New rule' : 'Propose a rule'}</button>}</div>
       </header>
+      {error && <div className="error">{error}</div>}
       <section className="card flush">
         {data?.rules.length === 0 ? (
           <p className="empty">No rules yet. {manage ? 'Start with one that routes new incidents on a service to the team that supports it.' : 'Propose one, and a problem manager reviews and enables it.'}</p>
@@ -157,7 +182,10 @@ export function RulesPage() {
                 <tr key={r.id} className="clickable" onClick={() => navigate(`/rules/${r.id}`)}>
                   <td><Link to={`/rules/${r.id}`} onClick={(e) => e.stopPropagation()}>{r.name}</Link></td>
                   <td><Sentence rule={r} lookups={lookups} /></td>
-                  <td><RuleState rule={r} /></td>
+                  <td>
+                    <RuleState rule={r} />
+                    {manage && r.recommended && !r.enabled && <button className="btn small" onClick={(e) => { e.stopPropagation(); turnOn(r); }}>Turn on</button>}
+                  </td>
                   <td className="num">{r.matched_30d ?? 0}{r.failed_30d ? <span className="error-text small"> · {r.failed_30d} failed</span> : null}</td>
                   <td className="muted small">{r.last_matched_at ? relativeTime(r.last_matched_at) : 'never'}</td>
                 </tr>
@@ -177,7 +205,7 @@ export function RulesPage() {
           </ul>
         </section>
       )}
-      {editing && <RuleEditor manage={manage} onClose={() => setEditing(null)} onSaved={(id) => { setEditing(null); reload(); navigate(`/rules/${id}`); }} />}
+      {editing && <RuleEditor manage={manage} webhooks={data?.webhooks ?? []} onClose={() => setEditing(null)} onSaved={(id) => { setEditing(null); reload(); navigate(`/rules/${id}`); }} />}
     </>
   );
 }
@@ -187,7 +215,7 @@ export function RulePage() {
   const { user } = useSession();
   const { data: r, error, reload } = useApi<RuleDetail>(`/api/rules/${id}`);
   const { data: list } = useApi<RuleList>('/api/rules');
-  const lookups = useLookups();
+  const lookups = useLookups(list?.webhooks);
   const navigate = useNavigate();
   const [editing, setEditing] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -221,7 +249,7 @@ export function RulePage() {
           <h1>{r.name} <RuleState rule={r} /></h1>
           <p className="rule-lead"><Sentence rule={r} lookups={lookups} /></p>
           <p className="muted small">
-            {r.proposed_by_agent ? 'Proposed by an agent' : `Written by ${r.created_by ?? 'someone'}`}{r.owner && ` · owner ${r.owner}`} · changed {relativeTime(r.updated_at)}
+            {r.proposed_by_agent ? 'Proposed by an agent' : r.recommended && !r.created_by ? 'Recommended, built in' : `Written by ${r.created_by ?? 'someone'}`}{r.owner && ` · owner ${r.owner}`} · changed {relativeTime(r.updated_at)}
           </p>
         </div>
         {manage && (
@@ -266,7 +294,7 @@ export function RulePage() {
           {manage && <section className="card"><button className="btn danger" onClick={remove}>Remove rule</button></section>}
         </aside>
       </div>
-      {editing && canEdit(user) && <RuleEditor manage={manage} rule={r} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); reload(); }} />}
+      {editing && canEdit(user) && <RuleEditor manage={manage} webhooks={list?.webhooks ?? []} rule={r} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); reload(); }} />}
     </>
   );
 }
@@ -302,19 +330,23 @@ function DryRunCard({ rule }: { rule: RuleDraft & { id?: number } }) {
 
 const emptyDraft = (kind: Kind): RuleDraft => ({ name: '', kind, trigger: { type: 'created' }, conditions: [], actions: [{ type: 'assign_team', team_id: 0 }] });
 
-function RuleEditor({ rule, manage, onClose, onSaved }: { rule?: Rule; manage: boolean; onClose: () => void; onSaved: (id: number) => void }) {
+function RuleEditor({ rule, manage, webhooks, onClose, onSaved }: { rule?: Rule; manage: boolean; webhooks: { id: number; name: string }[]; onClose: () => void; onSaved: (id: number) => void }) {
   const { meta } = useSession();
   const teams = useTeams().filter((t) => t.active);
-  const lookups = useLookups();
+  const lookups = useLookups(webhooks);
   const kinds = KINDS.filter((k) => !k.module || meta.modules[k.module]);
   const [draft, setDraft] = useState<RuleDraft>(rule ? { name: rule.name, kind: rule.kind, trigger: rule.trigger, conditions: rule.conditions, actions: rule.actions } : emptyDraft(kinds[0].kind));
   const [error, setError] = useState<string | null>(null);
   const set = (patch: Partial<RuleDraft>) => setDraft((d) => ({ ...d, ...patch }));
   const k = draft.kind;
 
-  const triggerValue = draft.trigger.type === 'created' ? 'created' : draft.trigger.type === 'status_changed' ? `status:${draft.trigger.to ?? ''}` : `field:${draft.trigger.field}`;
+  const t = draft.trigger;
+  const triggerValue = t.type === 'created' ? 'created' : t.type === 'status_changed' ? `status:${t.to ?? ''}` : t.type === 'field_changed' ? `field:${t.field}` : t.type;
   const setTrigger = (v: string) => set({
-    trigger: v === 'created' ? { type: 'created' } : v.startsWith('status:') ? { type: 'status_changed', ...(v.slice(7) ? { to: v.slice(7) } : {}) } : { type: 'field_changed', field: v.slice(6) },
+    trigger: v === 'created' ? { type: 'created' }
+      : v === 'in_status_for' ? { type: 'in_status_for', status: STATUSES[k][0], hours: 24 }
+        : v === 'due_in' ? { type: 'due_in', hours: 24 }
+          : v.startsWith('status:') ? { type: 'status_changed', ...(v.slice(7) ? { to: v.slice(7) } : {}) } : { type: 'field_changed', field: v.slice(6) },
   });
 
   const options = (field: string): { value: Value; label: string }[] => {
@@ -345,14 +377,16 @@ function RuleEditor({ rule, manage, onClose, onSaved }: { rule?: Rule; manage: b
       case 'set_field': return { type, field: SETTABLE[k][0], value: SETTABLE[k][0] === 'priority' ? 2 : null };
       case 'assign_team': return { type, team_id: teams[0]?.id ?? 0 };
       case 'add_comment': return { type, text: '' };
-      case 'notify': return { type, users: [], teams: [] };
+      case 'notify': return { type, users: [], teams: [], roles: [] };
       case 'transition': return { type, to: 'closed' };
+      case 'webhook': return { type, webhook_id: webhooks[0]?.id ?? 0 };
     }
   };
   const actionTypes: { type: Action['type']; label: string }[] = [
     ...(SETTABLE[k].includes('team') ? [{ type: 'assign_team' as const, label: 'assign to a team' }] : []),
     { type: 'set_field', label: 'set a field' }, { type: 'add_comment', label: 'add an internal note' }, { type: 'notify', label: 'notify' },
     ...(k === 'incident' ? [{ type: 'transition' as const, label: 'move it' }] : []),
+    ...(webhooks.length ? [{ type: 'webhook' as const, label: 'send to a webhook' }] : []),
   ];
 
   const changeKind = (kind: Kind) => setDraft((d) => ({ ...emptyDraft(kind), name: d.name, actions: [kind === 'request' ? { type: 'add_comment', text: '' } : { type: 'assign_team', team_id: teams[0]?.id ?? 0 }] }));
@@ -385,7 +419,22 @@ function RuleEditor({ rule, manage, onClose, onSaved }: { rule?: Rule; manage: b
               <option value="status:">changes status</option>
               {STATUSES[k].map((s) => <option key={s} value={`status:${s}`}>moves to {words(s)}</option>)}
               {TRIGGER_FIELDS[k].map((f) => <option key={f} value={`field:${f}`}>gets a new {FIELD_LABEL[f]}</option>)}
+              <option value="in_status_for">has been in a status for a while</option>
+              {k === 'problem' && <option value="due_in">has a follow-up action coming due</option>}
             </select>
+            {t.type === 'in_status_for' && (
+              <select aria-label="Status" value={t.status} onChange={(e) => set({ trigger: { ...t, status: e.target.value } })}>
+                {STATUSES[k].map((s) => <option key={s} value={s}>{words(s)}</option>)}
+              </select>
+            )}
+            {(t.type === 'in_status_for' || t.type === 'due_in') && (
+              <>
+                <span className="muted">{t.type === 'due_in' ? 'within' : 'for'}</span>
+                <select aria-label="How long" value={t.hours} onChange={(e) => set({ trigger: { ...t, hours: Number(e.target.value) } })}>
+                  {DURATIONS.filter((h) => t.type !== 'due_in' || h >= 1).map((h) => <option key={h} value={h}>{duration(h)}</option>)}
+                </select>
+              </>
+            )}
           </div>
         </fieldset>
 
@@ -458,6 +507,11 @@ function RuleEditor({ rule, manage, onClose, onSaved }: { rule?: Rule; manage: b
               )}
               {a.type === 'notify' && (
                 <>
+                  {NOTIFY_ROLES[k].filter((r) => r !== 'owner' || t.type === 'due_in').map((r) => (
+                    <label key={r} className="check small">
+                      <input type="checkbox" checked={(a.roles ?? []).includes(r)} onChange={(e) => setAction(n, { ...a, roles: e.target.checked ? [...(a.roles ?? []), r] : (a.roles ?? []).filter((x) => x !== r) })} /> {ROLE_LABEL[r]}
+                    </label>
+                  ))}
                   <select multiple aria-label="People to notify" className="rule-multi" value={a.users.map(String)} onChange={(e) => setAction(n, { ...a, users: [...e.target.selectedOptions].map((o) => Number(o.value)) })}>
                     {meta.assignees.map((u) => <option key={u.id} value={u.id}>{u.display_name}</option>)}
                   </select>
@@ -465,6 +519,11 @@ function RuleEditor({ rule, manage, onClose, onSaved }: { rule?: Rule; manage: b
                     {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                   </select>
                 </>
+              )}
+              {a.type === 'webhook' && (
+                <select aria-label="Webhook" value={a.webhook_id} onChange={(e) => setAction(n, { ...a, webhook_id: Number(e.target.value) })}>
+                  {webhooks.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+                </select>
               )}
               {a.type === 'transition' && (
                 <select aria-label="Move to" value={a.to} onChange={(e) => setAction(n, { ...a, to: e.target.value })}>
