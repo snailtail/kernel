@@ -7,6 +7,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { queueRuleRuns } from './rule-queue.js';
 import { audienceOf, forRequester, startNarrow } from './audience.js';
 import { USER_COLUMNS, type User } from './auth.js';
 import { audit } from './audit.js';
@@ -309,7 +310,7 @@ export async function getRequest(user: User, ref: string) {
   if (!r) throw notFound(`Request ${ref.toUpperCase()} not found`);
   const [activity, tasks, links, approvers, sla] = await Promise.all([
     query(
-      `SELECT a.id, a.kind, a.body, a.data, a.channel, a.created_at, u.display_name AS user_name
+      `SELECT a.id, a.kind, a.body, a.data, a.channel, a.created_at, coalesce(u.display_name, (SELECT 'Rule ''' || r.name || '''' FROM automation_rules r WHERE a.channel = 'rule:' || r.id)) AS user_name
        FROM request_activity a LEFT JOIN users u ON u.id = a.user_id WHERE a.request_id = $1 ORDER BY a.created_at DESC, a.id DESC`,
       [r.id],
     ),
@@ -457,6 +458,7 @@ export async function logRequest(db: Db, id: number, userId: number | null, kind
   ]);
   const { rows } = await db.query('UPDATE requests SET updated_at = now() WHERE id = $1 RETURNING ref', [id]);
   await audit(db, { entity_type: 'request', entity_ref: rows[0].ref, action: kind, changes: kind === 'comment' ? { body } : (data as Record<string, unknown>) });
+  await queueRuleRuns(db, 'request', rows[0].ref, kind, data);
 }
 
 async function loadRequest(db: Db, ref: string) {

@@ -24,6 +24,7 @@ import * as setupMod from './setup.js';
 import * as ppl from './people.js';
 import * as kb from './knowledge.js';
 import * as tm from './teams.js';
+import * as rulesMod from './rules.js';
 import * as vw from './views.js';
 import * as bulkMod from './bulk.js';
 import * as dv from './dev.js';
@@ -235,6 +236,14 @@ export const OPERATIONS: Op[] = [
   { method: 'post', path: '/api/records/:ref/break-glass', tag: 'Visibility', summary: 'Administrators: open a restricted record for an hour with a reason (audited; the people on it are told)' },
   { method: 'get', path: '/api/admin/visibility', tag: 'Visibility', summary: 'Team scoping per practice, categories that start restricted, and active break-glass sessions' },
   { method: 'put', path: '/api/admin/visibility', tag: 'Visibility', summary: 'Change team scoping and restricted categories (with a reason)' },
+  { method: 'get', path: '/api/rules', tag: 'Automation rules', summary: 'Automation rules (when / if / then) with their matches in the last 30 days, and the event and candidate rules as their own sections' },
+  { method: 'post', path: '/api/rules', tag: 'Automation rules', summary: 'Write a rule; it starts disabled (problem managers)', body: rulesMod.ruleSchema },
+  { method: 'post', path: '/api/rules/proposals', tag: 'Automation rules', summary: 'Propose a rule: it lands disabled, marked as proposed, for a problem manager to enable', body: rulesMod.ruleSchema },
+  { method: 'post', path: '/api/rules/dry-run', tag: 'Automation rules', summary: "Which records updated in the last 30 days a rule's conditions match (only those you can see); no action runs", body: rulesMod.dryRunSchema },
+  { method: 'get', path: '/api/rules/:id', tag: 'Automation rules', summary: 'A rule in a plain sentence, with its latest runs and what each action did' },
+  { method: 'put', path: '/api/rules/:id', tag: 'Automation rules', summary: 'Change a rule (problem managers); audited with before and after', body: rulesMod.ruleSchema },
+  { method: 'put', path: '/api/rules/:id/enabled', tag: 'Automation rules', summary: 'Enable or disable a rule; only a person signed in to Kernel enables one, never a token or an agent', body: rulesMod.enableSchema },
+  { method: 'delete', path: '/api/rules/:id', tag: 'Automation rules', summary: 'Remove a rule and its run log' },
   { method: 'get', path: '/api/teams', tag: 'Teams', summary: 'Teams with members, the services and CIs they support, and their open work' },
   { method: 'post', path: '/api/teams', tag: 'Teams', summary: 'Create a team (administrators)', body: tm.teamSchema },
   { method: 'put', path: '/api/teams/:id', tag: 'Teams', summary: 'Update a team; deactivating needs its open work reassigned first', body: tm.teamSchema },

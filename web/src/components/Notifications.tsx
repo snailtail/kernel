@@ -31,7 +31,7 @@ export function NotificationBell() {
 }
 
 const EVENT_LABEL: Record<string, string> = {
-  assigned: 'Assigned', approval_needed: 'Approval', decision: 'Decision', sla_breach: 'SLA breached', sla_warning: 'SLA at risk', major_incident: 'Major incident', watched_update: 'Update', service_status: 'Service status',
+  assigned: 'Assigned', approval_needed: 'Approval', decision: 'Decision', sla_breach: 'SLA breached', sla_warning: 'SLA at risk', major_incident: 'Major incident', watched_update: 'Update', service_status: 'Service status', automation: 'Automation',
 };
 
 export function NotificationsPage() {

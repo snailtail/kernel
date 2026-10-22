@@ -22,6 +22,7 @@ import { startConnectorWorker } from './connectors.js';
 import { startMajorIncidentWorker } from './major-incidents.js';
 import { startPagingWorker } from './oncall.js';
 import { startReportScheduleWorker } from './report-schedules.js';
+import { startRuleWorker } from './rules.js';
 import { moduleEnabled } from './modules.js';
 
 // The schema comes first: building the app already reads settings (modules), which a new database does not have yet.
@@ -53,6 +54,7 @@ asSystem(() => {
   startMajorIncidentWorker(log, () => moduleEnabled('incident'));
   startPagingWorker(log, () => moduleEnabled('incident'));
   startReportScheduleWorker(log);
+  startRuleWorker(log);
   startChainVerification((msg) => app.log.error(msg));
   setInterval(() => pruneIdempotencyKeys().catch(() => {}), 3600_000).unref();
   setInterval(() => pruneDeliveries().catch(() => {}), 3600_000).unref();

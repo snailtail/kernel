@@ -195,7 +195,7 @@ export async function getIncident(user: User, ref: string) {
       [i.id],
     ),
     query(
-      `SELECT a.id, a.kind, a.body, a.data, a.channel, a.key_moment, a.created_at, u.display_name AS user_name
+      `SELECT a.id, a.kind, a.body, a.data, a.channel, a.key_moment, a.created_at, coalesce(u.display_name, (SELECT 'Rule ''' || r.name || '''' FROM automation_rules r WHERE a.channel = 'rule:' || r.id)) AS user_name
        FROM incident_activity a LEFT JOIN users u ON u.id = a.user_id WHERE a.incident_id = $1 ORDER BY a.created_at DESC, a.id DESC`,
       [i.id],
     ),
