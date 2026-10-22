@@ -18,12 +18,11 @@ import { contextStore, currentContext, type RequestContext } from './context.js'
 import { query, tx } from './db.js';
 import { badRequest, conflict, forbidden, notFound } from './errors.js';
 import { logger } from './log.js';
-import { notify } from './notifications.js';
+import { absoluteUrl, notify } from './notifications.js';
 import { authorize, can } from './policy.js';
 import { onRulesQueued, RULE_KINDS, type RuleKind } from './rule-queue.js';
 import { moduleEnabled } from './modules.js';
 import { audienceOf } from './audience.js';
-import { config } from './config.js';
 import { enqueueTo } from './webhooks.js';
 import type { Db } from './problems.js';
 
@@ -597,15 +596,15 @@ async function recipients(db: Db, kind: RuleKind, ref: string, a: Extract<RuleAc
 }
 
 /**
- * What a rule's webhook receives: the record as a ref, title, status and priority, never its text. A restricted record
- * leaves Kernel only as its ref (#53), like the problem webhooks.
+ * What a rule's webhook receives: the record as a ref, title, status and priority, never its text. A restricted or
+ * confidential record leaves Kernel only as its ref (#53, #61): a webhook lands in chat, where the title is too much.
  */
 async function webhookPayload(kind: RuleKind, ref: string, rule: { id: number; name: string }, facts: Facts, event: any) {
   const a = await audienceOf(null, ref);
-  const url = config.publicUrl ? `${config.publicUrl.replace(/\/$/, '')}${pathOf(kind, ref)}` : null;
+  const url = absoluteUrl(pathOf(kind, ref));
   const base = { event: 'rule.matched', occurred_at: new Date().toISOString(), rule: { id: rule.id, name: rule.name }, trigger: event?.type ?? null };
-  return a.restricted
-    ? { ...base, record: { kind, ref, restricted: true, url }, summary: 'A restricted record matched a rule.' }
+  return a.restricted || a.classification === 'confidential'
+    ? { ...base, record: { kind, ref, restricted: a.restricted, classification: a.classification, url }, summary: 'A restricted or confidential record matched a rule.' }
     : { ...base, record: { kind, ref, title: facts.title, status: facts.status, priority: facts.priority, url }, summary: why(rule, event) };
 }
 

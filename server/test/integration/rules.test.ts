@@ -319,6 +319,8 @@ describe('automation rules (#49)', { skip }, () => {
     const open = ok(await analyst.post('/api/incidents', { title: 'Checkout down', description: 'SECRET-TEXT', impact: 1, urgency: 1 }), 201);
     const hidden = ok(await analyst.post('/api/incidents', { title: 'HR breach', impact: 1, urgency: 1 }), 201);
     ok(await analyst.put(`/api/records/${hidden.ref}/visibility`, { restricted: true, reason: 'HR case' }));
+    const secret = ok(await analyst.post('/api/incidents', { title: 'Salary file mailed to the wrong person', impact: 1, urgency: 1 }), 201);
+    ok(await analyst.put(`/api/records/${secret.ref}/classification`, { classification: 'confidential', reason: 'Personal data' }));
     await run();
     const sent = (await db.query("SELECT payload FROM webhook_deliveries WHERE webhook_id = $1 AND event = 'rule.matched' ORDER BY id", [hook.id])).rows.map((r: any) => r.payload);
     const a = sent.find((x: any) => x.record.ref === open.ref);
@@ -326,7 +328,11 @@ describe('automation rules (#49)', { skip }, () => {
     assert.equal(a.rule.name, 'To chat');
     assert.ok(!JSON.stringify(sent).includes('SECRET-TEXT'));
     const b = sent.find((x: any) => x.record.ref === hidden.ref);
-    assert.deepEqual(Object.keys(b.record).sort(), ['kind', 'ref', 'restricted', 'url'], 'a restricted record leaves only as its ref');
+    assert.deepEqual(Object.keys(b.record).sort(), ['classification', 'kind', 'ref', 'restricted', 'url'], 'a restricted record leaves only as its ref');
+    const c = sent.find((x: any) => x.record.ref === secret.ref);
+    assert.equal(c.record.title, undefined, 'a confidential record leaves without its title (chat is not the place)');
+    assert.equal(c.record.classification, 'confidential');
+    assert.ok(!JSON.stringify(sent).includes('Salary file'));
     await disableAll();
   });
 

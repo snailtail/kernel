@@ -91,7 +91,8 @@ each action did.
 - **Notifications** reach only people who may see the record. They carry the ref, the title and one line saying why
   (*Rule 'X': resolved for 5 days*), never the record's text.
 - **Webhook** payloads (`event: rule.matched`) carry the rule, the trigger and the record's kind, ref, title, status,
-  priority and URL. A **restricted** record leaves only as its ref (`restricted: true`), as with the problem webhooks.
+  priority and URL. A **restricted** or **confidential** record leaves only as its ref, with `restricted` and
+  `classification` set and no title: a webhook usually ends up in a chat channel.
 
 ## Loops and limits
 
