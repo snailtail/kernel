@@ -17,6 +17,8 @@ import { query, tx } from './db.js';
 import { badRequest, forbidden, HttpError, unauthorized } from './errors.js';
 import { securityEvent } from './security-events.js';
 import { outboundFetch } from './outbound.js';
+import { createPortalSession } from './portal.js';
+import { moduleEnabled } from './modules.js';
 import { authorize } from './policy.js';
 import { decryptSecret, encryptSecret } from './secrets.js';
 
@@ -78,7 +80,7 @@ async function providerConfig(s: SsoSettings) {
 }
 
 /** Starts sign-in: one-time state, nonce and PKCE verifier stored server-side, then off to the provider. */
-export async function startSso(req: FastifyRequest, reply: FastifyReply) {
+export async function startSso(req: FastifyRequest, reply: FastifyReply, purpose: 'kernel' | 'portal' = 'kernel') {
   const s = await ssoSettings();
   if (!s.enabled) throw new HttpError(404, 'Single sign-on is not set up');
   const cfg = await providerConfig(s);
@@ -86,10 +88,10 @@ export async function startSso(req: FastifyRequest, reply: FastifyReply) {
   const nonce = client.randomNonce();
   const verifier = client.randomPKCECodeVerifier();
   const ret = String((req.query as any)?.return ?? '/');
-  const returnTo = /^\/(?![/\\])[\w\-./?=&%#]*$/.test(ret) ? ret : '/';
+  const returnTo = purpose === 'portal' ? '/portal' : /^\/(?![/\\])[\w\-./?=&%#]*$/.test(ret) ? ret : '/';
   await query("DELETE FROM sso_requests WHERE created_at < now() - interval '10 minutes'");
-  const stepUp = (req.query as any)?.prompt === 'login';
-  await query('INSERT INTO sso_requests (state, nonce, code_verifier, return_to, step_up) VALUES ($1, $2, $3, $4, $5)', [state, nonce, verifier, returnTo, stepUp]);
+  const stepUp = purpose === 'kernel' && (req.query as any)?.prompt === 'login';
+  await query('INSERT INTO sso_requests (state, nonce, code_verifier, return_to, step_up, purpose) VALUES ($1, $2, $3, $4, $5, $6)', [state, nonce, verifier, returnTo, stepUp, purpose]);
   const url = client.buildAuthorizationUrl(cfg, {
     redirect_uri: redirectUri(), scope: s.scopes, state, nonce, response_type: 'code',
     code_challenge: await client.calculatePKCECodeChallenge(verifier), code_challenge_method: 'S256',
@@ -112,7 +114,7 @@ export async function finishSso(req: FastifyRequest, reply: FastifyReply) {
   const s = await ssoSettings();
   if (!s.enabled) throw new HttpError(404, 'Single sign-on is not set up');
   const q = req.query as Record<string, string>;
-  const { rows } = await query("DELETE FROM sso_requests WHERE state = $1 AND created_at > now() - interval '10 minutes' RETURNING nonce, code_verifier, return_to, step_up, created_at", [String(q.state ?? '')]);
+  const { rows } = await query("DELETE FROM sso_requests WHERE state = $1 AND created_at > now() - interval '10 minutes' RETURNING nonce, code_verifier, return_to, step_up, purpose, created_at", [String(q.state ?? '')]);
   if (!rows[0]) throw badRequest('This sign-in has expired or was already used. Start again.');
   const cfg = await providerConfig(s);
   const current = new URL(`${redirectUri()}?${new URLSearchParams(q).toString()}`);
@@ -132,6 +134,8 @@ export async function finishSso(req: FastifyRequest, reply: FastifyReply) {
       throw unauthorized('Your identity provider did not ask you to sign in again. Confirm with your password instead, or ask an administrator.');
     }
   }
+  // A portal sign-in (#45) is a person, not a Kernel account: no groups or roles, and no user is created.
+  if (rows[0].purpose === 'portal') return portalSignIn(req, reply, claims);
   const amr = Array.isArray(claims.amr) ? (claims.amr as unknown[]).map(String) : [];
   const idpMfa = s.trust_idp_mfa === true && (amr.includes('mfa') || (typeof claims.acr === 'string' && (s.mfa_acr_values ?? []).includes(claims.acr)));
   const groups = Array.isArray(claims[s.groups_claim]) ? (claims[s.groups_claim] as unknown[]).map(String) : [];
@@ -154,6 +158,23 @@ export async function finishSso(req: FastifyRequest, reply: FastifyReply) {
   await createSession(req, reply, user.id, 'sso', idpMfa);
   await audit(null, { entity_type: 'session', entity_ref: `#${user.id}`, action: 'login', changes: { method: 'sso', role, idp_mfa: idpMfa }, actor: { id: user.id, name: user.username } });
   return reply.redirect(rows[0].return_to || '/');
+}
+
+/**
+ * The portal's single sign-on: the provider's email (unless it says the address is unverified, as for Kernel's own
+ * sign-in) must belong to exactly one active person in people. No sign-up and no Kernel account.
+ */
+async function portalSignIn(req: FastifyRequest, reply: FastifyReply, claims: Record<string, unknown>) {
+  const email = typeof claims.email === 'string' && claims.email_verified !== false ? claims.email.trim().toLowerCase() : '';
+  const { rows } = moduleEnabled('portal') && email
+    ? await query("SELECT id FROM people WHERE lower(email) = $1 AND active AND erased_at IS NULL", [email])
+    : { rows: [] as any[] };
+  if (rows.length !== 1) {
+    securityEvent({ action: 'portal.sso_refused', category: 'authentication', outcome: 'denied', message: 'Portal single sign-on for an address that is not a known person' }, req);
+    return reply.redirect('/portal?signin=unknown');
+  }
+  await createPortalSession(req, reply, rows[0].id, 'sso');
+  return reply.redirect('/portal');
 }
 
 /** Just-in-time account: created on first sign-in, role and mapped teams kept in step with the provider's groups. */

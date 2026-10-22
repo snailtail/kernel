@@ -297,6 +297,8 @@ export function RequestPage() {
   const others = useLive([r && `request:${r.id}`], refresh, { presence: true });
   const [actionError, setActionError] = useState<string | null>(null);
   const [note, setNote] = useState('');
+  // A note is internal unless the person chooses to reply to the requester (#45): replies show in the portal and go by mail.
+  const [toRequester, setToRequester] = useState(false);
   if (error) return <RecordNotFound refId={ref ?? ''} error={error} onOpened={reload} />;
   if (!r) return null;
   const path = `/api/requests/${r.ref}`;
@@ -372,17 +374,22 @@ export function RequestPage() {
           <section className="card">
             <h2>Notes &amp; history</h2>
             {editable && (
-              <form className="comment-form" onSubmit={async (e) => { e.preventDefault(); if (await run(() => api.post(`${path}/comments`, { body: note }))) setNote(''); }}>
-                <textarea rows={2} placeholder="Add a note" value={note} onChange={(e) => setNote(e.target.value)} />
-                <div className="actions"><button className="btn primary" disabled={!note.trim()}>Add note</button></div>
+              <form className="comment-form" onSubmit={async (e) => { e.preventDefault(); if (await run(() => api.post(`${path}/comments`, { body: note, to_requester: toRequester }))) { setNote(''); setToRequester(false); } }}>
+                <div className="note-audience" role="radiogroup" aria-label="Who reads this">
+                  <label className="check"><input type="radio" name="note-audience" checked={!toRequester} onChange={() => setToRequester(false)} /> Internal note</label>
+                  <label className="check"><input type="radio" name="note-audience" checked={toRequester} onChange={() => setToRequester(true)} /> Reply to {r.requester.name}</label>
+                </div>
+                <textarea rows={2} placeholder={toRequester ? `Reply to ${r.requester.name}: they see it in the portal and by email` : 'Add a note'} value={note} onChange={(e) => setNote(e.target.value)} />
+                <div className="actions"><button className="btn primary" disabled={!note.trim()}>{toRequester ? 'Send reply' : 'Add note'}</button></div>
               </form>
             )}
             <ul className="activity">
               {r.activity.map((a) => (
                 <li key={a.id}>
                   <div className="activity-head">
-                    <strong>{a.user_name ?? 'System'}</strong>{' '}
-                    {a.kind === 'comment' ? 'added a note' : a.body}
+                    <strong>{a.data?.from_requester ? `${r.requester.name} (portal)` : a.user_name ?? 'System'}</strong>{' '}
+                    {a.kind === 'comment' ? (a.data?.from_requester ? 'added information' : a.data?.for_requester ? 'replied to the requester' : 'added a note') : a.body}
+                    {a.data?.for_requester && <span className="tag reply">Sent to the requester</span>}
                     {(a.channel === 'mcp' || a.channel === 'api' || a.channel.endsWith('_link')) && <span className="tag channel">via {a.channel.replace('_link', ' link').toUpperCase()}</span>}
                     <time title={formatDate(a.created_at)}>{relativeTime(a.created_at)}</time>
                   </div>

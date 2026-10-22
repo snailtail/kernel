@@ -87,7 +87,7 @@ export const linkBodySchema = z.object({ to: z.string().trim().min(1).max(200), 
 export async function addComment(user: User, ref: string, body: string) {
   const type = typeForRef(ref).type;
   if (type === 'problem') await addProblemComment(user, ref, body);
-  else if (type === 'incident') await addIncidentComment(user, ref, { body, kind: 'comment' });
+  else if (type === 'incident') await addIncidentComment(user, ref, { body, kind: 'comment', to_requester: false });
   else if (type === 'change') await addChangeComment(user, ref, body);
   else if (type === 'article') await addArticleComment(user, ref, body);
   else if (type === 'review') await addReviewComment(user, ref, body);

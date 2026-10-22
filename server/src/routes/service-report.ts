@@ -15,9 +15,10 @@ export async function serviceReportRoutes(app: FastifyInstance) {
     return reply.type('text/markdown; charset=utf-8').send(sr.serviceReportMarkdown(r));
   });
   app.get('/api/reports/service.csv', async (req, reply) => {
+    const user = requireUser(req);
     const { service, ...period } = z.object({ service: z.string().trim().min(1).max(30), from: z.string().optional(), to: z.string().optional() }).parse(req.query);
     const p = sr.serviceReportSchema.parse(period);
-    const csv = await sr.serviceReportCsv(requireUser(req), service, p);
+    const csv = await sr.serviceReportCsv(user, service, p);
     reply.header('Content-Disposition', `attachment; filename="service-report-${service.toUpperCase().replace(/[^\w-]/g, '')}-${p.from}-${p.to}.csv"`);
     return reply.type('text/csv; charset=utf-8').send(csv);
   });

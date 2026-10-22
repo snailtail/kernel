@@ -306,7 +306,7 @@ export async function decideInboundMail(user: User, id: number, input: z.infer<t
     } else if (input.action === 'comment') {
       ref = (input.ref || m.ref).toUpperCase();
       if (!ref.startsWith('INC')) throw badRequest('Name the incident to add the mail to');
-      await addIncidentComment(user, ref, { kind: 'comment', body: `Email from ${who}${m.verified ? '' : ' (unverified sender)'}:\n\n${m.body}` });
+      await addIncidentComment(user, ref, { kind: 'comment', to_requester: false, body: `Email from ${who}${m.verified ? '' : ' (unverified sender)'}:\n\n${m.body}` });
     }
     const { rows: inc } = ref ? await query('SELECT id FROM incidents WHERE ref = $1', [ref]) : { rows: [] as any[] };
     await query("UPDATE inbound_mail SET outcome = $2, incident_id = $3, ref = coalesce(nullif($4, ''), ref), body = '' WHERE id = $1", [id, input.action === 'discard' ? 'discarded' : input.action, inc[0]?.id ?? null, ref]);

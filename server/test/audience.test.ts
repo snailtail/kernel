@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { BROADEST, mayCopyText, type Audience } from '../src/audience.js';
+import { BROADEST, mayCopyText, PORTAL_INCIDENT_STATUS, PORTAL_REQUEST_STATUS, type Audience } from '../src/audience.js';
 
 const a = (restricted: boolean, teams: number[], classification: Audience['classification'] = 'normal'): Audience => ({ ref: 'X', restricted, restricted_teams: teams, classification });
 
@@ -25,4 +25,14 @@ test('mayCopyText: never into a broader audience (#117)', () => {
     ['restricted + confidential → restricted only', a(true, [1], 'confidential'), a(true, [1]), false],
   ];
   for (const [name, from, to, expected, kind] of cases) assert.equal(mayCopyText(from, to, kind), expected, name);
+});
+
+test('the portal names every status in plain words (#45)', () => {
+  const jargon = /\b(incident|sla|priority|fulfil\w*|resolution|resolved|escalat\w*|triage|on hold|in progress)\b/i;
+  for (const [statuses, labels] of [[['new', 'in_progress', 'on_hold', 'resolved', 'closed'], PORTAL_INCIDENT_STATUS], [['submitted', 'awaiting_approval', 'in_fulfilment', 'fulfilled', 'rejected', 'cancelled'], PORTAL_REQUEST_STATUS]] as const) {
+    for (const s of statuses) {
+      assert.ok(labels[s], `a label for ${s}`);
+      assert.doesNotMatch(labels[s], jargon);
+    }
+  }
 });

@@ -29,10 +29,11 @@ export async function requestRoutes(app: FastifyInstance) {
   app.get<RefParams>('/api/requests/:ref', async (req) => rq.getRequest(requireUser(req), req.params.ref));
   app.patch<RefParams>('/api/requests/:ref', async (req) => rq.updateRequest(requireUser(req), req.params.ref, rq.updateRequestSchema.parse(req.body)));
   app.post<RefParams>('/api/requests/:ref/transition', async (req) => {
+    const user = requireUser(req);
     const input = rq.transitionRequestSchema.parse(req.body);
     // Approving and rejecting are a person's decision: never by API token.
     if (input.to !== 'cancelled' && req.headers.authorization) throw forbidden('Approvals are decided by a person in the web UI');
-    return rq.transitionRequest(requireUser(req), req.params.ref, input);
+    return rq.transitionRequest(user, req.params.ref, input);
   });
   app.post<RefParams>('/api/requests/:ref/approval', async (req) => {
     if (req.headers.authorization) throw forbidden('Approvals are decided by a person in the web UI');
@@ -45,9 +46,11 @@ export async function requestRoutes(app: FastifyInstance) {
     return rq.completeRequestTask(requireUser(req), req.params.ref, Number(req.params.id), rq.completeTaskSchema.parse(req.body ?? {}));
   });
   app.patch<TaskParams>('/api/requests/:ref/tasks/:id', async (req) => rq.assignRequestTask(requireUser(req), req.params.ref, Number(req.params.id), rq.assignTaskSchema.parse(req.body)));
-  app.post<RefParams>('/api/requests/:ref/comments', { config: { idempotent: 'request.write' } }, async (req) =>
-    rq.addRequestComment(requireUser(req), req.params.ref, z.object({ body: z.string().max(20000) }).parse(req.body).body),
-  );
+  app.post<RefParams>('/api/requests/:ref/comments', { config: { idempotent: 'request.write' } }, async (req) => {
+    const user = requireUser(req);
+    const body = rq.requestCommentSchema.parse(req.body);
+    return rq.addRequestComment(user, req.params.ref, body.body, body.to_requester);
+  });
   app.post<RefParams>('/api/requests/:ref/links', async (req) => rq.addRequestLink(requireUser(req), req.params.ref, rq.requestLinkSchema.parse(req.body)));
   app.delete<TaskParams>('/api/requests/:ref/links/:id', async (req) => rq.removeRequestLink(requireUser(req), req.params.ref, Number(req.params.id)));
 }

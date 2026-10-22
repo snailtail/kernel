@@ -17,6 +17,7 @@ import * as knowledge from '../src/knowledge.js';
 import * as major from '../src/major-incidents.js';
 import * as oncall from '../src/oncall.js';
 import * as people from '../src/people.js';
+import * as portal from '../src/portal.js';
 import * as problems from '../src/problems.js';
 import * as improvements from '../src/improvements.js';
 import * as requests from '../src/requests.js';
@@ -371,6 +372,21 @@ export async function seedStory(p: People) {
   // Rejected, with the reason.
   const rejected = await requests.createRequest(sara, { item_id: access.id, requester: { id: await personId('johan.ek@example.com') }, answers: { system: db, level: 'Write', why: 'Fix prices directly in the database.' }, priority: 4 });
   await requests.decideRequest(anna, rejected.ref, { decision: 'reject', comment: 'Prices are changed in the shop admin, which keeps the history. Ask for the price editor role there.' });
+
+  // ---- The self-service portal (#45): Maria follows what she reported ----
+  const help = await knowledge.createArticle(anna, { title: 'Headset or microphone not found after an update', article_type: 'how_to', audience: 'end_users', body: '1. Unplug the headset and plug it into another USB port.\n2. Restart the softphone.\n3. Still nothing? Report the problem and tell us which headset you use.' });
+  await knowledge.transitionArticle(anna, help.ref, { to: 'published' });
+  await setup.setModules(admin, { portal: true }, 'Demo story');
+  const maria = { id: await personId('maria.svensson@example.com'), name: 'Maria Svensson', email: 'maria.svensson@example.com', organisation_id: cs[0].id as number };
+  const asMaria = <T>(fn: () => Promise<T>) => portal.asPortal(maria, fn);
+  const headset = await asMaria(() => portal.reportProblem(maria, { service: null, what: 'My headset is not recognised after the update\nThe softphone says "no microphone found" since this morning, so I cannot take calls.', affected: 'me' }));
+  await incidents.addIncidentComment(sara, headset.ref, { kind: 'comment', to_requester: false, body: 'Probably the audio driver from last night\'s client update. Check the other agents on the floor.' });
+  await incidents.addIncidentComment(sara, headset.ref, { kind: 'comment', to_requester: true, body: 'Thanks Maria. Could you try another USB port and tell us whether the headset shows up then?' });
+  await asMaria(() => portal.addInformation(maria, headset.ref, 'Tried the other port: same thing. The headset works on my phone.'));
+  const orderSearch = await asMaria(() => portal.reportProblem(maria, { service: webshop, what: 'Order search in the shop admin takes over a minute\nAll of us in customer service see it when customers call about their orders.', affected: 'some' }));
+  await incidents.transitionIncident(sara, orderSearch.ref, { to: 'in_progress' });
+  await incidents.addIncidentComment(sara, orderSearch.ref, { kind: 'comment', to_requester: true, body: 'We rebuilt the search index and order search answers in about a second again. Does it work for you now?' });
+  await incidents.transitionIncident(sara, orderSearch.ref, { to: 'resolved', resolution_code: 'fixed', resolution: 'Rebuilt the order search index after the nightly import had left it stale.' });
 
   // The pages the story queued (the worker is not running while seeding).
   await oncall.deliverPages();

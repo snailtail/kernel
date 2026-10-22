@@ -14,8 +14,9 @@ export async function candidateRoutes(app: FastifyInstance) {
   );
   app.get('/api/candidates/draft', async (req) => candidates.candidateDraft(requireUser(req), z.object({ key: z.string().max(300) }).parse(req.query).key));
   app.post('/api/candidates/create', { bodyLimit: 2 * 1024 * 1024 }, async (req, reply) => {
+    const user = requireUser(req);
     const body = { ...candidates.candidateActionSchema.parse(req.body), ...candidates.fromCandidateSchema.parse(req.body) };
-    const created = await candidates.createFromCandidate(requireUser(req), body);
+    const created = await candidates.createFromCandidate(user, body);
     reply.code(201);
     return created;
   });

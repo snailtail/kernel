@@ -311,6 +311,8 @@ describe('copying text between records (#117)', { skip }, () => {
       'actions.ts': 1, 'candidates.ts': 1, 'changes.ts': 1, 'events.ts': 1, 'incidents.ts': 2, 'knowledge.ts': 1, 'mcp.ts': 3, 'problems.ts': 1, 'requests.ts': 1, 'reviews.ts': 3, 'setup.ts': 2,
       // An incident from an email (#48): its text comes from outside Kernel, not from another record.
       'inbound-mail.ts': 1,
+      // A problem reported in the portal (#45): the person's own words, not text from another record.
+      'portal.ts': 1,
     };
     const dir = new URL('../../src/', import.meta.url);
     const found: Record<string, number> = {};
