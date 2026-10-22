@@ -139,6 +139,50 @@ describe('sensitive data in records (#61)', { skip }, () => {
     assert.ok(!trail.rows[0].c.includes(NAME));
   });
 
+  test('requests and improvements are cleaned too: answers, comments, portal replies, task notes and feedback (#170)', async () => {
+    const OLD = 'AKIAYYYYYYYYYYYYYYYY';
+    await pm.post('/api/auth/reauth', { password: PASSWORD });
+    ok(await admin.put('/api/admin/modules', { request: true, reason: 'Requests for the redaction test' }));
+    const pmId = (await ownerQuery("SELECT id FROM users WHERE username = 'pm'")).rows[0].id;
+    const service = (await pm.post('/api/cis', { name: 'Redact service', ci_type: 'business_service', owner_id: pmId })).body.ref;
+    const item = await pm.post('/api/request-items', { service, name: 'Redact access', form: [{ key: 'why', label: 'Why', type: 'textarea', required: true }], fulfilment_tasks: [{ title: 'Grant it', team_id: null }] });
+    ok(item);
+    const person = (await analyst.post('/api/people', { name: 'Redact Requester', email: 'redact@example.com' })).body.id;
+    const req = await analyst.post('/api/requests', { item_id: item.body.id, requester: { id: person }, answers: { why: 'needs it' } });
+    ok(req);
+    const imp = await analyst.post('/api/improvements', { title: 'Rotate keys' });
+    ok(imp);
+    // Text from before the scanner existed: written straight to the database, in every place it could be.
+    const reqId = (await ownerQuery('SELECT id FROM requests WHERE ref = $1', [req.body.ref])).rows[0].id;
+    await ownerQuery('UPDATE requests SET answers = $2 WHERE id = $1', [reqId, JSON.stringify({ why: `the old key ${OLD} stopped working` })]);
+    await ownerQuery("INSERT INTO request_activity (request_id, kind, body, data) VALUES ($1, 'comment', $2, '{}')", [reqId, `internal: key ${OLD}`]);
+    await ownerQuery("INSERT INTO request_activity (request_id, kind, body, data) VALUES ($1, 'comment', $2, $3)", [reqId, `from the portal: ${OLD}`, JSON.stringify({ from_requester: true, person_id: person })]);
+    await ownerQuery("INSERT INTO request_activity (request_id, kind, body, data) VALUES ($1, 'update', 'Answers changed', $2)", [reqId, JSON.stringify({ from: { why: OLD } })]);
+    await ownerQuery('UPDATE request_tasks SET note = $2 WHERE request_id = $1', [reqId, `used ${OLD}`]);
+    await ownerQuery("INSERT INTO portal_feedback (person_id, request_id, rating, comment) VALUES ($1, $2, 'bad', $3)", [person, reqId, `you leaked ${OLD}`]);
+    const impId = (await ownerQuery('SELECT id FROM improvements WHERE ref = $1', [imp.body.ref])).rows[0].id;
+    await ownerQuery('UPDATE improvements SET benefit = $2 WHERE id = $1', [impId, `no more ${OLD} in configs`]);
+    await ownerQuery("INSERT INTO improvement_activity (improvement_id, kind, body, data) VALUES ($1, 'update', 'Benefit changed', $2)", [impId, JSON.stringify({ benefit: { to: `no more ${OLD}` } })]);
+    const everywhere = async () => Number((await ownerQuery(
+      `SELECT (SELECT count(*) FROM requests x WHERE x::text LIKE $1) + (SELECT count(*) FROM request_activity x WHERE x::text LIKE $1)
+            + (SELECT count(*) FROM request_tasks x WHERE x::text LIKE $1) + (SELECT count(*) FROM portal_feedback x WHERE x::text LIKE $1)
+            + (SELECT count(*) FROM improvements x WHERE x::text LIKE $1) + (SELECT count(*) FROM improvement_activity x WHERE x::text LIKE $1) AS n`,
+      [`%${OLD}%`])).rows[0].n);
+    assert.equal(await everywhere(), 8, 'positive control: the key is in every place before');
+
+    const r = await pm.post(`/api/records/${req.body.ref}/redact`, { secrets: true, reason: 'Old key in a request' });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.deepEqual(r.body.places, { requests: 1, request_activity: 3, request_tasks: 1, portal_feedback: 1 });
+    const i = await pm.post(`/api/records/${imp.body.ref}/redact`, { secrets: true, reason: 'Old key in an improvement' });
+    assert.equal(i.status, 200, JSON.stringify(i.body));
+    assert.deepEqual(i.body.places, { improvements: 1, improvement_activity: 1 });
+    assert.equal(await everywhere(), 0);
+    // The search column follows the answers, and the removal is on each record's own history.
+    assert.equal((await ownerQuery("SELECT count(*)::int AS n FROM requests WHERE search @@ to_tsquery('simple', $1)", [OLD.toLowerCase()])).rows[0].n, 0);
+    assert.ok((await pm.get(`/api/requests/${req.body.ref}`)).body.activity.some((a: any) => a.body?.startsWith('Removed sensitive text')));
+    assert.ok((await pm.get(`/api/improvements/${imp.body.ref}`)).body.activity.some((a: any) => a.body?.startsWith('Removed sensitive text')));
+  });
+
   test('the typing check reports kinds only', async () => {
     const r = await analyst.post('/api/sensitive/check', { text: `password=${PW} and ${PNR}` });
     assert.deepEqual(r.body, { secrets: ['password'], personal: ['personal-identity-number'], action: 'redact' });

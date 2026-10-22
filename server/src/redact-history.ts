@@ -14,7 +14,7 @@ import { typeForRef } from './records.js';
 import { redact } from './sensitive.js';
 import { createHash } from 'node:crypto';
 
-type Kind = 'problem' | 'incident' | 'change';
+type Kind = 'problem' | 'incident' | 'change' | 'improvement' | 'request';
 interface Place { table: string; key: string; columns: string[]; json?: string[] }
 
 /** Every place a record's free text can be. Codes, statuses, refs and ids are left alone. */
@@ -30,6 +30,7 @@ const PLACES: Record<Kind, Place[]> = {
     { table: 'incidents', key: 'id', columns: ['title', 'description', 'reporter', 'hold_reason', 'resolution'] },
     { table: 'incident_activity', key: 'incident_id', columns: ['body'], json: ['data'] },
     { table: 'incident_links', key: 'incident_id', columns: ['note', 'url'] },
+    { table: 'portal_feedback', key: 'incident_id', columns: ['comment'] },
   ],
   change: [
     { table: 'changes', key: 'id', columns: ['title', 'description', 'implementation_plan', 'test_plan', 'backout_plan', 'outcome', 'review', 'cancel_reason'] },
@@ -37,9 +38,25 @@ const PLACES: Record<Kind, Place[]> = {
     { table: 'change_votes', key: 'change_id', columns: ['comment'] },
     { table: 'change_links', key: 'change_id', columns: ['note', 'url'] },
   ],
+  improvement: [
+    { table: 'improvements', key: 'id', columns: ['title', 'description', 'benefit', 'reject_reason'] },
+    { table: 'improvement_activity', key: 'improvement_id', columns: ['body'], json: ['data'] },
+    { table: 'improvement_links', key: 'improvement_id', columns: ['note', 'url'] },
+  ],
+  // The portal's replies are request_activity comments (from_requester), so they are cleaned with the rest of it.
+  request: [
+    { table: 'requests', key: 'id', columns: ['title', 'reject_reason', 'cancel_reason'], json: ['answers'] },
+    { table: 'request_activity', key: 'request_id', columns: ['body'], json: ['data'] },
+    { table: 'request_tasks', key: 'request_id', columns: ['title', 'note'] },
+    { table: 'request_links', key: 'request_id', columns: ['note', 'url'] },
+    { table: 'portal_feedback', key: 'request_id', columns: ['comment'] },
+  ],
 };
-const TABLE: Record<Kind, string> = { problem: 'problems', incident: 'incidents', change: 'changes' };
-const LOG: Record<Kind, [string, string]> = { problem: ['problem_activity', 'problem_id'], incident: ['incident_activity', 'incident_id'], change: ['change_activity', 'change_id'] };
+const TABLE: Record<Kind, string> = { problem: 'problems', incident: 'incidents', change: 'changes', improvement: 'improvements', request: 'requests' };
+const LOG: Record<Kind, [string, string]> = {
+  problem: ['problem_activity', 'problem_id'], incident: ['incident_activity', 'incident_id'], change: ['change_activity', 'change_id'],
+  improvement: ['improvement_activity', 'improvement_id'], request: ['request_activity', 'request_id'],
+};
 
 export const redactHistorySchema = z.object({
   /** Remove everything the scanner sees as a secret. */
@@ -117,7 +134,7 @@ export async function redactHistory(user: User, ref: string, input: z.infer<type
   const reason = input.dry_run ? '' : requireReason(input.reason);
   if (!input.secrets && !input.text) throw badRequest('Choose what to remove: secrets, a text, or both');
   const type = typeForRef(ref).type as Kind;
-  if (!TABLE[type]) throw badRequest('Only problems, incidents and changes have a history to clean');
+  if (!TABLE[type]) throw badRequest('Only problems, incidents, changes, improvements and requests have a history to clean');
   if (input.text && input.text.toUpperCase().includes(ref.toUpperCase())) throw badRequest('The text cannot include the record\'s own reference');
   const clean = cleaner(input);
   let preview: { removed: number; places: Record<string, number>; outside: unknown; dry_run: true } | null = null;
@@ -156,7 +173,8 @@ export async function redactHistory(user: User, ref: string, input: z.infer<type
         places.notifications = (places.notifications ?? 0) + a + b;
       }
     }
-    const { rows: deliveries } = await db.query(`SELECT id, payload FROM webhook_deliveries WHERE payload->'${type}'->>'ref' = $1`, [record.ref]);
+    // Practice webhooks carry the record under its type, automation rules' under "record".
+    const { rows: deliveries } = await db.query(`SELECT id, payload FROM webhook_deliveries WHERE $1 IN (payload->'${type}'->>'ref', payload->'record'->>'ref')`, [record.ref]);
     for (const d of deliveries) {
       const count = { n: 0 };
       const payload = cleanJson(d.payload, clean, count);
@@ -170,7 +188,7 @@ export async function redactHistory(user: User, ref: string, input: z.infer<type
     const { rows: sent } = await db.query(
       `SELECT d.channel, count(*)::int AS n FROM notification_deliveries d JOIN notifications n ON n.id = d.notification_id
        WHERE n.ref = $1 AND d.status = 'sent' GROUP BY d.channel`, [record.ref]);
-    const { rows: delivered } = await db.query(`SELECT count(*)::int AS n FROM webhook_deliveries WHERE payload->'${type}'->>'ref' = $1 AND delivered_at IS NOT NULL`, [record.ref]);
+    const { rows: delivered } = await db.query(`SELECT count(*)::int AS n FROM webhook_deliveries WHERE $1 IN (payload->'${type}'->>'ref', payload->'record'->>'ref') AND delivered_at IS NOT NULL`, [record.ref]);
     const { rows: articles } = await db.query(
       `SELECT ref, title FROM articles WHERE (problem_id = $1 AND $2 = 'problem' AND NOT synced_with_problem) OR (source_incident_id = $1 AND $2 = 'incident')`, [record.id, type]);
     const { rows: images } = await db.query("SELECT filename FROM attachments WHERE record_type = $1 AND record_ref = $2 AND kind = 'image' ORDER BY id", [type, record.ref]);
