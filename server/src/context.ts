@@ -5,7 +5,7 @@ import type { Notice } from './notifications.js';
 export interface RequestContext {
   userId: number | null;
   userName: string;
-  actorType: 'user' | 'api_token' | 'mcp' | 'integration' | 'system' | 'anonymous';
+  actorType: 'user' | 'api_token' | 'mcp' | 'integration' | 'system' | 'anonymous' | 'portal';
   channel: string;
   tokenPrefix: string;
   ip: string;

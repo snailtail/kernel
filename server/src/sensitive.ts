@@ -191,7 +191,7 @@ export const clearSensitivePolicyCache = () => { cached = null; };
  * no free text. Everything else is scanned, so a new route is covered by default; a test keeps this list deliberate.
  */
 export const UNSCANNED = [
-  /^\/api\/auth\//, /^\/api\/tokens/, /^\/api\/setup/, /^\/api\/users(\/|$)/, /^\/api\/live\//,
+  /^\/api\/auth\//, /^\/api\/portal\/auth\//, /^\/api\/tokens/, /^\/api\/setup/, /^\/api\/users(\/|$)/, /^\/api\/live\//,
   /^\/api\/admin\/(ai\/providers|sso|cf-access)/, /^\/api\/webhooks/, /^\/api\/connectors/, /^\/api\/dev-sources/,
   /^\/api\/event-sources/, /^\/api\/notifications\/settings/, /^\/api\/dev-hooks\//, /^\/api\/teams\/\d+\/paging$/,
   // Text for the AI assistant is redacted on its way to the model (redactForModel) and never stored.

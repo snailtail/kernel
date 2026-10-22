@@ -11,11 +11,13 @@ export const MODULES = {
   sla: { label: 'Service levels', description: 'SLAs, business hours and the service catalogue; SLA clocks on incidents.' },
   knowledge: { label: 'Knowledge', description: 'Articles from known errors and resolutions, suggested while logging incidents.' },
   request: { label: 'Service requests', description: 'A catalogue of things people can ask for (accounts, access, VMs), with approval and fulfilment tasks, kept apart from incidents.' },
+  portal: { label: 'Self-service portal', description: 'A simple page at /portal where people outside IT report problems, follow their tickets and answer replies, signed in by SSO or an email link.' },
 } as const;
 export type Module = keyof typeof MODULES;
 
-// Service requests (#44) are off until someone turns them on: existing installations keep the menus they know.
-export const MODULE_DEFAULTS: Record<Module, boolean> = { incident: true, change: true, event: true, cmdb: true, sla: true, knowledge: true, request: false };
+// Service requests (#44) and the portal (#45) are off until someone turns them on: existing installations keep the
+// menus they know, and nothing faces people outside IT unless an administrator chose it.
+export const MODULE_DEFAULTS: Record<Module, boolean> = { incident: true, change: true, event: true, cmdb: true, sla: true, knowledge: true, request: false, portal: false };
 let state: Record<Module, boolean> = { ...MODULE_DEFAULTS };
 let loadedAt = 0;
 
@@ -49,4 +51,4 @@ export const actionEnabled = (action: string) => {
 };
 
 /** OpenAPI tags and MCP prompts per module, so the documentation and agent surface follow the switches too. */
-export const MODULE_TAGS: Record<string, Module> = { Incidents: 'incident', Changes: 'change', Events: 'event', CMDB: 'cmdb', 'Service levels': 'sla', 'Service requests': 'request' };
+export const MODULE_TAGS: Record<string, Module> = { Incidents: 'incident', Changes: 'change', Events: 'event', CMDB: 'cmdb', 'Service levels': 'sla', 'Service requests': 'request', Portal: 'portal' };

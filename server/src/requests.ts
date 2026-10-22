@@ -20,6 +20,7 @@ import { absoluteUrl, notify, sendOutsideMail } from './notifications.js';
 import { rateLimit } from './ratelimit.js';
 import { securityEvent } from './security-events.js';
 import { unsubscribeUrl } from './status-subscriptions.js';
+import { queueReply } from './portal.js';
 import { authorize, can } from './policy.js';
 import type { Db } from './problems.js';
 import { recordUrl, registerRecordType, typeForRef, type RecordType } from './records.js';
@@ -488,6 +489,7 @@ export const transitionRequestSchema = z.object({
   reason: z.string().trim().max(2000).optional(),
 });
 export const decisionSchema = z.object({ decision: z.enum(['approve', 'reject']), comment: z.string().trim().max(2000).default('') });
+export const requestCommentSchema = z.object({ body: z.string().max(20000), to_requester: z.boolean().default(false) });
 export const completeTaskSchema = z.object({ note: z.string().trim().max(5000).default('') });
 export const assignTaskSchema = z.object({ assignee_id: z.number().int().nullable() });
 
@@ -754,12 +756,14 @@ export async function assignRequestTask(user: User, ref: string, taskId: number,
   return getRequest(user, ref);
 }
 
-export async function addRequestComment(user: User, ref: string, body: string) {
+/** A work note, or with toRequester a reply to the requester (#45): shown in the portal and mailed to them. */
+export async function addRequestComment(user: User, ref: string, body: string, toRequester = false) {
   authorize(user, 'request.write');
   if (!body.trim()) throw badRequest('Comment cannot be empty');
   await tx(async (db) => {
     const r = await loadRequest(db, ref);
-    await logRequest(db, r.id, user.id, 'comment', body.trim());
+    await logRequest(db, r.id, user.id, 'comment', body.trim(), toRequester ? { for_requester: true } : {});
+    if (toRequester) await queueReply(db, 'request', r.id);
   });
   return getRequest(user, ref);
 }

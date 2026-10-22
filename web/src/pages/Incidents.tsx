@@ -223,6 +223,8 @@ export function IncidentPage() {
   const others = useLive([i && `incident:${i.id}`], refresh, { presence: true });
   const [note, setNote] = useState('');
   const [noteKind, setNoteKind] = useState<'comment' | 'communication'>('comment');
+  // A note is internal unless the person chooses to reply to the caller (#45): replies show in the portal and go by mail.
+  const [toCaller, setToCaller] = useState(false);
   const [resolving, setResolving] = useState(false);
   const [declaring, setDeclaring] = useState(false);
   const [view, setView] = useState<'all' | 'timeline'>('all');
@@ -332,8 +334,14 @@ export function IncidentPage() {
             </div>
             {view === 'timeline' ? <IncidentTimeline incidentRef={i.ref} version={i.activity.length + i.activity.filter((a) => a.key_moment).length} /> : <>
             {editable && (
-              <form className="comment-form" onSubmit={async (e) => { e.preventDefault(); if (await run(() => api.post(`${path}/comments`, { body: note, kind: noteKind }))) setNote(''); }}>
-                <textarea rows={2} placeholder={noteKind === 'communication' ? 'Stakeholder update: what is affected, what we are doing, next update at…' : 'Add a work note – paste screenshots and logs here'} value={note} onChange={(e) => setNote(e.target.value)} {...richPaste(i.ref, setNote, setActionError)} />
+              <form className="comment-form" onSubmit={async (e) => { e.preventDefault(); if (await run(() => api.post(`${path}/comments`, { body: note, kind: noteKind, to_requester: noteKind === 'comment' && toCaller }))) { setNote(''); setToCaller(false); } }}>
+                {i.caller && noteKind === 'comment' && (
+                  <div className="note-audience" role="radiogroup" aria-label="Who reads this">
+                    <label className="check"><input type="radio" name="note-audience" checked={!toCaller} onChange={() => setToCaller(false)} /> Internal note</label>
+                    <label className="check"><input type="radio" name="note-audience" checked={toCaller} onChange={() => setToCaller(true)} /> Reply to {i.caller.name}</label>
+                  </div>
+                )}
+                <textarea rows={2} placeholder={noteKind === 'communication' ? 'Stakeholder update: what is affected, what we are doing, next update at…' : toCaller ? `Reply to ${i.caller?.name}: they see it in the portal and by email` : 'Add a work note – paste screenshots and logs here'} value={note} onChange={(e) => setNote(e.target.value)} {...richPaste(i.ref, setNote, setActionError)} />
                 <div className="actions">
                   {i.is_major && (
                     <select value={noteKind} onChange={(e) => setNoteKind(e.target.value as 'comment')} aria-label="Kind of note">
@@ -346,11 +354,12 @@ export function IncidentPage() {
             )}
             <ul className="activity">
               {i.activity.map((a) => (
-                <li key={a.id} className={a.kind === 'communication' ? 'communication' : ''}>
+                <li key={a.id} className={a.kind === 'communication' ? 'communication' : a.data?.for_requester || a.data?.from_requester ? 'requester' : ''}>
                   <div className="activity-head">
-                    <strong>{a.user_name ?? 'System'}</strong>{' '}
-                    {a.kind === 'comment' ? 'added a note' : a.kind === 'communication' ? 'posted a communication update' : a.kind === 'status' ? `moved it from ${INCIDENT_STATUS[a.data.from as IncidentStatus]} to ${INCIDENT_STATUS[a.data.to as IncidentStatus]}` : a.body}
+                    <strong>{a.data?.from_requester ? `${i.caller?.name ?? 'The caller'} (portal)` : a.user_name ?? 'System'}</strong>{' '}
+                    {a.kind === 'comment' ? (a.data?.from_requester ? 'added information' : a.data?.for_requester ? 'replied to the caller' : 'added a note') : a.kind === 'communication' ? 'posted a communication update' : a.kind === 'status' ? `moved it from ${INCIDENT_STATUS[a.data.from as IncidentStatus]} to ${INCIDENT_STATUS[a.data.to as IncidentStatus]}` : a.body}
                     {(a.channel === 'mcp' || a.channel === 'api') && <span className="tag channel">via {a.channel.toUpperCase()}</span>}
+                    {a.data?.for_requester && <span className="tag reply">Sent to the caller</span>}
                     <time title={formatDate(a.created_at)}>{relativeTime(a.created_at)}</time>
                     {user.role !== 'viewer' && <KeyMomentToggle incidentRef={i.ref} activityId={a.id} marked={a.key_moment} onChange={refresh} />}
                   </div>

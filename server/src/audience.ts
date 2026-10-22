@@ -118,3 +118,77 @@ export async function forRequester(db: Queryable | null, requestId: number) {
   if (!r) return null;
   return { ref: r.ref as string, title: r.restricted ? null : (r.title as string), approval: !!r.approval };
 }
+
+// ---- The self-service portal (#45) ------------------------------------------------------------
+
+/** How long after resolution the caller may say "Still a problem" in the portal and reopen it. */
+export const PORTAL_REOPEN_DAYS = 14;
+
+// Plain words for where a ticket stands: no ITIL terms.
+export const PORTAL_INCIDENT_STATUS: Record<string, string> = { new: 'Received', in_progress: 'Being worked on', on_hold: 'Waiting', resolved: 'Solved: does it work for you?', closed: 'Closed' };
+export const PORTAL_REQUEST_STATUS: Record<string, string> = { submitted: 'Received', awaiting_approval: 'Waiting for approval', in_fulfilment: 'Being worked on', fulfilled: 'Done', rejected: 'Not approved', cancelled: 'Cancelled' };
+const SERVICE_DESK = 'IT service desk';
+
+export interface PortalTicket {
+  kind: 'problem_report' | 'request';
+  ref: string;
+  /** Null for a restricted or confidential record: the portal shows only its ref and status. */
+  title: string | null;
+  status: string;
+  status_label: string;
+  handled_by: string;
+  created_at: string;
+  updated_at: string;
+  can: { add_information: boolean; confirm: boolean };
+  /** Only with a ref: the replies to the requester and the requester's own messages, oldest first. */
+  updates?: { at: string; from: 'you' | 'it'; by: string; body: string }[];
+}
+
+/**
+ * Everything the portal shows (#45) is built here. A person outside IT sees only incidents where they are the caller
+ * and requests where they are the requester: the ref, title, status in plain words and who handles it (the IT service
+ * desk or the team's name, never a person), and only the updates written for them plus their own messages. Never
+ * internal notes, assignees, categories, CIs, other people or SLA internals. A restricted or confidential record shows
+ * its ref and status only.
+ */
+export async function forPortal(db: Queryable | null, personId: number, ref?: string): Promise<PortalTicket[]> {
+  db ??= { query };
+  const one = ref ? ref.toUpperCase() : null;
+  const { rows } = await db.query(
+    `SELECT 'problem_report' AS kind, i.id, i.ref, i.title, i.status, i.restricted OR i.classification = 'confidential' AS narrow,
+            CASE WHEN i.restricted THEN NULL ELSE t.name END AS team, i.created_at, i.updated_at,
+            i.status = 'resolved' AND i.resolved_at > now() - $3 * interval '1 day' AS confirmable
+     FROM incidents i LEFT JOIN teams t ON t.id = i.team_id
+     WHERE i.caller_id = $1 AND ($2::text IS NULL OR i.ref = $2)
+     UNION ALL
+     SELECT 'request', r.id, r.ref, r.title, r.status, r.restricted OR r.classification = 'confidential', NULL, r.created_at, r.updated_at, false
+     FROM requests r WHERE r.requester_id = $1 AND ($2::text IS NULL OR r.ref = $2)
+     ORDER BY updated_at DESC LIMIT 200`,
+    [personId, one, PORTAL_REOPEN_DAYS],
+  );
+  const out: PortalTicket[] = [];
+  for (const r of rows) {
+    const incident = r.kind === 'problem_report';
+    const handledBy = r.team ?? SERVICE_DESK;
+    const open = incident ? !['closed'].includes(r.status) : !['fulfilled', 'rejected', 'cancelled'].includes(r.status);
+    const t: PortalTicket = {
+      kind: r.kind, ref: r.ref, title: r.narrow ? null : r.title, status: r.status,
+      status_label: (incident ? PORTAL_INCIDENT_STATUS : PORTAL_REQUEST_STATUS)[r.status] ?? r.status, handled_by: handledBy,
+      created_at: new Date(r.created_at).toISOString(), updated_at: new Date(r.updated_at).toISOString(),
+      can: { add_information: open, confirm: !!r.confirmable },
+    };
+    if (one) {
+      // Replies to the requester and the requester's own messages; nothing at all from a narrow record.
+      const { rows: acts } = r.narrow ? { rows: [] as any[] } : await db.query(
+        `SELECT created_at, body, data->>'from_requester' = 'true' AS mine FROM ${incident ? 'incident_activity' : 'request_activity'}
+         WHERE ${incident ? 'incident_id' : 'request_id'} = $1 AND kind = 'comment'
+           AND (data->>'for_requester' = 'true' OR (data->>'from_requester' = 'true' AND (data->>'person_id')::int = $2))
+         ORDER BY created_at, id`,
+        [r.id, personId],
+      );
+      t.updates = acts.map((a) => ({ at: new Date(a.created_at).toISOString(), from: a.mine ? ('you' as const) : ('it' as const), by: a.mine ? 'You' : handledBy, body: a.body }));
+    }
+    out.push(t);
+  }
+  return out;
+}

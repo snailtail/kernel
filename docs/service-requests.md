@@ -102,6 +102,11 @@ Content-Type: application/json
 one task: 256 random bits, of which Kernel stores only the SHA-256. It works once and expires after 7 days. A
 retried delivery mints a new one, and the old one stops working. No script ever runs on the Kernel host.
 
+Behind an access gateway such as Cloudflare Access, the receiver cannot reach the callback until you let it past:
+either an Access **bypass** policy for `POST /api/requests/*/tasks/*/complete` only (the task token is the
+credential), or an Access **service token** that the receiver sends with its call (`CF-Access-Client-Id` and
+`CF-Access-Client-Secret`). The second keeps the gateway in front of it; see also `docs/status-page.md`.
+
 ## API and MCP
 
 REST: `/api/request-items` (the catalogue; `/options` lists templates and JSON webhooks for the editor),

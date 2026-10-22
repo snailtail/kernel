@@ -70,8 +70,9 @@ export async function problemRoutes(app: FastifyInstance) {
   });
 
   app.post<RefParams>('/api/problems/:ref/duplicate', async (req) => {
+    const user = requireUser(req);
     const body = z.object({ of: z.string().trim().min(1) }).parse(req.body);
-    return problems.markDuplicate(requireUser(req), req.params.ref, body.of);
+    return problems.markDuplicate(user, req.params.ref, body.of);
   });
 
   app.get<RefParams>('/api/problems/:ref', async (req) => {
@@ -103,8 +104,9 @@ export async function problemRoutes(app: FastifyInstance) {
   app.delete<RefParams>('/api/problems/:ref/watch', async (req) => problems.setWatching(requireUser(req), req.params.ref, false));
 
   app.post<RefParams>('/api/problems/:ref/comments', { config: { idempotent: 'problem.comment' } }, async (req) => {
+    const user = requireUser(req);
     const body = z.object({ body: z.string().max(20000) }).parse(req.body);
-    return problems.addComment(requireUser(req), req.params.ref, body.body);
+    return problems.addComment(user, req.params.ref, body.body);
   });
 
   app.post<RefParams>('/api/problems/:ref/links', { config: { idempotent: 'problem.link' } }, async (req) =>
@@ -185,8 +187,9 @@ export async function problemRoutes(app: FastifyInstance) {
     return reply.code(201).send({ ok: true });
   });
   app.post<RefParams>('/api/records/:ref/links', { config: { idempotent: 'problem.link' } }, async (req) => {
+    const user = requireUser(req);
     const body = generic.linkBodySchema.parse(req.body);
-    return generic.linkRecords(requireUser(req), req.params.ref, body.to, body);
+    return generic.linkRecords(user, req.params.ref, body.to, body);
   });
   app.get('/api/flow', async (req) => flow.processMap(requireUser(req, 'meta.read')));
   app.get('/api/health-tips', async (req) => flow.healthTips(requireUser(req, 'meta.read')));
@@ -211,8 +214,9 @@ export async function problemRoutes(app: FastifyInstance) {
     analyses.confirmAnalysis(requireUser(req), req.params.ref, Number(req.params.id)),
   );
   app.post<RefParams>('/api/problems/:ref/confirm', async (req) => {
+    const user = requireUser(req);
     const body = z.object({ fields: z.array(z.enum(problems.PROPOSABLE as [string, ...string[]])).min(1) }).parse(req.body);
-    return problems.confirmProposals(requireUser(req), req.params.ref, body.fields);
+    return problems.confirmProposals(user, req.params.ref, body.fields);
   });
 
   app.get('/api/approvals', async (req) => {

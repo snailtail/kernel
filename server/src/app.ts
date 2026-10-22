@@ -5,6 +5,7 @@ import { markPersonalData, scanInbound } from './sensitive.js';
 import { liveRoutes } from './routes/live.js';
 import { startLive, stopLive } from './live.js';
 import { ssoRoutes } from './routes/sso.js';
+import { portalRoutes } from './routes/portal.js';
 import { serviceReportRoutes } from './routes/service-report.js';
 import { statusRoutes } from './routes/status.js';
 import { viewerFor } from './visibility.js';
@@ -97,9 +98,9 @@ export async function buildApp(options: { logLevel?: string; serveWeb?: boolean 
   });
 
   app.addHook('onRequest', async (req) => {
-    // Event hooks authenticate with their own source token (event-hooks.ts), never as a user.
-    // Event and dev platform hooks authenticate with their own token or signature, never as a user.
-    if ((req.url.startsWith('/api/') && !req.url.startsWith('/api/event-hooks/') && !req.url.startsWith('/api/dev-hooks/') && !/^\/api\/paging\/\d+\/inbound/.test(req.url) && !req.url.startsWith('/api/public/')) || req.url.startsWith('/mcp')) await authenticate(req);
+    // Event and dev platform hooks authenticate with their own token or signature, never as a user. The portal (#45) has its
+    // own session for people outside IT (portal.ts) and never sees Kernel's.
+    if ((req.url.startsWith('/api/') && !req.url.startsWith('/api/event-hooks/') && !req.url.startsWith('/api/dev-hooks/') && !/^\/api\/paging\/\d+\/inbound/.test(req.url) && !req.url.startsWith('/api/public/') && !req.url.startsWith('/api/portal/')) || req.url.startsWith('/mcp')) await authenticate(req);
   });
   // Who is acting and how, for the audit trail; the rest of the request runs inside this context.
   app.addHook('onRequest', (req, _reply, done) => {
@@ -160,6 +161,7 @@ export async function buildApp(options: { logLevel?: string; serveWeb?: boolean 
   await app.register(statusRoutes);
   await app.register(serviceReportRoutes);
   await app.register(ssoRoutes);
+  await app.register(portalRoutes);
   await app.register(liveRoutes);
   await app.register(sensitiveRoutes);
   // Sensitive data (#61): secrets in inbound text are redacted before any handler sees them (or the request is

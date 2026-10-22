@@ -14,6 +14,7 @@ import { possibleCausesForIncident } from './changes.js';
 import { createProblemInTx, createProblemSchema, getProblem, problemFields, loadForUpdate, logActivity, registerProblemExtra, type Db } from './problems.js';
 import { recordUrl, registerRecordType, type RecordType } from './records.js';
 import { logIncident } from './incident-log.js';
+import { queueReply } from './portal.js';
 import { recomputeSla, slaClock, slaOnTransition } from './sla.js';
 import { incidentPeople, namePeople, personRefSchema, resolvePerson } from './people.js';
 import { incidentArticles, suggestArticles } from './knowledge.js';
@@ -84,7 +85,12 @@ export const listIncidentsSchema = z.object({
   bulk: z.uuid().optional(),
   limit: z.coerce.number().int().min(1).max(500).default(200),
 });
-export const incidentCommentSchema = z.object({ body: z.string().max(20000), kind: z.enum(['comment', 'communication']).default('comment') });
+export const incidentCommentSchema = z.object({
+  body: z.string().max(20000),
+  kind: z.enum(['comment', 'communication']).default('comment'),
+  /** A reply to the caller (#45): shown in the portal and mailed to them. Internal notes are the default. */
+  to_requester: z.boolean().default(false),
+});
 export const incidentLinkSchema = z.object({
   kind: z.enum(['incident', 'event', 'change', 'document']),
   reference: z.string().trim().min(1).max(200),
@@ -298,7 +304,7 @@ export async function insertIncident(
   actorId: number | null,
   fields: Omit<z.infer<typeof createIncidentSchema>, 'cis'>,
   ciIds: number[],
-  source: 'user' | 'api' | 'mcp' | 'event' | 'email',
+  source: 'user' | 'api' | 'mcp' | 'event' | 'email' | 'portal',
   extra: { event_rule_id?: number; event_group_key?: string; restricted?: boolean } = {},
 ) {
   const values: Record<string, unknown> = { ...fields, ...extra, source, created_by: actorId };
@@ -470,6 +476,13 @@ export async function addIncidentComment(user: User, ref: string, input: z.infer
   await tx(async (db) => {
     const current = await loadIncident(db, ref);
     if (input.kind === 'communication' && !current.is_major) throw badRequest('Communication updates are for major incidents; add a note instead');
+    if (input.to_requester) {
+      if (input.kind !== 'comment') throw badRequest('A reply to the caller is a comment, not a communication update');
+      if (!current.caller_id) throw badRequest('This incident has no caller to reply to: set the caller first');
+      await logIncident(db, current.id, user.id, 'comment', input.body.trim(), { for_requester: true });
+      await queueReply(db, 'incident', current.id);
+      return;
+    }
     await logIncident(db, current.id, user.id, input.kind, input.body.trim());
   });
   return getIncident(user, ref);

@@ -127,7 +127,7 @@ export function checkUnsubscribe(who: Who, id: number, token: string) {
     return expected.length === given.length && timingSafeEqual(expected, given);
   });
   if (!valid) throw badRequest('Invalid unsubscribe link');
-  return who === 's' ? 'Stop email about service status?' : who === 'r' ? 'Stop email about the requests made for you?' : 'Stop email about service status for your organisation?';
+  return who === 's' ? 'Stop email about service status?' : who === 'r' ? 'Stop email about your requests and the problems you reported?' : 'Stop email about service status for your organisation?';
 }
 
 /** One-click unsubscribe (POST only). A subscriber is deleted; a contact stays a contact for everything else. */
@@ -139,7 +139,7 @@ export async function unsubscribe(who: Who, id: number, token: string) {
   } else if (who === 'r') {
     const { rowCount } = await query('UPDATE people SET request_mail = false WHERE id = $1 AND request_mail', [id]);
     if (rowCount) await audit(null, { entity_type: 'person', entity_ref: `#${id}`, action: 'unsubscribe_requests' });
-    return 'You will no longer receive email about the requests made for you.';
+    return 'You will no longer receive email about your requests and the problems you reported.';
   } else {
     const { rowCount } = await query('UPDATE people SET status_contact = false WHERE id = $1 AND status_contact', [id]);
     if (rowCount) await audit(null, { entity_type: 'person', entity_ref: `#${id}`, action: 'unsubscribe_status' });

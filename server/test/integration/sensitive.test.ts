@@ -153,7 +153,9 @@ describe('sensitive data in records (#61)', { skip }, () => {
       '/api/admin/ai', '/api/admin/cf-access', '/api/admin/sso', '/api/ai/analyze-log', '/api/ai/review-wording', '/api/ai/summarize',
       '/api/auth/access', '/api/auth/login', '/api/auth/logout', '/api/auth/mfa', '/api/auth/passkey', '/api/auth/passkeys',
       '/api/auth/password', '/api/auth/preferences', '/api/auth/reauth', '/api/auth/sessions', '/api/connectors', '/api/dev-hooks',
-      '/api/dev-sources', '/api/event-sources', '/api/live', '/api/notifications/settings', '/api/records', '/api/sensitive/check',
+      '/api/dev-sources', '/api/event-sources', '/api/live', '/api/notifications/settings',
+      // The portal's sign-in (#45): its body is the sign-in token itself, or an email address.
+      '/api/portal/auth', '/api/records', '/api/sensitive/check',
       '/api/setup', '/api/setup/demo', '/api/tokens', '/api/users', '/api/webhooks',
     ], 'a route that takes secrets on purpose is added here (and to UNSCANNED) after review');
   });
