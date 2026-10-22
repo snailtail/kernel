@@ -8,7 +8,7 @@ import { moduleEnabled } from './modules.js';
 import { authorize, can } from './policy.js';
 import { hiddenRecordsExist } from './visibility.js';
 
-export const TILES = ['mttr', 'sla', 'change_success', 'recurring', 'problems_resolved', 'major_open', 'requests_fulfilled'] as const;
+export const TILES = ['mttr', 'sla', 'change_success', 'recurring', 'problems_resolved', 'major_open', 'requests_fulfilled', 'satisfaction'] as const;
 export type TileId = (typeof TILES)[number];
 const PERIODS = 6;
 
@@ -46,7 +46,9 @@ export async function kpis(user: User, { period }: z.infer<typeof kpiSchema>) {
     SELECT gs AS start, gs + ('1 ' || $1)::interval AS stop
     FROM generate_series(date_trunc($1, now()) - ('1 ' || $1)::interval * ${PERIODS - 1}, date_trunc($1, now()), ('1 ' || $1)::interval) gs)`;
   const none = { rows: [] as any[] };
-  const [periods, resolved, changes, recurring, problems, knownErrors, major, requests] = await Promise.all([
+  // How people rated their closed tickets in the portal (#45): only while the portal is on.
+  const portal = moduleEnabled('portal') && (incident || request);
+  const [periods, resolved, changes, recurring, problems, knownErrors, major, requests, ratings] = await Promise.all([
     query(`${P} SELECT start::date::text AS start FROM p ORDER BY start`, [period]),
     incident
       ? query(
@@ -109,6 +111,17 @@ export async function kpis(user: User, { period }: z.infer<typeof kpiSchema>) {
            FROM p LEFT JOIN requests r ON r.status = 'fulfilled' AND r.resolved_at >= p.start AND r.resolved_at < p.stop
            GROUP BY 1`,
           [period],
+        )
+      : none,
+    portal
+      ? query(
+          `${P} SELECT p.start::date::text AS start, count(f.id)::int AS total,
+             count(f.id) FILTER (WHERE f.rating = 'good')::int AS good, count(f.id) FILTER (WHERE f.rating = 'okay')::int AS okay,
+             count(f.id) FILTER (WHERE f.rating = 'bad')::int AS bad
+           FROM p LEFT JOIN portal_feedback f ON f.created_at >= p.start AND f.created_at < p.stop
+             AND (f.incident_id IS NULL OR $2) AND (f.request_id IS NULL OR $3)
+           GROUP BY 1`,
+          [period, incident, request],
         )
       : none,
   ]);
@@ -187,6 +200,16 @@ export async function kpis(user: User, { period }: z.infer<typeof kpiSchema>) {
       detail: now?.with_target ? `${now.met} of ${now.with_target} within their SLA.` : `No requests with a target fulfilled this ${unit}.`,
       basis: `Service requests fulfilled in the ${unit}, and how many within their SLA. Requests never count as incidents.`,
       link: '/requests?status=fulfilled',
+    });
+  }
+  if (portal) {
+    const good = per(ratings.rows, (rs) => pct(rs[0]?.good ?? 0, rs[0]?.total ?? 0));
+    const now = ratings.rows.find((r) => r.start === last(starts));
+    tiles.push({
+      id: 'satisfaction', label: 'Satisfaction', value: last(good), unit: 'percent', trend: good, trend_label: `rated good per ${unit}`, lower_is_better: false,
+      detail: now?.total ? `${now.good} good, ${now.okay} okay, ${now.bad} not good, of ${now.total} ratings.` : `No ratings this ${unit}.`,
+      basis: `The share of ratings that were "good", from the one-click question people get in the portal when their ticket is closed.`,
+      link: '/incidents?status=closed',
     });
   }
   return {

@@ -373,6 +373,10 @@ export async function seedStory(p: People) {
   const rejected = await requests.createRequest(sara, { item_id: access.id, requester: { id: await personId('johan.ek@example.com') }, answers: { system: db, level: 'Write', why: 'Fix prices directly in the database.' }, priority: 4 });
   await requests.decideRequest(anna, rejected.ref, { decision: 'reject', comment: 'Prices are changed in the shop admin, which keeps the history. Ask for the price editor role there.' });
 
+  // The webshop is on the public status page, which the portal shows to the organisations that use it.
+  await status.savePageSettings(admin, { public_enabled: true, title: 'Service status' }, 'Demo story');
+  await status.setPublicService(anna, webshop, { public: true, public_name: 'Online shop', public_description: 'Browse, cart and checkout' });
+  await status.postUpdate(anna, { incident: inc, services: [webshop], phase: 'identified', status: 'major_outage', message: 'Payments in the online shop fail. We know the cause and are fixing it. Browsing and carts work.', public: true });
   // ---- The self-service portal (#45): Maria follows what she reported ----
   const help = await knowledge.createArticle(anna, { title: 'Headset or microphone not found after an update', article_type: 'how_to', audience: 'end_users', body: '1. Unplug the headset and plug it into another USB port.\n2. Restart the softphone.\n3. Still nothing? Report the problem and tell us which headset you use.' });
   await knowledge.transitionArticle(anna, help.ref, { to: 'published' });
@@ -387,6 +391,12 @@ export async function seedStory(p: People) {
   await incidents.transitionIncident(sara, orderSearch.ref, { to: 'in_progress' });
   await incidents.addIncidentComment(sara, orderSearch.ref, { kind: 'comment', to_requester: true, body: 'We rebuilt the search index and order search answers in about a second again. Does it work for you now?' });
   await incidents.transitionIncident(sara, orderSearch.ref, { to: 'resolved', resolution_code: 'fixed', resolution: 'Rebuilt the order search index after the nightly import had left it stale.' });
+  // Last week: a printer jam, fixed, confirmed and rated in the portal.
+  const printer = await asMaria(() => portal.reportProblem(maria, { service: null, what: 'The printer by the coffee machine jams on every page', affected: 'some' }));
+  await incidents.transitionIncident(sara, printer.ref, { to: 'in_progress' });
+  await incidents.transitionIncident(sara, printer.ref, { to: 'resolved', resolution_code: 'fixed', resolution: 'Replaced the worn pickup roller.' });
+  await asMaria(() => portal.confirm(maria, printer.ref, { works: true, body: '' }));
+  await asMaria(() => portal.rate(maria, printer.ref, { rating: 'good', comment: 'Fixed the same morning, thank you!' }));
 
   // The pages the story queued (the worker is not running while seeding).
   await oncall.deliverPages();

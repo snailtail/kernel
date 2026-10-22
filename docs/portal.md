@@ -1,8 +1,8 @@
 # Self-service portal
 
-The portal (`/portal`) is the front door for people outside IT. They report something that does not work, follow
-what they reported or asked for, answer questions from IT and say whether a fix worked, without knowing ITIL or
-Kernel's own views. It is plain language, mobile first, and works with a keyboard and a screen reader.
+The portal (`/portal`) is the front door for people outside IT. They report something that does not work, ask for
+something from the catalogue, follow what they reported or asked for, answer questions from IT, say whether a fix
+worked and how it went, and see the status of the services they use, without knowing ITIL or Kernel's own views. It is plain language, mobile first, and works with a keyboard and a screen reader.
 
 It is a module (Administration → Modules → **Self-service portal**) and **off by default**. While it is off, `/portal`
 and everything under `/api/portal/` answer 404. Turn it off again at any time; nothing is deleted.
@@ -38,7 +38,8 @@ Only their own: problems they reported (incidents where they are the **caller**)
 they are the **requester**). For each, the reference, the title, where it stands in plain words (Received, Being
 worked on, Waiting, Solved, Closed; for requests also Waiting for approval, Done, Not approved), and who handles it:
 the team's name, or "IT service desk". Never a person's name, internal notes, categories, CIs, other people,
-priorities or service-level details. A **restricted or confidential** record shows its reference and status only.
+priorities or service-level details. A **confidential** record, or a **restricted** problem report, shows its
+reference and status only; a restricted request is the requester's own and shows in full.
 
 Of the history they see only the **replies written for them** and their own messages. Everything the portal shows is
 built in one place, `forPortal` in `server/src/audience.ts`.
@@ -47,8 +48,8 @@ built in one place, `forPortal` in `server/src/audience.ts`.
 
 On an incident with a caller, and on any service request, the note box has a choice: **Internal note** (the default)
 or **Reply to …**. A reply shows in the portal and is mailed to the person, with the reply's text and a link to answer,
-plus a one-click unsubscribe. On a restricted or confidential record a reply is refused: the person would only see the
-status, so contact them directly. Replies are written by people (web UI or API); agents over MCP add internal notes
+plus a one-click unsubscribe. On a confidential record, or a restricted incident, a reply is refused: the person would
+only see the status, so contact them directly. Replies are written by people (web UI or API); agents over MCP add internal notes
 only.
 
 What the person writes back ("Add information", or the comment on "Still a problem") becomes a comment marked as
@@ -76,6 +77,37 @@ When a reported problem is solved, the person is asked whether it works. **It wo
 reopens it, within 14 days of it being solved, and tells the people handling it. A major incident only records the
 answer; it closes through its review.
 
+## Asking for something
+
+With the Service requests module on, **Ask for something** lists the catalogue (#44): active items, grouped under
+their service's name for people outside IT (the public name, else the catalogue's own name). Only items whose form
+people outside IT can answer are listed: text, long text, a choice and a date. An item with a person or CI field
+needs Kernel's directory or CMDB, so it is ordered inside Kernel instead. People never see approvers, tasks, teams
+or SLAs, only that an item "needs an approval first".
+
+The form is checked by the same validator as inside Kernel, and the request takes the same path: approval, then
+fulfilment. The person is the requester. No Kernel user logged it (`created_by` is empty), and the history says
+"Submitted in the portal" (channel `portal`). Separation of duties is unchanged: nobody who logs a request in the
+portal can also approve it.
+
+A requester's own **restricted** request shows in full in their portal, with its replies: they are its requester. A
+**confidential** one still shows its reference and status only.
+
+## Service status
+
+If the person's organisation uses services that are on the public status page (#46), **Service status** shows them
+under their public names, with the published status and the published, unretracted news of the last 14 days. Nothing
+else: no CIs, incidents or internal updates. When the public page offers email sign-up, the person can ask for email
+about these services with one button. It is the status page's own sign-up for their address, confirmed by mail.
+
+## How did it go
+
+When a reported problem is closed, or a request is done, not approved or cancelled, the person is asked once
+**How did it go?**: 😊 Good, 😐 Okay or 😞 Not good, with an optional comment. The rating and the comment go into
+the record's history (the comment is marked as the requester's), and the dashboard gets a **Satisfaction** tile with
+the share of "good" ratings per period. The tile appears only while the portal is on, and counts only ratings on
+records of practices the reader may see.
+
 ## Reaching it from outside
 
 Behind an access gateway such as Cloudflare Access, people outside cannot reach the portal until you either add an
@@ -83,6 +115,13 @@ Access **bypass** policy for `/portal`, `/portal/*`, `/api/portal/*` and the web
 publish those paths on a **separate host name** (for example `help.example.com`) that routes only them. The portal
 then authenticates people itself. Single sign-on from the portal also needs `/api/auth/sso/callback` reachable.
 Mail links point at `KERNEL_PUBLIC_URL`.
+
+## Turning it off
+
+Administration → Modules → **Self-service portal** off. `/portal` and `/api/portal/*` answer 404 straight away and
+the Satisfaction tile leaves the dashboard. Portal sessions stop working (they are cleared as they expire), and
+nothing people reported, asked for or rated is deleted: it all stays in Kernel, and switching the module on brings
+the portal back as it was.
 
 ## API
 

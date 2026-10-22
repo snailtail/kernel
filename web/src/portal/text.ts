@@ -53,7 +53,46 @@ export const TEXT = {
   articleFooter: 'Did not help? Report the problem and we will look at it.',
   notFound: 'We could not find this.',
   error: 'Something went wrong. Try again in a moment.',
+  // Part 2: asking for something, service status, how it went.
+  askButton: 'Ask for something',
+  askHint: 'Access, accounts, equipment and more',
+  askTitle: 'What do you need?',
+  askEmpty: 'There is nothing to ask for here yet. Contact your IT service desk.',
+  askOther: 'Other',
+  needsApproval: 'Needs an approval first',
+  choose: 'Choose…',
+  optional: '(optional)',
+  askSend: 'Send request',
+  askSent: 'Thank you. We have received your request and will tell you how it goes.',
+  statusButton: 'Service status',
+  statusHint: 'Is something down right now?',
+  statusTitle: 'Service status',
+  statusNone: 'There are no services to show.',
+  statusNews: 'Latest news',
+  statusNoNews: 'No news in the last two weeks.',
+  statusSignUp: 'Email me when there is news about these services',
+  statusSignedUp: 'Check your inbox: follow the link in the email to start receiving updates.',
+  rateQuestion: 'How did it go?',
+  rateComment: 'Anything you want to tell us? (optional)',
+  rateSend: 'Send',
+  rateThanks: 'Thank you for telling us.',
+  rated: (label: string) => `You told us: ${label}. Thank you.`,
 } as const;
+
+/** One click on how it went (the server keeps good, okay and bad). */
+export const RATINGS = [
+  { value: 'good', label: 'Good', face: '😊' },
+  { value: 'okay', label: 'Okay', face: '😐' },
+  { value: 'bad', label: 'Not good', face: '😞' },
+] as const;
+
+/** A service's state and the news about it, in plain words. */
+export const SERVICE_STATE: Record<string, string> = {
+  operational: 'Working normally', degraded: 'Slower than usual', partial_outage: 'Partly down', major_outage: 'Down', maintenance: 'Planned maintenance',
+};
+export const NEWS_PHASE: Record<string, string> = {
+  investigating: 'We are looking into it', identified: 'We know the cause', monitoring: 'Fixed, and we are keeping an eye on it', resolved: 'Fixed', maintenance: 'Planned maintenance',
+};
 
 /** How many are affected, in the order the form shows them (the server maps it to how fast we act). */
 export const AFFECTED = [
