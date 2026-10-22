@@ -49,6 +49,11 @@ export const ssoSchema = z.object({
   trust_idp_mfa: z.boolean().default(false),
   mfa_acr_values: z.array(z.string().trim().min(1).max(200)).max(10).default([]),
   private_allow: z.array(z.string().max(100)).max(20).default([]),
+  /**
+   * Accept an email claim the provider does not mark as verified (no email_verified at all). Off by default: the portal
+   * signs people in by email alone, and some providers let users set their own (Entra's "nOAuth"). false is never accepted.
+   */
+  trust_email_claim: z.boolean().default(false),
 });
 type SsoSettings = z.infer<typeof ssoSchema> & { client_secret_enc?: string | null };
 
@@ -100,6 +105,16 @@ export async function startSso(req: FastifyRequest, reply: FastifyReply, purpose
   return reply.redirect(url.href);
 }
 
+/**
+ * The provider's email when it may identify a person: email_verified must be true, or absent with trust_email_claim
+ * on. It decides who you are in the portal (#45) and which person a new account is linked to.
+ */
+export function verifiedEmail(claims: Record<string, unknown>, s: Pick<SsoSettings, 'trust_email_claim'>) {
+  if (typeof claims.email !== 'string' || !claims.email.trim()) return '';
+  const ok = claims.email_verified === true || (claims.email_verified === undefined && s.trust_email_claim === true);
+  return ok ? claims.email.trim().toLowerCase() : '';
+}
+
 const RANK: Record<Role, number> = { viewer: 0, analyst: 1, problem_manager: 2, admin: 3 };
 
 /** The role from groups: the highest explicitly mapped role, else the default (never admin), else no access. */
@@ -135,7 +150,7 @@ export async function finishSso(req: FastifyRequest, reply: FastifyReply) {
     }
   }
   // A portal sign-in (#45) is a person, not a Kernel account: no groups or roles, and no user is created.
-  if (rows[0].purpose === 'portal') return portalSignIn(req, reply, claims);
+  if (rows[0].purpose === 'portal') return portalSignIn(req, reply, claims, s);
   const amr = Array.isArray(claims.amr) ? (claims.amr as unknown[]).map(String) : [];
   const idpMfa = s.trust_idp_mfa === true && (amr.includes('mfa') || (typeof claims.acr === 'string' && (s.mfa_acr_values ?? []).includes(claims.acr)));
   const groups = Array.isArray(claims[s.groups_claim]) ? (claims[s.groups_claim] as unknown[]).map(String) : [];
@@ -146,6 +161,7 @@ export async function finishSso(req: FastifyRequest, reply: FastifyReply) {
   }
   const user = await asSystem(() => provisionUser(String(claims.iss), String(claims.sub), {
     email: typeof claims.email === 'string' && claims.email_verified !== false ? claims.email : '',
+    verified_email: verifiedEmail(claims, s),
     name: String(claims.name ?? claims.preferred_username ?? claims.email ?? claims.sub),
     username: String(claims.preferred_username ?? claims.email ?? `sso-${String(claims.sub).slice(0, 12)}`),
   }, role, groups, s));
@@ -161,11 +177,11 @@ export async function finishSso(req: FastifyRequest, reply: FastifyReply) {
 }
 
 /**
- * The portal's single sign-on: the provider's email (unless it says the address is unverified, as for Kernel's own
- * sign-in) must belong to exactly one active person in people. No sign-up and no Kernel account.
+ * The portal's single sign-on: the provider's verified email (verifiedEmail) must belong to exactly one active person
+ * in people. No sign-up and no Kernel account.
  */
-async function portalSignIn(req: FastifyRequest, reply: FastifyReply, claims: Record<string, unknown>) {
-  const email = typeof claims.email === 'string' && claims.email_verified !== false ? claims.email.trim().toLowerCase() : '';
+async function portalSignIn(req: FastifyRequest, reply: FastifyReply, claims: Record<string, unknown>, s: SsoSettings) {
+  const email = verifiedEmail(claims, s);
   const { rows } = moduleEnabled('portal') && email
     ? await query("SELECT id FROM people WHERE lower(email) = $1 AND active AND erased_at IS NULL", [email])
     : { rows: [] as any[] };
@@ -178,7 +194,7 @@ async function portalSignIn(req: FastifyRequest, reply: FastifyReply, claims: Re
 }
 
 /** Just-in-time account: created on first sign-in, role and mapped teams kept in step with the provider's groups. */
-async function provisionUser(issuer: string, subject: string, p: { email: string; name: string; username: string }, role: Role, groups: string[], s: SsoSettings) {
+async function provisionUser(issuer: string, subject: string, p: { email: string; verified_email: string; name: string; username: string }, role: Role, groups: string[], s: SsoSettings) {
   return tx(async (db) => {
     const { rows: found } = await db.query('SELECT id, username, role, mfa_enabled_at IS NOT NULL AS mfa_enabled FROM users WHERE sso_issuer = $1 AND sso_subject = $2', [issuer, subject]);
     let id: number;
@@ -203,8 +219,8 @@ async function provisionUser(issuer: string, subject: string, p: { email: string
       );
       id = rows[0].id;
       await audit(db, { entity_type: 'user', entity_ref: `#${id}`, action: 'create', changes: { role, via: 'sso' } });
-      // Link to the person record with the same e-mail (#39).
-      if (p.email) await db.query('UPDATE people SET user_id = $1 WHERE lower(email) = lower($2) AND user_id IS NULL AND erased_at IS NULL', [id, p.email]);
+      // Link to the person record with the same e-mail (#39), only when the provider vouches for it (verifiedEmail).
+      if (p.verified_email) await db.query('UPDATE people SET user_id = $1 WHERE lower(email) = lower($2) AND user_id IS NULL AND erased_at IS NULL', [id, p.verified_email]);
     }
     // Mapped teams follow the groups; teams that are not mapped are left alone.
     for (const m of s.team_map) {

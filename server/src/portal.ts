@@ -152,13 +152,18 @@ export async function ticket(person: PortalPerson, ref: string) {
   return t;
 }
 
-/** Services the person can choose when reporting: their organisation's services and the service catalogue. */
+/**
+ * Services the person can choose when reporting: their organisation's services and the service catalogue, under a
+ * name meant for people outside IT (the public name, else the catalogue's own name). An internal service with neither
+ * is left out.
+ */
 export async function services(person: PortalPerson) {
   const { rows } = await query(
-    `SELECT c.ref, coalesce(nullif(st.public_name, ''), c.name) AS name FROM configuration_items c
+    `SELECT c.ref, coalesce(nullif(st.public_name, ''), CASE WHEN c.in_catalogue THEN c.name END) AS name FROM configuration_items c
      LEFT JOIN service_status st ON st.ci_id = c.id AND st.public
      WHERE c.class = 'service' AND c.status <> 'retired'
        AND (c.in_catalogue OR EXISTS (SELECT 1 FROM organisation_services os WHERE os.ci_id = c.id AND os.organisation_id = $1))
+       AND (c.in_catalogue OR coalesce(st.public_name, '') <> '')
      ORDER BY 2 LIMIT 200`,
     [person.organisation_id ?? 0],
   );
