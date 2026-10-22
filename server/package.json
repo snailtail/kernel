@@ -38,7 +38,7 @@
     "@simplewebauthn/server": "14.0.3",
     "ai": "7.0.136",
     "bcryptjs": "^3.0.3",
-    "fastify": "^5.12.5",
+    "fastify": "^5.12.6",
     "html-to-text": "10.0.1",
     "imapflow": "2.2.5",
     "jose": "6.2.12",
