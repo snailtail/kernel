@@ -17,7 +17,7 @@ import type { Db } from './problems.js';
 import { rateLimit } from './ratelimit.js';
 import { pageSettings, STATUS_LABEL } from './status.js';
 import { absoluteUrl } from './core/url.js';
-import { sha256Hex } from './core/hash.js';
+import { sha256Hex, tokenHash } from './core/hash.js';
 import { cap } from './core/text.js';
 
 const CONFIRM_HOURS = 48;
@@ -88,7 +88,7 @@ export async function checkConfirm(subscriberId: number, token: string) {
     `SELECT s.pending_ci_ids,
             (SELECT array_agg(st.public_name ORDER BY st.public_name) FROM service_status st WHERE st.public AND st.ci_id = ANY(s.pending_ci_ids)) AS services
      FROM status_subscribers s WHERE s.id = $1 AND s.confirm_hash = $2 AND s.confirm_expires_at > now()`,
-    [subscriberId, sha256Hex(token)],
+    [subscriberId, tokenHash(token)],
   );
   if (!rows[0]) throw badRequest('This link has expired or was already used. Sign up again on the status page.');
   return rows[0].pending_ci_ids?.length ? `updates on ${(rows[0].services ?? []).join(', ')}` : 'updates on every service on the status page';
@@ -100,7 +100,7 @@ export async function confirm(subscriberId: number, token: string) {
     `UPDATE status_subscribers SET confirmed_at = coalesce(confirmed_at, now()), ci_ids = coalesce(pending_ci_ids, ci_ids),
        pending_ci_ids = NULL, confirm_hash = NULL, confirm_expires_at = NULL
      WHERE id = $1 AND confirm_hash = $2 AND confirm_expires_at > now() RETURNING id`,
-    [subscriberId, sha256Hex(token)],
+    [subscriberId, tokenHash(token)],
   );
   if (!rows[0]) throw badRequest('This link has expired or was already used. Sign up again on the status page.');
   await audit(null, { entity_type: 'status_subscriber', entity_ref: `#${subscriberId}`, action: 'confirm' });
@@ -236,7 +236,7 @@ async function deliver(d: any) {
     if (!rows[0]) return 'skipped';
     // Minted when sent and stored as a hash only: a later sign-up's link replaces this one.
     const token = randomBytes(24).toString('base64url');
-    await query(`UPDATE status_subscribers SET confirm_hash = $2, confirm_expires_at = now() + $3 * interval '1 hour' WHERE id = $1`, [d.subscriber_id, sha256Hex(token), CONFIRM_HOURS]);
+    await query(`UPDATE status_subscribers SET confirm_hash = $2, confirm_expires_at = now() + $3 * interval '1 hour' WHERE id = $1`, [d.subscriber_id, tokenHash(token), CONFIRM_HOURS]);
     const what = rows[0].services?.length ? rows[0].services.join(', ') : 'every service on the page';
     await sendOutsideMail(rows[0].email, `Confirm your subscription to ${page.title}`, [
       `Someone asked to receive an email from ${page.title} when there is an update on: ${what}.`,

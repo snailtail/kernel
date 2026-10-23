@@ -28,7 +28,7 @@ import { slaOnTransition } from './sla.js';
 import { signUp as statusSignUp, signUpOpen, unsubscribeUrl } from './status-subscriptions.js';
 import { notifyTeamQueue } from './teams.js';
 import { absoluteUrl } from './core/url.js';
-import { sha256Hex } from './core/hash.js';
+import { sha256Hex, tokenHash } from './core/hash.js';
 
 export const PORTAL_COOKIE = 'kernel_portal';
 const SESSION_HOURS = 8;
@@ -54,7 +54,7 @@ export async function createPortalSession(req: FastifyRequest, reply: FastifyRep
   const token = randomBytes(32).toString('base64url');
   await query(
     `INSERT INTO portal_sessions (token_hash, person_id, method, ip, user_agent, expires_at) VALUES ($1, $2, $3, $4, $5, now() + $6 * interval '1 hour')`,
-    [sha256Hex(token), personId, method, req.ip, String(req.headers['user-agent'] ?? '').slice(0, 300), SESSION_HOURS],
+    [tokenHash(token), personId, method, req.ip, String(req.headers['user-agent'] ?? '').slice(0, 300), SESSION_HOURS],
   );
   await query('DELETE FROM portal_sessions WHERE expires_at < now()');
   reply.setCookie(PORTAL_COOKIE, token, {
@@ -70,7 +70,7 @@ export async function requirePerson(req: FastifyRequest): Promise<PortalPerson> 
   const { rows } = await query(
     `SELECT p.id, p.name, p.email, p.organisation_id FROM portal_sessions s JOIN people p ON p.id = s.person_id
      WHERE s.token_hash = $1 AND s.expires_at > now() AND p.active AND p.erased_at IS NULL`,
-    [sha256Hex(token)],
+    [tokenHash(token)],
   );
   if (!rows[0]) throw unauthorized('Not signed in');
   if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
@@ -82,7 +82,7 @@ export async function requirePerson(req: FastifyRequest): Promise<PortalPerson> 
 
 export async function endPortalSession(req: FastifyRequest, reply: FastifyReply) {
   const token = req.cookies[PORTAL_COOKIE];
-  if (token) await query('DELETE FROM portal_sessions WHERE token_hash = $1', [sha256Hex(token)]);
+  if (token) await query('DELETE FROM portal_sessions WHERE token_hash = $1', [tokenHash(token)]);
   reply.clearCookie(PORTAL_COOKIE, { path: '/api/portal' });
   return { ok: true };
 }
@@ -129,7 +129,7 @@ export async function signInWithLink(req: FastifyRequest, reply: FastifyReply, t
     `UPDATE portal_links l SET used_at = now() FROM people p
      WHERE l.token_hash = $1 AND l.used_at IS NULL AND l.expires_at > now() AND p.id = l.person_id AND p.active AND p.erased_at IS NULL
      RETURNING l.person_id`,
-    [sha256Hex(token)],
+    [tokenHash(token)],
   );
   if (!rows[0]) {
     securityEvent({ action: 'portal.link_refused', category: 'authentication', outcome: 'failure', message: 'Portal sign-in link expired, used or unknown' }, req);
@@ -439,7 +439,7 @@ async function deliver(m: any) {
     // Minted when sent, hash only; an earlier unused link for the person stops working.
     const token = randomBytes(32).toString('base64url');
     await query('UPDATE portal_links SET used_at = now() WHERE person_id = $1 AND used_at IS NULL', [m.person_id]);
-    await query(`INSERT INTO portal_links (person_id, token_hash, expires_at) VALUES ($1, $2, now() + $3 * interval '1 minute')`, [m.person_id, sha256Hex(token), LINK_MINUTES]);
+    await query(`INSERT INTO portal_links (person_id, token_hash, expires_at) VALUES ($1, $2, now() + $3 * interval '1 minute')`, [m.person_id, tokenHash(token), LINK_MINUTES]);
     await sendOutsideMail(p[0].email, 'Your sign-in link', [
       'Someone asked to sign in to the help portal with this address.',
       '',

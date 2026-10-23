@@ -11,7 +11,7 @@ import { authorize, type Action } from './policy.js';
 import { checkSameOrigin } from './security.js';
 import { originOf, securityEvent } from './security-events.js';
 import type { Role } from './workflow.js';
-import { sha256Hex } from './core/hash.js';
+import { tokenHash } from './core/hash.js';
 
 export interface User {
   id: number;
@@ -74,7 +74,7 @@ export async function createSession(req: FastifyRequest, reply: FastifyReply, us
   const token = randomBytes(32).toString('base64url');
   await query(
     `INSERT INTO sessions (token_hash, user_id, expires_at, ip, user_agent, auth_method, idp_mfa) VALUES ($1, $2, now() + $3 * interval '1 day', $4, $5, $6, $7)`,
-    [sha256Hex(token), userId, config.sessionDays, req.ip, String(req.headers['user-agent'] ?? '').slice(0, 300), method, idpMfa],
+    [tokenHash(token), userId, config.sessionDays, req.ip, String(req.headers['user-agent'] ?? '').slice(0, 300), method, idpMfa],
   );
   reply.setCookie(SESSION_COOKIE, token, {
     path: '/',
@@ -88,7 +88,7 @@ export async function createSession(req: FastifyRequest, reply: FastifyReply, us
 
 export async function destroySession(req: FastifyRequest, reply: FastifyReply) {
   const token = req.cookies[SESSION_COOKIE];
-  if (token) await query('DELETE FROM sessions WHERE token_hash = $1', [sha256Hex(token)]);
+  if (token) await query('DELETE FROM sessions WHERE token_hash = $1', [tokenHash(token)]);
   reply.clearCookie(SESSION_COOKIE, { path: '/' });
 }
 
@@ -103,7 +103,7 @@ export async function createApiToken(userId: number, name: string, expiresInDays
     `INSERT INTO api_tokens (user_id, name, token_hash, prefix, expires_at, scopes)
      VALUES ($1, $2, $3, $4, now() + $5 * interval '1 day', $6)
      RETURNING id, name, prefix, created_at, last_used_at, expires_at, scopes`,
-    [userId, name, sha256Hex(token), token.slice(0, 16), expiresInDays, scopes],
+    [userId, name, tokenHash(token), token.slice(0, 16), expiresInDays, scopes],
   );
   return { ...rows[0], token };
 }
@@ -118,12 +118,12 @@ async function userFromSession(token: string): Promise<User | null> {
        RETURNING user_id)
      SELECT ${USER_COLUMNS}, ss.auth_method, ss.idp_mfa, u.sso_subject IS NOT NULL AS sso FROM sessions ss JOIN users u ON u.id = ss.user_id
      WHERE ss.token_hash = $1 AND ss.expires_at > now() AND ss.last_seen_at > now() - $2 * interval '1 hour' AND u.active`,
-    [sha256Hex(token), config.sessionIdleHours],
+    [tokenHash(token), config.sessionIdleHours],
   );
   return rows[0] ?? null;
 }
 
-export const currentSessionHash = (req: FastifyRequest) => sha256Hex(req.cookies[SESSION_COOKIE] ?? '');
+export const currentSessionHash = (req: FastifyRequest) => tokenHash(req.cookies[SESSION_COOKIE] ?? '');
 
 export async function listSessions(user: User, req: FastifyRequest) {
   const current = currentSessionHash(req);
@@ -194,7 +194,7 @@ async function userFromApiToken(req: FastifyRequest, token: string): Promise<(Us
     `UPDATE api_tokens t SET last_used_at = now(), last_used_ip = $2 FROM users u, api_tokens old
      WHERE old.id = t.id AND u.id = t.user_id AND t.token_hash = $1 AND u.active AND t.revoked_at IS NULL AND (t.expires_at IS NULL OR t.expires_at > now())
      RETURNING ${USER_COLUMNS}, t.scopes, t.prefix AS token_prefix, t.id AS token_id, old.last_used_ip AS previous_ip`,
-    [sha256Hex(token), ip],
+    [tokenHash(token), ip],
   );
   if (!rows[0]) return null;
   const { token_id, previous_ip, ...found } = rows[0];

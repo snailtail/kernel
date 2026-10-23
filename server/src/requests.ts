@@ -29,7 +29,7 @@ import { recomputeSla, slaClock, slaOnTransition } from './sla.js';
 import { checkAssigneeInTeam, teamMembers } from './teams.js';
 import { assertVisibleRef } from './visibility.js';
 import { absoluteUrl } from './core/url.js';
-import { sha256 } from './core/hash.js';
+import { tokenHashBytes } from './core/hash.js';
 
 export const REQUEST_STATUSES = ['submitted', 'awaiting_approval', 'in_fulfilment', 'fulfilled', 'rejected', 'cancelled'] as const;
 type Status = (typeof REQUEST_STATUSES)[number];
@@ -934,7 +934,7 @@ export async function withCallback(payload: any) {
   const { rows } = await query(
     `UPDATE request_tasks SET callback_hash = $2, callback_expires_at = now() + $3 * interval '1 day', callback_used_at = NULL
      WHERE id = $1 AND status = 'open' AND kind = 'webhook' RETURNING callback_expires_at`,
-    [payload?.task?.id, sha256(token), CALLBACK_DAYS],
+    [payload?.task?.id, tokenHashBytes(token), CALLBACK_DAYS],
   );
   if (!rows[0]) return null;
   return {
@@ -961,7 +961,7 @@ export async function completeTaskByToken(req: FastifyRequest, ref: string, task
     const { rows } = await db.query(
       `SELECT t.*, t.callback_expires_at < now() AS expired, r.ref AS request_ref FROM request_tasks t JOIN requests r ON r.id = t.request_id
        WHERE t.id = $1 AND r.ref = $2 AND t.callback_hash = $3 FOR UPDATE OF t`,
-      [taskId, ref.toUpperCase(), sha256(token)],
+      [taskId, ref.toUpperCase(), tokenHashBytes(token)],
     );
     const t = rows[0];
     if (!t) throw refuse('invalid');
