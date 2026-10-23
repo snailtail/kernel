@@ -498,11 +498,6 @@ export async function purgeEvents() {
   return { events: events.rowCount ?? 0, alerts: alerts.rowCount ?? 0 };
 }
 
-export function startEventWorker(log: (msg: string) => void) {
-  setInterval(() => moduleEnabled('event') && moduleEnabled('incident') && autoResolveIncidents().catch((err) => log(`event auto-resolve failed: ${err.message}`)), 60_000).unref();
-  setInterval(() => purgeEvents().catch((err) => log(`event purge failed: ${err.message}`)), 3600_000).unref();
-}
-
 // ---- Reading -----------------------------------------------------------------------------------
 
 export const listAlertsSchema = z.object({

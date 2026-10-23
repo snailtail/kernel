@@ -439,15 +439,3 @@ export async function runDueConnectors({ concurrency = 3, timeoutMs = RUN_TIMEOU
   await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, worker));
   return ran;
 }
-
-export function startConnectorWorker(log: (msg: string) => void) {
-  // A tick can outlast the interval (a run may take minutes); the next tick waits so the concurrency limit holds.
-  let busy = false;
-  setInterval(() => {
-    if (busy) return;
-    busy = true;
-    runDueConnectors()
-      .catch((err) => log(`connector scheduler failed: ${err.message}`))
-      .finally(() => { busy = false; });
-  }, 60_000).unref();
-}

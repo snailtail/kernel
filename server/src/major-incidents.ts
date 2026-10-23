@@ -398,7 +398,3 @@ export async function checkOverdueUpdates() {
   }
   return sent;
 }
-
-export function startMajorIncidentWorker(log: (msg: string) => void, enabled: () => boolean) {
-  setInterval(() => enabled() && checkOverdueUpdates().catch((err) => log(`Major incident check failed: ${err.message}`)), 60_000).unref();
-}

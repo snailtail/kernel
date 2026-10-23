@@ -13,6 +13,7 @@ import { authorize, can } from './policy.js';
 import { serviceReport, serviceReportMarkdown } from './service-report.js';
 import { viewerFor } from './visibility.js';
 import { absoluteUrl } from './core/url.js';
+import { backoffMinutes, processOutbox, SkipDelivery } from './core/outbox.js';
 
 export const FREQUENCIES = ['monthly', 'quarterly'] as const;
 export const scheduleSchema = z
@@ -99,23 +100,11 @@ export async function queueScheduledReports(now = new Date()) {
   return queued;
 }
 
-const BACKOFF_MINUTES = [5, 30, 120];
-
 /** Sends due deliveries; claimed with a lease so replicas never send the same one twice. */
 export async function processReportDeliveries(limit = 10) {
-  const { rows } = await query(
-    `UPDATE report_deliveries d SET status = 'sending', lease_until = now() + interval '5 minutes'
-     FROM (SELECT id FROM report_deliveries WHERE (status = 'pending' OR (status = 'sending' AND lease_until < now())) AND next_attempt_at <= now()
-           ORDER BY id LIMIT $1 FOR UPDATE SKIP LOCKED) due
-     WHERE d.id = due.id
-     RETURNING d.*`,
-    [limit],
-  );
-  let sent = 0;
-  for (const d of rows) {
-    let error = '';
-    let skipped = false;
-    try {
+  const { sent } = await processOutbox({
+    table: 'report_deliveries', leaseSeconds: 300, limit, retryIn: backoffMinutes(5, 30, 120), permanent: /not configured/,
+    send: async (d: any) => {
       const { rows: s } = await query(
         `SELECT s.*, u.username, u.display_name, u.email, u.role, u.active, c.ref AS service_ref, c.owner_id, o.name AS organisation_name
          FROM report_schedules s JOIN users u ON u.id = s.user_id
@@ -126,25 +115,10 @@ export async function processReportDeliveries(limit = 10) {
       const sch = s[0];
       // Who may have it is checked again at sending: an owner who handed the service on no longer gets its report.
       const allowed = sch && sch.active && sch.email && can(sch.role, 'report.read') && (isManager(sch) || (sch.service_id && sch.owner_id === sch.user_id));
-      if (!allowed) {
-        skipped = true;
-        error = 'The recipient may no longer receive this report';
-      } else {
-        await sendScheduled(sch, d);
-      }
-    } catch (err) {
-      error = (err as Error).message.slice(0, 500);
-    }
-    const attempts = d.attempts + 1;
-    if (!error) {
-      sent++;
-      await query("UPDATE report_deliveries SET status = 'sent', sent_at = now(), attempts = $2, lease_until = NULL, error = '' WHERE id = $1", [d.id, attempts]);
-    } else if (skipped || attempts > BACKOFF_MINUTES.length || /not configured/.test(error)) {
-      await query('UPDATE report_deliveries SET status = $4, attempts = $2, error = $3, lease_until = NULL WHERE id = $1', [d.id, attempts, error, skipped ? 'skipped' : 'failed']);
-    } else {
-      await query("UPDATE report_deliveries SET status = 'pending', attempts = $2, error = $3, lease_until = NULL, next_attempt_at = now() + $4 * interval '1 minute' WHERE id = $1", [d.id, attempts, error, BACKOFF_MINUTES[attempts - 1]]);
-    }
-  }
+      if (!allowed) throw new SkipDelivery('The recipient may no longer receive this report');
+      await sendScheduled(sch, d);
+    },
+  });
   return sent;
 }
 
@@ -180,9 +154,4 @@ async function sendScheduled(sch: any, d: any) {
       content: markdown,
     }, absoluteUrl(sch.service_ref ? `/services/${sch.service_ref}/report` : '/reports'));
   });
-}
-
-export function startReportScheduleWorker(log: (msg: string) => void) {
-  setInterval(() => queueScheduledReports().catch((err) => log(`report schedule failed: ${err.message}`)), 15 * 60_000).unref();
-  setInterval(() => processReportDeliveries().catch((err) => log(`report delivery failed: ${err.message}`)), 60_000).unref();
 }

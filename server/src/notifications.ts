@@ -19,6 +19,7 @@ import { decryptSecret, encryptSecret } from './secrets.js';
 import { formatBody } from './webhooks.js';
 import { absoluteUrl } from './core/url.js';
 import { clip } from './core/text.js';
+import { backoffMinutes, processOutbox } from './core/outbox.js';
 
 /** The events people can be notified about, with quiet defaults per channel. */
 export const EVENTS = {
@@ -327,22 +328,11 @@ function approvalLines(links: ApprovalLinks | 'sign_in' | null) {
   ];
 }
 
-const BACKOFF_MINUTES = [1, 5, 30, 120];
-
 /** Sends due deliveries; claimed with a lease so replicas never send the same one twice. */
 export async function processNotificationDeliveries(limit = 20) {
-  const { rows } = await query(
-    `UPDATE notification_deliveries d SET status = 'sending', lease_until = now() + interval '2 minutes'
-     FROM (SELECT id FROM notification_deliveries WHERE (status = 'pending' OR (status = 'sending' AND lease_until < now())) AND next_attempt_at <= now()
-           ORDER BY id LIMIT $1 FOR UPDATE SKIP LOCKED) due
-     WHERE d.id = due.id
-     RETURNING d.*`,
-    [limit],
-  );
-  let sent = 0;
-  for (const d of rows) {
-    let error = '';
-    try {
+  const { sent } = await processOutbox({
+    table: 'notification_deliveries', leaseSeconds: 120, limit, retryIn: backoffMinutes(1, 5, 30, 120), permanent: /not configured/,
+    send: async (d: any) => {
       const { rows: u } = await query('SELECT u.id, u.email, u.display_name, s.chat_url, s.chat_format, s.last_digest_at FROM users u LEFT JOIN notification_settings s ON s.user_id = u.id WHERE u.id = $1', [d.user_id]);
       const user = u[0];
       if (d.channel === 'digest') {
@@ -350,47 +340,30 @@ export async function processNotificationDeliveries(limit = 20) {
           'SELECT ref, title, summary, url FROM notifications WHERE user_id = $1 AND created_at > $2 AND created_at <= $3 ORDER BY created_at',
           [d.user_id, d.since ?? new Date(Date.now() - 86400_000), d.created_at],
         );
-        if (!items.length) {
-          await query("UPDATE notification_deliveries SET status = 'skipped', lease_until = NULL WHERE id = $1", [d.id]);
-          continue;
-        }
+        if (!items.length) return 'skipped';
         await sendEmail(user.id, user.email, `Kernel: ${items.length} update${items.length === 1 ? '' : 's'} since yesterday`, items.flatMap((n) => [`${n.ref} ${n.title}`, `  ${n.summary}`, `  ${absoluteUrl(n.url)}`, '']), 'all');
-      } else {
-        const { rows: ns } = await query('SELECT * FROM notifications WHERE id = $1', [d.notification_id]);
-        const n = ns[0];
-        if (!n) throw new Error('Notification is gone');
-        // Something to approve: links to decide from the message itself, minted per delivery (#48).
-        // Loaded lazily: approval-links depends on changes and approvals, which depend on this module.
-        const links = n.event === 'approval_needed' ? await (await import('./approval-links.js')).mintApprovalLink(n, user.id, d.channel, d.id) : null;
-        if (d.channel === 'email') {
-          // Recorded first, so a reply to this mail finds its record even if the send is retried (#48 inbound).
-          const messageId = `<${randomUUID()}@${ownMail().messageIdDomain}>`;
-          await query('UPDATE notification_deliveries SET message_id = $2 WHERE id = $1', [d.id, messageId]);
-          await sendEmail(user.id, user.email, `[Kernel] ${n.ref ? `${n.ref}: ` : ''}${n.title}`, [n.summary, '', ...approvalLines(links), absoluteUrl(n.url)], n.event, messageId);
-        } else {
-          if (!user.chat_url) throw new Error('No chat webhook');
-          const actions = links && links !== 'sign_in' ? [{ title: 'Approve', url: links.approve }, { title: 'Reject', url: links.reject }] : undefined;
-          const body = JSON.stringify(formatBody(user.chat_format, { event: n.event, summary: n.summary, problem: { ref: n.ref, title: n.title, url: absoluteUrl(n.url) }, actions }));
-          const res = await outboundFetch(decryptSecret(user.chat_url), { method: 'POST', headers: { 'Content-Type': 'application/json', 'User-Agent': 'Kernel-Notifications/1' }, body, maxBytes: 16_384 });
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        }
+        return;
       }
-    } catch (err) {
-      error = (err as Error).message.slice(0, 500);
-    }
-    const attempts = d.attempts + 1;
-    if (!error) {
-      sent++;
-      await query("UPDATE notification_deliveries SET status = 'sent', sent_at = now(), attempts = $2, lease_until = NULL, error = '' WHERE id = $1", [d.id, attempts]);
-    } else if (attempts > BACKOFF_MINUTES.length || /not configured/.test(error)) {
-      await query("UPDATE notification_deliveries SET status = 'failed', attempts = $2, error = $3, lease_until = NULL WHERE id = $1", [d.id, attempts, error]);
-    } else {
-      await query(
-        "UPDATE notification_deliveries SET status = 'pending', attempts = $2, error = $3, lease_until = NULL, next_attempt_at = now() + $4 * interval '1 minute' WHERE id = $1",
-        [d.id, attempts, error, BACKOFF_MINUTES[attempts - 1]],
-      );
-    }
-  }
+      const { rows: ns } = await query('SELECT * FROM notifications WHERE id = $1', [d.notification_id]);
+      const n = ns[0];
+      if (!n) throw new Error('Notification is gone');
+      // Something to approve: links to decide from the message itself, minted per delivery (#48).
+      // Loaded lazily: approval-links depends on changes and approvals, which depend on this module.
+      const links = n.event === 'approval_needed' ? await (await import('./approval-links.js')).mintApprovalLink(n, user.id, d.channel, d.id) : null;
+      if (d.channel === 'email') {
+        // Recorded first, so a reply to this mail finds its record even if the send is retried (#48 inbound).
+        const messageId = `<${randomUUID()}@${ownMail().messageIdDomain}>`;
+        await query('UPDATE notification_deliveries SET message_id = $2 WHERE id = $1', [d.id, messageId]);
+        await sendEmail(user.id, user.email, `[Kernel] ${n.ref ? `${n.ref}: ` : ''}${n.title}`, [n.summary, '', ...approvalLines(links), absoluteUrl(n.url)], n.event, messageId);
+      } else {
+        if (!user.chat_url) throw new Error('No chat webhook');
+        const actions = links && links !== 'sign_in' ? [{ title: 'Approve', url: links.approve }, { title: 'Reject', url: links.reject }] : undefined;
+        const body = JSON.stringify(formatBody(user.chat_format, { event: n.event, summary: n.summary, problem: { ref: n.ref, title: n.title, url: absoluteUrl(n.url) }, actions }));
+        const res = await outboundFetch(decryptSecret(user.chat_url), { method: 'POST', headers: { 'Content-Type': 'application/json', 'User-Agent': 'Kernel-Notifications/1' }, body, maxBytes: 16_384 });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      }
+    },
+  });
   return sent;
 }
 
@@ -413,12 +386,8 @@ export async function queueDigests(now = Date.now()) {
   return rows.length;
 }
 
-export function startNotificationWorker(log: (msg: string) => void) {
-  setInterval(() => processNotificationDeliveries().catch((err) => log(`notification delivery failed: ${err.message}`)), 15_000).unref();
-  setInterval(() => queueDigests().catch((err) => log(`digest failed: ${err.message}`)), 60_000).unref();
-  setInterval(() => {
-    query("DELETE FROM notifications WHERE created_at < now() - interval '90 days'").catch(() => {});
-    // The lists that bulk summaries link to (#125) live as long as the notifications.
-    query("DELETE FROM bulk_requests WHERE created_at < now() - interval '90 days'").catch(() => {});
-  }, 86400_000).unref();
+/** Notifications are kept for 90 days, and so are the lists that bulk summaries link to (#125). */
+export async function pruneNotifications() {
+  await query("DELETE FROM notifications WHERE created_at < now() - interval '90 days'");
+  await query("DELETE FROM bulk_requests WHERE created_at < now() - interval '90 days'");
 }

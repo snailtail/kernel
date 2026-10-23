@@ -10,6 +10,7 @@ import { minimiseData } from './minimise.js';
 import { checkUrl, outboundFetch } from './outbound.js';
 import { decryptSecret, encryptSecret, isEncrypted, secretsConfigured } from './secrets.js';
 import { absoluteUrl } from './core/url.js';
+import { GiveUp, processOutbox } from './core/outbox.js';
 
 type Db = { query: (sql: string, params?: unknown[]) => Promise<{ rows: any[]; rowCount: number | null }> };
 
@@ -167,32 +168,25 @@ const newSecret = () => 'whsec_' + randomBytes(32).toString('base64');
  * without holding a database connection, then updated one by one. Safe with several replicas.
  */
 export async function processDeliveries(options: { limit?: number; ids?: number[] } = {}) {
-  const { rows } = await query(
-    `UPDATE webhook_deliveries d SET status = 'sending', locked_until = now() + interval '2 minutes'
-     FROM webhooks w
-     WHERE w.id = d.webhook_id AND d.id IN (
-       SELECT id FROM webhook_deliveries
-       WHERE (status = 'pending' AND next_attempt_at <= now() OR status = 'sending' AND locked_until < now())
-         AND ($2::bigint[] IS NULL OR id = ANY($2))
-       ORDER BY next_attempt_at LIMIT $1 FOR UPDATE SKIP LOCKED)
-     RETURNING d.id, d.event, d.payload, d.attempts, d.created_at, w.url, w.format, w.secret`,
-    [options.limit ?? 20, options.ids ?? null],
-  );
-  for (const d of rows) {
-    let status: number | null = null;
-    let error: string | null = null;
-    try {
+  const { claimed } = await processOutbox({
+    table: 'webhook_deliveries', leaseSeconds: 120, limit: options.limit ?? 20, order: 'next_attempt_at',
+    filter: { sql: '($2::bigint[] IS NULL OR id = ANY($2))', params: [options.ids ?? null] },
+    // The delivery log in the API shows these names; they predate the shared outbox columns.
+    columns: { lease: 'locked_until', error: 'last_error', sentAt: 'delivered_at', sent: 'ok', noError: null },
+    // Exponential backoff: 30 s, 2 min, 8 min, 32 min, ~2 h; then give up.
+    retryIn: (attempts) => (attempts >= MAX_ATTEMPTS ? null : 30 * 4 ** (attempts - 1)),
+    send: async (d: any, extra) => {
+      extra.response_status = null;
       // A request task (#44) gets its single-use callback token as it is sent; a task no longer open is not sent.
       const payload = d.event === 'request.task' ? await (await import('./requests.js')).withCallback(d.payload) : d.payload;
-      if (!payload) {
-        await query("UPDATE webhook_deliveries SET status = 'failed', attempts = attempts + 1, last_error = 'Skipped: the task is no longer open', locked_until = NULL WHERE id = $1", [d.id]);
-        continue;
-      }
-      const body = JSON.stringify(formatBody(d.format, payload));
-      const secret = decryptSecret(d.secret);
+      if (!payload) throw new GiveUp('Skipped: the task is no longer open');
+      const { rows: w } = await query('SELECT url, format, secret FROM webhooks WHERE id = $1', [d.webhook_id]);
+      if (!w[0]) throw new GiveUp('The webhook is gone');
+      const body = JSON.stringify(formatBody(w[0].format, payload));
+      const secret = decryptSecret(w[0].secret);
       const id = `msg_${d.id}`;
       const timestamp = Math.floor(Date.now() / 1000);
-      const res = await outboundFetch(d.url, {
+      const res = await outboundFetch(w[0].url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -207,28 +201,11 @@ export async function processDeliveries(options: { limit?: number; ids?: number[
         body,
         maxBytes: 16_384,
       });
-      status = res.status;
-      if (!res.ok) error = `HTTP ${res.status}`;
-    } catch (err) {
-      error = (err as Error).message;
-    }
-    const attempts = d.attempts + 1;
-    if (!error) {
-      await query(
-        `UPDATE webhook_deliveries SET status = 'ok', attempts = $2, response_status = $3, last_error = NULL, delivered_at = now(), locked_until = NULL WHERE id = $1`,
-        [d.id, attempts, status],
-      );
-    } else {
-      // Exponential backoff: 30 s, 2 min, 8 min, 32 min, ~2 h; then give up.
-      const failed = attempts >= MAX_ATTEMPTS;
-      await query(
-        `UPDATE webhook_deliveries SET status = $2, attempts = $3, response_status = $4, last_error = $5, locked_until = NULL,
-           next_attempt_at = now() + $6 * interval '1 second' WHERE id = $1`,
-        [d.id, failed ? 'failed' : 'pending', attempts, status, error.slice(0, 500), 30 * 4 ** (attempts - 1)],
-      );
-    }
-  }
-  return rows.length;
+      extra.response_status = res.status;
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    },
+  });
+  return claimed;
 }
 
 /** Deletes old deliveries: successful after KERNEL_WEBHOOK_RETENTION_DAYS (30), failed after 3x that. */
@@ -267,26 +244,6 @@ export async function notifyOverdueActions() {
       await enqueue(db, 'action.overdue', a.problem_id, null, `Action overdue: ${a.title} (due ${a.due_date})`, { action_id: a.id, due_date: a.due_date, owner_id: a.owner_id });
     }
   });
-}
-
-export function startWorker(log: (msg: string) => void) {
-  let busy = false;
-  const tick = async () => {
-    if (busy) return;
-    busy = true;
-    try {
-      while ((await processDeliveries()) > 0);
-    } catch (err) {
-      log(`Webhook delivery failed: ${(err as Error).message}`);
-    } finally {
-      busy = false;
-    }
-  };
-  setInterval(tick, 5000).unref();
-  setInterval(() => notifyOverdueActions().catch((err) => log(`Overdue check failed: ${err.message}`)), 3600_000).unref();
-  setInterval(() => pruneDeliveries().catch((err) => log(`Delivery cleanup failed: ${err.message}`)), 6 * 3600_000).unref();
-  pruneDeliveries().catch(() => {});
-  notifyOverdueActions().catch(() => {});
 }
 
 // ---- Administration ------------------------------------------------------------------------

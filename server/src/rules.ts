@@ -20,7 +20,7 @@ import { badRequest, conflict, forbidden, notFound } from './errors.js';
 import { logger } from './log.js';
 import { notify } from './notifications.js';
 import { authorize, can } from './policy.js';
-import { onRulesQueued, RULE_KINDS, type RuleKind } from './rule-queue.js';
+import { RULE_KINDS, type RuleKind } from './rule-queue.js';
 import { moduleEnabled } from './modules.js';
 import { audienceOf } from './audience.js';
 import { enqueueTo } from './webhooks.js';
@@ -818,15 +818,13 @@ export async function processRuleRuns(): Promise<number> {
 
 const asWorker = <T>(fn: () => Promise<T>) => contextStore.run({ userId: null, userName: 'rules', actorType: 'system', channel: 'system', tokenPrefix: '', ip: '', userAgent: '', requestId: '', viewer: 'system' }, fn);
 
-export function startRuleWorker(log: (msg: string) => void) {
-  const run = () => asWorker(() => processRuleRuns()).catch((err) => log(`automation rules failed: ${err.message}`));
-  // Woken right after a change commits; the interval picks up what another replica queued or a crash left behind.
-  onRulesQueued(() => setImmediate(run));
-  setInterval(run, 5_000).unref();
-  // Time triggers are looked for every minute; what they queue runs right away.
-  setInterval(() => asWorker(() => scanTimeTriggers()).then((n) => n && run()).catch((err) => log(`automation time triggers failed: ${err.message}`)), 60_000).unref();
-  // The log keeps what a rule did for a year; runs that did not match only for a week.
-  setInterval(() => asWorker(() => query(
-    "DELETE FROM rule_runs WHERE (status = 'not_matched' AND created_at < now() - interval '7 days') OR created_at < now() - interval '365 days'",
-  )).catch(() => {}), 3600_000).unref();
-}
+/** Runs queued rule runs as the rules actor. */
+export const runRules = () => asWorker(() => processRuleRuns());
+
+/** Looks for due time triggers; returns how many runs they queued. */
+export const runTimeTriggers = () => asWorker(() => scanTimeTriggers());
+
+/** The log keeps what a rule did for a year; runs that did not match only for a week. */
+export const pruneRuleRuns = () => asWorker(() => query(
+  "DELETE FROM rule_runs WHERE (status = 'not_matched' AND created_at < now() - interval '7 days') OR created_at < now() - interval '365 days'",
+));

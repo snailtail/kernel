@@ -286,15 +286,9 @@ export async function verifyChain(): Promise<{ ok: boolean; checked: number; bro
 let lastVerification: { at: string; ok: boolean; checked: number; broken_at?: number } | null = null;
 export const lastChainVerification = () => lastVerification;
 
-/** Verifies the chain hourly (as the system actor); a mismatch is logged as a security event. */
-export function startChainVerification(log: (msg: string) => void) {
-  const run = () =>
-    verifyChain()
-      .then((r) => {
-        lastVerification = { at: new Date().toISOString(), ...r };
-        if (!r.ok) log(`Audit trail hash chain broken at entry ${r.broken_at}`);
-      })
-      .catch((err) => log(`Audit verification failed: ${err.message}`));
-  setTimeout(run, 10_000).unref();
-  setInterval(run, 3600_000).unref();
+/** Verifies the chain (hourly, as the system actor) and keeps the result for the admin view; a mismatch is logged. */
+export async function runChainVerification() {
+  const r = await verifyChain();
+  lastVerification = { at: new Date().toISOString(), ...r };
+  if (!r.ok) logger.error(`Audit trail hash chain broken at entry ${r.broken_at}`);
 }

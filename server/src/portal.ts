@@ -30,6 +30,7 @@ import { signUp as statusSignUp, signUpOpen, unsubscribeUrl } from './status-sub
 import { notifyTeamQueue } from './teams.js';
 import { absoluteUrl } from './core/url.js';
 import { sha256Hex, tokenHash } from './core/hash.js';
+import { processOutbox } from './core/outbox.js';
 
 export const PORTAL_COOKIE = 'kernel_portal';
 const SESSION_HOURS = 8;
@@ -471,34 +472,11 @@ async function deliver(m: any) {
 
 /** Sends due portal mail; claimed with a lease so replicas never send the same one twice. */
 export async function processPortalMail(limit = 20) {
-  const { rows } = await query(
-    `UPDATE portal_mail m SET status = 'sending', lease_until = now() + interval '2 minutes'
-     FROM (SELECT id FROM portal_mail WHERE (status = 'pending' OR (status = 'sending' AND lease_until < now())) AND next_attempt_at <= now()
-           ORDER BY id LIMIT $1 FOR UPDATE SKIP LOCKED) due
-     WHERE m.id = due.id RETURNING m.*`,
-    [limit],
-  );
-  let sent = 0;
-  for (const m of rows) {
-    let error = '';
-    let outcome = 'sent';
-    try {
-      outcome = await deliver(m);
-    } catch (err) {
-      error = (err as Error).message.slice(0, 500);
-    }
-    const attempts = m.attempts + 1;
+  const { sent } = await processOutbox({
+    table: 'portal_mail', leaseSeconds: 120, limit, permanent: /not configured/, send: deliver,
     // A sign-in link is only useful now: it is not retried for long.
-    const maxAttempts = m.kind === 'signin' ? 2 : 5;
-    if (!error) {
-      if (outcome === 'sent') sent++;
-      await query("UPDATE portal_mail SET status = $2, sent_at = CASE WHEN $2 = 'sent' THEN now() END, attempts = $3, lease_until = NULL, error = '' WHERE id = $1", [m.id, outcome, attempts]);
-    } else if (attempts >= maxAttempts || /not configured/.test(error)) {
-      await query("UPDATE portal_mail SET status = 'failed', attempts = $2, error = $3, lease_until = NULL WHERE id = $1", [m.id, attempts, error]);
-    } else {
-      await query("UPDATE portal_mail SET status = 'pending', attempts = $2, error = $3, lease_until = NULL, next_attempt_at = now() + $4 * interval '1 minute' WHERE id = $1", [m.id, attempts, error, 2 ** attempts]);
-    }
-  }
+    retryIn: (attempts, m: any) => (attempts >= (m.kind === 'signin' ? 2 : 5) ? null : 2 ** attempts * 60),
+  });
   return sent;
 }
 
@@ -507,9 +485,4 @@ export async function prunePortal() {
   await query("DELETE FROM portal_links WHERE expires_at < now() - interval '1 day'");
   await query("DELETE FROM portal_mail WHERE kind = 'signin' AND status NOT IN ('pending', 'sending') AND created_at < now() - interval '1 day'");
   await query("DELETE FROM portal_mail WHERE status NOT IN ('pending', 'sending') AND created_at < now() - interval '90 days'");
-}
-
-export function startPortalWorker(log: (msg: string) => void) {
-  setInterval(() => moduleEnabled('portal') && asSystem(() => processPortalMail()).catch((err) => log(`portal mail failed: ${err.message}`)), 10_000).unref();
-  setInterval(() => asSystem(() => prunePortal()).catch((err) => log(`portal cleanup failed: ${err.message}`)), 3600_000).unref();
 }
