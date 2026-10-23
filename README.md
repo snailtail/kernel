@@ -83,10 +83,14 @@ duplicates) need the person's quoted confirmation and then, by default, wait as 
 approves them in the web UI (an agent's quote could be fabricated after a prompt injection). Record text is handed to
 agents as `untrusted_content`, and the MCP instructions tell them it is data, never instructions.
 
-**My work and navigation**: the start page lists what needs you – approvals and decisions waiting on you, your
-problems and actions, and changes on what you watch. Ctrl+K or `/` opens a command palette (type a ref such as
-`PRB000012` to jump, search everything, or run a command); `g` + a letter goes to a page, `n` logs a problem and `?`
-shows all shortcuts. List filters can be saved as named views.
+**My work and navigation**: My work lists what needs you – approvals and decisions waiting on you, your incidents,
+problems, changes, requests and actions, and changes on what you watch – with your own practice first. Kernel favours
+no practice: each person chooses their start page (My work, the dashboard, incidents, problems, changes, requests or
+improvements) and what "+ New" and `n` create first, in Settings or on their first visit; until they do, the default
+an administrator set for their role applies (Administration → Start page per role), else My work and incidents. A
+choice whose module is switched off falls back the same way. Ctrl+K or `/` opens a command palette (type a ref such as
+`PRB000012` to jump, search everything, or run a command); `g` + a letter goes to a page, `n` creates your default
+record (or the current page's kind) and `?` shows all shortcuts. List filters can be saved as named views.
 
 **CMDB**: configuration items and services as pointers to where they really live (vCenter, Azure, OP5…), with
 typed attributes per CI type, source links, linked records and history. Source systems report CIs through
@@ -442,7 +446,9 @@ Cookie-authenticated requests that change data must send the header `X-Kernel-Re
 | GET | `/api/kedb?q=&include_resolved=` | Known error database |
 | POST | `/api/integrations/records` | Report incidents/events: `{ records: [{ system, kind, reference, service?, summary?, occurred_at?, problem_ref? }] }` |
 | GET | `/api/candidates` | Problem candidates; `POST /api/candidates/create`, `/link`, `/dismiss` act on them |
-| GET | `/api/dashboard` | Backlog summary |
+| GET | `/api/dashboard` | Problem backlog summary for the dashboard (`report.read`) |
+| PUT | `/api/auth/preferences` | Your preferences; `home` and `default_new` choose the start page and the first record of "+ New" (`null` follows your role's default) |
+| GET / PUT | `/api/admin/start-pages` | Start page and default record per role (administrators) |
 | GET | `/api/reports?from=&to=&bucket=` | KPIs and trends for a period |
 | GET | `/api/reports/problems.csv?from=&to=` | Problems active in the period as CSV |
 

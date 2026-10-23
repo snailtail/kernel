@@ -33,6 +33,11 @@ export interface Preferences {
   nav_collapsed?: string[];
   /** The dashboard's KPI tiles, in order (#54); all of them when unset. */
   dashboard_tiles?: string[];
+  /** The start page and the record "+ New" creates first (#171); null or unset follows the role's default. */
+  home?: string | null;
+  default_new?: string | null;
+  /** The start-page prompt on My work was answered or dismissed. */
+  start_seen?: boolean;
 }
 
 declare module 'fastify' {

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router';
 import { api } from '../api';
 import { useSession } from '../session';
 import { Modal } from './Modal';
-import { FOOTER, HOME, LIST_KEYS, NAV, PALETTE_ONLY, SHORTCUTS as GO_KEYS, visible } from '../nav';
+import { FOOTER, HOME, LIST_KEYS, NAV, newItems, PALETTE_ONLY, SHORTCUTS as GO_KEYS, visible } from '../nav';
 
 interface Hit { type: string; ref: string; title: string; status: string; url: string; summary?: string }
 interface Item { id: string; label: string; hint?: string; go: () => void }
@@ -32,7 +32,8 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     for (const h of hits) out.push({ id: `${h.type}-${h.ref}`, label: `${h.ref} ${h.title}`, hint: h.status.replace('_', ' '), go: go(new URL(h.url, location.origin).pathname) });
     const needle = q.trim().toLowerCase();
     const commands: Item[] = [
-      ...(user.role !== 'viewer' ? [{ id: 'new', label: 'Log a problem', hint: 'n', go: go('/problems/new') }] : []),
+      // "+ New" in the palette: the person's own record, and the others once they type (#171).
+      ...newItems(user, meta, location.pathname).slice(0, needle ? undefined : 1).map((n, i) => ({ id: `new-${n.kind}`, label: `New ${n.label.toLowerCase()}`, hint: i === 0 ? 'n' : undefined, go: go(n.to) })),
       // Every destination comes from nav.ts, like the menu and the shortcuts (#102).
       ...[HOME, ...NAV.flatMap((g) => g.items), ...FOOTER, ...PALETTE_ONLY].filter((i) => visible(i, user, meta)).map((i) => ({ id: i.to, label: `Go to ${i.label}`, hint: i.key ? `g ${i.key}` : undefined, go: go(i.to) })),
     ];
@@ -71,7 +72,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
 const LABELS = Object.fromEntries([HOME, ...NAV.flatMap((g) => g.items), ...FOOTER, ...PALETTE_ONLY].map((i) => [i.to, i.label]));
 const SHORTCUTS: [string, string][] = [
   ['Ctrl+K or /', 'Search and go to…'],
-  ['n', 'Log a problem'],
+  ['n', 'New record: this page\'s kind, else your default'],
   ...Object.entries(GO_KEYS).map(([k, to]) => [`g ${k}`, LABELS[to]] as [string, string]),
   ...Object.values(LIST_KEYS).map((k) => [k.key, k.label] as [string, string]),
   ['Esc', 'Clear the selection in a list'],
@@ -93,6 +94,9 @@ const GOTO = GO_KEYS;
 /** Global keyboard shortcuts; ignored while typing in a field. */
 export function useShortcuts(open: (what: 'palette' | 'help') => void) {
   const navigate = useNavigate();
+  const session = useSession();
+  const latest = useRef(session);
+  latest.current = session;
   useEffect(() => {
     let pendingG = 0;
     const onKey = (e: KeyboardEvent) => {
@@ -109,7 +113,10 @@ export function useShortcuts(open: (what: 'palette' | 'help') => void) {
         return navigate(GOTO[e.key]);
       }
       pendingG = e.key === 'g' ? Date.now() : 0;
-      if (e.key === 'n') navigate('/problems/new');
+      if (e.key === 'n') {
+        const first = newItems(latest.current.user, latest.current.meta, location.pathname)[0];
+        if (first) navigate(first.to);
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);

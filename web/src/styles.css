@@ -637,6 +637,10 @@ button.stat:hover { border-color: var(--accent); }
 .pref-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 10px 0; border-top: 1px solid var(--border); }
 .pref-row:first-of-type { border-top: none; }
 .pref-row p { margin: 2px 0 0; }
+.start-selects { display: flex; flex-wrap: wrap; gap: 12px; flex: none; }
+.banner .start-selects { margin-top: 8px; }
+.pref-row:has(> .start-selects) { flex-wrap: wrap; }
+.start-selects label { display: flex; flex-direction: column; gap: 2px; }
 .switch { flex-direction: row; align-items: center; gap: 8px; cursor: pointer; }
 .switch input { appearance: none; width: 36px; height: 20px; border-radius: 999px; background: var(--border-strong); position: relative; cursor: pointer; border: none; padding: 0; transition: background-color .15s; }
 .switch input::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform .15s; }

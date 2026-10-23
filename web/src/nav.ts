@@ -2,7 +2,7 @@
 // shortcut help all read from here, so they can never disagree. Groups follow the order the practices are applied:
 // respond to what happens, improve by finding and removing causes, learn and share; then the registers the work
 // refers to.
-import type { Meta, User } from './api';
+import type { Home, Meta, NewKind, User } from './api';
 import { canEdit, isManager } from './session';
 
 export type Module = keyof Meta['modules'];
@@ -26,7 +26,26 @@ export interface NavItem {
 }
 export interface NavGroup { id: string; label: string; purpose?: string; items: NavItem[]; register?: boolean }
 
-export const HOME: NavItem = { to: '/', label: 'My work', icon: 'home', badge: 'my_work', key: 'm' };
+export const HOME: NavItem = { to: '/my-work', label: 'My work', icon: 'home', badge: 'my_work', key: 'm' };
+
+/** The start pages a person can choose (#171); "/" opens theirs. */
+export const START_PAGES: { id: Home; label: string; to: string; module?: Module }[] = [
+  { id: 'my_work', label: 'My work', to: '/my-work' },
+  { id: 'dashboard', label: 'Dashboard', to: '/dashboard' },
+  { id: 'incidents', label: 'Incidents', to: '/incidents', module: 'incident' },
+  { id: 'problems', label: 'Problems', to: '/problems' },
+  { id: 'changes', label: 'Changes', to: '/changes', module: 'change' },
+  { id: 'requests', label: 'Service requests', to: '/requests', module: 'request' },
+  { id: 'improvements', label: 'Improvements', to: '/improvements' },
+];
+
+const on = (meta: Meta, m?: Module) => !m || meta.modules?.[m] !== false;
+
+/** Where "/" takes this person; My work if their start page's module was switched off since. */
+export function startPath(user: User, meta: Meta) {
+  const page = START_PAGES.find((p) => p.id === user.home);
+  return page && on(meta, page.module) ? page.to : HOME.to;
+}
 
 export const NAV: NavGroup[] = [
   {
@@ -86,34 +105,41 @@ export const PALETTE_ONLY: NavItem[] = [
   { to: '/api-docs', label: 'API documentation', icon: 'admin' },
 ];
 
-/** "+ New": what this user may create, the most common first for their role. */
-export interface NewItem { to: string; label: string; module?: Module }
+export type Practice = 'incident' | 'problem' | 'change' | 'request' | 'improvement';
+const HOME_PRACTICE: Partial<Record<Home, Practice>> = { incidents: 'incident', problems: 'problem', changes: 'change', requests: 'request', improvements: 'improvement' };
+
+/** The practice this person works in most: their start page's, else the record they create first. */
+export function focusPractice(user: User): Practice | null {
+  const kind = user.default_new;
+  return (user.home && HOME_PRACTICE[user.home]) || (kind && kind !== 'article' ? kind : null);
+}
+
+/** "+ New": what this user may create, the record of their own process first. */
+export interface NewItem { kind: NewKind; to: string; label: string; module?: Module }
+export const NEW_ITEMS: NewItem[] = [
+  { kind: 'incident', to: '/incidents?new=1', label: 'Incident', module: 'incident' },
+  { kind: 'problem', to: '/problems/new', label: 'Problem' },
+  { kind: 'change', to: '/changes?new=1', label: 'Change', module: 'change' },
+  { kind: 'article', to: '/knowledge?new=1', label: 'Article', module: 'knowledge' },
+  { kind: 'improvement', to: '/improvements?new=1', label: 'Improvement' },
+  { kind: 'request', to: '/requests?new=1', label: 'Request', module: 'request' },
+];
 export function newItems(user: User, meta: Meta, path = '/'): NewItem[] {
   if (!canEdit(user)) return [];
-  const on = (m?: Module) => !m || meta.modules?.[m] !== false;
-  const candidates: NewItem[] = [
-    { to: '/incidents?new=1', label: 'Incident', module: 'incident' },
-    { to: '/problems/new', label: 'Problem' },
-    { to: '/changes?new=1', label: 'Change', module: 'change' },
-    { to: '/knowledge?new=1', label: 'Article', module: 'knowledge' },
-    { to: '/improvements?new=1', label: 'Improvement' },
-    { to: '/requests?new=1', label: 'Request', module: 'request' },
-  ];
-  const all = candidates.filter((i) => on(i.module));
-  // On a practice's pages, its own record comes first; elsewhere what the role logs most (managers problems, others
-  // incidents).
-  const here = path.startsWith('/incidents') || path.startsWith('/events') ? 'Incident'
-    : path.startsWith('/changes') ? 'Change'
-    : path.startsWith('/knowledge') ? 'Article'
-    : path.startsWith('/improvements') ? 'Improvement'
-    : path.startsWith('/requests') ? 'Request'
-    : /^\/(problems|kedb|candidates|actions|review)/.test(path) ? 'Problem'
-    : isManager(user) ? 'Problem' : 'Incident';
-  const first = all.find((i) => i.label === here) ?? all[0];
+  const all = NEW_ITEMS.filter((i) => on(meta, i.module));
+  // On a practice's pages, its own record comes first; elsewhere the person's default (their choice or their role's).
+  const here: NewKind | undefined = path.startsWith('/incidents') || path.startsWith('/events') ? 'incident'
+    : path.startsWith('/changes') ? 'change'
+    : path.startsWith('/knowledge') ? 'article'
+    : path.startsWith('/improvements') ? 'improvement'
+    : path.startsWith('/requests') ? 'request'
+    : /^\/(problems|kedb|candidates|actions|review)/.test(path) ? 'problem'
+    : user.default_new;
+  const first = all.find((i) => i.kind === here) ?? all.find((i) => i.kind === user.default_new) ?? all[0];
   return first ? [first, ...all.filter((i) => i !== first)] : [];
 }
 
-export const visible = (item: NavItem, user: User, meta: Meta) => (!item.module || meta.modules?.[item.module] !== false) && (!item.show || item.show(user));
+export const visible = (item: NavItem, user: User, meta: Meta) => on(meta, item.module) && (!item.show || item.show(user));
 
 /** The groups and items this user sees; a group with nothing left disappears. */
 export function navFor(user: User, meta: Meta) {
@@ -135,4 +161,4 @@ export const SHORTCUTS: Record<string, string> = Object.fromEntries(
   [HOME, ...NAV.flatMap((g) => g.items), ...FOOTER, ...PALETTE_ONLY].filter((i) => i.key).map((i) => [i.key!, i.to]),
 );
 
-export const isActive = (item: NavItem, path: string) => (item.to === '/' ? path === '/' : path === item.to.split('?')[0] || (item.match ?? []).some((m) => path.startsWith(m)));
+export const isActive = (item: NavItem, path: string) => path === item.to.split('?')[0] || (item.match ?? []).some((m) => path.startsWith(m));

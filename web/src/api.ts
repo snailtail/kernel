@@ -12,7 +12,13 @@ export interface User {
   must_change_password?: boolean;
   mfa_enabled?: boolean;
   mfa_enrollment_required?: boolean;
+  /** The start page and the record "+ New" creates first, as they resolve (#171): own choice, role default, else neutral. */
+  home?: Home;
+  default_new?: NewKind;
 }
+
+export type Home = 'my_work' | 'dashboard' | 'incidents' | 'problems' | 'changes' | 'requests' | 'improvements';
+export type NewKind = 'incident' | 'problem' | 'change' | 'article' | 'improvement' | 'request';
 
 export interface Preferences {
   theme?: 'system' | 'light' | 'dark';
@@ -23,6 +29,10 @@ export interface Preferences {
   intro_seen?: boolean;
   /** The dashboard's KPI tiles in order (#54); unset means all. */
   dashboard_tiles?: string[];
+  /** Own choice of start page and default record (#171); null follows the role's default. */
+  home?: Home | null;
+  default_new?: NewKind | null;
+  start_seen?: boolean;
 }
 
 export interface Guidance {

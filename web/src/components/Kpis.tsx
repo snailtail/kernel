@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router';
 import { useApi } from '../hooks';
+import { focusPractice } from '../nav';
 import { canEdit, useSession } from '../session';
 import { Modal } from './Modal';
 
@@ -51,6 +52,8 @@ export function Trend({ tile, starts, unit }: { tile: Pick<KpiTile, 'label' | 'u
   );
 }
 
+const PRACTICE_TILES: Record<string, string[]> = { incident: ['mttr', 'sla', 'major_open'], problem: ['problems_resolved', 'recurring'], change: ['change_success'], request: ['requests_fulfilled', 'satisfaction'] };
+
 export function KpiSection() {
   const { user, setPreferences } = useSession();
   const [unit, setUnit] = useState<'month' | 'week'>('month');
@@ -59,7 +62,9 @@ export function KpiSection() {
   if (error) return <div className="error">{error}</div>;
   if (!data) return null;
   const chosen = user.preferences.dashboard_tiles;
-  const tiles = chosen ? chosen.map((id) => data.tiles.find((t) => t.id === id)).filter((t): t is KpiTile => !!t) : data.tiles;
+  // Until the reader picks their own, their practice's tiles come first (#171).
+  const focus = PRACTICE_TILES[focusPractice(user) ?? ''] ?? [];
+  const tiles = chosen ? chosen.map((id) => data.tiles.find((t) => t.id === id)).filter((t): t is KpiTile => !!t) : [...data.tiles.filter((t) => focus.includes(t.id)), ...data.tiles.filter((t) => !focus.includes(t.id))];
   return (
     <section className="kpis" aria-labelledby="kpis-title">
       <div className="section-head">

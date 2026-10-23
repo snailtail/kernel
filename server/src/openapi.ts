@@ -21,6 +21,7 @@ import * as portal from './portal.js';
 import * as slaMod from './sla.js';
 import * as notif from './notifications.js';
 import * as setupMod from './setup.js';
+import * as startPageMod from './start-page.js';
 import * as ppl from './people.js';
 import * as kb from './knowledge.js';
 import * as tm from './teams.js';
@@ -76,9 +77,9 @@ const BULK_TAG: Record<bulkMod.Practice, string> = { incidents: 'Incidents', pro
 export const OPERATIONS: Op[] = [
   { method: 'post', path: '/api/auth/login', tag: 'Authentication', summary: 'Sign in with username and password (sets a session cookie)', body: z.object({ username: z.string(), password: z.string() }), public: true },
   { method: 'post', path: '/api/auth/logout', tag: 'Authentication', summary: 'Sign out', public: true },
-  { method: 'get', path: '/api/auth/me', tag: 'Authentication', summary: 'The signed-in user, with preferences' },
+  { method: 'get', path: '/api/auth/me', tag: 'Authentication', summary: 'The signed-in user, with preferences and the resolved start page (home) and default record (default_new)' },
   { method: 'post', path: '/api/auth/password', tag: 'Authentication', summary: 'Change your password', body: z.object({ current: z.string(), password: z.string().min(12), revoke_tokens: z.boolean().optional(), code: z.string().optional() }) },
-  { method: 'put', path: '/api/auth/preferences', tag: 'Authentication', summary: 'Update your preferences (merged)', body: z.object({ theme: z.enum(['system', 'light', 'dark']).optional(), guided: z.boolean().optional(), intro_seen: z.boolean().optional() }) },
+  { method: 'put', path: '/api/auth/preferences', tag: 'Authentication', summary: 'Update your preferences (merged); home and default_new choose your start page and what "+ New" creates first, null follows your role\'s default', body: z.object({ theme: z.enum(['system', 'light', 'dark']).optional(), guided: z.boolean().optional(), intro_seen: z.boolean().optional(), home: z.enum(startPageMod.HOMES).nullable().optional(), default_new: z.enum(startPageMod.NEW_KINDS).nullable().optional() }) },
   { method: 'post', path: '/api/auth/login/mfa', tag: 'Authentication', summary: 'Second sign-in step: TOTP or recovery code for the mfa_token from login', body: z.object({ mfa_token: z.string(), code: z.string() }), public: true },
   { method: 'post', path: '/api/auth/reauth', tag: 'Authentication', summary: 'Confirm it is you (password + code) before sensitive actions', body: z.object({ password: z.string(), code: z.string().optional() }) },
   { method: 'get', path: '/api/auth/mfa', tag: 'Authentication', summary: 'Your two-factor authentication status' },
@@ -97,7 +98,7 @@ export const OPERATIONS: Op[] = [
   { method: 'delete', path: '/api/tokens/:id', tag: 'Authentication', summary: 'Revoke a token' },
 
   { method: 'get', path: '/api/meta', tag: 'Reference data', summary: 'Statuses, transitions, closure codes, categories, assignees and other reference data' },
-  { method: 'get', path: '/api/dashboard', tag: 'Reference data', summary: 'Backlog summary for the dashboard' },
+  { method: 'get', path: '/api/dashboard', tag: 'Reference data', summary: 'The dashboard: problem backlog summary (the KPIs are under /api/kpis)' },
 
   { method: 'get', path: '/api/problems', tag: 'Problems', summary: 'Search problems', query: problems.listSchema },
   { method: 'post', path: '/api/problems', tag: 'Problems', summary: 'Log a problem', body: problems.createProblemSchema },
@@ -156,6 +157,8 @@ export const OPERATIONS: Op[] = [
   { method: 'delete', path: '/api/cis/:ref/links/:id', tag: 'CMDB', summary: 'Remove a link' },
   { method: 'post', path: '/api/users/:id/erase', tag: 'Administration', summary: 'Erase (anonymise) a user account with a reason; the audit trail stays valid (ADR 0001)' },
   { method: 'get', path: '/api/admin/modules', tag: 'Administration', summary: 'Modules (practices) and whether they are on' },
+  { method: 'get', path: '/api/admin/start-pages', tag: 'Administration', summary: 'Start page and default record per role, for people who have not chosen their own' },
+  { method: 'put', path: '/api/admin/start-pages', tag: 'Administration', summary: 'Set the start page and default record per role (administrators); null follows the built-in default', body: startPageMod.roleDefaultsSchema },
   { method: 'put', path: '/api/admin/modules', tag: 'Administration', summary: 'Switch modules on or off (administrators); nothing is deleted', body: setupMod.modulesSchema },
   { method: 'get', path: '/api/setup', tag: 'Administration', summary: 'First-run setup state' },
   { method: 'post', path: '/api/setup', tag: 'Administration', summary: 'Apply the setup wizard (modules, support hours, first event source, demo data); safe to repeat', body: setupMod.setupSchema },

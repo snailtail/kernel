@@ -48,7 +48,7 @@ export function DashboardPage() {
       {isGuided(user.preferences) && !user.preferences.intro_seen && (
         <div className="banner intro">
           <div>
-            <strong>New to problem management?</strong> Take five minutes to see how the process works and how Kernel guides you through it.
+            <strong>New to Kernel?</strong> Take five minutes to see how the practices fit together and how Kernel guides you through them.
           </div>
           <div className="banner-actions">
             <Link className="btn primary small" to="/guide">Show me</Link>

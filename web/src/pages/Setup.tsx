@@ -51,7 +51,7 @@ export function SetupPage() {
           </div>
         )}
         {result.demo?.loaded && <p>Example data is loaded ({result.demo.refs.join(', ')}). Remove it in one click under Administration when you are done exploring.</p>}
-        <div className="actions"><button className="btn primary" onClick={() => navigate('/')}>Go to My work</button><Link className="btn" to="/guide">How problem management works</Link></div>
+        <div className="actions"><button className="btn primary" onClick={() => navigate('/my-work')}>Go to My work</button><Link className="btn" to="/guide">How problem management works</Link></div>
       </section>
     );
   }

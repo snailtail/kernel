@@ -18,6 +18,7 @@ import { AskHost } from './components/Ask';
 import { NewProblemPage } from './pages/NewProblem';
 import { ProblemPage } from './pages/Problem';
 import { ProblemsPage } from './pages/Problems';
+import { startPath } from './nav';
 import { SessionContext } from './session';
 import { SensitiveWatch } from './components/SensitiveWatch';
 
@@ -83,7 +84,9 @@ export function App() {
 
   const setPreferences = async (prefs: Preferences) => {
     const preferences = await api.put<Preferences>('/api/auth/preferences', prefs);
-    setUser((u) => (u ? { ...u, preferences } : u));
+    // The start page and default record resolve on the server (own choice, the role's default, modules).
+    const start = 'home' in prefs || 'default_new' in prefs ? await api.get<User>('/api/auth/me') : null;
+    setUser((u) => (u ? { ...u, preferences, ...(start && { home: start.home, default_new: start.default_new }) } : u));
   };
 
   const logout = async () => {
@@ -127,7 +130,8 @@ export function App() {
           <SensitiveWatch />
           <Suspense fallback={<p className="muted">Loading…</p>}>
           <Routes>
-            <Route path="/" element={<MyWorkPage />} />
+            <Route path="/" element={<Navigate to={startPath(user, meta)} replace />} />
+            <Route path="/my-work" element={<MyWorkPage />} />
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/problems" element={<ProblemsPage />} />
             <Route path="/problems/new" element={<NewProblemPage />} />

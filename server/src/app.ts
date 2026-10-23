@@ -49,6 +49,7 @@ import { onCallRoutes } from './routes/oncall.js';
 import { visibilityRoutes } from './routes/visibility.js';
 import { devRoutes } from './routes/dev.js';
 import { aiRoutes } from './routes/ai.js';
+import { metaRoutes } from './routes/meta.js';
 import { problemRoutes } from './routes/problems.js';
 import { originOf, recordResponse } from './security-events.js';
 
@@ -134,6 +135,7 @@ export async function buildApp(options: { logLevel?: string; serveWeb?: boolean 
 
   registerIdempotency(app);
   await app.register(authRoutes);
+  await app.register(metaRoutes);
   await app.register(problemRoutes);
   await app.register(adminRoutes);
   await app.register(integrationRoutes);
