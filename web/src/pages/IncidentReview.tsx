@@ -131,7 +131,7 @@ export function IncidentReviewPage() {
                   {list.map((x) => (
                     <li key={x.id}>
                       <div>{x.body}</div>
-                      <ItemOutput item={x} reviewPath={path} editable={user.role !== 'viewer'} people={people} onChange={run} />
+                      <ItemOutput item={x} reviewPath={path} editable={user.role !== 'viewer'} problems={meta.modules?.problem !== false} people={people} onChange={run} />
                       {editable && !x.problem_ref && !x.action_id && <button className="btn-link small no-print" onClick={() => run(() => api.del(`${path}/items/${x.id}`))}>Remove</button>}
                     </li>
                   ))}
@@ -184,8 +184,8 @@ export function IncidentReviewPage() {
 }
 
 /** Where an item went: a problem, an action, an improvement, or the buttons to get it there. */
-function ItemOutput({ item: x, reviewPath, editable, people, onChange }: {
-  item: Item; reviewPath: string; editable: boolean; people: { id: number; display_name: string }[];
+function ItemOutput({ item: x, reviewPath, editable, problems, people, onChange }: {
+  item: Item; reviewPath: string; editable: boolean; problems: boolean; people: { id: number; display_name: string }[];
   onChange: (fn: () => Promise<any>) => Promise<boolean>;
 }) {
   const [problem, setProblem] = useState('');
@@ -196,6 +196,8 @@ function ItemOutput({ item: x, reviewPath, editable, people, onChange }: {
   if (x.improvement_ref) return <div className="small">→ improvement <Link to={`/improvements/${x.improvement_ref}`} className="mono">{x.improvement_ref}</Link> {x.improvement_title} <span className="muted">{x.improvement_status?.replace('_', ' ')}</span></div>;
   if (!editable) return null;
   if (x.kind === 'factor') {
+    // A factor becomes a problem: only while problem management is on (#184).
+    if (!problems) return null;
     return (
       <div className="rel-form small no-print">
         <button className="btn small" onClick={() => onChange(() => api.post(`${reviewPath}/items/${x.id}/problem`, {}))}>Create a problem</button>
@@ -209,7 +211,7 @@ function ItemOutput({ item: x, reviewPath, editable, people, onChange }: {
     <div className="rel-form small no-print">
       <select value={owner} onChange={(e) => setOwner(e.target.value)} aria-label="Action owner"><option value="">Owner…</option>{people.map((p) => <option key={p.id} value={p.id}>{p.display_name}</option>)}</select>
       <input type="date" value={due} onChange={(e) => setDue(e.target.value)} aria-label="Due date" />
-      <input value={problem} onChange={(e) => setProblem(e.target.value)} placeholder="On a problem (optional)" title="Leave empty to keep the action on this review" aria-label="On problem" />
+      {problems && <input value={problem} onChange={(e) => setProblem(e.target.value)} placeholder="On a problem (optional)" title="Leave empty to keep the action on this review" aria-label="On problem" />}
       <button className="btn small"
         onClick={() => onChange(() => api.post(`${reviewPath}/items/${x.id}/action`, { ...(owner ? { owner_id: Number(owner) } : {}), ...(due ? { due_date: due } : {}), ...(problem.trim() ? { problem: problem.trim() } : {}) }))}>Create action</button>
       <span className="muted">or</span>

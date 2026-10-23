@@ -25,14 +25,16 @@ interface Dashboard {
 }
 
 export function DashboardPage() {
-  const { user, setPreferences } = useSession();
-  const { data, error, reload } = useApi<Dashboard>('/api/dashboard');
+  const { user, meta, setPreferences } = useSession();
+  // The problem backlog only while problem management is on (#184); the KPIs and tips stay.
+  const problems = meta.modules?.problem !== false;
+  const { data, error, reload } = useApi<Dashboard>(problems ? '/api/dashboard' : null);
   const { data: backups } = useApi<BackupStatus>(isManager(user) ? '/api/admin/backups' : null);
   if (error) return <div className="error">{error}</div>;
-  if (!data) return null;
+  if (problems && !data) return null;
 
-  const open = (['new', 'analysis', 'known_error'] as Status[]).reduce((n, s) => n + (data.by_status[s] ?? 0), 0);
-  const maxPrio = Math.max(1, ...data.open_by_priority.map((p) => p.count));
+  const open = data ? (['new', 'analysis', 'known_error'] as Status[]).reduce((n, s) => n + (data.by_status[s] ?? 0), 0) : 0;
+  const maxPrio = data ? Math.max(1, ...data.open_by_priority.map((p) => p.count)) : 1;
 
   return (
     <>
@@ -65,6 +67,7 @@ export function DashboardPage() {
 
       <KpiSection />
 
+      {data && (<>
       <h2 className="dashboard-subhead">Problem backlog</h2>
       <section className="stat-row">
         <Link to="/problems" className="stat">
@@ -178,6 +181,7 @@ export function DashboardPage() {
           ))}
         </ul>
       </section>
+      </>)}
     </>
   );
 }

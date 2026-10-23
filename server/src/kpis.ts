@@ -75,8 +75,8 @@ export async function kpis(user: User, { period }: z.infer<typeof kpiSchema>) {
         )
       : none,
     // Recurring: CIs or categories with three or more incidents in the 30 days up to the end of the period, none of
-    // them linked to a problem. Counted per CI and per category (a cluster may show in both).
-    incident
+    // them linked to a problem. Counted per CI and per category (a cluster may show in both). Only with problems on.
+    incident && problem
       ? query(
           `${P} SELECT p.start::date::text AS start, (
              SELECT count(*) FROM (
@@ -164,7 +164,7 @@ export async function kpis(user: User, { period }: z.infer<typeof kpiSchema>) {
       link: '/changes?status=all',
     });
   }
-  if (incident) {
+  if (incident && problem) {
     const clusters = per(recurring.rows, (rs) => rs[0]?.clusters ?? 0);
     tiles.push({
       id: 'recurring', label: 'Recurring incidents', value: last(clusters), unit: 'count', trend: clusters, trend_label: `at the end of each ${unit}`, lower_is_better: true,

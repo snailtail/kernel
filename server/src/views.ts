@@ -13,7 +13,7 @@ export type ListName = (typeof LISTS)[number];
 
 /** Reading a list's views needs the same permission as reading the list. */
 const READ: Record<ListName, Action> = {
-  problems: 'problem.read', actions: 'problem.read', incidents: 'incident.read', changes: 'change.read', alerts: 'event.read',
+  problems: 'problem.read', actions: 'action.read', incidents: 'incident.read', changes: 'change.read', alerts: 'event.read',
   known_errors: 'kedb.read', knowledge: 'article.read', cis: 'ci.read', candidates: 'candidate.read', improvements: 'improvement.read', requests: 'request.read',
 };
 

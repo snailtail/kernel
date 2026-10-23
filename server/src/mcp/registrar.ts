@@ -40,8 +40,9 @@ const TOOL_ACTIONS: Record<string, Action> = {
   summarize_record: 'meta.read', analyze_log: 'meta.read',
   get_service_report: 'report.read', get_service_status: 'ci.read', post_status_update: 'status.set', follow_service: 'ci.read',
   get_on_call: 'team.read', list_teams: 'team.read',
-  // Each operation checks its own permission; the tool is listed for roles that can change records.
-  bulk_update: 'problem.update',
+  // Each operation checks its own permission; the tool is listed for roles that can change records (action.write is
+  // in every working role and in no module, so these stay when a practice is switched off).
+  bulk_update: 'action.write',
   list_views: 'meta.read', save_view: 'meta.read', delete_view: 'meta.read', set_default_view: 'meta.read', link_dev_item: 'meta.read', list_dev_links: 'meta.read',
   search_knowledge: 'article.read', get_article: 'article.read', create_article: 'article.write', update_article: 'article.write', transition_article: 'article.write', use_article: 'incident.update',
   search_people: 'person.read', get_person: 'person.read', add_affected_person: 'incident.update',
@@ -65,13 +66,13 @@ const TOOL_ACTIONS: Record<string, Action> = {
   get_ci_impact: 'ci.read', get_service_dependencies: 'ci.read', add_ci_relationship: 'ci.manage', remove_ci_relationship: 'ci.manage',
   sync_ci_relationships: 'ci.ingest', sync_ci_batch: 'ci.ingest', list_ci_groups: 'ci.read', get_ci_group: 'ci.read', save_ci_group: 'ci.manage',
   whoami: 'meta.read', list_reference_data: 'meta.read', search: 'meta.read', get_record: 'meta.read', next_steps: 'meta.read',
-  my_work: 'problem.read', link_records: 'problem.link',
+  my_work: 'action.read', link_records: 'action.write',
   search_problems: 'problem.read', get_problem: 'problem.read', get_history: 'meta.read', get_impact: 'ci.read', find_similar_problems: 'problem.read',
-  export_problem: 'problem.read', list_actions: 'action.read', get_dashboard: 'report.read',
+  export_problem: 'problem.read', list_actions: 'action.read', get_dashboard: 'problem.read',
   search_known_errors: 'kedb.read', get_report: 'report.read', get_review_agenda: 'review.read',
   list_problem_candidates: 'candidate.read', query_audit_log: 'audit.read', query_security_events: 'security.read', get_security_alerting: 'security.read',
   create_problem: 'problem.create', update_problem: 'problem.update', transition_problem: 'problem.transition',
-  assess_known_error: 'problem.assess', add_comment: 'problem.comment', link_record: 'problem.link', unlink_record: 'problem.link',
+  assess_known_error: 'problem.assess', add_comment: 'action.write', link_record: 'problem.link', unlink_record: 'problem.link',
   watch_problem: 'problem.watch', mark_duplicate: 'problem.mark_duplicate',
   add_action: 'action.write', update_action: 'action.write', start_analysis: 'analysis.write', update_analysis: 'analysis.write',
   create_problem_from_candidate: 'candidate.act', link_candidate_records: 'candidate.act', dismiss_problem_candidate: 'candidate.act', list_eol_versions: 'candidate.read', save_eol_version: 'candidate.rule', report_problem_candidate: 'candidate.report', report_records: 'record.ingest',

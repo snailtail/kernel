@@ -8,5 +8,8 @@ export async function metaRoutes(app: FastifyInstance) {
   app.get('/api/meta', async (req) => getMeta(requireUser(req, 'meta.read')));
 
   // Everyone who reads reports, on the same permission as the KPIs, not the problem one.
-  app.get('/api/dashboard', async (req) => problems.dashboard(requireUser(req, 'report.read')));
+  app.get('/api/dashboard', async (req) => {
+    requireUser(req, 'report.read');
+    return problems.dashboard(requireUser(req, 'problem.read'));
+  });
 }

@@ -9,6 +9,7 @@ import { assertMayWriteText, notCopied, readableText, textFilterSql } from './co
 import { currentContext } from './context.js';
 import { type Db, inPeriod, query, tx } from './db.js';
 import { badRequest, conflict, notFound } from './errors.js';
+import { moduleEnabled } from './modules.js';
 import { authorize, can } from './policy.js';
 import { affectedFrom } from './problem-cis.js';
 import { possibleCausesForIncident } from './changes.js';
@@ -197,8 +198,8 @@ export async function getIncident(user: User, ref: string) {
     ),
     historyOf('incident', i.id),
     query('SELECT id, kind, reference, system, url, note, created_at FROM incident_links WHERE incident_id = $1 ORDER BY kind, created_at', [i.id]),
-    // Known errors on the affected CIs: the workaround may restore service right away.
-    query(
+    // Known errors on the affected CIs: the workaround may restore service right away (while problems are on, #184).
+    !can(user.role, 'kedb.read') ? { rows: [] } : query(
       `SELECT DISTINCT ON (p.id) p.ref, p.title, p.workaround, p.workaround_effectiveness, c.ref AS ci_ref, c.name AS ci_name
        FROM incident_cis x JOIN problem_cis pc ON pc.ci_id = x.ci_id JOIN problems p ON p.id = pc.problem_id
        JOIN configuration_items c ON c.id = x.ci_id
@@ -255,11 +256,11 @@ function incidentGuidance(i: any) {
       hint: 'A short, blameless look back: it starts from the timeline and impact, and turns contributing factors into problems and follow-ups into actions.',
       done: i.review.status === 'published',
     }] : []),
-    ...(i.is_major || i.reopen_count > 0 ? [{ id: 'problem', label: 'Hand over to problem management', hint: i.is_major ? 'A major incident needs a problem record to find the root cause.' : 'It came back: a problem record finds out why.', done: !!i.problem_id }] : []),
+    ...((i.is_major || i.reopen_count > 0) && moduleEnabled('problem') ? [{ id: 'problem', label: 'Hand over to problem management', hint: i.is_major ? 'A major incident needs a problem record to find the root cause.' : 'It came back: a problem record finds out why.', done: !!i.problem_id }] : []),
   ];
   const knownError = i.known_errors[0];
-  const handover =
-    !i.problem_id && knownError ? { label: `A known error matches: link it to ${knownError.ref}`, hint: 'Its workaround may restore service, and the problem then counts this incident.', action: 'link_problem' as const, target: knownError.ref }
+  const handover = !moduleEnabled('problem') ? null
+    : !i.problem_id && knownError ? { label: `A known error matches: link it to ${knownError.ref}`, hint: 'Its workaround may restore service, and the problem then counts this incident.', action: 'link_problem' as const, target: knownError.ref }
     : !i.problem_id && (i.is_major || i.reopen_count > 0) ? { label: i.is_major ? 'Major incident: create a problem' : 'Recurring? Create a problem', hint: 'Problem management finds the root cause so it does not happen again.', action: 'create_problem' as const }
     : null;
   return {
@@ -423,7 +424,8 @@ export async function transitionIncidentLean(user: User, ref: string, input: z.i
       if (!resolution.trim() && code !== 'duplicate' && code !== 'cancelled') throw conflict('Describe how service was restored (resolution)');
     }
     if (input.to === 'on_hold' && !(input.hold_reason ?? '').trim()) throw conflict('Give a reason for putting the incident on hold');
-    if (input.to === 'closed' && current.is_major && !current.problem_id) {
+    // Only while problem management is on (#184): without it there is nowhere to hand the cause over to.
+    if (input.to === 'closed' && current.is_major && !current.problem_id && moduleEnabled('problem')) {
       throw conflict('A major incident needs a problem record before it is closed: create one from the incident or link an existing one');
     }
     if (input.to === 'closed' && current.is_major) {

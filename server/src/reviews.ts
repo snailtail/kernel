@@ -394,6 +394,7 @@ export async function itemToAction(user: User, ref: string, itemId: number, inpu
     if (item.action_id) throw conflict('This follow-up already has an action');
     if (item.improvement_id) throw conflict('This follow-up became an improvement');
     // On the problem named, otherwise on the review itself (#184): a follow-up needs no problem.
+    if (input.problem) authorize(user, 'problem.read');
     const problem = input.problem ? await loadForUpdate(db, input.problem) : null;
     const parent: Parent = problem ? { kind: 'problem', id: problem.id, ref: problem.ref } : { kind: 'review', id: r.id, ref: r.review_ref };
     // On a problem more people can read, the action says where it came from but not what the review said.
