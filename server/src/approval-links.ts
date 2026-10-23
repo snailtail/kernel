@@ -21,7 +21,7 @@ import { rateLimit } from './ratelimit.js';
 import { securityEvent } from './security-events.js';
 import { viewerFor } from './visibility.js';
 import { absoluteUrl } from './core/url.js';
-import { sha256 } from './core/hash.js';
+import { tokenHashBytes } from './core/hash.js';
 
 
 /** The form on the GET page carries this instead of the token itself; it proves the POST comes from that page. */
@@ -128,7 +128,7 @@ export async function mintApprovalLink(n: { ref: string; approval_id: number | n
   const expires = new Date(Math.min(Date.now() + APPROVAL_LINK_HOURS * 3600_000, s.deadline?.getTime() ?? Infinity));
   await query(
     'INSERT INTO approval_links (token_hash, user_id, change_id, approval_id, request_id, version, channel, delivery_id, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
-    [sha256(token), user.id, target.change_id ?? null, target.approval_id ?? null, target.request_id ?? null, s.version, channel, deliveryId, expires],
+    [tokenHashBytes(token), user.id, target.change_id ?? null, target.approval_id ?? null, target.request_id ?? null, s.version, channel, deliveryId, expires],
   );
   const base = absoluteUrl(`/api/public/approval-links?token=${token}`);
   return { approve: `${base}&decision=approve`, reject: `${base}&decision=reject` };
@@ -158,7 +158,7 @@ export type LinkState =
 /** Checks a link without changing anything; refusals are security events. */
 export async function checkApprovalLink(req: FastifyRequest, token: string): Promise<LinkState> {
   rateLimit(`approval-link:ip:${req.ip}`, 120, 60_000);
-  const hash = sha256(token);
+  const hash = tokenHashBytes(token);
   rateLimit(`approval-link:t:${hash.toString('hex').slice(0, 32)}`, 10, 600_000);
   const refuse = (reason: Refusal, linkId?: number, userId?: number, path?: string): LinkState => {
     securityEvent({

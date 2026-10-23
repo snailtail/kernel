@@ -25,7 +25,7 @@ import { decryptSecret, encryptSecret } from './secrets.js';
 import { loadCalendar } from './sla.js';
 import { standardSignature } from './webhooks.js';
 import { absoluteUrl } from './core/url.js';
-import { sha256Hex } from './core/hash.js';
+import { tokenHash } from './core/hash.js';
 
 export const KINDS = ['pagerduty', 'opsgenie', 'grafana_oncall', 'webhook', 'rotation'] as const;
 type Kind = (typeof KINDS)[number];
@@ -130,7 +130,7 @@ export async function savePaging(user: User, teamId: number, input: z.infer<type
        ON CONFLICT (team_id) DO UPDATE SET kind = $2, config = $3, secret = $4, rule = $5, private_allow = $6, enabled = $7,
          inbound_token_hash = coalesce($9, paging_targets.inbound_token_hash), updated_at = now()
        RETURNING ${PUBLIC}`,
-      [...values, token ? sha256Hex(token) : null],
+      [...values, token ? tokenHash(token) : null],
     );
     // What changed, never the secret.
     await audit(db, { entity_type: 'team', entity_ref: team.name, action: 'paging', changes: { kind: input.kind, config: cfg, rule: input.rule, enabled: input.enabled, secret: secret ? '[changed]' : undefined, inbound_token: token ? '[issued]' : undefined } });
@@ -602,7 +602,7 @@ export function verifyPagerDutySignature(secret: string, raw: string, header: st
 export async function receiveInbound(targetId: number, auth: { token?: string; pagerDutySignature?: string; raw: string }, body: unknown) {
   const { rows } = await asSystem(() => query('SELECT id, team_id, kind, secret, inbound_token_hash FROM paging_targets WHERE id = $1', [targetId]));
   const t = rows[0];
-  const tokenOk = !!t?.inbound_token_hash && !!auth.token && timingSafeEqual(Buffer.from(sha256Hex(auth.token)), Buffer.from(t.inbound_token_hash));
+  const tokenOk = !!t?.inbound_token_hash && !!auth.token && timingSafeEqual(Buffer.from(tokenHash(auth.token)), Buffer.from(t.inbound_token_hash));
   const pdSecret = t?.kind === 'pagerduty' && t.secret ? JSON.parse(decryptSecret(t.secret)).webhook_secret : undefined;
   const signatureOk = !!pdSecret && verifyPagerDutySignature(pdSecret, auth.raw, auth.pagerDutySignature);
   if (!tokenOk && !signatureOk) throw forbidden('Unknown paging target, token or signature');
