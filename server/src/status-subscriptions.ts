@@ -19,6 +19,7 @@ import { pageSettings, STATUS_LABEL } from './status.js';
 import { absoluteUrl } from './core/url.js';
 import { sha256Hex, tokenHash } from './core/hash.js';
 import { cap } from './core/text.js';
+import { backoffMinutes, processOutbox } from './core/outbox.js';
 
 const CONFIRM_HOURS = 48;
 
@@ -211,8 +212,6 @@ export async function communicationLog(incidentId: number) {
 
 // ---- Delivery -------------------------------------------------------------------------------------
 
-const BACKOFF_MINUTES = [1, 5, 30, 120];
-
 function updateLines(title: string, p: NonNullable<Awaited<ReturnType<typeof forOutside>>>['published'], intro: string[]) {
   return [
     ...intro,
@@ -264,36 +263,7 @@ async function deliver(d: any) {
 
 /** Sends due deliveries; claimed with a lease so replicas never send the same one twice. */
 export async function processStatusDeliveries(limit = 20) {
-  const { rows } = await query(
-    `UPDATE status_deliveries d SET status = 'sending', lease_until = now() + interval '2 minutes'
-     FROM (SELECT id FROM status_deliveries WHERE (status = 'pending' OR (status = 'sending' AND lease_until < now())) AND next_attempt_at <= now()
-           ORDER BY id LIMIT $1 FOR UPDATE SKIP LOCKED) due
-     WHERE d.id = due.id
-     RETURNING d.*`,
-    [limit],
-  );
-  let sent = 0;
-  for (const d of rows) {
-    let error = '';
-    let outcome = 'sent';
-    try {
-      outcome = await deliver(d);
-    } catch (err) {
-      error = (err as Error).message.slice(0, 500);
-    }
-    const attempts = d.attempts + 1;
-    if (!error) {
-      if (outcome === 'sent') sent++;
-      await query(`UPDATE status_deliveries SET status = $2, sent_at = CASE WHEN $2 = 'sent' THEN now() END, attempts = $3, lease_until = NULL, error = '' WHERE id = $1`, [d.id, outcome, attempts]);
-    } else if (attempts > BACKOFF_MINUTES.length || /not configured/.test(error)) {
-      await query("UPDATE status_deliveries SET status = 'failed', attempts = $2, error = $3, lease_until = NULL WHERE id = $1", [d.id, attempts, error]);
-    } else {
-      await query(
-        "UPDATE status_deliveries SET status = 'pending', attempts = $2, error = $3, lease_until = NULL, next_attempt_at = now() + $4 * interval '1 minute' WHERE id = $1",
-        [d.id, attempts, error, BACKOFF_MINUTES[attempts - 1]],
-      );
-    }
-  }
+  const { sent } = await processOutbox({ table: 'status_deliveries', leaseSeconds: 120, limit, retryIn: backoffMinutes(1, 5, 30, 120), permanent: /not configured/, send: deliver });
   return sent;
 }
 
@@ -301,9 +271,4 @@ export async function processStatusDeliveries(limit = 20) {
 export async function pruneStatusSubscriptions() {
   await query("DELETE FROM status_subscribers WHERE confirmed_at IS NULL AND created_at < now() - interval '7 days'");
   await query("DELETE FROM status_deliveries WHERE kind IN ('confirm', 'subscriber') AND status NOT IN ('pending', 'sending') AND created_at < now() - interval '90 days'");
-}
-
-export function startStatusWorker(log: (msg: string) => void) {
-  setInterval(() => processStatusDeliveries().catch((err) => log(`status delivery failed: ${err.message}`)), 15_000).unref();
-  setInterval(() => pruneStatusSubscriptions().catch((err) => log(`status subscription cleanup failed: ${err.message}`)), 86400_000).unref();
 }

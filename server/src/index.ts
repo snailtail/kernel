@@ -1,7 +1,7 @@
 import { buildApp } from './app.js';
 import { logger } from './log.js';
 import { pruneDeliveries, refreshWindowStatuses } from './dev.js';
-import { startChainVerification } from './audit.js';
+import { runChainVerification } from './audit.js';
 import { purgeSecurityEvents } from './security-events.js';
 import { asSystem } from './context.js';
 import { pruneIdempotencyKeys } from './idempotency.js';
@@ -10,19 +10,21 @@ import { recordActiveKey } from './rotate-keys.js';
 import { bootstrapAdmin } from './auth.js';
 import { config } from './config.js';
 import { migrate, pool, query, waitForDb } from './db.js';
-import { encryptLegacySecrets, startWorker } from './webhooks.js';
-import { startEventWorker } from './events.js';
-import { startSecurityAlertWorker } from './security-alerts.js';
-import { startSlaWorker } from './sla.js';
-import { startNotificationWorker } from './notifications.js';
-import { startStatusWorker } from './status-subscriptions.js';
-import { startRequestWorker } from './requests.js';
-import { startPortalWorker } from './portal.js';
-import { startConnectorWorker } from './connectors.js';
-import { startMajorIncidentWorker } from './major-incidents.js';
-import { startPagingWorker } from './oncall.js';
-import { startReportScheduleWorker } from './report-schedules.js';
-import { startRuleWorker } from './rules.js';
+import { encryptLegacySecrets, notifyOverdueActions, processDeliveries, pruneDeliveries as pruneWebhookDeliveries } from './webhooks.js';
+import { autoResolveIncidents, purgeEvents } from './events.js';
+import { runSecurityAlerting } from './security-alerts.js';
+import { backfillSla, checkSlaEvents } from './sla.js';
+import { processNotificationDeliveries, pruneNotifications, queueDigests } from './notifications.js';
+import { processStatusDeliveries, pruneStatusSubscriptions } from './status-subscriptions.js';
+import { processRequestMail } from './requests.js';
+import { processPortalMail, prunePortal } from './portal.js';
+import { runDueConnectors } from './connectors.js';
+import { checkOverdueUpdates } from './major-incidents.js';
+import { deliverPages } from './oncall.js';
+import { processReportDeliveries, queueScheduledReports } from './report-schedules.js';
+import { pruneRuleRuns, runRules, runTimeTriggers } from './rules.js';
+import { onRulesQueued } from './rule-queue.js';
+import { every } from './core/workers.js';
 import { moduleEnabled } from './modules.js';
 
 // The schema comes first: building the app already reads settings (modules), which a new database does not have yet.
@@ -36,30 +38,54 @@ const log = (msg: string) => app.log.info(msg);
 await bootstrapAdmin(log);
 await encryptLegacySecrets(log);
 await recordActiveKey();
-setInterval(() => query('DELETE FROM sessions WHERE expires_at < now()').catch(() => {}), 3600_000).unref();
-// IP addresses and user agents of audit entries are kept for a limited time (settings.privacy.audit_context_days).
-setInterval(() => query("DELETE FROM audit_context WHERE created_at < now() - coalesce((SELECT (value->>'audit_context_days')::int FROM settings WHERE key = 'privacy'), 365) * interval '1 day'").catch(() => {}), 86400_000).unref();
-// Security events and the addresses tokens were used from, likewise (settings.privacy.security_event_days, #64).
-setInterval(() => purgeSecurityEvents().catch(() => {}), 86400_000).unref();
+
+// Every background job: how often it runs, and when it is off. Each runs one at a time on this replica; the jobs
+// themselves are safe with several replicas (deliveries are claimed with a lease).
 asSystem(() => {
-  startWorker(log);
-  startEventWorker(log);
-  startSecurityAlertWorker(log);
-  startSlaWorker(log);
-  startNotificationWorker(log);
-  startStatusWorker(log);
-  startRequestWorker(log);
-  startPortalWorker(log);
-  startConnectorWorker(log);
-  startMajorIncidentWorker(log, () => moduleEnabled('incident'));
-  startPagingWorker(log, () => moduleEnabled('incident'));
-  startReportScheduleWorker(log);
-  startRuleWorker(log);
-  startChainVerification((msg) => app.log.error(msg));
-  setInterval(() => pruneIdempotencyKeys().catch(() => {}), 3600_000).unref();
-  setInterval(() => pruneDeliveries().catch(() => {}), 3600_000).unref();
+  const on = (module: Parameters<typeof moduleEnabled>[0]) => () => moduleEnabled(module);
+  const MINUTE = 60_000;
+  const HOUR = 3600_000;
+  const DAY = 86400_000;
+  // Deliveries: webhooks drain the queue while there is more.
+  every(5_000, 'webhook delivery', async () => { while ((await processDeliveries()) > 0); });
+  every(15_000, 'notification delivery', () => processNotificationDeliveries());
+  every(MINUTE, 'digest', () => queueDigests());
+  every(15_000, 'status delivery', () => processStatusDeliveries());
+  every(15_000, 'request mail', () => processRequestMail(), { when: on('request') });
+  every(10_000, 'portal mail', () => processPortalMail(), { when: on('portal') });
+  every(15 * MINUTE, 'report schedule', () => queueScheduledReports());
+  every(MINUTE, 'report delivery', () => processReportDeliveries());
+  every(5_000, 'paging', () => deliverPages(), { when: on('incident') });
+  // Automation: woken right after a change commits; the interval picks up what another replica queued or a crash
+  // left behind. Time triggers are looked for every minute, and what they queue runs right away.
+  const rules = every(5_000, 'automation rules', () => runRules());
+  onRulesQueued(() => setImmediate(rules));
+  every(MINUTE, 'automation time triggers', async () => (await runTimeTriggers()) && rules());
+  // Checks.
+  every(MINUTE, 'connector scheduler', () => runDueConnectors());
+  every(MINUTE, 'event auto-resolve', () => autoResolveIncidents(), { when: () => moduleEnabled('event') && moduleEnabled('incident') });
+  every(MINUTE, 'SLA check', () => checkSlaEvents(), { when: on('sla') });
+  every(MINUTE, 'major incident check', () => checkOverdueUpdates(), { when: on('incident') });
+  every(MINUTE, 'security alerting', () => runSecurityAlerting());
+  every(HOUR, 'overdue actions', () => notifyOverdueActions(), { firstAfter: 0 });
+  every(HOUR, 'audit chain verification', () => runChainVerification(), { firstAfter: 10_000 });
   // A change window opening or closing changes the status on its pull requests (#32).
-  setInterval(() => refreshWindowStatuses().catch(() => {}), 5 * 60_000).unref();
+  every(5 * MINUTE, 'change window status', () => refreshWindowStatuses());
+  // Retention.
+  every(HOUR, 'session cleanup', () => query('DELETE FROM sessions WHERE expires_at < now()'));
+  // IP addresses and user agents of audit entries are kept for a limited time (settings.privacy.audit_context_days).
+  every(DAY, 'audit context cleanup', () => query("DELETE FROM audit_context WHERE created_at < now() - coalesce((SELECT (value->>'audit_context_days')::int FROM settings WHERE key = 'privacy'), 365) * interval '1 day'"));
+  // Security events and the addresses tokens were used from, likewise (settings.privacy.security_event_days, #64).
+  every(DAY, 'security event cleanup', () => purgeSecurityEvents());
+  every(HOUR, 'idempotency key cleanup', () => pruneIdempotencyKeys());
+  every(HOUR, 'dev webhook replay cleanup', () => pruneDeliveries());
+  every(6 * HOUR, 'webhook delivery cleanup', () => pruneWebhookDeliveries(), { firstAfter: 0 });
+  every(DAY, 'notification cleanup', () => pruneNotifications());
+  every(DAY, 'status subscription cleanup', () => pruneStatusSubscriptions());
+  every(HOUR, 'portal cleanup', () => prunePortal());
+  every(HOUR, 'automation log cleanup', () => pruneRuleRuns());
+  every(HOUR, 'event purge', () => purgeEvents());
+  backfillSla().catch((err) => app.log.warn(`SLA backfill failed: ${err.message}`));
 });
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {

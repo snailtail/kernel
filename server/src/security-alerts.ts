@@ -250,10 +250,6 @@ async function notifyAdmins(hits: Detection[], results: EventResult[]) {
   });
 }
 
-export function startSecurityAlertWorker(log: (msg: string) => void) {
-  setInterval(() => runSecurityAlerting().catch((err) => log(`security alerting failed: ${err.message}`)), 60_000).unref();
-}
-
 // ---- Settings and the admin view -----------------------------------------------------------------
 
 export async function saveAlertingSettings(value: Alerting, reason: string) {

@@ -317,11 +317,6 @@ export async function backfillSla() {
   return rows.length;
 }
 
-export function startSlaWorker(log: (msg: string) => void) {
-  backfillSla().catch((err) => log(`SLA backfill failed: ${err.message}`));
-  setInterval(() => moduleEnabled('sla') && checkSlaEvents().catch((err) => log(`SLA check failed: ${err.message}`)), 60_000).unref();
-}
-
 // ---- Catalogue and reports ---------------------------------------------------------------------
 
 export async function serviceCatalogue(user: User) {

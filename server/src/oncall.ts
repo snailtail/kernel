@@ -544,10 +544,6 @@ export async function deliverPages() {
   return rows.length;
 }
 
-export function startPagingWorker(log: (msg: string) => void, enabled: () => boolean) {
-  setInterval(() => enabled() && deliverPages().catch((err) => log(`paging failed: ${err.message}`)), 5_000).unref();
-}
-
 /** The pages of an incident, for its page and agents. */
 export async function pagesFor(incidentId: number) {
   const { rows } = await query(

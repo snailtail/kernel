@@ -30,6 +30,7 @@ import { checkAssigneeInTeam, teamMembers } from './teams.js';
 import { assertVisibleRef } from './visibility.js';
 import { absoluteUrl } from './core/url.js';
 import { tokenHashBytes } from './core/hash.js';
+import { processOutbox } from './core/outbox.js';
 
 export const REQUEST_STATUSES = ['submitted', 'awaiting_approval', 'in_fulfilment', 'fulfilled', 'rejected', 'cancelled'] as const;
 type Status = (typeof REQUEST_STATUSES)[number];
@@ -1010,43 +1011,18 @@ function requesterLines(kind: Notice, r: { ref: string; title: string | null; ap
 
 /** Sends due requester mail; claimed with a lease so replicas never send the same one twice. */
 export async function processRequestMail(limit = 20) {
-  const { rows } = await query(
-    `UPDATE request_mail m SET status = 'sending', lease_until = now() + interval '2 minutes'
-     FROM (SELECT id FROM request_mail WHERE (status = 'pending' OR (status = 'sending' AND lease_until < now())) AND next_attempt_at <= now()
-           ORDER BY id LIMIT $1 FOR UPDATE SKIP LOCKED) due
-     WHERE m.id = due.id RETURNING m.*`,
-    [limit],
-  );
-  let sent = 0;
-  for (const m of rows) {
-    let error = '';
-    let outcome = 'sent';
-    try {
+  const { sent } = await processOutbox({
+    table: 'request_mail', leaseSeconds: 120, limit, permanent: /not configured/,
+    retryIn: (attempts) => (attempts >= 5 ? null : 2 ** attempts * 60),
+    send: async (m: any) => {
       const { rows: p } = await query("SELECT email FROM people WHERE id = $1 AND request_mail AND active AND erased_at IS NULL AND coalesce(email, '') <> ''", [m.person_id]);
       const r = await forRequester(null, m.request_id);
-      if (!p[0] || !r) outcome = 'skipped';
-      else {
-        const { subject, lines } = requesterLines(m.kind, r);
-        await sendOutsideMail(p[0].email, subject, lines, unsubscribeUrl('r', m.person_id));
-      }
-    } catch (err) {
-      error = (err as Error).message.slice(0, 500);
-    }
-    const attempts = m.attempts + 1;
-    if (!error) {
-      if (outcome === 'sent') sent++;
-      await query("UPDATE request_mail SET status = $2, sent_at = CASE WHEN $2 = 'sent' THEN now() END, attempts = $3, lease_until = NULL, error = '' WHERE id = $1", [m.id, outcome, attempts]);
-    } else if (attempts >= 5 || /not configured/.test(error)) {
-      await query("UPDATE request_mail SET status = 'failed', attempts = $2, error = $3, lease_until = NULL WHERE id = $1", [m.id, attempts, error]);
-    } else {
-      await query("UPDATE request_mail SET status = 'pending', attempts = $2, error = $3, lease_until = NULL, next_attempt_at = now() + $4 * interval '1 minute' WHERE id = $1", [m.id, attempts, error, 2 ** attempts]);
-    }
-  }
+      if (!p[0] || !r) return 'skipped';
+      const { subject, lines } = requesterLines(m.kind, r);
+      await sendOutsideMail(p[0].email, subject, lines, unsubscribeUrl('r', m.person_id));
+    },
+  });
   return sent;
-}
-
-export function startRequestWorker(log: (msg: string) => void) {
-  setInterval(() => moduleEnabled('request') && asSystem(() => processRequestMail()).catch((err) => log(`request mail failed: ${err.message}`)), 15_000).unref();
 }
 
 // ---- Approval by link (#48) ------------------------------------------------------------------
