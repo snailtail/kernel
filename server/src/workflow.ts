@@ -31,11 +31,11 @@ export function priorityOf(impact: number, urgency: number): number {
 }
 
 /** Workflow rules ask the policy layer, so roles are defined in one place (policy.ts). */
-export function canEdit(role: Role) {
+function canEdit(role: Role) {
   return can(role, 'problem.transition');
 }
 
-export function isManager(role: Role) {
+function isManager(role: Role) {
   return can(role, 'problem.close');
 }
 

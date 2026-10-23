@@ -17,7 +17,6 @@ import { authorize } from './policy.js';
 import type { Db } from './problems.js';
 import { recordType } from './records.js';
 
-const MINUTE = 60_000;
 type Target = 'response' | 'resolution';
 
 /**

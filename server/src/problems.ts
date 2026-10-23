@@ -19,7 +19,7 @@ import { notify } from './notifications.js';
 import { enqueue as enqueueWebhooks, eventFor } from './webhooks.js';
 import { checkAssigneeInTeam, validTeam } from './teams.js';
 import { restrictedByCategory } from './visibility.js';
-import { canEdit, checkTransition, CLOSURE_CODES, EC_DECISIONS, isManager, STATUSES, WORKAROUND_EFFECTIVENESS, type Status } from './workflow.js';
+import { checkTransition, CLOSURE_CODES, EC_DECISIONS, STATUSES, WORKAROUND_EFFECTIVENESS, type Status } from './workflow.js';
 
 export const LINK_KINDS = ['incident', 'event', 'change', 'problem'] as const;
 

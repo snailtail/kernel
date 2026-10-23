@@ -1,5 +1,4 @@
 import type { FastifyInstance } from 'fastify';
-import { z } from 'zod';
 import { requireUser } from '../auth.js';
 import { forbidden } from '../errors.js';
 import * as rq from '../requests.js';

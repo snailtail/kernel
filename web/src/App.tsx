@@ -6,8 +6,6 @@ import { NotificationsPage } from './components/Notifications';
 import { IncidentPage, IncidentsPage } from './pages/Incidents';
 import { Navigate, Route, Routes } from 'react-router';
 import { api, type Meta, type Preferences, type User } from './api';
-import { icons } from './components/Icons';
-import { ROLE_LABEL } from './format';
 import { ActionsPage } from './pages/Actions';
 import { CandidatesPage } from './pages/Candidates';
 import { DashboardPage } from './pages/Dashboard';

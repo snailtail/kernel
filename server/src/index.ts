@@ -2,7 +2,7 @@ import { buildApp } from './app.js';
 import { logger } from './log.js';
 import { pruneDeliveries, refreshWindowStatuses } from './dev.js';
 import { runChainVerification } from './audit.js';
-import { purgeSecurityEvents } from './security-events.js';
+import { closeWindows as closeSecurityEventWindows, purgeSecurityEvents } from './security-events.js';
 import { asSystem } from './context.js';
 import { pruneIdempotencyKeys } from './idempotency.js';
 import { checkConfiguration } from './security.js';
@@ -66,6 +66,7 @@ asSystem(() => {
   every(MINUTE, 'event auto-resolve', () => autoResolveIncidents(), { when: () => moduleEnabled('event') && moduleEnabled('incident') });
   every(MINUTE, 'SLA check', () => checkSlaEvents(), { when: on('sla') });
   every(MINUTE, 'major incident check', () => checkOverdueUpdates(), { when: on('incident') });
+  every(15_000, 'security event summaries', async () => closeSecurityEventWindows());
   every(MINUTE, 'security alerting', () => runSecurityAlerting());
   every(HOUR, 'overdue actions', () => notifyOverdueActions(), { firstAfter: 0 });
   every(HOUR, 'audit chain verification', () => runChainVerification(), { firstAfter: 10_000 });

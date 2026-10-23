@@ -422,8 +422,6 @@ const COMPUTE: Record<RuleId, (db: Db, settings: any) => Promise<Raw[]>> = {
 
 interface Decision { key: string; rule: string; decision: 'dismissed' | 'snoozed'; until: string | null; evidence: string[]; reason: string; decided_by_name: string | null; decided_at: string }
 
-type Candidate = ReturnType<typeof present>;
-
 function present(raw: Raw, records: EvidenceRecord[], reason: string, decision?: Decision) {
   // As ISO strings, whether the database gave a Date or a string, so they sort in time order.
   const times = records.map((r) => r.occurred_at).filter(Boolean).map((t) => new Date(t!).toISOString()).sort();

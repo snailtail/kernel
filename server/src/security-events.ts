@@ -83,12 +83,11 @@ function closeWindow(key: string, e: Window) {
   recent.delete(key);
   if (e.last) track(e.last());
 }
-/** Writes the summary rows of minutes that are over (or all of them, when flushing). */
-function closeWindows(all = false) {
+/** Writes the summary rows of minutes that are over (or all of them, when flushing). A background job in index.ts. */
+export function closeWindows(all = false) {
   const now = Date.now();
   for (const [k, v] of recent) if (all || v.until <= now) closeWindow(k, v);
 }
-setInterval(() => closeWindows(), 15_000).unref();
 
 const pending = new Set<Promise<unknown>>();
 /** Waits for queued writes (tests, and shutdown). */
