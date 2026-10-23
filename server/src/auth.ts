@@ -140,6 +140,12 @@ export async function revokeSession(user: User, id: string) {
   securityEvent({ action: 'auth.session_revoked', category: 'authentication', outcome: 'success', message: 'Session signed out remotely', target: `#${user.id}` });
 }
 
+/** Signs out every other session of this person (after a password change, or when they ask). */
+export async function revokeOtherSessions(user: User, req: FastifyRequest) {
+  const { rowCount } = await query('DELETE FROM sessions WHERE user_id = $1 AND token_hash <> $2', [user.id, currentSessionHash(req)]);
+  return rowCount;
+}
+
 // ---- Brute force protection ------------------------------------------------------------------
 
 const failures = new Map<string, { count: number; until: number }>();

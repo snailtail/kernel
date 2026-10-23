@@ -1,13 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { audit, requireReason } from '../audit.js';
+import { requireReason } from '../audit.js';
 import { requireUser } from '../auth.js';
-import { query } from '../db.js';
 import { requireStepUp } from '../mfa.js';
 import { rateLimit } from '../ratelimit.js';
-import { clearSensitivePolicyCache, policySchema, scan, sensitivePolicy } from '../sensitive.js';
+import { policySchema, scan, sensitivePolicy } from '../sensitive.js';
 import { redactHistory, redactHistorySchema } from '../redact-history.js';
-import { classifySchema, reveal, setClassification } from '../confidential.js';
+import { classifySchema, reveal, saveSensitivePolicy, setClassification } from '../confidential.js';
 
 export async function sensitiveRoutes(app: FastifyInstance) {
   // For the warning while typing or pasting (#61): what the scanner would do with this text. Nothing is stored or
@@ -45,13 +44,7 @@ export async function sensitiveRoutes(app: FastifyInstance) {
   app.put('/api/admin/sensitive-data', async (req) => {
     requireUser(req, 'mfa.policy');
     await requireStepUp(req);
-    const body = policySchema.extend({ reason: z.string().max(1000).optional() }).parse(req.body);
-    const reason = requireReason(body.reason);
-    const { reason: _r, ...value } = body;
-    const before = await sensitivePolicy();
-    await query("INSERT INTO settings (key, value) VALUES ('sensitive_data', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", [value]);
-    clearSensitivePolicyCache();
-    await audit(null, { entity_type: 'setting', entity_ref: 'sensitive_data', action: 'update', changes: { from: before, to: value }, reason });
-    return sensitivePolicy();
+    const { reason, ...value } = policySchema.extend({ reason: z.string().max(1000).optional() }).parse(req.body);
+    return saveSensitivePolicy(value, requireReason(reason));
   });
 }
