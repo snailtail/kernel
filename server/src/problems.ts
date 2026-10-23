@@ -4,9 +4,8 @@ import { historyOf, logActivity } from './activity.js';
 import { assertMayWriteText, forgetExists, onlyTitleMatches, textFilterSql } from './confidential.js';
 import { z } from 'zod';
 import { queueRuleRuns } from './rule-queue.js';
-import type pg from 'pg';
 import type { User } from './auth.js';
-import { afterCommit, query, tx } from './db.js';
+import { afterCommit, type Db, query, tx } from './db.js';
 import { audit } from './audit.js';
 import { currentContext } from './context.js';
 import { recordUrl, registerRecordType, type ActivityEntry, type RecordType } from './records.js';
@@ -97,7 +96,6 @@ export const listSchema = z.object({
 });
 
 export type ProblemInput = Omit<z.infer<typeof updateProblemSchema>, 'base'>;
-export type Db = Pick<pg.PoolClient, 'query'>;
 
 const SELECT_PROBLEM = `
   SELECT p.id, p.ref, p.title, p.description, p.status, p.category_id, c.name AS category,

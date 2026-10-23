@@ -4,11 +4,11 @@
 import { z } from 'zod';
 import type { User } from './auth.js';
 import { audit } from './audit.js';
-import { query, tx } from './db.js';
+import { type Db, query, tx } from './db.js';
 import { badRequest, conflict, notFound } from './errors.js';
 import { logIncident } from './incident-log.js';
 import { authorize, can } from './policy.js';
-import { registerProblemExtra, type Db } from './problems.js';
+import { registerProblemExtra } from './problems.js';
 
 const optionalText = (max: number) => z.string().trim().max(max);
 const personFields = {

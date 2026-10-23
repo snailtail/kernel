@@ -52,6 +52,12 @@ export async function query<T extends pg.QueryResultRow = any>(sql: string, para
 }
 
 /** For code that takes a "db" argument outside a transaction: the same helper, never a raw connection. */
+/** What a function that may run inside a transaction takes: tx()'s client, or pool for a statement on its own. */
+export type Db = Pick<pg.PoolClient, 'query'>;
+
+/** The signed-in user's columns (auth.ts's User), selected from users aliased u. */
+export const USER_COLUMNS = 'u.id, u.username, u.display_name, u.email, u.role, u.preferences, u.must_change_password, u.mfa_enabled_at IS NOT NULL AS mfa_enabled';
+
 export const pool = {
   query: (sql: string, params?: unknown[]) => query(sql, params),
   end: () => rawPool.end(),

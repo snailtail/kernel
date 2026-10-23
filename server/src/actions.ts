@@ -2,11 +2,11 @@
 import { notify } from './notifications.js';
 import { z } from 'zod';
 import type { User } from './auth.js';
-import { query, tx } from './db.js';
+import { type Db, query, tx } from './db.js';
 import { badRequest, notFound } from './errors.js';
 import { assertMayWriteText } from './confidential.js';
 import { authorize } from './policy.js';
-import { getProblem, loadForUpdate, logProblem, SELECT_ACTION, type Db } from './problems.js';
+import { getProblem, loadForUpdate, logProblem, SELECT_ACTION } from './problems.js';
 
 export const ACTION_STATUSES = ['open', 'done', 'cancelled'] as const;
 

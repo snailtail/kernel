@@ -9,9 +9,8 @@
 // record created *from* another starts as narrow as its source, from its first insert (startNarrow). test/integration/copy-text.test.ts runs every
 // path with a restricted and a confidential source.
 import { audit } from './audit.js';
-import { query } from './db.js';
+import { type Db, query } from './db.js';
 import { recordType, textKindOfRef } from './records.js';
-import type { Db } from './problems.js';
 
 export interface Audience { ref: string | null; restricted: boolean; restricted_teams: number[]; classification: 'normal' | 'confidential' }
 

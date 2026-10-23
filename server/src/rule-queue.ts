@@ -1,8 +1,7 @@
 // Queues automation rule runs (#49) when a record changes. Each record type's activity log calls it in the change's
 // own transaction (the outbox), so a run exists exactly when the change commits; rules.ts runs it after commit.
 import { currentContext } from './context.js';
-import { afterCommit } from './db.js';
-import type { Db } from './problems.js';
+import { afterCommit, type Db } from './db.js';
 
 export const RULE_KINDS = ['incident', 'problem', 'change', 'request'] as const;
 export type RuleKind = (typeof RULE_KINDS)[number];

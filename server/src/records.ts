@@ -1,14 +1,13 @@
 // The registry of record types. Every practice (problems today; incidents, changes, CIs… later) registers here with
 // the same conventions, so generic REST/MCP tools (search, get_record, link_records, next_steps, my_work) and the
 // parity test work for all of them. See docs/api-conventions.md.
-import type pg from 'pg';
 import type { User } from './auth.js';
 import { notFound } from './errors.js';
 import type { Module } from './modules.js';
 import type { Action } from './policy.js';
 import { absoluteUrl } from './core/url.js';
+import type { Db } from './db.js';
 
-type Db = Pick<pg.PoolClient, 'query'>;
 
 export interface SearchHit {
   type: string;

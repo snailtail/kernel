@@ -3,11 +3,10 @@
 import { z } from 'zod';
 import type { User } from './auth.js';
 import { audit } from './audit.js';
-import { query, tx } from './db.js';
+import { type Db, query, tx } from './db.js';
 import { badRequest, conflict, forbidden, notFound } from './errors.js';
 import { notify } from './notifications.js';
 import { authorize, can } from './policy.js';
-import type { Db } from './problems.js';
 
 /** Members who can be given work: active, and in a role that can update records (not viewers or integrations). */
 const CAN_WORK = "u.active AND u.role NOT IN ('viewer', 'integration')";

@@ -12,10 +12,10 @@ import { computeImpact, impactSchema } from './cmdb-graph.js';
 import { loadCi, logCi, registerCiExtra } from './cmdb.js';
 import { assertMayWriteText, forgetExists, notCopied, readableText, textFilterSql } from './confidential.js';
 import { currentContext } from './context.js';
-import { query, tx } from './db.js';
+import { type Db, query, tx } from './db.js';
 import { badRequest, conflict, forbidden, notFound } from './errors.js';
 import { authorize, can } from './policy.js';
-import { getProblem, loadForUpdate, logProblem, registerProblemExtra, type Db } from './problems.js';
+import { getProblem, loadForUpdate, logProblem, registerProblemExtra } from './problems.js';
 import { managers, notify } from './notifications.js';
 import { recordUrl, registerRecordType, type RecordType } from './records.js';
 

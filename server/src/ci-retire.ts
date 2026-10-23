@@ -3,8 +3,8 @@
 // before it is retired returns to active, and a retired CI keeps its history.
 import { z } from 'zod';
 import type { User } from './auth.js';
-import { loadCi, logCi, type Db } from './cmdb.js';
-import { query, tx } from './db.js';
+import { loadCi, logCi } from './cmdb.js';
+import { type Db, query, tx } from './db.js';
 import { forbidden } from './errors.js';
 import { authorize, can } from './policy.js';
 import { recordUrl, typeForRef } from './records.js';

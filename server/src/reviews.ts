@@ -9,7 +9,7 @@ import type { User } from './auth.js';
 import { audienceOf, copyText, mayCopyText, startNarrow, titleAudience, whyNotForEveryone } from './audience.js';
 import { assertMayWriteText, maskedRefs, notCopied, readableText } from './confidential.js';
 import { currentContext } from './context.js';
-import { query, tx } from './db.js';
+import { type Db, query, tx } from './db.js';
 import { badRequest, conflict, forbidden, notFound } from './errors.js';
 import { logIncident } from './incident-log.js';
 import { createImprovementInTx } from './improvements.js';
@@ -17,7 +17,7 @@ import { getIncident } from './incidents.js';
 import { createArticle } from './knowledge.js';
 import { timeline } from './major-incidents.js';
 import { authorize, can } from './policy.js';
-import { createProblemInTx, loadForUpdate, logProblem, registerProblemExtra, type Db } from './problems.js';
+import { createProblemInTx, loadForUpdate, logProblem, registerProblemExtra } from './problems.js';
 import { recordUrl, registerRecordType, type RecordType, type SearchHit } from './records.js';
 import { loadCalendar } from './sla.js';
 

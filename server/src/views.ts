@@ -4,10 +4,9 @@
 import { z } from 'zod';
 import type { User } from './auth.js';
 import { audit } from './audit.js';
-import { query, tx } from './db.js';
+import { type Db, query, tx } from './db.js';
 import { badRequest, conflict, forbidden, notFound } from './errors.js';
 import { authorize, can, type Action } from './policy.js';
-import type { Db } from './problems.js';
 
 export const LISTS = ['problems', 'actions', 'incidents', 'changes', 'alerts', 'known_errors', 'knowledge', 'cis', 'candidates', 'improvements', 'requests'] as const;
 export type ListName = (typeof LISTS)[number];

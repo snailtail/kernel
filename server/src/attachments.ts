@@ -10,10 +10,9 @@ import { markPersonalData, redact, remainingFlags, scan, sensitivePolicy } from 
 import sharp from 'sharp';
 import type { User } from './auth.js';
 import { audit } from './audit.js';
-import { pool, query, tx } from './db.js';
+import { type Db, pool, query, tx } from './db.js';
 import { badRequest, forbidden, HttpError, notFound } from './errors.js';
 import { authorize, type Action } from './policy.js';
-import type { Db } from './problems.js';
 import { logActivity } from './activity.js';
 import { typeForRef } from './records.js';
 import { sha256Hex } from './core/hash.js';

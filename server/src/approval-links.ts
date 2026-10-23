@@ -8,10 +8,10 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypt
 import type { FastifyRequest } from 'fastify';
 import { approvalAction, decideApproval, type ApprovalKind } from './approvals.js';
 import { audit } from './audit.js';
-import { USER_COLUMNS, type User } from './auth.js';
+import type { User } from './auth.js';
 import { RISKS, changePolicy, getChange, voteOnChange } from './changes.js';
 import { asSystem, contextStore, type RequestContext } from './context.js';
-import { query } from './db.js';
+import { query, USER_COLUMNS } from './db.js';
 import { decideRequest, requestForApprover } from './requests.js';
 import { badRequest, HttpError } from './errors.js';
 import { mfaRequiredFor } from './mfapolicy.js';

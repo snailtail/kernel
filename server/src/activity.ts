@@ -3,8 +3,7 @@
 // `after` hook, so a major incident's update cadence or a problem's webhooks stay with their domain.
 import { audit } from './audit.js';
 import { currentContext } from './context.js';
-import { query } from './db.js';
-import type { Db } from './problems.js';
+import { type Db, query } from './db.js';
 import { recordType, type ActivityEntry } from './records.js';
 import { queueRuleRuns, type RuleKind } from './rule-queue.js';
 
