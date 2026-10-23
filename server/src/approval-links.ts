@@ -15,7 +15,7 @@ import { query, USER_COLUMNS } from './db.js';
 import { decideRequest, requestForApprover } from './requests.js';
 import { badRequest, HttpError } from './errors.js';
 import { mfaRequiredFor } from './mfapolicy.js';
-import { APPROVAL_LINK_HOURS } from './notifications.js';
+import { APPROVAL_LINK_HOURS, approvalLinks } from './notifications.js';
 import { can } from './policy.js';
 import { rateLimit } from './ratelimit.js';
 import { securityEvent } from './security-events.js';
@@ -109,6 +109,7 @@ export interface ApprovalLinks { approve: string; reject: string }
  * Mints a link for one delivery of an approval_needed notification (run by the delivery worker). Returns the links,
  * 'sign_in' when the decision needs a signed-in approver, or null when there is nothing for this person to decide.
  */
+approvalLinks.provide(mintApprovalLink);
 export async function mintApprovalLink(n: { ref: string; approval_id: number | null }, userId: number, channel: 'email' | 'chat', deliveryId: number): Promise<ApprovalLinks | 'sign_in' | null> {
   const target: { approval_id?: number; change_id?: number; request_id?: number } | null = n.approval_id
     ? { approval_id: n.approval_id }

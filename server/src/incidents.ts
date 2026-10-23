@@ -677,6 +677,8 @@ const INCIDENT_TYPE: RecordType = {
   ],
   liveTopic: 'incident',
   comment: (user, ref, body) => addIncidentComment(user, ref, { body, kind: 'comment', to_requester: false }),
+  update: (user, ref, input) => updateIncidentLean(user, ref, input),
+  transition: (user, ref, input) => transitionIncidentLean(user, ref, input as z.infer<typeof transitionIncidentSchema>),
 };
 registerRecordType(INCIDENT_TYPE);
 
