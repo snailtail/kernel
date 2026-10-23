@@ -8,13 +8,14 @@ import type { User } from './auth.js';
 import { query, tx } from './db.js';
 import { moduleEnabled, type Module } from './modules.js';
 import { authorize } from './policy.js';
+import { legacyRole } from './workflow.js';
 
 export const HOMES = ['my_work', 'dashboard', 'incidents', 'problems', 'changes', 'requests', 'improvements'] as const;
 export type Home = (typeof HOMES)[number];
 export const NEW_KINDS = ['incident', 'problem', 'change', 'article', 'improvement', 'request'] as const;
 export type NewKind = (typeof NEW_KINDS)[number];
 /** The roles that sign in to the web UI; integration accounts have no start page. */
-export const PERSON_ROLES = ['admin', 'problem_manager', 'analyst', 'viewer'] as const;
+export const PERSON_ROLES = ['admin', 'manager', 'analyst', 'viewer'] as const;
 
 const HOME_MODULE: Partial<Record<Home, Module>> = { incidents: 'incident', changes: 'change', requests: 'request' };
 const NEW_MODULE: Partial<Record<NewKind, Module>> = { incident: 'incident', change: 'change', article: 'knowledge', request: 'request' };
@@ -24,6 +25,11 @@ const newOn = (k: unknown): k is NewKind => (NEW_KINDS as readonly unknown[]).in
 
 const choice = z.object({ home: z.enum(HOMES).nullable(), default_new: z.enum(NEW_KINDS).nullable() }).partial().strict();
 export const roleDefaultsSchema = z.object(Object.fromEntries(PERSON_ROLES.map((r) => [r, choice.optional()])) as Record<(typeof PERSON_ROLES)[number], z.ZodOptional<typeof choice>>).strict();
+/** The request body; the old role name is accepted as a key for one release (#171). */
+export const roleDefaultsInput = z.preprocess(
+  (v) => (v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, c]) => [legacyRole(k) as string, c])) : v),
+  roleDefaultsSchema.extend({ reason: z.string().trim().max(1000).optional() }),
+);
 type RoleDefaults = z.infer<typeof roleDefaultsSchema>;
 
 export async function getRoleDefaults(): Promise<RoleDefaults> {

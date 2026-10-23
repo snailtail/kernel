@@ -22,7 +22,7 @@ export const scheduleSchema = z
   })
   .refine((s) => !!s.service !== (s.organisation_id != null), 'Give a service or an organisation');
 
-const isManager = (user: { role: string }) => ['admin', 'problem_manager'].includes(user.role);
+const isManager = (user: { role: string }) => ['admin', 'manager'].includes(user.role);
 
 const SELECT = `SELECT s.id, s.frequency, s.created_at, s.user_id, u.display_name AS recipient,
     c.ref AS service_ref, c.name AS service_name, o.id AS organisation_id, o.name AS organisation_name,

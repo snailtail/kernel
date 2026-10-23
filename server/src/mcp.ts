@@ -122,7 +122,7 @@ const editable = {
   detection: z.enum(['reactive', 'proactive']).describe('reactive = from incidents, proactive = from events/trends'),
   impact: z.number().int().min(1).max(3).describe('1 high, 2 medium, 3 low'),
   urgency: z.number().int().min(1).max(3).describe('1 high, 2 medium, 3 low'),
-  is_major: z.boolean().describe('Major problem (problem managers only)'),
+  is_major: z.boolean().describe('Major problem (managers only)'),
   assignee: z.string().nullable().describe('Username of the problem owner/analyst'),
   root_cause: z.string().describe('Root cause analysis findings'),
   workaround: z.string().describe('Workaround that reduces or eliminates the impact'),
@@ -331,7 +331,7 @@ function buildServer(user: User, scopes?: string[]) {
 
   tool(
     'mark_duplicate',
-    'Mark a problem as a duplicate of another: links them, moves incident/event links to the original and closes the duplicate. Problem managers only.',
+    'Mark a problem as a duplicate of another: links them, moves incident/event links to the original and closes the duplicate. Managers only.',
     { ref: z.string().describe('The duplicate'), of: z.string().describe('The original problem to keep'), human_confirmation: HUMAN_CONFIRMATION },
     false,
     async ({ ref, of, human_confirmation }) => {
@@ -413,7 +413,7 @@ function buildServer(user: User, scopes?: string[]) {
   });
   tool(
     'create_ci',
-    'Create a CI or service (problem managers). Prefer connectors/upsert_cis for CIs that exist in a source system.',
+    'Create a CI or service (managers). Prefer connectors/upsert_cis for CIs that exist in a source system.',
     { ...ciOptional, name: ciEditable.name, ci_type: ciEditable.ci_type, source_system: z.string().optional(), source_id: z.string().optional(), source_url: z.string().optional() },
     false,
     async ({ source_system, source_id, source_url, ...fields }) =>
@@ -482,7 +482,7 @@ function buildServer(user: User, scopes?: string[]) {
     team_id: z.number().int().nullable().describe('Team (from list_teams); work on a CI goes to the team that supports it by default'),
     assignee_id: z.number().int().nullable(),
     reporter: z.string().describe('Who reported it'),
-    is_major: z.boolean().describe('Major incident (problem managers only)'),
+    is_major: z.boolean().describe('Major incident (managers only)'),
   };
   const incidentOptional = Object.fromEntries(Object.entries(incidentEditable).map(([k, v]) => [k, v.optional()])) as { [K in keyof typeof incidentEditable]: z.ZodOptional<(typeof incidentEditable)[K]> };
   // Notes the requester wrote in the portal, and replies the requester was sent (#45), are marked as such.
@@ -663,7 +663,7 @@ function buildServer(user: User, scopes?: string[]) {
   // ---- Major incidents (#108) ----
   tool(
     'declare_major',
-    'Declare a major incident (problem managers): sets the incident lead (username, default you), an optional communications lead, the bridge (meeting link or phone) and the minutes between stakeholder updates (default by priority).',
+    'Declare a major incident (managers): sets the incident lead (username, default you), an optional communications lead, the bridge (meeting link or phone) and the minutes between stakeholder updates (default by priority).',
     { ref: z.string(), lead: z.string().optional(), comms_lead: z.string().optional(), bridge: z.string().optional(), update_minutes: z.number().int().min(5).max(1440).optional() },
     false,
     async ({ ref, lead, comms_lead, ...args }) =>
@@ -820,7 +820,7 @@ function buildServer(user: User, scopes?: string[]) {
   );
   tool(
     'save_view',
-    'Save a list view (filters and sort as a query string, and visible columns), or change one by id. Personal by default; scope team shares it with a team (its leads), everyone with all users (problem managers).',
+    'Save a list view (filters and sort as a query string, and visible columns), or change one by id. Personal by default; scope team shares it with a team (its leads), everyone with all users (managers).',
     {
       id: z.number().int().optional().describe('Change this view instead of creating one'),
       list: listName.optional().describe('Required when creating'),
@@ -837,7 +837,7 @@ function buildServer(user: User, scopes?: string[]) {
       return views.createView(user, views.viewSchema.parse({ list, ...rest }));
     },
   );
-  tool('delete_view', 'Remove a saved view you own (team views: team leads; shared views: problem managers).', { id: z.number().int() }, false, async ({ id }) => views.deleteView(user, id), { destructive: true });
+  tool('delete_view', 'Remove a saved view you own (team views: team leads; shared views: managers).', { id: z.number().int() }, false, async ({ id }) => views.deleteView(user, id), { destructive: true });
   tool(
     'set_default_view',
     "Pin a view as the person's default for a list: a view id, \"builtin:<key>\", or null to clear it.",
@@ -1179,7 +1179,7 @@ function buildServer(user: User, scopes?: string[]) {
   );
   tool(
     'propose_rule',
-    `Propose an automation rule. It lands disabled and marked "proposed by agent"; a problem manager reviews it and enables it in Kernel (an agent never can). Dry-run it first.
+    `Propose an automation rule. It lands disabled and marked "proposed by agent"; a manager reviews it and enables it in Kernel (an agent never can). Dry-run it first.
 Conditions read only structured fields: incident: ${rules.CONDITION_FIELDS.incident.join(', ')}; problem: ${rules.CONDITION_FIELDS.problem.join(', ')}; change: ${rules.CONDITION_FIELDS.change.join(', ')}; request: ${rules.CONDITION_FIELDS.request.join(', ')}. Operators: is, is_not, in (a list), is_empty (no value), gt, lt (priority). Values: service and ci are CI refs, team, assignee and category ids, priority 1-5.
 Triggers: created, field_changed (field), status_changed (to), in_status_for (status, hours from 0.25), due_in (hours; problem follow-up actions).
 Actions: set_field (priority, category, team or assignee where the kind has it), assign_team, add_comment (an internal note), notify (user and team ids, and roles: assignee, team_lead, approvers for requests, owner of the due action), transition (incident only: closed from resolved, in_progress from on hold), webhook (the id of an outgoing webhook an administrator set up).`,
@@ -1375,7 +1375,7 @@ Actions: set_field (priority, category, team or assignee where the kind has it),
 
   tool(
     'save_eol_version',
-    'Add or change a row in the end-of-life table (problem managers). CIs whose os, or engine/product and version, match it become candidates near or after the date.',
+    'Add or change a row in the end-of-life table (managers). CIs whose os, or engine/product and version, match it become candidates near or after the date.',
     { id: z.number().int().optional().describe('Row to change; omit to add'), ...config.eolSchema.shape },
     false,
     async ({ id, ...row }) => config.saveEol(user, id ?? null, config.eolSchema.parse(row)),
@@ -1508,7 +1508,7 @@ Actions: set_field (priority, category, team or assignee where the kind has it),
 
   tool(
     'assess_known_error',
-    'Record the error control assessment of a known error: risk of not fixing, cost of fixing, decision (fix/accept/defer/pending), rationale, review date and workaround effectiveness. Accept/defer require a problem manager.',
+    'Record the error control assessment of a known error: risk of not fixing, cost of fixing, decision (fix/accept/defer/pending), rationale, review date and workaround effectiveness. Accept/defer require a manager.',
     {
       ref: z.string(),
       risk_level: z.number().int().min(1).max(3).nullable().optional().describe('Risk of not fixing: 1 high, 2 medium, 3 low'),

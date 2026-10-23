@@ -52,7 +52,7 @@ export function ChangesPage() {
   const [creating, setCreating] = useState(false);
   useOpenOnNew(() => setCreating(true));
   const navigate = useNavigate();
-  const manager = user.role === 'admin' || user.role === 'problem_manager';
+  const manager = user.role === 'admin' || user.role === 'manager';
   return (
     <>
       <header className="page-head">
@@ -95,7 +95,7 @@ function ChangeList({ params, set }: { params: URLSearchParams; set: (k: string,
           <option value="open">Open</option>{Object.entries(CHANGE_STATUS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}<option value="all">All</option>
         </select>
         <select value={params.get('type') ?? ''} onChange={(e) => set('type', e.target.value)}><option value="">Any type</option><option value="standard">Standard</option><option value="normal">Normal</option><option value="emergency">Emergency</option></select>
-        {(user.role === 'admin' || user.role === 'problem_manager') && <label className="check"><input type="checkbox" checked={params.get('awaiting_my_vote') === 'true'} onChange={(e) => set('awaiting_my_vote', e.target.checked ? 'true' : '')} /> Awaiting my approval</label>}
+        {(user.role === 'admin' || user.role === 'manager') && <label className="check"><input type="checkbox" checked={params.get('awaiting_my_vote') === 'true'} onChange={(e) => set('awaiting_my_vote', e.target.checked ? 'true' : '')} /> Awaiting my approval</label>}
         {cols.picker}
       </div>
       {tk.scope}
@@ -407,7 +407,7 @@ export function ChangePage() {
           <SummaryButton recordRef={c.ref} onAddNote={async (body) => { await api.post(`/api/changes/${c.ref}/comments`, { body }); reload(); }} />
           <VisibilityPanel record={c as any} onChange={reload} />
           <DevLinksPanel recordRef={c.ref} editable={editable} />
-          <AttachmentsPanel recordRef={c.ref} editable={editable} canDelete={(a) => a.uploaded_by === user.id || user.role === 'admin' || user.role === 'problem_manager'} />
+          <AttachmentsPanel recordRef={c.ref} editable={editable} canDelete={(a) => a.uploaded_by === user.id || user.role === 'admin' || user.role === 'manager'} />
           <HistoryPanel recordRef={c.ref} version={c} />
           <section className="card">
             <h2>Window</h2>

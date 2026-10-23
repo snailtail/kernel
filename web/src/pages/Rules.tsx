@@ -173,7 +173,7 @@ export function RulesPage() {
       {error && <div className="error">{error}</div>}
       <section className="card flush">
         {data?.rules.length === 0 ? (
-          <p className="empty">No rules yet. {manage ? 'Start with one that routes new incidents on a service to the team that supports it.' : 'Propose one, and a problem manager reviews and enables it.'}</p>
+          <p className="empty">No rules yet. {manage ? 'Start with one that routes new incidents on a service to the team that supports it.' : 'Propose one, and a manager reviews and enables it.'}</p>
         ) : (
           <table className="table compact rule-table">
             <thead><tr><th>Rule</th><th>What it does</th><th>State</th><th className="num">Ran (30 days)</th><th>Last ran</th></tr></thead>
@@ -542,7 +542,7 @@ function RuleEditor({ rule, manage, webhooks, onClose, onSaved }: { rule?: Rule;
         <p className="muted small">
           {manage
             ? rule?.enabled ? 'Changes apply to the next record change.' : 'A new rule starts off. Enable it on its page when the dry run looks right.'
-            : 'Your proposal starts off. A problem manager reviews it and enables it.'}
+            : 'Your proposal starts off. A manager reviews it and enables it.'}
           {' '}A rule runs as itself with an analyst's permissions; at most 3 rules run in a row on a record, and a rule fires once per record in 10 minutes.
         </p>
         {error && <div className="error">{error}</div>}

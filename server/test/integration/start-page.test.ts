@@ -33,17 +33,17 @@ describe('a personal start page and default process (#171)', { skip }, () => {
   });
 
   test('an administrator sets defaults per role; a person\'s own choice wins', async () => {
-    assert.equal((await pm.put('/api/admin/start-pages', { problem_manager: { home: 'problems' } })).status, 403, 'administrators only');
+    assert.equal((await pm.put('/api/admin/start-pages', { manager: { home: 'problems' } })).status, 403, 'administrators only');
     assert.equal((await admin.put('/api/admin/start-pages', { integration: { home: 'problems' } })).status, 400, 'integration accounts have no start page');
-    ok(await admin.put('/api/admin/start-pages', { problem_manager: { home: 'problems', default_new: 'problem' }, analyst: { home: 'incidents' }, reason: 'Start pages' }));
+    ok(await admin.put('/api/admin/start-pages', { manager: { home: 'problems', default_new: 'problem' }, analyst: { home: 'incidents' }, reason: 'Start pages' }));
     assert.deepEqual(await start(pm), { home: 'problems', default_new: 'problem' });
     assert.deepEqual(await start(analyst), { home: 'incidents', default_new: 'incident' });
     assert.deepEqual(await start(viewer), { home: 'my_work', default_new: 'incident' });
     ok(await pm.put('/api/auth/preferences', { home: 'dashboard' }));
     assert.deepEqual(await start(pm), { home: 'dashboard', default_new: 'problem' });
-    // Fields merge; null clears one.
+    // Fields merge; null clears one. The old role name still works as a key for one release.
     ok(await admin.put('/api/admin/start-pages', { problem_manager: { default_new: null } }));
-    assert.deepEqual((await admin.get('/api/admin/start-pages')).body.problem_manager, { home: 'problems' });
+    assert.deepEqual((await admin.get('/api/admin/start-pages')).body.manager, { home: 'problems' });
     const entry = (await admin.get('/api/audit?entity_type=setting')).body.find((e: any) => e.entity_ref === 'start_pages');
     assert.ok(entry, 'the change is in the audit trail');
   });
@@ -56,6 +56,18 @@ describe('a personal start page and default process (#171)', { skip }, () => {
     // With incidents off, the analyst's role default (incidents) and the built-in default both fall back.
     assert.deepEqual(await start(analyst), { home: 'my_work', default_new: 'problem' });
     ok(await admin.put('/api/admin/modules', { request: false, incident: true, reason: 'Back' }));
+  });
+
+  test('the manager role is neutral; the old name problem_manager is an alias for one release', async () => {
+    assert.equal((await pm.get('/api/auth/me')).body.role, 'manager');
+    assert.ok((await admin.get('/api/meta')).body.roles.includes('manager'));
+    const created = await admin.post('/api/users', { username: 'old-name', display_name: 'Old name', role: 'problem_manager', password: 'long enough pw 1' });
+    ok(created);
+    assert.equal(created.body.role, 'manager');
+    const mfa = await admin.put('/api/admin/mfa-policy', { required_roles: ['problem_manager'], reason: 'Alias' });
+    assert.deepEqual(mfa.body.required_roles, ['manager']);
+    ok(await admin.put('/api/admin/mfa-policy', { required_roles: [], reason: 'Back' }));
+    assert.equal((await admin.post('/api/users', { username: 'bad-role', display_name: 'Bad', role: 'problem_owner', password: 'long enough pw 1' })).status, 400);
   });
 
   test('the dashboard and its KPIs need the general read permission; MCP whoami returns the focus', async () => {

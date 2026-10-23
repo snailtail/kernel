@@ -62,7 +62,7 @@ describe('saved list views (#110)', { skip }, () => {
     assert.equal(trail[1].changes.query.to.changed, true, 'the query is recorded as changed (it may hold search text, so not verbatim)');
   });
 
-  test('views shared with everyone are for problem managers to make', async () => {
+  test('views shared with everyone are for managers to make', async () => {
     assert.equal((await analyst.post('/api/views', { list: 'problems', name: 'All majors', query: 'is_major=true', scope: 'everyone' })).status, 403);
     const all = (await pm.post('/api/views', { list: 'problems', name: 'Majors by update', query: 'is_major=true&sort=updated', scope: 'everyone' })).body;
     assert.ok((await names(viewer, 'problems')).includes('Majors by update'));

@@ -79,6 +79,7 @@ describe('passkeys and token rotation (#75)', { skip }, () => {
   });
 
   test('passwordless sign-in counts as two factors; no user verification, replay or cloning is accepted', async () => {
+    // The old role name is accepted for one release (#171).
     await admin.put('/api/admin/mfa-policy', { required_roles: ['problem_manager'], reason: 'Managers need two factors' });
     const login = async (opts: { uv?: boolean; counter?: number } = {}) => {
       const o = await fetch(`${k.base}/api/auth/passkey/options`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then((x) => x.json() as any);
@@ -119,7 +120,7 @@ describe('passkeys and token rotation (#75)', { skip }, () => {
     forged.response.userHandle = Buffer.from('kernel-user-1').toString('base64url');
     assert.equal((await fetch(`${k.base}/api/auth/passkey/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ response: forged }) })).status, 401);
     await admin.post('/api/auth/reauth', { password: PASSWORD });
-    assert.equal((await admin.put('/api/admin/mfa-policy', { required_roles: ['problem_manager'], reason: 'Managers need two factors' })).status, 200);
+    assert.equal((await admin.put('/api/admin/mfa-policy', { required_roles: ['manager'], reason: 'Managers need two factors' })).status, 200);
     await pm.post('/api/auth/reauth', { password: PASSWORD });
     const keys = (await pm.get('/api/auth/passkeys')).body;
     const removed = await pm.del(`/api/auth/passkeys/${keys[0].id}`);

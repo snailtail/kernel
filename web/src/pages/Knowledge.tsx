@@ -139,7 +139,7 @@ export function ArticlePage() {
         {writer && (
           <div className="head-actions">
             {a.status === 'draft' && canPublish && <button className="btn primary" onClick={() => go('published')}>Publish</button>}
-            {a.status === 'draft' && !canPublish && <span className="muted small">A problem manager publishes articles for end users.</span>}
+            {a.status === 'draft' && !canPublish && <span className="muted small">A manager publishes articles for end users.</span>}
             {a.status === 'published' && <button className="btn" onClick={() => go('retired')}>Retire</button>}
             {a.status === 'retired' && !a.synced_with_problem && <button className="btn" onClick={() => go('draft')}>Back to draft</button>}
             {!a.synced_with_problem && a.status !== 'retired' && <button className="btn" onClick={() => setEditing(true)}>Edit</button>}

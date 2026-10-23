@@ -25,7 +25,7 @@ describe('major incidents (#108)', { skip }, () => {
   after(async () => k?.close());
 
   test('declaring is one action: lead, comms lead, bridge and the first update due', async () => {
-    assert.equal((await analyst.post(`/api/incidents/${major}/major`, {})).status, 403, 'problem managers declare');
+    assert.equal((await analyst.post(`/api/incidents/${major}/major`, {})).status, 403, 'managers declare');
     assert.equal((await pm.post(`/api/incidents/${major}/major`, { bridge: 'javascript:alert(1)' })).status, 400, 'a bridge is a link or a phone number');
     const analystId = await userId('analyst');
     const r = await pm.post(`/api/incidents/${major}/major`, { comms_id: analystId, bridge: 'https://meet.example.com/war-room' });

@@ -58,7 +58,7 @@ export function SsoAdminSection() {
         <label>Client secret<input type="password" autoComplete="off" value={form.client_secret} onChange={set('client_secret')} placeholder={data.sso.has_secret ? '(unchanged)' : ''} /></label>
         <label>Groups claim<input value={form.groups_claim} onChange={set('groups_claim')} /></label>
         <label>Button text<input value={form.label} onChange={set('label')} /></label>
-        <label className="full">Group = role, one per line<textarea rows={3} value={form.roles} onChange={set('roles')} placeholder={'kernel-admins = admin\nkernel-problem-managers = problem_manager\nservicedesk = analyst'} /></label>
+        <label className="full">Group = role, one per line<textarea rows={3} value={form.roles} onChange={set('roles')} placeholder={'kernel-admins = admin\nkernel-managers = manager\nservicedesk = analyst'} /></label>
         <label className="full">Group = team, one per line<textarea rows={2} value={form.teamsMap} onChange={set('teamsMap')} placeholder={'servicedesk = Service desk'} /></label>
         <label>People in no mapped group<select value={form.default_role ?? ''} onChange={(e) => setForm({ ...form, default_role: e.target.value || null })}><option value="">May not sign in</option><option value="viewer">Viewer</option><option value="analyst">Analyst</option></select></label>
         <label>Password sign-in<select value={form.local_login} onChange={(e) => setForm({ ...form, local_login: e.target.value as 'all' | 'admins' })}><option value="all">Still allowed for everyone</option><option value="admins">Administrators only (break-glass)</option></select></label>

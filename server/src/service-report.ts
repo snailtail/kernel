@@ -165,7 +165,7 @@ export async function serviceReport(user: User, ref: string, period: z.infer<typ
       workaround: p.status === 'known_error' && !masked.has(p.ref) ? p.workaround : null,
       ...(masked.has(p.ref) ? { workaround_masked: true } : {}),
     })),
-    restricted_records_left_out: ['admin', 'problem_manager'].includes(user.role) ? await hiddenRecordsExist() : false,
+    restricted_records_left_out: ['admin', 'manager'].includes(user.role) ? await hiddenRecordsExist() : false,
   };
 }
 

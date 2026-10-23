@@ -204,7 +204,7 @@ export async function getAttachmentText(user: User, id: number, from = 0, limit 
 
 export async function deleteAttachment(user: User, id: number) {
   const a = await loadAttachment(user, id);
-  const manager = user.role === 'admin' || user.role === 'problem_manager';
+  const manager = user.role === 'admin' || user.role === 'manager';
   if (a.uploaded_by !== user.id && !manager) throw forbidden('Only the uploader or a manager can remove an attachment');
   authorize(user, WRITE[a.record_type]);
   await tx(async (db) => {

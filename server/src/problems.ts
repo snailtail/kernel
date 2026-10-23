@@ -580,7 +580,7 @@ const ASSESSMENT_LABELS: Record<string, string> = {
 
 /**
  * Records the error control assessment of a known error. Accepting or deferring the risk is a
- * management decision, so only problem managers can record those.
+ * management decision, so only managers can record those.
  */
 export async function assessProblem(user: User, ref: string, { base, ...input }: z.infer<typeof assessmentSchema>) {
   authorize(user, 'problem.assess');
@@ -639,7 +639,7 @@ export async function findSimilar(viewer: { id: number } | null, text: string, e
 
 /**
  * Marks a problem as a duplicate of another: links the two, copies its incident/event links to the original,
- * and closes it with closure code "duplicate". Closing is reserved for problem managers.
+ * and closes it with closure code "duplicate". Closing is reserved for managers.
  */
 export async function markDuplicate(user: User, ref: string, ofRef: string) {
   authorize(user, 'problem.mark_duplicate');

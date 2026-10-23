@@ -118,7 +118,7 @@ export async function setMajorRoles(user: User, ref: string, input: z.infer<type
   await tx(async (db) => {
     const current = await lockIncident(db, ref);
     if (!current.is_major) throw conflict(`${current.ref} is not a major incident`);
-    if (current.major_lead_id !== user.id && !can(user.role, 'incident.flag_major')) throw forbidden('Only the incident lead or a problem manager can change the major incident team');
+    if (current.major_lead_id !== user.id && !can(user.role, 'incident.flag_major')) throw forbidden('Only the incident lead or a manager can change the major incident team');
     if (input.lead_id === undefined && input.comms_id === undefined && input.bridge === undefined && input.update_minutes === undefined) return;
     await checkPerson(db, input.lead_id, 'incident lead');
     await checkPerson(db, input.comms_id, 'communications lead');

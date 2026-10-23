@@ -181,7 +181,7 @@ export async function listEol() {
   return (await query('SELECT id, product, version, eol_date, note, updated_at FROM eol_versions ORDER BY lower(product), eol_date')).rows;
 }
 
-/** Adds or changes a row (problem managers), audited with before and after. */
+/** Adds or changes a row (managers), audited with before and after. */
 export async function saveEol(user: User, id: number | null, input: z.infer<typeof eolSchema>) {
   authorize(user, 'candidate.rule');
   return tx(async (db) => {

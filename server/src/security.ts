@@ -138,7 +138,7 @@ export async function securityStatus(): Promise<{ checks: SecurityCheck[] }> {
     query('SELECT count(*)::int AS n FROM users WHERE must_change_password AND active'),
     query('SELECT count(*)::int AS n FROM api_tokens WHERE expires_at IS NULL'),
     backupStatus(),
-    query("SELECT count(*) FILTER (WHERE mfa_enabled_at IS NULL)::int AS without, count(*)::int AS total FROM users WHERE active AND role IN ('admin', 'problem_manager')"),
+    query("SELECT count(*) FILTER (WHERE mfa_enabled_at IS NULL)::int AS without, count(*)::int AS total FROM users WHERE active AND role IN ('admin', 'manager')"),
     query(`SELECT current_user AS me, (SELECT tableowner FROM pg_tables WHERE tablename = 'audit_log') AS owner,
              (SELECT rolsuper FROM pg_roles WHERE rolname = current_user) AS superuser`),
     query("SELECT count(*)::int AS n FROM audit_log WHERE actor_name <> '' OR ip <> ''"),
@@ -221,7 +221,7 @@ export async function securityStatus(): Promise<{ checks: SecurityCheck[] }> {
         id: 'mfa',
         label: 'Two-factor authentication',
         ok: m.without === 0,
-        detail: m.without ? `${m.without} of ${m.total} administrators/problem managers have no two-factor authentication. Require it under Two-factor policy.` : 'All administrators and problem managers use two-factor authentication.',
+        detail: m.without ? `${m.without} of ${m.total} administrators/managers have no two-factor authentication. Require it under Two-factor policy.` : 'All administrators and managers use two-factor authentication.',
       },
       {
         id: 'db_role',

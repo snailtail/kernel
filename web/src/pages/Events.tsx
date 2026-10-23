@@ -131,7 +131,7 @@ const emptyRule = (): Omit<Rule, 'id'> => ({
 
 function RulesTab() {
   const { user } = useSession();
-  const manager = user.role === 'admin' || user.role === 'problem_manager';
+  const manager = user.role === 'admin' || user.role === 'manager';
   const { data, reload } = useApi<Rule[]>('/api/event-rules');
   const [editing, setEditing] = useState<Rule | Omit<Rule, 'id'> | null>(null);
   const describe = (r: Rule) => {
@@ -217,7 +217,7 @@ function RuleEditor({ rule, onClose, onDone }: { rule: Rule | Omit<Rule, 'id'>; 
 
 function MaintenanceTab() {
   const { user } = useSession();
-  const manager = user.role === 'admin' || user.role === 'problem_manager';
+  const manager = user.role === 'admin' || user.role === 'manager';
   const { data, reload } = useApi<Window[]>('/api/maintenance-windows');
   const { data: groups } = useApi<{ id: number; name: string }[]>('/api/ci-groups');
   const hour = (h: number) => new Date(Date.now() + h * 3600_000).toISOString().slice(0, 16);

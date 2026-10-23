@@ -49,7 +49,7 @@ export function IncidentReviewPage() {
   if (!r) return null;
   const path = `/api/incidents/${r.incident_ref}/review`;
   const editable = user.role !== 'viewer' && (r.status === 'scheduled' || r.status === 'draft');
-  const manager = user.role === 'admin' || user.role === 'problem_manager';
+  const manager = user.role === 'admin' || user.role === 'manager';
   const dirty = Object.keys(draft).length > 0;
   const run = async (fn: () => Promise<ReviewData>) => {
     setActionError(null);

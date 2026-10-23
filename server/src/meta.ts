@@ -34,6 +34,6 @@ export async function getMeta(user: User) {
     categories,
     assignees: assignees.map(({ id, display_name, role }) => ({ id, display_name, role })),
     // Managers' numbers leave out restricted records they cannot see; the UI says so (a yes/no, never a count).
-    hidden_records: ['admin', 'problem_manager'].includes(user.role) ? await hiddenRecordsExist() : false,
+    hidden_records: ['admin', 'manager'].includes(user.role) ? await hiddenRecordsExist() : false,
   };
 }

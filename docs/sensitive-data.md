@@ -61,7 +61,7 @@ Secrets written before the scanner existed, or personal details that should not 
 - an exact text, such as a name or an account number;
 - or both.
 
-Only problem managers and administrators can do this. It requires step-up and a reason.
+Only managers and administrators can do this. It requires step-up and a reason.
 
 The text is replaced with `[REDACTED]` everywhere on the record:
 

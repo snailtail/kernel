@@ -38,26 +38,26 @@ test('resolving requires a resolution', () => {
 
 test('closing requires a manager and a closure code', () => {
   const resolved = { ...base, status: 'resolved' as const, closure_code: 'resolved' as const };
-  assert.match(checkTransition(resolved, 'closed', 'analyst')!, /problem manager/);
-  assert.match(checkTransition({ ...resolved, closure_code: null }, 'closed', 'problem_manager')!, /closure code/);
-  assert.equal(checkTransition(resolved, 'closed', 'problem_manager'), null);
+  assert.match(checkTransition(resolved, 'closed', 'analyst')!, /a manager/);
+  assert.match(checkTransition({ ...resolved, closure_code: null }, 'closed', 'manager')!, /closure code/);
+  assert.equal(checkTransition(resolved, 'closed', 'manager'), null);
 });
 
 test('major problems need a review before closing, unless dismissed', () => {
   const major = { ...base, status: 'resolved' as const, is_major: true, closure_code: 'resolved' as const };
-  assert.match(checkTransition(major, 'closed', 'problem_manager')!, /major problem review/);
-  assert.equal(checkTransition({ ...major, major_review: 'Lessons learned' }, 'closed', 'problem_manager'), null);
-  assert.equal(checkTransition({ ...major, closure_code: 'duplicate' }, 'closed', 'problem_manager'), null);
+  assert.match(checkTransition(major, 'closed', 'manager')!, /major problem review/);
+  assert.equal(checkTransition({ ...major, major_review: 'Lessons learned' }, 'closed', 'manager'), null);
+  assert.equal(checkTransition({ ...major, closure_code: 'duplicate' }, 'closed', 'manager'), null);
 });
 
 test('only managers reopen closed problems', () => {
   const closed = { ...base, status: 'closed' as const };
   assert.match(checkTransition(closed, 'analysis', 'analyst')!, /reopen/);
-  assert.equal(checkTransition(closed, 'analysis', 'problem_manager'), null);
+  assert.equal(checkTransition(closed, 'analysis', 'manager'), null);
 });
 
 test('closing without a fix requires an accepted risk', () => {
   const p = { ...base, status: 'known_error' as const, closure_code: 'no_fix' as const };
-  assert.match(checkTransition(p, 'closed', 'problem_manager')!, /accept the risk/);
-  assert.equal(checkTransition({ ...p, ec_decision: 'accept' }, 'closed', 'problem_manager'), null);
+  assert.match(checkTransition(p, 'closed', 'manager')!, /accept the risk/);
+  assert.equal(checkTransition({ ...p, ec_decision: 'accept' }, 'closed', 'manager'), null);
 });

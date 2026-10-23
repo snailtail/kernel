@@ -23,7 +23,7 @@ export async function setupRoutes(app: FastifyInstance) {
   });
   app.put('/api/admin/start-pages', async (req) => {
     const user = requireUser(req, 'user.manage');
-    const body = startPage.roleDefaultsSchema.extend({ reason: z.string().trim().max(1000).optional() }).parse(req.body);
+    const body = startPage.roleDefaultsInput.parse(req.body);
     const { reason, ...defaults } = body;
     return startPage.setRoleDefaults(user, defaults, reason);
   });

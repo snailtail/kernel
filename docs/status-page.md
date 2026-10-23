@@ -5,7 +5,7 @@ Kernel can publish a status page at `/status` (HTML) and `/api/public/status` (J
 
 What it shows:
 
-- Only services a problem manager made public, under a **public name** and description. The internal service
+- Only services a manager made public, under a **public name** and description. The internal service
   name, its CIs, hosts and teams are never shown.
 - Each public service's **published** status. Setting a status internally changes nothing publicly. It changes
   only when someone publishes it, or posts a public update with a status.
@@ -32,7 +32,7 @@ The internal status board (`/service-status` in the app) stays behind sign-in.
 
 ## Retracting an update
 
-A problem manager retracts a published update with `POST /api/status/updates/:id/retract` and `{ "reason": "…" }` in
+A manager retracts a published update with `POST /api/status/updates/:id/retract` and `{ "reason": "…" }` in
 the body. The update leaves the public page, mail that has not gone out yet is stopped, and the reason is audited.
 The reason travels in the body because query strings end up in proxy, gateway and request logs. The old
 `DELETE /api/status/updates/:id?reason=…` answers 400 with a pointer for one release.
@@ -45,11 +45,11 @@ Status updates reach four kinds of recipients, and each gets something different
 | --- | --- | --- |
 | Staff (Kernel users) | **Follow** on a service on the status board (or MCP `follow_service`) | Every update on the service, internal or public, in the bell and by email or chat according to their own notification settings (event "A status update on a service I follow"). |
 | People outside | The form on the public page, for public services only | Published updates by email. |
-| Organisation contacts | A problem manager ticks **Status contact** on a person in an organisation that uses the service | Published updates by email. |
+| Organisation contacts | A manager ticks **Status contact** on a person in an organisation that uses the service | Published updates by email. |
 | Systems | An administrator adds a webhook with the event `status.published` (Administration → Webhooks), optionally for some services | Published updates as JSON, Slack or Teams, signed like every Kernel webhook (Standard Webhooks plus `X-Kernel-Signature`). |
 
 Staff following a service also hear about internal updates. People outside, contacts and webhooks hear about an update
-only when a problem manager **publishes** it. Kernel never sends anything outside on its own.
+only when a manager **publishes** it. Kernel never sends anything outside on its own.
 
 ### What people outside receive
 

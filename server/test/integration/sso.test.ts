@@ -89,6 +89,8 @@ describe('single sign-on (#41)', { skip }, () => {
     });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.sso.has_secret, true);
+    // The old role name is accepted for one release and stored as the new one (#171).
+    assert.equal(r.body.sso.role_map[0].role, 'manager');
     assert.equal(JSON.stringify(r.body).includes('shh-secret'), false);
     assert.equal((await analyst.put('/api/admin/sso', { enabled: false, issuer, client_id: 'x', reason: 'x' })).status, 403);
     assert.deepEqual((await fetch(`${k.base}/api/auth/options`).then((x) => x.json())).sso, { label: 'Sign in with SSO' });
@@ -121,7 +123,7 @@ describe('single sign-on (#41)', { skip }, () => {
     assert.equal(res.status, 302, await res.text());
     const cookie = res.headers.getSetCookie().find((c) => c.startsWith('kernel_session='))!.split(';')[0];
     const me = await fetch(`${k.base}/api/auth/me`, { headers: { Cookie: cookie } }).then((x) => x.json() as any);
-    assert.equal(me.role, 'problem_manager');
+    assert.equal(me.role, 'manager');
     assert.equal(me.display_name, 'Kim Lund');
     const teams = await fetch(`${k.base}/api/my-work`, { headers: { Cookie: cookie } }).then((x) => x.json() as any);
     assert.deepEqual(teams.teams.map((t: any) => t.name), ['Service desk']);
@@ -132,7 +134,7 @@ describe('single sign-on (#41)', { skip }, () => {
 
   test('administrator only when a group is explicitly mapped to it; default roles are never admin', async () => {
     const { roleFor } = await import('../../src/sso.js');
-    assert.equal(roleFor(['kernel-admins', 'kernel-pm'], { role_map: [{ group: 'kernel-pm', role: 'problem_manager' }, { group: 'kernel-admins', role: 'admin' }], default_role: null }), 'admin');
+    assert.equal(roleFor(['kernel-admins', 'kernel-pm'], { role_map: [{ group: 'kernel-pm', role: 'manager' }, { group: 'kernel-admins', role: 'admin' }], default_role: null }), 'admin');
     assert.equal(roleFor(['other'], { role_map: [{ group: 'kernel-admins', role: 'admin' }], default_role: 'viewer' }), 'viewer');
     assert.equal((await admin.put('/api/admin/sso', { enabled: true, issuer, client_id: 'kernel', default_role: 'admin', reason: 'x' })).status, 400);
   });
@@ -148,7 +150,7 @@ describe('single sign-on (#41)', { skip }, () => {
   });
 
   test('with local sign-in kept for administrators only, others must use SSO (break-glass admin stays)', async () => {
-    await admin.put('/api/admin/sso', { enabled: true, issuer, client_id: 'kernel', role_map: [{ group: 'kernel-pm', role: 'problem_manager' }], local_login: 'admins', reason: 'Directory only' });
+    await admin.put('/api/admin/sso', { enabled: true, issuer, client_id: 'kernel', role_map: [{ group: 'kernel-pm', role: 'manager' }], local_login: 'admins', reason: 'Directory only' });
     const local = await new Client(k.base).post('/api/auth/login', { username: 'analyst', password: 'correct horse battery' });
     assert.equal(local.status, 403);
     assert.equal((await new Client(k.base).post('/api/auth/login', { username: 'admin', password: 'correct horse battery' })).status, 200);
@@ -157,8 +159,8 @@ describe('single sign-on (#41)', { skip }, () => {
   test('the provider\'s MFA is not trusted by default, and only with evidence in the ID token', async () => {
     const { query } = await import('../../src/db.js');
     assert.equal((await query("SELECT value->>'trust_idp_mfa' AS t FROM settings WHERE key = 'sso'")).rows[0].t, 'false');
-    await admin.put('/api/admin/mfa-policy', { required_roles: ['problem_manager'], reason: 'Managers need two factors' });
-    await admin.put('/api/admin/sso', { enabled: true, issuer, client_id: 'kernel', role_map: [{ group: 'kernel-pm', role: 'problem_manager' }], trust_idp_mfa: true, reason: 'Trust Entra MFA with evidence' });
+    await admin.put('/api/admin/mfa-policy', { required_roles: ['manager'], reason: 'Managers need two factors' });
+    await admin.put('/api/admin/sso', { enabled: true, issuer, client_id: 'kernel', role_map: [{ group: 'kernel-pm', role: 'manager' }], trust_idp_mfa: true, reason: 'Trust Entra MFA with evidence' });
     const without = await signIn({ sub: 'u-300', email: 'p1@example.com', name: 'P One', groups: ['kernel-pm'], amr: ['pwd'] });
     const c1 = without.res.headers.getSetCookie().find((c) => c.startsWith('kernel_session='))!.split(';')[0];
     const blocked = await fetch(`${k.base}/api/problems`, { headers: { Cookie: c1 } });
@@ -217,7 +219,7 @@ describe('single sign-on (#41)', { skip }, () => {
   test('only a verified email identifies a person: the portal and linking accounts to people (#45)', async () => {
     const { query } = await import('../../src/db.js');
     const sso = (trust: boolean) => admin.put('/api/admin/sso', {
-      enabled: true, issuer, client_id: 'kernel', role_map: [{ group: 'kernel-pm', role: 'problem_manager' }], default_role: null, trust_email_claim: trust, reason: 'Testing email trust',
+      enabled: true, issuer, client_id: 'kernel', role_map: [{ group: 'kernel-pm', role: 'manager' }], default_role: null, trust_email_claim: trust, reason: 'Testing email trust',
     });
     assert.equal((await sso(false)).status, 200);
     assert.equal((await admin.put('/api/admin/modules', { portal: true, reason: 'Portal SSO' })).status, 200);

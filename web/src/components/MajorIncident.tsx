@@ -54,7 +54,7 @@ export function MajorHeader({ incidentRef, major, open, canEdit, onChange }: { i
   const countdown = useCountdown(major.next_update_at);
   const [posting, setPosting] = useState(false);
   const [editing, setEditing] = useState(false);
-  const manager = user.role === 'admin' || user.role === 'problem_manager';
+  const manager = user.role === 'admin' || user.role === 'manager';
   return (
     <section className={`card major-head${major.update_overdue ? ' overdue' : ''}`} aria-label="Major incident">
       <dl className="major-grid">
@@ -215,7 +215,7 @@ export function StatusProposalCard({ incidentRef, proposal, onPosted }: { incide
   const [status, setStatus] = useState(proposal.status);
   const [publish, setPublish] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const canPublish = user.role === 'admin' || user.role === 'problem_manager';
+  const canPublish = user.role === 'admin' || user.role === 'manager';
   return (
     <section className="card">
       <h2>Status page</h2>

@@ -476,7 +476,7 @@ export function ImprovementPage() {
             <button className="btn" onClick={() => setEditing(true)}>Edit</button>
           </div>
         )}
-        {m.status === 'idea' && !m.may_decide && <p className="muted small">A problem manager approves or rejects it.</p>}
+        {m.status === 'idea' && !m.may_decide && <p className="muted small">A manager approves or rejects it.</p>}
         {actionError && <div className="error">{actionError}</div>}
       </header>
 

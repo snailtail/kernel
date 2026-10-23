@@ -166,7 +166,7 @@ export function ProblemPage() {
           <SummaryButton recordRef={p.ref} onAddNote={async (body) => { await api.post(`/api/problems/${p.ref}/comments`, { body }); reload(); }} />
           <VisibilityPanel record={p as any} onChange={reload} />
           <DevLinksPanel recordRef={p.ref} editable={editable} />
-          <AttachmentsPanel recordRef={p.ref} editable={editable} canDelete={(a) => a.uploaded_by === user.id || user.role === 'admin' || user.role === 'problem_manager'} />
+          <AttachmentsPanel recordRef={p.ref} editable={editable} canDelete={(a) => a.uploaded_by === user.id || user.role === 'admin' || user.role === 'manager'} />
           <HistoryPanel recordRef={p.ref} version={p} />
           {meta.modules?.cmdb !== false && <AffectedCisPanel record={p} basePath={`/api/problems/${p.ref}`} editable={canEdit(user)} onChange={setData} />}
           {meta.modules?.change !== false && <ProblemChanges problem={p} editable={canEdit(user) && !['resolved', 'closed'].includes(p.status)} />}
@@ -483,7 +483,7 @@ function AssessmentModal({ problem: p, onClose, onDone }: { problem: ProblemDeta
   return (
     <Modal title={`Error control – ${p.ref}`} onClose={onClose}>
       <form className="form" onSubmit={submit}>
-        <p className="hint full">Weigh the risk of living with this known error against the cost of a permanent fix. Accepting or deferring the risk is a decision for the problem manager.</p>
+        <p className="hint full">Weigh the risk of living with this known error against the cost of a permanent fix. Accepting or deferring the risk is a decision for a manager.</p>
         <label>Risk of not fixing
           <select value={form.ec_risk_level} onChange={set('ec_risk_level')}>
             <option value="">Not assessed</option>
@@ -505,7 +505,7 @@ function AssessmentModal({ problem: p, onClose, onDone }: { problem: ProblemDeta
         <label>Decision
           <select value={form.ec_decision} onChange={set('ec_decision')}>
             <option value="">–</option>
-            {meta.ec_decisions.map((d) => <option key={d} value={d} disabled={managerOnly(d)}>{DECISION_LABEL[d]}{managerOnly(d) ? ' (problem manager)' : ''}</option>)}
+            {meta.ec_decisions.map((d) => <option key={d} value={d} disabled={managerOnly(d)}>{DECISION_LABEL[d]}{managerOnly(d) ? ' (managers)' : ''}</option>)}
           </select>
         </label>
         <label>Review date

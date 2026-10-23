@@ -122,7 +122,7 @@ describe('visibility and restricted records (#53)', { skip }, () => {
             // The live event stream never ends: read what it sends in a moment, then hang up (#70).
             const r = url === '/api/live' ? { body: await peekStream(`${k.base}${url}${q}`, who.cookie!) } : await who.get(url.replace(/\{[^}]+\}/g, '1') + q);
             calls++;
-            assert.ok(!leaks(r.body), `${url}${q} leaked to a ${who === admin ? 'admin' : who === pm ? 'problem manager' : who === viewer ? 'viewer' : 'analyst'}: …${around(r.body)}`);
+            assert.ok(!leaks(r.body), `${url}${q} leaked to a ${who === admin ? 'admin' : who === pm ? 'manager' : who === viewer ? 'viewer' : 'analyst'}: …${around(r.body)}`);
           }
         }
       }

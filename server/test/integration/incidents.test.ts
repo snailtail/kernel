@@ -79,7 +79,7 @@ describe('incident management (#28)', { skip }, () => {
     assert.match((await analyst.post(`/api/incidents/${i.ref}/transition`, { to: 'closed' })).body.error, /major incident needs a problem/);
     const prb = await analyst.post(`/api/incidents/${i.ref}/problem`, {});
     assert.equal(prb.status, 201, JSON.stringify(prb.body));
-    assert.equal(prb.body.is_major, false, 'only a problem manager flags a major problem');
+    assert.equal(prb.body.is_major, false, 'only a manager flags a major problem');
     assert.equal(prb.body.title, 'Webshop down');
     assert.deepEqual(prb.body.affected_cis.map((c: any) => c.ref), [svc]);
     assert.ok(prb.body.links.some((l: any) => l.reference === i.ref && l.system === 'Kernel'));

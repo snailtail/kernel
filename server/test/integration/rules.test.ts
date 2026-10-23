@@ -51,7 +51,7 @@ describe('automation rules (#49)', { skip }, () => {
     await k?.close();
   });
 
-  test('only allowlisted fields, operators and actions are accepted; only problem managers write rules', async () => {
+  test('only allowlisted fields, operators and actions are accepted; only managers write rules', async () => {
     assert.equal((await pm.post('/api/rules', rule({ conditions: [{ field: 'description', op: 'is', value: 'x' }] }))).status, 400, 'free text is never a condition');
     assert.equal((await pm.post('/api/rules', rule({ conditions: [{ field: 'priority', op: 'matches', value: 1 }] }))).status, 400, 'unknown operator');
     assert.equal((await pm.post('/api/rules', rule({ actions: [{ type: 'run_script', script: 'rm -rf' }] }))).status, 400, 'unknown action');

@@ -6,8 +6,10 @@ import { can } from './policy.js';
 export const STATUSES = ['new', 'analysis', 'known_error', 'resolved', 'closed'] as const;
 export type Status = (typeof STATUSES)[number];
 
-export const ROLES = ['admin', 'problem_manager', 'analyst', 'viewer', 'integration'] as const;
+export const ROLES = ['admin', 'manager', 'analyst', 'viewer', 'integration'] as const;
 export type Role = (typeof ROLES)[number];
+/** `problem_manager` became `manager` (#171); the API accepts the old name for one release, then this goes. */
+export const legacyRole = (r: unknown) => (r === 'problem_manager' ? 'manager' : r);
 
 export const EC_DECISIONS = ['pending', 'fix', 'accept', 'defer'] as const;
 export const WORKAROUND_EFFECTIVENESS = ['effective', 'partial', 'ineffective'] as const;
@@ -51,7 +53,7 @@ export interface TransitionSubject {
 export function checkTransition(p: TransitionSubject, to: Status, role: Role): string | null {
   if (!canEdit(role)) return 'Your role cannot change problems';
   if (!TRANSITIONS[p.status].includes(to)) return `Cannot move from ${p.status} to ${to}`;
-  if (p.status === 'closed' && !isManager(role)) return 'Only a problem manager can reopen a closed problem';
+  if (p.status === 'closed' && !isManager(role)) return 'Only a manager can reopen a closed problem';
 
   switch (to) {
     case 'known_error':
@@ -61,7 +63,7 @@ export function checkTransition(p: TransitionSubject, to: Status, role: Role): s
       if (!p.resolution.trim()) return 'Document the resolution before resolving';
       break;
     case 'closed': {
-      if (!isManager(role)) return 'Only a problem manager can close problems';
+      if (!isManager(role)) return 'Only a manager can close problems';
       if (!p.closure_code) return 'A closure code is required';
       const dismissed = p.closure_code === 'duplicate' || p.closure_code === 'cancelled';
       if (p.is_major && !dismissed && !p.major_review.trim()) {

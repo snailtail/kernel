@@ -45,8 +45,8 @@ export const LEVEL_LABEL: Record<number, string> = { 1: 'High', 2: 'Medium', 3: 
 
 export const ROLE_LABEL: Record<Role, string> = {
   admin: 'Administrator',
-  problem_manager: 'Problem Manager',
-  analyst: 'Problem Analyst',
+  manager: 'Manager',
+  analyst: 'Analyst',
   viewer: 'Viewer',
   integration: 'Integration (API only)',
 };

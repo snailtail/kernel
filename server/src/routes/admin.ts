@@ -17,13 +17,13 @@ import { privacySchema, privacySettings, querySecurityEvents, savePrivacySetting
 import { SECURITY_SOURCE } from '../events.js';
 import { alertingSchema, alertingStatus, saveAlertingSettings } from '../security-alerts.js';
 import { approvalsRequired, setApprovalsRequired } from '../approvals.js';
-import { ROLES } from '../workflow.js';
+import { legacyRole, ROLES } from '../workflow.js';
 
 const userFields = {
   username: z.string().trim().min(2).max(50).regex(/^[a-zA-Z0-9._-]+$/, 'Use letters, digits, dot, dash or underscore'),
   display_name: z.string().trim().min(1).max(100),
   email: z.string().trim().max(200),
-  role: z.enum(ROLES),
+  role: z.preprocess(legacyRole, z.enum(ROLES)),
   active: z.boolean(),
   /** Source systems an integration account may report CIs for (exact names, e.g. vCenter). */
   ci_source_systems: z.array(z.string().trim().min(1).max(100)).max(20),
@@ -205,7 +205,7 @@ export async function adminRoutes(app: FastifyInstance) {
   app.put('/api/admin/mfa-policy', async (req) => {
     const admin = requireUser(req, 'mfa.policy');
     await requireStepUp(req);
-    const body = z.object({ required_roles: z.array(z.enum(ROLES)).max(10), reason: z.string().max(1000).optional() }).parse(req.body);
+    const body = z.object({ required_roles: z.array(z.preprocess(legacyRole, z.enum(ROLES))).max(10), reason: z.string().max(1000).optional() }).parse(req.body);
     return { required_roles: await setRequiredRoles(admin, body.required_roles, requireReason(body.reason)) };
   });
   app.post<{ Params: { id: string } }>('/api/users/:id/mfa/reset', async (req) => {

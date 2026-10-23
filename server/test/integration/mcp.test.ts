@@ -148,7 +148,7 @@ describe('MCP server', { skip }, () => {
     assert.equal(update.actor_type, 'mcp');
     assert.deepEqual(update.changes.impact, { from: 3, to: 1 });
     const { tools } = await mcp.listTools();
-    assert.ok(!tools.some((t) => t.name === 'query_audit_log'), 'admin-only tool hidden from a problem manager');
+    assert.ok(!tools.some((t) => t.name === 'query_audit_log'), 'admin-only tool hidden from a manager');
   });
 
   test('guided investigation: guides, context, checks, proposals and confirmations (#76)', async () => {

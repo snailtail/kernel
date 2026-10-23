@@ -72,7 +72,7 @@ function Catalogue() {
 
 function Slas() {
   const { user } = useSession();
-  const manager = user.role === 'admin' || user.role === 'problem_manager';
+  const manager = user.role === 'admin' || user.role === 'manager';
   const { data, reload } = useApi<Sla[]>('/api/slas');
   const { data: cals } = useApi<Cal[]>('/api/calendars');
   const [editing, setEditing] = useState<Partial<Sla> | null>(null);
@@ -151,7 +151,7 @@ function SlaEditor({ sla, calendars, onClose, onDone }: { sla: Partial<Sla>; cal
 
 function Calendars() {
   const { user } = useSession();
-  const manager = user.role === 'admin' || user.role === 'problem_manager';
+  const manager = user.role === 'admin' || user.role === 'manager';
   const { data, reload } = useApi<Cal[]>('/api/calendars');
   const [editing, setEditing] = useState<Partial<Cal> | null>(null);
   return (

@@ -1,5 +1,5 @@
 // Saved list views (#110): a named filter, sort and set of columns for a practice list. A view is personal, shared
-// with a team (owned by the team; its leads and administrators edit it) or shared with everyone (problem managers).
+// with a team (owned by the team; its leads and administrators edit it) or shared with everyone (managers).
 // Every list also has a few built-in views, and each user may pin one view as the list's default.
 import { z } from 'zod';
 import type { User } from './auth.js';
@@ -109,7 +109,7 @@ function visibleSql(user: User) {
   return `(v.owner_id = $1 OR v.scope = 'everyone' OR (v.scope = 'team' AND (EXISTS (SELECT 1 FROM team_members m WHERE m.team_id = v.team_id AND m.user_id = $1)${can(user.role, 'team.manage') ? ' OR true' : ''})))`;
 }
 
-/** Personal views are the owner's; team views their leads' (and administrators'); shared views problem managers'. */
+/** Personal views are the owner's; team views their leads' (and administrators'); shared views managers'. */
 function canEditView(user: User, v: { scope: string; owner_id: number | null; lead: boolean }) {
   if (v.scope === 'personal') return v.owner_id === user.id;
   if (v.scope === 'team') return v.lead || can(user.role, 'team.manage');

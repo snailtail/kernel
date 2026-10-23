@@ -135,9 +135,9 @@ export async function flushBulkNotices(b: BulkContext) {
   });
 }
 
-/** Active problem managers and administrators (the change authority, and who hears about major incidents). */
+/** Active managers and administrators (the change authority, and who hears about major incidents). */
 export async function managers(db: Db, exclude: (number | null | undefined)[] = []) {
-  const { rows } = await db.query("SELECT id FROM users WHERE active AND role IN ('admin', 'problem_manager') AND NOT (id = ANY($1))", [exclude.filter(Boolean)]);
+  const { rows } = await db.query("SELECT id FROM users WHERE active AND role IN ('admin', 'manager') AND NOT (id = ANY($1))", [exclude.filter(Boolean)]);
   return rows.map((r) => r.id as number);
 }
 

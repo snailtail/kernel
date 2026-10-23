@@ -34,7 +34,7 @@ interface CiDetail extends Ci { alerts: { id: number; source: string; check_key:
 
 const STATUSES = ['planned', 'active', 'maintenance', 'retired', 'missing'];
 const CRITICALITY: Record<number, string> = { 1: 'Business critical', 2: 'High', 3: 'Medium', 4: 'Low' };
-const canManage = (u: User) => u.role === 'admin' || u.role === 'problem_manager';
+const canManage = (u: User) => u.role === 'admin' || u.role === 'manager';
 
 export function CiStatus({ status }: { status: string }) {
   return <span className={`badge ci-status ci-${status}`}>{status}</span>;
@@ -259,7 +259,7 @@ export function CiPage() {
           </section>
         </div>
         <aside className="problem-side">
-          <AttachmentsPanel recordRef={ci.ref} editable={annotate} canDelete={(a) => a.uploaded_by === user.id || user.role === 'admin' || user.role === 'problem_manager'} />
+          <AttachmentsPanel recordRef={ci.ref} editable={annotate} canDelete={(a) => a.uploaded_by === user.id || user.role === 'admin' || user.role === 'manager'} />
           <HistoryPanel recordRef={ci.ref} version={ci} />
           <section className="card">
             <h2>Where it lives</h2>
