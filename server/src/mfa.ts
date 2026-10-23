@@ -20,7 +20,7 @@ export async function requiredRoles(): Promise<Role[]> {
   return rows[0]?.value ?? [];
 }
 
-export async function setRequiredRoles(actor: User, roles: Role[], reason: string) {
+export async function setRequiredRoles(roles: Role[], reason: string) {
   const before = await requiredRoles();
   clearMfaPolicyCache();
   await query("INSERT INTO settings (key, value) VALUES ('mfa_required_roles', $1) ON CONFLICT (key) DO UPDATE SET value = excluded.value", [JSON.stringify(roles)]);

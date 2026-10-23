@@ -21,7 +21,7 @@ import { incidentPeople, namePeople, personRefSchema, resolvePerson } from './pe
 import { incidentArticles, suggestArticles } from './knowledge.js';
 import { restrictedByCategory } from './visibility.js';
 import { checkAssigneeInTeam, defaultTeamFor, nameTeams, notifyTeamQueue, pickAssignee, validTeam } from './teams.js';
-import { managers, notify } from './notifications.js';
+import { notify } from './notifications.js';
 import { pool } from './db.js';
 import { declareInTx, majorDetail, resolveChildren, undeclareInTx } from './major-incidents.js';
 import { reviewBlocksClosing, reviewSummary, scheduleReviewInTx } from './reviews.js';

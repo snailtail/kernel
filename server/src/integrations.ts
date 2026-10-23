@@ -2,12 +2,11 @@
 import { z } from 'zod';
 import type { User } from './auth.js';
 import { linkRecordCis } from './problem-cis.js';
-import { linkIncidentToProblem } from './incidents.js';
 import { audit } from './audit.js';
 import { authorize } from './policy.js';
 import { query, savepoint, tx } from './db.js';
-import { badRequest, conflict, notFound } from './errors.js';
-import { createProblem, createProblemSchema, getProblem, LINK_KINDS, loadForUpdate, logProblem, type Db } from './problems.js';
+import { conflict, notFound } from './errors.js';
+import { LINK_KINDS, loadForUpdate, logProblem, type Db } from './problems.js';
 
 // ---- External systems ------------------------------------------------------------------------
 

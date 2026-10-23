@@ -44,7 +44,6 @@ import * as bulk from './bulk.js';
 import * as dev from './dev.js';
 import * as aiTasks from './ai.js';
 import * as generic from './generic.js';
-import { typeForRef } from './records.js';
 import { GUIDES, guideMarkdown } from './methods.js';
 import { problemContext } from './problem-context.js';
 import * as candidates from './candidates.js';

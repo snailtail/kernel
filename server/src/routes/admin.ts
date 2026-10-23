@@ -137,36 +137,36 @@ export async function adminRoutes(app: FastifyInstance) {
     return { webhooks: await webhooks.listWebhooks(), events: webhooks.EVENTS, formats: webhooks.FORMATS };
   });
   app.post('/api/webhooks', async (req, reply) => {
-    const admin = requireUser(req, 'webhook.manage');
+    requireUser(req, 'webhook.manage');
     await requireStepUp(req);
     reply.code(201);
-    return webhooks.createWebhook(admin, webhooks.webhookSchema.parse(req.body));
+    return webhooks.createWebhook(webhooks.webhookSchema.parse(req.body));
   });
   app.put<Id>('/api/webhooks/:id', async (req) => {
-    const admin = requireUser(req, 'webhook.manage');
+    requireUser(req, 'webhook.manage');
     await requireStepUp(req);
-    return webhooks.updateWebhook(admin, Number(req.params.id), webhooks.webhookSchema.parse(req.body));
+    return webhooks.updateWebhook(Number(req.params.id), webhooks.webhookSchema.parse(req.body));
   });
   // The reason travels in the body: query strings end up in proxy and request logs, and reasons may describe people.
   app.post<Id>('/api/webhooks/:id/delete', async (req) => {
-    const admin = requireUser(req, 'webhook.manage');
+    requireUser(req, 'webhook.manage');
     await requireStepUp(req);
     const body = z.object({ reason: z.string().max(1000).optional() }).parse(req.body ?? {});
-    await webhooks.deleteWebhook(admin, Number(req.params.id), requireReason(body.reason));
+    await webhooks.deleteWebhook(Number(req.params.id), requireReason(body.reason));
     return { ok: true };
   });
   app.post<Id>('/api/webhooks/:id/rotate', async (req) => {
-    const admin = requireUser(req, 'webhook.manage');
+    requireUser(req, 'webhook.manage');
     await requireStepUp(req);
-    return webhooks.rotateSecret(admin, Number(req.params.id));
+    return webhooks.rotateSecret(Number(req.params.id));
   });
   app.get<Id>('/api/webhooks/:id/deliveries', async (req) => {
     requireUser(req, 'webhook.manage');
     return webhooks.deliveries(Number(req.params.id));
   });
   app.post<Id>('/api/webhooks/:id/ping', async (req) => {
-    const admin = requireUser(req, 'webhook.manage');
-    return webhooks.ping(admin, Number(req.params.id));
+    requireUser(req, 'webhook.manage');
+    return webhooks.ping(Number(req.params.id));
   });
 
   app.get('/api/admin/mcp-approvals', async (req) => {
@@ -174,10 +174,10 @@ export async function adminRoutes(app: FastifyInstance) {
     return { required: await approvalsRequired() };
   });
   app.put('/api/admin/mcp-approvals', async (req) => {
-    const admin = requireUser(req, 'mfa.policy');
+    requireUser(req, 'mfa.policy');
     await requireStepUp(req);
     const body = z.object({ required: z.boolean(), reason: z.string().max(1000).optional() }).parse(req.body);
-    return setApprovalsRequired(admin, body.required, requireReason(body.reason));
+    return setApprovalsRequired(body.required, requireReason(body.reason));
   });
 
   app.get('/api/admin/ai-data', async (req) => {
@@ -198,10 +198,10 @@ export async function adminRoutes(app: FastifyInstance) {
     return { required_roles: await requiredRoles() };
   });
   app.put('/api/admin/mfa-policy', async (req) => {
-    const admin = requireUser(req, 'mfa.policy');
+    requireUser(req, 'mfa.policy');
     await requireStepUp(req);
     const body = z.object({ required_roles: z.array(z.preprocess(legacyRole, z.enum(ROLES))).max(10), reason: z.string().max(1000).optional() }).parse(req.body);
-    return { required_roles: await setRequiredRoles(admin, body.required_roles, requireReason(body.reason)) };
+    return { required_roles: await setRequiredRoles(body.required_roles, requireReason(body.reason)) };
   });
   app.post<{ Params: { id: string } }>('/api/users/:id/mfa/reset', async (req) => {
     const admin = requireUser(req, 'user.manage');

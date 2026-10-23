@@ -21,7 +21,7 @@ export async function approvalsRequired(): Promise<boolean> {
   return rows[0]?.value !== false;
 }
 
-export async function setApprovalsRequired(actor: User, required: boolean, reason: string) {
+export async function setApprovalsRequired(required: boolean, reason: string) {
   await query("INSERT INTO settings (key, value) VALUES ('mcp_decisions_require_approval', $1) ON CONFLICT (key) DO UPDATE SET value = excluded.value", [JSON.stringify(required)]);
   await audit(null, { entity_type: 'setting', entity_ref: 'mcp_decisions_require_approval', action: 'update', changes: { required }, reason });
   return { required };

@@ -278,9 +278,7 @@ export async function listWebhooks() {
   return (await query(`SELECT ${COLUMNS} FROM webhooks w ORDER BY w.name`)).rows;
 }
 
-type Actor = { id: number; username: string };
-
-export async function createWebhook(actor: Actor, input: z.infer<typeof webhookSchema>) {
+export async function createWebhook(input: z.infer<typeof webhookSchema>) {
   const secret = newSecret();
   const { rows } = await query(
     `INSERT INTO webhooks (name, url, format, events, active, secret, ci_ids) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
@@ -291,7 +289,7 @@ export async function createWebhook(actor: Actor, input: z.infer<typeof webhookS
   return { ...(await query(`SELECT ${COLUMNS} FROM webhooks w WHERE w.id = $1`, [rows[0].id])).rows[0], secret };
 }
 
-export async function updateWebhook(actor: Actor, id: number, input: z.infer<typeof webhookSchema>) {
+export async function updateWebhook(id: number, input: z.infer<typeof webhookSchema>) {
   const { rows: before } = await query(`SELECT w.name, w.url, w.format, w.events, w.active,
     coalesce((SELECT array_agg(c.ref ORDER BY c.ref) FROM configuration_items c WHERE c.id = ANY(w.ci_ids)), '{}') AS services FROM webhooks w WHERE w.id = $1`, [id]);
   if (!before[0]) throw notFound();
@@ -303,14 +301,14 @@ export async function updateWebhook(actor: Actor, id: number, input: z.infer<typ
   return (await query(`SELECT ${COLUMNS} FROM webhooks w WHERE w.id = $1`, [id])).rows[0];
 }
 
-export async function deleteWebhook(actor: Actor, id: number, reason: string) {
+export async function deleteWebhook(id: number, reason: string) {
   const { rows } = await query('DELETE FROM webhooks WHERE id = $1 RETURNING name, url', [id]);
   if (!rows[0]) throw notFound();
   await audit(null, { entity_type: 'webhook', entity_ref: String(id), action: 'delete', changes: rows[0], reason });
 }
 
 /** Replaces the signing secret and returns the new one (shown once). */
-export async function rotateSecret(actor: Actor, id: number) {
+export async function rotateSecret(id: number) {
   const secret = newSecret();
   const { rowCount } = await query('UPDATE webhooks SET secret = $2, secret_rotated_at = now() WHERE id = $1', [id, encryptSecret(secret)]);
   if (!rowCount) throw notFound();
@@ -330,7 +328,7 @@ export async function deliveries(id: number) {
 }
 
 /** Queues a test event and sends only that delivery, immediately. */
-export async function ping(actor: Actor, id: number) {
+export async function ping(id: number) {
   const { rows } = await query('SELECT id FROM webhooks WHERE id = $1', [id]);
   if (!rows[0]) throw notFound();
   const { rows: created } = await query('INSERT INTO webhook_deliveries (webhook_id, event, payload) VALUES ($1, $2, $3) RETURNING id', [

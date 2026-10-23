@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import type { Action } from '../api';
 import { ActionList } from '../components/Actions';

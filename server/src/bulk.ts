@@ -23,7 +23,7 @@ import { logger } from './log.js';
 import * as major from './major-incidents.js';
 import { flushBulkNotices } from './notifications.js';
 import * as oncall from './oncall.js';
-import { authorize, can, type Action } from './policy.js';
+import { authorize, type Action } from './policy.js';
 import * as problems from './problems.js';
 
 export const BULK_LIMIT = 500;

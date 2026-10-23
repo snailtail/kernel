@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState, type FormEvent } from 'react';
+import { Fragment, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { api, type User } from '../api';
 import { GroupsPage, ImpactSection, RelationshipsSection, type Relationship } from '../components/CmdbGraph';

@@ -1,7 +1,6 @@
-import { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import type { Problem } from '../api';
-import { useColumns, useListToolkit, type ColumnKey } from '../components/ListToolkit';
+import { useColumns, useListToolkit } from '../components/ListToolkit';
 import { PROBLEM_COLUMNS, ProblemTable } from '../components/ProblemTable';
 import { PRIORITY_LABEL, STATUS_LABEL } from '../format';
 import { useLive } from '../live';
