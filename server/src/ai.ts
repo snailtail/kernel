@@ -11,7 +11,7 @@ import { randomBytes } from 'node:crypto';
 import { generateText, type LanguageModel } from 'ai';
 import { z } from 'zod';
 import { aiDataPolicy, getAttachmentText } from './attachments.js';
-import { redactForModel, remainingFlags } from './sensitive.js';
+import { remainingFlags } from './sensitive.js';
 import type { User } from './auth.js';
 import { audit } from './audit.js';
 import { query, tx } from './db.js';
@@ -22,6 +22,7 @@ import { authorize } from './policy.js';
 import { rateLimit } from './ratelimit.js';
 import { typeForRef } from './records.js';
 import { decryptSecret, encryptSecret } from './secrets.js';
+import { redactForModel } from './scanner.js';
 
 
 const TASKS = { summarize: 'Summaries ("catch me up")', analyze_log: 'Log analysis', review_wording: 'Blameless wording hints in post-incident reviews' } as const;

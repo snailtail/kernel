@@ -4,9 +4,10 @@ import { requireReason } from '../audit.js';
 import { requireUser } from '../auth.js';
 import { requireStepUp } from '../mfa.js';
 import { rateLimit } from '../ratelimit.js';
-import { policySchema, scan, sensitivePolicy } from '../sensitive.js';
+import { policySchema, saveSensitivePolicy, sensitivePolicy } from '../sensitive.js';
 import { redactHistory, redactHistorySchema } from '../redact-history.js';
-import { classifySchema, reveal, saveSensitivePolicy, setClassification } from '../confidential.js';
+import { classifySchema, reveal, setClassification } from '../confidential.js';
+import { scan } from '../scanner.js';
 
 export async function sensitiveRoutes(app: FastifyInstance) {
   // For the warning while typing or pasting (#61): what the scanner would do with this text. Nothing is stored or

@@ -6,7 +6,7 @@
 // record may see its attachments, and whoever may work on it may attach.
 import { maskedRefs } from './confidential.js';
 import { currentContext } from './context.js';
-import { markPersonalData, redact, remainingFlags, scan, sensitivePolicy } from './sensitive.js';
+import { markPersonalData, remainingFlags, sensitivePolicy } from './sensitive.js';
 import sharp from 'sharp';
 import type { User } from './auth.js';
 import { audit } from './audit.js';
@@ -16,6 +16,7 @@ import { authorize, type Action } from './policy.js';
 import { logActivity } from './activity.js';
 import { typeForRef } from './records.js';
 import { sha256Hex } from './core/hash.js';
+import { redact, scan } from './scanner.js';
 
 /** What it takes to attach to (or remove from) each record type. Reading follows the record's own access. */
 const WRITE: Record<string, Action> = { problem: 'problem.comment', incident: 'incident.update', change: 'change.update', ci: 'ci.annotate', service: 'ci.annotate', article: 'article.write' };

@@ -1,5 +1,5 @@
 // The unified audit trail: every change writes an entry in the same transaction, chained by hash.
-import { scan } from './sensitive.js';
+import { scan } from './scanner.js';
 import { activeKey, derive, keyById } from './keys.js';
 import { createHash, createHmac } from 'node:crypto';
 import { z } from 'zod';
