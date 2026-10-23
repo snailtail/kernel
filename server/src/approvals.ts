@@ -9,7 +9,7 @@ import { audit } from './audit.js';
 import { query, tx } from './db.js';
 import { conflict, forbidden, notFound } from './errors.js';
 import { authorize, type Action } from './policy.js';
-import { assessmentSchema, assessProblem, getProblem, loadForUpdate, logActivity, markDuplicate, transitionProblem, transitionSchema } from './problems.js';
+import { assessmentSchema, assessProblem, getProblem, loadForUpdate, logProblem, markDuplicate, transitionProblem, transitionSchema } from './problems.js';
 
 export type ApprovalKind = 'close' | 'risk_decision' | 'mark_duplicate';
 const ACTION: Record<ApprovalKind, Action> = { close: 'problem.close', risk_decision: 'problem.accept_risk', mark_duplicate: 'problem.mark_duplicate' };
@@ -36,7 +36,7 @@ export async function requestApproval(user: User, ref: string, kind: ApprovalKin
       `INSERT INTO pending_approvals (problem_id, kind, payload, summary, requested_by, human_confirmation) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
       [p.id, kind, JSON.stringify(payload), summary, user.id, confirmation],
     );
-    await logActivity(db, p.id, user.id, 'update', `Requested approval: ${summary}`, { approval_id: rows[0].id, approval: 'requested' });
+    await logProblem(db, p.id, user.id, 'update', `Requested approval: ${summary}`, { approval_id: rows[0].id, approval: 'requested' });
     await notify(db, { users: await managers(db), event: 'approval_needed', ref: p.ref, title: summary, summary: 'An AI agent asked for a decision. Nothing happens until a person approves.', path: `/problems/${p.ref}`, dedupe: `mcp-approval:${rows[0].id}`, approvalId: rows[0].id });
     return rows[0].id as number;
   });

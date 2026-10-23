@@ -10,6 +10,7 @@
 // path with a restricted and a confidential source.
 import { audit } from './audit.js';
 import { query } from './db.js';
+import { recordType, textKindOfRef } from './records.js';
 import type { Db } from './problems.js';
 
 export interface Audience { ref: string | null; restricted: boolean; restricted_teams: number[]; classification: 'normal' | 'confidential' }
@@ -17,8 +18,8 @@ export interface Audience { ref: string | null; restricted: boolean; restricted_
 /** Articles, actions, status updates and anything else everyone can read. */
 export const BROADEST: Audience = { ref: null, restricted: false, restricted_teams: [], classification: 'normal' };
 
-const TABLES: Record<string, string> = { PRB: 'problems', INC: 'incidents', CHG: 'changes', IMP: 'improvements', REQ: 'requests' };
-const tableOf = (ref: string) => TABLES[ref.toUpperCase().match(/^[A-Z]+/)?.[0] ?? ''];
+/** Only the kinds that hold people's text have an audience of their own (records.ts: textKinds). */
+const tableOf = (ref: string) => textKindOfRef(ref)?.table;
 
 type Queryable = { query: (sql: string, params?: unknown[]) => Promise<{ rows: any[] }> };
 
@@ -185,9 +186,10 @@ export async function forPortal(db: Queryable | null, personId: number, ref?: st
     };
     if (one) {
       // Replies to the requester and the requester's own messages; nothing at all from a narrow record.
+      const log = recordType(incident ? 'incident' : 'request').activity!;
       const { rows: acts } = r.narrow ? { rows: [] as any[] } : await db.query(
-        `SELECT created_at, body, data->>'from_requester' = 'true' AS mine FROM ${incident ? 'incident_activity' : 'request_activity'}
-         WHERE ${incident ? 'incident_id' : 'request_id'} = $1 AND kind = 'comment'
+        `SELECT created_at, body, data->>'from_requester' = 'true' AS mine FROM ${log.table}
+         WHERE ${log.fk} = $1 AND kind = 'comment'
            AND (data->>'for_requester' = 'true' OR (data->>'from_requester' = 'true' AND (data->>'person_id')::int = $2))
          ORDER BY created_at, id`,
         [r.id, personId],

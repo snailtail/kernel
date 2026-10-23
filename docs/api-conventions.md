@@ -14,7 +14,11 @@ and every change writes the audit trail (`server/src/audit.ts`) in the same tran
 
 - Every record has a **ref** with a type prefix (`PRB000012`), a **type** (`problem`) and a **url** to the web UI.
 - A new record type registers itself with `registerRecordType()` (`server/src/records.ts`): prefix, read permission,
-  UI path, `get`, `search`, and its REST routes and MCP tools.
+  UI path, `get`, `search`, its REST routes and MCP tools, and where it lives: `table`, `activity` (its log, with an
+  `after` hook for audit, rules and notices), `module`, `liveTopic`, `comment`, and – for kinds that hold people's
+  text – `people` and `textPlaces`. Confidential masking, restriction, redaction, personal-data marking, live updates,
+  attachments and the generic tools all read these, so nothing else lists the kinds by hand
+  (`test/integration/record-kinds.test.ts` checks them against the schema).
 - `get` returns the **envelope** `ref`, `type`, `status`, `url` and `next_steps` (guided mode), over REST and MCP alike,
   plus the record's own fields, links and activity.
 
@@ -164,8 +168,8 @@ are compared. For these, a dismissal holds until a new alert or change joins the
    actions, and audit entries with `entity_type` = the type (or set `history.entityType` in the registration).
 2. REST routes and MCP tools following the tables above; `registerRecordType()` with all of them, a `pattern` for the
    ref, and `get` returning the envelope with `next_steps`.
-3. Teach the generic tools about it where they dispatch per type: `addComment` and `linkRecords` in
-   `server/src/generic.ts`.
+3. Log its history with `logActivity(db, type, …)` (`server/src/activity.ts`) and read it with `historyOf`. Teach
+   `linkRecords` in `server/src/generic.ts` about its links.
 4. OpenAPI entries (the coverage test checks all routes). Add a way to make one to `MAKE` in
    `test/integration/parity.test.ts`: the test then checks its routes, tools, envelope (REST and MCP), search by ref,
    comments and history, and fails for a registered type without an entry.

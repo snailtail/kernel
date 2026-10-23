@@ -6,7 +6,7 @@ import { query, tx } from './db.js';
 import { badRequest, notFound } from './errors.js';
 import { assertMayWriteText } from './confidential.js';
 import { authorize } from './policy.js';
-import { getProblem, loadForUpdate, logActivity, SELECT_ACTION, type Db } from './problems.js';
+import { getProblem, loadForUpdate, logProblem, SELECT_ACTION, type Db } from './problems.js';
 
 export const ACTION_STATUSES = ['open', 'done', 'cancelled'] as const;
 
@@ -79,7 +79,7 @@ export async function insertAction(db: Db, user: User, problem: { id: number; re
      VALUES (${[...cols, 'p', 'c'].map((_, i) => `$${i + 1}`).join(', ')}) RETURNING id`,
     [...Object.values(input), problem.id, user.id],
   );
-  await logActivity(db, problem.id, user.id, 'action', `Added action: ${input.title}`, { action_id: rows[0].id, change: 'added' });
+  await logProblem(db, problem.id, user.id, 'action', `Added action: ${input.title}`, { action_id: rows[0].id, change: 'added' });
   if (input.owner_id) {
     await notify(db, { users: [input.owner_id], event: 'assigned', ref: problem.ref, title: input.title, summary: `An action on ${problem.ref} was assigned to you.`, path: `/problems/${problem.ref}`, dedupe: `action:${rows[0].id}:${input.owner_id}`, actorId: user.id });
   }
@@ -113,7 +113,7 @@ export async function updateAction(user: User, ref: string, actionId: number, in
     const body = statusChange
       ? `${input.status === 'done' ? 'Completed' : input.status === 'cancelled' ? 'Cancelled' : 'Reopened'} action: ${title}`
       : `Updated action: ${title}`;
-    await logActivity(db, problem.id, user.id, 'action', body, {
+    await logProblem(db, problem.id, user.id, 'action', body, {
       action_id: actionId,
       change: statusChange ? input.status : 'updated',
       fields: changed.map(([k]) => k),

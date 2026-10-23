@@ -2,19 +2,18 @@
 // reviews or anyone's idea. Lightweight on purpose: a title, value and effort, an owner, a manager's decision and the
 // benefit it brought, linked to the changes, problems and actions that carry it out and to a dashboard KPI whose
 // trend shows whether it worked. Shared by REST, MCP and the web UI.
+import { historyOf, logActivity, touchAndAudit } from './activity.js';
 import { z } from 'zod';
 import { audienceOf, BROADEST, startNarrow, type Audience } from './audience.js';
 import type { User } from './auth.js';
-import { audit } from './audit.js';
 import { assertMayWriteText, forgetExists, textFilterSql } from './confidential.js';
-import { currentContext } from './context.js';
 import { query, tx } from './db.js';
 import { badRequest, conflict, notFound } from './errors.js';
 import { kpis, TILES } from './kpis.js';
 import { notify } from './notifications.js';
 import { authorize, can } from './policy.js';
-import { logActivity, registerProblemExtra, type Db, type StartNarrow } from './problems.js';
-import { recordUrl, registerRecordType, typeForRef, type RecordType } from './records.js';
+import { logProblem, registerProblemExtra, type Db, type StartNarrow } from './problems.js';
+import { recordType, recordUrl, refRegex, registerRecordType, typeForRef, typeOfPrefix, type RecordType } from './records.js';
 import { assertVisibleRef } from './visibility.js';
 
 export const IMPROVEMENT_STATUSES = ['idea', 'approved', 'in_progress', 'done', 'rejected'] as const;
@@ -89,13 +88,7 @@ export const improvementLinkSchema = z.object({
   note: z.string().trim().max(2000).default(''),
 });
 
-async function logImprovement(db: Db, id: number, userId: number | null, kind: string, body = '', data: object = {}) {
-  await db.query('INSERT INTO improvement_activity (improvement_id, user_id, kind, body, data, channel) VALUES ($1, $2, $3, $4, $5, $6)', [
-    id, userId, kind, body, JSON.stringify(data), currentContext().channel,
-  ]);
-  const { rows } = await db.query('UPDATE improvements SET updated_at = now() WHERE id = $1 RETURNING ref', [id]);
-  await audit(db, { entity_type: 'improvement', entity_ref: rows[0].ref, action: kind, changes: kind === 'comment' ? { body } : (data as Record<string, unknown>) });
-}
+const logImprovement = (db: Db, id: number, userId: number | null, kind: string, body = '', data: object = {}) => logActivity(db, 'improvement', id, userId, kind, body, data);
 
 async function loadImprovement(db: Db, ref: string) {
   const { rows } = await db.query('SELECT * FROM improvements WHERE ref = $1 FOR UPDATE', [ref.toUpperCase()]);
@@ -130,11 +123,7 @@ export async function getImprovement(user: User, ref: string) {
   const m = rows[0];
   if (!m) throw notFound(`Improvement ${ref.toUpperCase()} not found`);
   const [activity, links] = await Promise.all([
-    query(
-      `SELECT a.id, a.kind, a.body, a.data, a.channel, a.created_at, u.display_name AS user_name
-       FROM improvement_activity a LEFT JOIN users u ON u.id = a.user_id WHERE a.improvement_id = $1 ORDER BY a.created_at DESC, a.id DESC`,
-      [m.id],
-    ),
+    historyOf('improvement', m.id),
     linksOf(m.id),
   ]);
   const { search: _s, service_id: _sid, shown_source_ref, ...rest } = m;
@@ -145,7 +134,7 @@ export async function getImprovement(user: User, ref: string) {
     source_ref: shown_source_ref,
     service: m.service_ref ? { ref: m.service_ref, name: m.service_name } : null,
     links,
-    activity: activity.rows,
+    activity,
     kpi_tile: m.kpi ? await kpiTile(user, m.kpi) : null,
     may_decide: can(user.role, 'improvement.approve'),
     transitions: TRANSITIONS[m.status as Status].filter((to) => !isDecision(m.status, to) || can(user.role, 'improvement.approve')),
@@ -253,9 +242,12 @@ export async function createImprovementInTx(db: Db, user: User, input: z.infer<t
   return m;
 }
 
+/** The Kernel records an improvement can come from. */
+const SOURCE_TYPES = ['problem', 'change', 'incident', 'review', 'improvement'];
+
 /** The audience a new improvement starts with: as narrow as the Kernel record it came from. */
 async function sourceAudience(db: Db | null, sourceRef: string | null | undefined): Promise<Audience> {
-  if (!sourceRef || !/^(PRB|CHG|INC|PIR|IMP)\d{6}$/i.test(sourceRef)) return BROADEST;
+  if (!sourceRef || !refRegex(SOURCE_TYPES.map(recordType)).test(sourceRef)) return BROADEST;
   await assertVisibleRef(sourceRef);
   // A review is as narrow as its incident.
   if (/^PIR/i.test(sourceRef)) {
@@ -348,8 +340,6 @@ export async function addImprovementComment(user: User, ref: string, body: strin
   return getImprovement(user, ref);
 }
 
-const KIND_OF_PREFIX: Record<string, (typeof IMPROVEMENT_LINK_KINDS)[number]> = { PRB: 'problem', CHG: 'change', INC: 'incident', PIR: 'review' };
-
 export async function addImprovementLink(user: User, ref: string, input: z.infer<typeof improvementLinkSchema>) {
   authorize(user, 'improvement.write');
   const kernel = !input.system || input.system === 'Kernel';
@@ -361,7 +351,7 @@ export async function addImprovementLink(user: User, ref: string, input: z.infer
   } else if (kernel && input.kind !== 'document') {
     reference = reference.toUpperCase();
     await assertVisibleRef(reference);
-    if (KIND_OF_PREFIX[reference.slice(0, 3)] !== input.kind) throw badRequest(`${reference} is not a ${input.kind}`);
+    if (typeOfPrefix(reference) !== input.kind) throw badRequest(`${reference} is not a ${input.kind}`);
     typeForRef(reference);
   }
   await tx(async (db) => {
@@ -403,7 +393,7 @@ export async function improvementFromProblem(user: User, problemRef: string, inp
     if (!['resolved', 'closed'].includes(p.status)) throw conflict('Lessons learned become an improvement once the problem is resolved or closed');
     const from = await audienceOf(db, p.ref);
     const m = await createImprovementInTx(db, user, { title: input.title, description: input.description, owner_id: input.owner_id, source: 'problem', source_ref: p.ref }, startNarrow(from));
-    await logActivity(db, p.id, user.id, 'link', `Lessons learned → improvement ${m.ref}`, { kind: 'improvement', reference: m.ref, system: 'Kernel', action: 'add' });
+    await logProblem(db, p.id, user.id, 'link', `Lessons learned → improvement ${m.ref}`, { kind: 'improvement', reference: m.ref, system: 'Kernel', action: 'add' });
     return m.ref;
   });
   return getImprovement(user, ref);
@@ -457,6 +447,17 @@ const IMPROVEMENT_TYPE: RecordType = {
     comments: '/api/improvements/:ref/comments',
   },
   mcp: { list: 'list_improvements', get: 'get_improvement', create: 'create_improvement', update: 'update_improvement', transition: 'transition_improvement' },
+  table: 'improvements',
+  activity: { table: 'improvement_activity', fk: 'improvement_id', after: async (db, e) => void (await touchAndAudit(db, 'improvement', e)) },
+  // An improvement has an owner and no team.
+  people: { assignee: 'owner_id', team: null },
+  textPlaces: [
+    { table: 'improvements', key: 'id', columns: ['title', 'description', 'benefit', 'reject_reason'] },
+    { table: 'improvement_activity', key: 'improvement_id', columns: ['body'], json: ['data'] },
+    { table: 'improvement_links', key: 'improvement_id', columns: ['note', 'url'] },
+  ],
+  liveTopic: 'improvement',
+  comment: addImprovementComment,
 };
 registerRecordType(IMPROVEMENT_TYPE);
 

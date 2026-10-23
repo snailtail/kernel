@@ -14,6 +14,7 @@ import { validatePrivateAllow } from './outbound.js';
 import { authorize, type Action } from './policy.js';
 import type { Db } from './problems.js';
 import { typeForRef } from './records.js';
+import { addEntry } from './activity.js';
 import { decryptSecret, encryptSecret } from './secrets.js';
 import { registerDeploymentChange } from './changes.js';
 import { azureDevOps, AZURE_DEVOPS } from './dev-azure.js';
@@ -26,11 +27,6 @@ export type { ParsedItem } from './dev-platform.js';
 
 const ADAPTERS: Record<Platform, Adapter> = { github, gitlab, azure_devops: azureDevOps };
 const WRITE: Record<string, Action> = { problem: 'problem.link', change: 'change.update', incident: 'incident.update' };
-const LOG: Record<string, [string, string, string]> = {
-  problem: ['problem_activity', 'problem_id', 'problems'],
-  change: ['change_activity', 'change_id', 'changes'],
-  incident: ['incident_activity', 'incident_id', 'incidents'],
-};
 
 /** A GitHub, GitLab or Azure DevOps URL as an item. `gitlabBases` are the self-hosted GitLabs of the sources. */
 function parseDevUrl(raw: string, gitlabBases: string[] = []): ParsedItem {
@@ -65,17 +61,18 @@ async function upsertItem(db: Db, item: UpsertItem) {
 }
 
 async function linkItem(db: Db, itemId: number, ref: string, via: 'manual' | 'webhook' | 'mcp', userId: number | null) {
-  const type = typeForRef(ref).type;
-  const [logTable, col, table] = LOG[type];
-  const { rows: rec } = await db.query(`SELECT id FROM ${table} WHERE ref = $1`, [ref]);
+  const t = typeForRef(ref);
+  if (!WRITE[t.type]) throw badRequest('Dev links belong on problems, changes and incidents');
+  const type = t.type;
+  const { rows: rec } = await db.query(`SELECT id FROM ${t.table} WHERE ref = $1`, [ref]);
   if (!rec[0]) throw notFound(`${ref} not found`);
   const { rowCount } = await db.query('INSERT INTO dev_item_links (dev_item_id, record_type, record_ref, linked_by, via) VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING', [itemId, type, ref, userId, via]);
   if (!rowCount) return false;
   const { rows: item } = await db.query('SELECT platform, repo, item_type, key, title FROM dev_items WHERE id = $1', [itemId]);
   const i = item[0];
-  await db.query(`INSERT INTO ${logTable} (${col}, user_id, kind, body, data) VALUES ($1, $2, 'link', $3, $4)`, [
-    rec[0].id, userId, `Linked ${label(i)}${via === 'webhook' ? ` (mentioned on ${ADAPTERS[i.platform as Platform]?.label ?? i.platform})` : ''}`, JSON.stringify({ kind: 'dev_item', dev_item_id: itemId, action: 'add' }),
-  ]);
+  await addEntry(db, type, rec[0].id, {
+    userId, kind: 'link', body: `Linked ${label(i)}${via === 'webhook' ? ` (mentioned on ${ADAPTERS[i.platform as Platform]?.label ?? i.platform})` : ''}`, data: { kind: 'dev_item', dev_item_id: itemId, action: 'add' },
+  });
   return true;
 }
 

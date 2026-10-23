@@ -7,7 +7,7 @@ import { currentContext } from './context.js';
 import { checkAnalysis } from './analysis-checks.js';
 import { assertMayWriteText } from './confidential.js';
 import { authorize } from './policy.js';
-import { getProblem, loadForUpdate, logActivity } from './problems.js';
+import { getProblem, loadForUpdate, logProblem } from './problems.js';
 
 export const TECHNIQUES = ['five_whys', 'ishikawa', 'kepner_tregoe', 'timeline'] as const;
 export type Technique = (typeof TECHNIQUES)[number];
@@ -127,7 +127,7 @@ export async function createAnalysis(user: User, ref: string, input: z.infer<typ
        VALUES ($1, $2, $3, $4, $5, $6, $6, $7) RETURNING id`,
       [problem.id, input.technique, title, JSON.stringify(data), input.conclusion ?? '', user.id, currentContext().channel === 'mcp'],
     );
-    await logActivity(db, problem.id, user.id, 'analysis', `Started ${TECHNIQUE_LABEL[input.technique]} analysis`, { analysis_id: rows[0].id });
+    await logProblem(db, problem.id, user.id, 'analysis', `Started ${TECHNIQUE_LABEL[input.technique]} analysis`, { analysis_id: rows[0].id });
     await db.query('UPDATE problems SET updated_at = now() WHERE id = $1', [problem.id]);
   });
   return getProblem(ref);
@@ -165,7 +165,7 @@ export async function updateAnalysis(user: User, ref: string, id: number, input:
       [problem.id, user.id, String(id)],
     );
     if (!recent[0]) {
-      await logActivity(db, problem.id, user.id, 'analysis', `Updated ${TECHNIQUE_LABEL[current.technique as Technique]} analysis`, { analysis_id: id });
+      await logProblem(db, problem.id, user.id, 'analysis', `Updated ${TECHNIQUE_LABEL[current.technique as Technique]} analysis`, { analysis_id: id });
     }
     await db.query('UPDATE problems SET updated_at = now() WHERE id = $1', [problem.id]);
   });
@@ -178,7 +178,7 @@ export async function deleteAnalysis(user: User, ref: string, id: number) {
     const problem = await loadForUpdate(db, ref);
     const { rows } = await db.query('DELETE FROM problem_analyses WHERE id = $1 AND problem_id = $2 RETURNING technique, title', [id, problem.id]);
     if (!rows[0]) throw notFound('Analysis not found');
-    await logActivity(db, problem.id, user.id, 'analysis', `Removed analysis: ${rows[0].title}`, { analysis_id: id });
+    await logProblem(db, problem.id, user.id, 'analysis', `Removed analysis: ${rows[0].title}`, { analysis_id: id });
   });
   return getProblem(ref);
 }
@@ -193,7 +193,7 @@ export async function confirmAnalysis(user: User, ref: string, id: number) {
       'UPDATE problem_analyses SET proposed_via_mcp = false, confirmed_by = $3, confirmed_at = now() WHERE id = $1 AND problem_id = $2 AND proposed_via_mcp',
       [id, problem.id, user.id],
     );
-    if (rowCount) await logActivity(db, problem.id, user.id, 'analysis', 'Confirmed an analysis proposed via MCP', { analysis_id: id });
+    if (rowCount) await logProblem(db, problem.id, user.id, 'analysis', 'Confirmed an analysis proposed via MCP', { analysis_id: id });
   });
   return getProblem(ref);
 }

@@ -1,5 +1,6 @@
 // CMDB (#16): configuration items and services as pointers to where they really live. Every CI keeps its source
 // links (vCenter, Azure, OP5…); attributes are a small typed set per CI type. Changes are audited like any record.
+import { historyOf, logActivity } from './activity.js';
 import { z } from 'zod';
 import type pg from 'pg';
 import type { User } from './auth.js';
@@ -8,7 +9,7 @@ import { currentContext } from './context.js';
 import { query, tx } from './db.js';
 import { badRequest, conflict, forbidden, notFound } from './errors.js';
 import { authorize } from './policy.js';
-import { recordUrl, registerRecordType, type RecordType } from './records.js';
+import { recordUrl, registerRecordType, type ActivityEntry, type RecordType } from './records.js';
 
 export type Db = Pick<pg.PoolClient, 'query'>;
 
@@ -207,11 +208,7 @@ export async function getCi(user: User, ref: string) {
        FROM ci_links l JOIN users u ON u.id = l.created_by WHERE l.ci_id = $1 ORDER BY l.kind, l.created_at`,
       [ci.id],
     ),
-    query(
-      `SELECT a.id, a.kind, a.body, a.data, a.channel, a.created_at, u.display_name AS user_name
-       FROM ci_activity a LEFT JOIN users u ON u.id = a.user_id WHERE a.ci_id = $1 ORDER BY a.created_at DESC, a.id DESC LIMIT 200`,
-      [ci.id],
-    ),
+    historyOf('ci', ci.id),
     ciExtras(ci.id),
     query('SELECT missing_since, retire_after_days, proposed_at FROM ci_retire_due WHERE id = $1', [ci.id]),
   ]);
@@ -221,7 +218,7 @@ export async function getCi(user: User, ref: string) {
     url: urlFor(ci.class, ci.ref),
     sources: sources.rows,
     links: links.rows,
-    activity: activity.rows,
+    activity,
     ...extra,
     retirement: due.rows[0] ? { ...due.rows[0], proposed: due.rows[0].proposed_at <= new Date() } : null,
     next_steps: ciNextSteps(ci, sources.rows, due.rows[0]),
@@ -254,13 +251,13 @@ function ciNextSteps(ci: any, sources: any[], due?: { retire_after_days: number;
 
 // ---- Changing ----------------------------------------------------------------------------------
 
-export async function logCi(db: Db, ciId: number, userId: number | null, kind: string, body: string, data: object = {}) {
-  await db.query('INSERT INTO ci_activity (ci_id, user_id, kind, body, data, channel) VALUES ($1, $2, $3, $4, $5, $6)', [
-    ciId, userId, kind, body, JSON.stringify(data), currentContext().channel,
-  ]);
-  const { rows } = await db.query('SELECT ref, class FROM configuration_items WHERE id = $1', [ciId]);
-  await audit(db, { entity_type: rows[0].class === 'service' ? 'service' : 'ci', entity_ref: rows[0].ref, action: kind, changes: kind === 'comment' ? { body } : (data as Record<string, unknown>) });
-  await db.query('UPDATE configuration_items SET updated_at = now() WHERE id = $1', [ciId]);
+export const logCi = (db: Db, ciId: number, userId: number | null, kind: string, body: string, data: object = {}) => logActivity(db, 'ci', ciId, userId, kind, body, data);
+
+/** After a CI or service history entry: audited under its class, and the CI is touched. */
+async function afterCiLog(db: Db, e: ActivityEntry) {
+  const { rows } = await db.query('SELECT ref, class FROM configuration_items WHERE id = $1', [e.recordId]);
+  await audit(db, { entity_type: rows[0].class === 'service' ? 'service' : 'ci', entity_ref: rows[0].ref, action: e.kind, changes: e.kind === 'comment' ? { body: e.body } : (e.data as Record<string, unknown>) });
+  await db.query('UPDATE configuration_items SET updated_at = now() WHERE id = $1', [e.recordId]);
 }
 
 export async function loadCi(db: Db, ref: string) {
@@ -616,8 +613,12 @@ const history: RecordType['history'] = {
     { entity_type: 'ci_upsert', changes: { updated_refs: [ci.id] } },
   ],
 };
-const CI_TYPE: RecordType = { type: 'ci', prefix: 'CI', readAction: 'ci.read', uiPath: (ref) => `/cis/${ref}`, get: getCi, search: search('ci'), rest: routes, mcp, history };
-const SERVICE_TYPE: RecordType = { type: 'service', prefix: 'SVC', readAction: 'ci.read', uiPath: (ref) => `/cis/${ref}`, get: getCi, search: search('service'), rest: routes, mcp, history };
+// CIs and services share a table, a history and a live topic.
+const ciStore = {
+  table: 'configuration_items', activity: { table: 'ci_activity', fk: 'ci_id', limit: 200, after: afterCiLog }, module: 'cmdb', liveTopic: 'ci', comment: addCiComment,
+} as const;
+const CI_TYPE: RecordType = { type: 'ci', prefix: 'CI', readAction: 'ci.read', uiPath: (ref) => `/cis/${ref}`, get: getCi, search: search('ci'), rest: routes, mcp, history, ...ciStore };
+const SERVICE_TYPE: RecordType = { type: 'service', prefix: 'SVC', readAction: 'ci.read', uiPath: (ref) => `/cis/${ref}`, get: getCi, search: search('service'), rest: routes, mcp, history, ...ciStore };
 registerRecordType(CI_TYPE);
 registerRecordType(SERVICE_TYPE);
 

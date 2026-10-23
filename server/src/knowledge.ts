@@ -1,6 +1,7 @@
 // Knowledge management (#47): articles people and agents find when they need them. Known errors become articles in
 // one step and stay in step with the problem (a database trigger, 117_knowledge.sql); incident resolutions become
 // drafts; published articles are suggested while incidents are logged, and "used to resolve" measures their value.
+import { historyOf, logActivity } from './activity.js';
 import { z } from 'zod';
 import { audienceOf, whyNotForEveryone } from './audience.js';
 import type { User } from './auth.js';
@@ -9,9 +10,8 @@ import { pool, query, tx } from './db.js';
 import { badRequest, conflict, notFound } from './errors.js';
 import { logIncident } from './incident-log.js';
 import { authorize, can } from './policy.js';
-import { logActivity, registerProblemExtra, type Db } from './problems.js';
+import { logProblem, registerProblemExtra, type Db } from './problems.js';
 import { recordUrl, registerRecordType, type RecordType } from './records.js';
-import { currentContext } from './context.js';
 
 export const ARTICLE_TYPES = ['how_to', 'troubleshooting', 'known_error', 'faq'] as const;
 export const AUDIENCES = ['internal', 'end_users'] as const;
@@ -64,9 +64,7 @@ async function reviewDate(db: Db) {
   return d.toISOString().slice(0, 10);
 }
 
-export async function logArticle(db: Db, articleId: number, userId: number | null, kind: string, body = '', data: object = {}) {
-  await db.query('INSERT INTO article_activity (article_id, user_id, kind, body, data, channel) VALUES ($1, $2, $3, $4, $5, $6)', [articleId, userId, kind, body, JSON.stringify(data), currentContext().channel]);
-}
+const logArticle = (db: Db, articleId: number, userId: number | null, kind: string, body = '', data: object = {}) => logActivity(db, 'article', articleId, userId, kind, body, data);
 
 async function load(db: Db, ref: string, lock = false) {
   const { rows } = await db.query(`SELECT * FROM articles WHERE ref = $1${lock ? ' FOR UPDATE' : ''}`, [ref.toUpperCase()]);
@@ -106,15 +104,11 @@ export async function getArticle(user: User, ref: string) {
   if (!a || (a.status === 'draft' && !seesDrafts(user))) throw notFound(`Article ${ref} not found`);
   const [cis, activity, mine, incidents] = await Promise.all([
     query('SELECT c.ref, c.name, c.class FROM article_cis x JOIN configuration_items c ON c.id = x.ci_id WHERE x.article_id = $1 ORDER BY c.name', [a.id]),
-    query(
-      `SELECT x.id, x.kind, x.body, x.data, x.channel, x.created_at, u.display_name AS user_name
-       FROM article_activity x LEFT JOIN users u ON u.id = x.user_id WHERE x.article_id = $1 ORDER BY x.created_at DESC, x.id DESC LIMIT 200`,
-      [a.id],
-    ),
+    historyOf('article', a.id),
     query('SELECT helpful FROM article_feedback WHERE article_id = $1 AND user_id = $2', [a.id, user.id]),
     query('SELECT i.ref, i.title, x.used_at FROM incident_articles x JOIN incidents i ON i.id = x.incident_id WHERE x.article_id = $1 ORDER BY x.used_at DESC LIMIT 20', [a.id]),
   ]);
-  const article = { ...a, cis: cis.rows, activity: activity.rows, my_feedback: mine.rows[0]?.helpful ?? null, used_in: incidents.rows };
+  const article = { ...a, cis: cis.rows, activity, my_feedback: mine.rows[0]?.helpful ?? null, used_in: incidents.rows };
   return withUrl({ ...article, next_steps: articleGuidance(article) });
 }
 
@@ -229,7 +223,7 @@ export async function publishKnownError(user: User, problemRef: string) {
     );
     await db.query('INSERT INTO article_cis (article_id, ci_id) SELECT $1, ci_id FROM problem_cis WHERE problem_id = $2 ON CONFLICT DO NOTHING', [created[0].id, p.id]);
     await logArticle(db, created[0].id, user.id, 'created', `Published from known error ${p.ref}`, { problem: p.ref });
-    await logActivity(db, p.id, user.id, 'link', `Published as knowledge article ${ref}`, { kind: 'article', reference: ref, action: 'add' });
+    await logProblem(db, p.id, user.id, 'link', `Published as knowledge article ${ref}`, { kind: 'article', reference: ref, action: 'add' });
     await audit(db, { entity_type: 'article', entity_ref: ref, action: 'create', changes: { from_problem: p.ref, status: 'published' } });
     return ref;
   });
@@ -369,6 +363,10 @@ const ARTICLE_TYPE: RecordType = {
     comments: '/api/articles/:ref/comments',
   },
   mcp: { list: 'search_knowledge', get: 'get_article', create: 'create_article', update: 'update_article', transition: 'transition_article' },
+  table: 'articles',
+  activity: { table: 'article_activity', fk: 'article_id', limit: 200 },
+  module: 'knowledge',
+  comment: addArticleComment,
 };
 registerRecordType(ARTICLE_TYPE);
 

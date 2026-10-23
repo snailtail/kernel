@@ -21,14 +21,9 @@ import { addChangeLink, setChangeCi } from './changes.js';
 const incidentExists = async (ref: string) => (await query('SELECT 1 FROM incidents WHERE ref = $1', [ref.toUpperCase()])).rows.length > 0;
 import { addLink, LINK_KINDS, SELECT_ACTION } from './problems.js';
 import { recordTypes, recordUrl, typeForRef, type SearchHit } from './records.js';
-import { addReviewComment, attentionCount, incidentRefOf, myReviews } from './reviews.js';
-import { addComment as addProblemComment } from './problems.js';
-import { addIncidentComment } from './incidents.js';
-import { addChangeComment } from './changes.js';
-import { addArticleComment } from './knowledge.js';
-import { addCiComment } from './cmdb.js';
-import { addImprovementComment, addImprovementLink, improvementLinkSchema, myImprovements } from './improvements.js';
-import { addRequestComment, addRequestLink, myRequestWork, requestLinkSchema, teamRequestTasks } from './requests.js';
+import { attentionCount, incidentRefOf, myReviews } from './reviews.js';
+import { addImprovementLink, improvementLinkSchema, myImprovements } from './improvements.js';
+import { addRequestLink, myRequestWork, requestLinkSchema, teamRequestTasks } from './requests.js';
 
 export const searchSchema = z.object({
   q: z.string().trim().min(1).max(200),
@@ -85,15 +80,7 @@ export const linkBodySchema = z.object({ to: z.string().trim().min(1).max(200), 
 
 /** A work note on any record, through its practice's own rules. */
 export async function addComment(user: User, ref: string, body: string) {
-  const type = typeForRef(ref).type;
-  if (type === 'problem') await addProblemComment(user, ref, body);
-  else if (type === 'incident') await addIncidentComment(user, ref, { body, kind: 'comment', to_requester: false });
-  else if (type === 'change') await addChangeComment(user, ref, body);
-  else if (type === 'article') await addArticleComment(user, ref, body);
-  else if (type === 'review') await addReviewComment(user, ref, body);
-  else if (type === 'improvement') await addImprovementComment(user, ref, body);
-  else if (type === 'request') await addRequestComment(user, ref, body);
-  else await addCiComment(user, ref, body);
+  await typeForRef(ref).comment(user, ref, body);
 }
 
 /** Links a record to another Kernel record or to an external record. */

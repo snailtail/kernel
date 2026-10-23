@@ -10,20 +10,16 @@ import { markPersonalData, redact, remainingFlags, scan, sensitivePolicy } from 
 import sharp from 'sharp';
 import type { User } from './auth.js';
 import { audit } from './audit.js';
-import { logChange } from './changes.js';
-import { logCi } from './cmdb.js';
-import { logArticle } from './knowledge.js';
 import { pool, query, tx } from './db.js';
 import { badRequest, forbidden, HttpError, notFound } from './errors.js';
-import { logIncident } from './incident-log.js';
 import { authorize, type Action } from './policy.js';
-import { logActivity, type Db } from './problems.js';
+import type { Db } from './problems.js';
+import { logActivity } from './activity.js';
 import { typeForRef } from './records.js';
 import { sha256Hex } from './core/hash.js';
 
 /** What it takes to attach to (or remove from) each record type. Reading follows the record's own access. */
 const WRITE: Record<string, Action> = { problem: 'problem.comment', incident: 'incident.update', change: 'change.update', ci: 'ci.annotate', service: 'ci.annotate', article: 'article.write' };
-const TABLE: Record<string, string> = { problem: 'problems', incident: 'incidents', change: 'changes', ci: 'configuration_items', service: 'configuration_items', article: 'articles' };
 
 /** Files that are kept but only ever downloaded (zip containers and gzip). */
 const DOWNLOAD_ONLY = /\.(docx|xlsx|pptx|odt|ods|odp|zip|gz|tgz|pcap|pcapng)$/i;
@@ -80,18 +76,12 @@ function sniff(buf: Buffer, filename: string): Sniffed {
 async function loadRecord(db: Db, user: User, ref: string) {
   const t = typeForRef(ref);
   const record = await t.get(user, ref.toUpperCase()); // enforces read access (and later scoping, #53)
-  const { rows } = await db.query(`SELECT id FROM ${TABLE[t.type]} WHERE ref = $1`, [ref.toUpperCase()]);
+  const { rows } = await db.query(`SELECT id FROM ${t.table} WHERE ref = $1`, [ref.toUpperCase()]);
   if (!rows[0]) throw notFound(`${ref} not found`);
   return { type: t.type, ref: ref.toUpperCase(), id: rows[0].id as number, record };
 }
 
-async function logOn(db: Db, type: string, id: number, userId: number, body: string, data: object) {
-  if (type === 'problem') await logActivity(db, id, userId, 'update', body, data);
-  else if (type === 'incident') await logIncident(db, id, userId, 'update', body, data);
-  else if (type === 'change') await logChange(db, id, userId, 'update', body, data);
-  else if (type === 'article') await logArticle(db, id, userId, 'update', body, data);
-  else await logCi(db, id, userId, 'update', body, data);
-}
+const logOn = (db: Db, type: string, id: number, userId: number, body: string, data: object) => logActivity(db, type, id, userId, 'update', body, data);
 
 const SELECT = `SELECT a.id, a.record_type, a.record_ref, a.filename, a.kind, a.content_type, a.size, a.width, a.height, a.flags,
                        a.created_at, a.uploaded_by, u.display_name AS uploaded_by_name

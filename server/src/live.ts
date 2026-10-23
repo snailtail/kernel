@@ -17,12 +17,13 @@ import { config } from './config.js';
 import { contextStore } from './context.js';
 import { listen, query } from './db.js';
 import { badRequest, forbidden, HttpError, notFound } from './errors.js';
-import { moduleEnabled, type Module } from './modules.js';
+import { moduleEnabled } from './modules.js';
+import { recordTypes } from './records.js';
 import { viewerFor } from './visibility.js';
 
-const KINDS = { problem: 'problems', incident: 'incidents', change: 'changes', ci: 'configuration_items', improvement: 'improvements', request: 'requests' } as const;
-type Kind = keyof typeof KINDS;
-const MODULE_OF: Partial<Record<Kind, Module>> = { incident: 'incident', change: 'change', ci: 'cmdb', request: 'request' };
+/** A live topic ("problem", "ci"…): the record type whose trigger sends it (records.ts: liveTopic). */
+type Kind = string;
+const typeOfTopic = (k: Kind) => recordTypes().find((t) => t.liveTopic === k);
 
 export const LIMITS = {
   perUser: Number(process.env.KERNEL_LIVE_PER_USER ?? 6),
@@ -54,7 +55,10 @@ let flushTimer: NodeJS.Timeout | null = null;
 let timers: NodeJS.Timeout[] = [];
 let stopListening: (() => Promise<void>) | null = null;
 
-const kindOk = (k: string): k is Kind => Object.hasOwn(KINDS, k) && (!MODULE_OF[k as Kind] || moduleEnabled(MODULE_OF[k as Kind]!));
+const kindOk = (k: string): k is Kind => {
+  const t = typeOfTopic(k);
+  return !!t && (!t.module || moduleEnabled(t.module));
+};
 
 function write(s: Stream, chunk: string) {
   const raw = s.reply.raw;
@@ -77,7 +81,7 @@ const asViewer = <T>(viewer: string, fn: () => Promise<T>) =>
 /** The ids among these that the viewer may see. */
 async function visibleIds(viewer: string, kind: Kind, ids: number[]) {
   if (!ids.length) return new Set<number>();
-  const { rows } = await asViewer(viewer, () => query(`SELECT id FROM ${KINDS[kind]} WHERE id = ANY($1::int[])`, [ids]));
+  const { rows } = await asViewer(viewer, () => query(`SELECT id FROM ${typeOfTopic(kind)!.table} WHERE id = ANY($1::int[])`, [ids]));
   return new Set(rows.map((r) => Number(r.id)));
 }
 
