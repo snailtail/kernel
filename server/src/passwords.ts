@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { badRequest } from './errors.js';
 import { outboundFetch } from './outbound.js';
 
-export const MIN_LENGTH = 12;
+const MIN_LENGTH = 12;
 
 // The most common passwords and patterns of at least MIN_LENGTH characters (shorter ones fail on length).
 const COMMON = new Set(

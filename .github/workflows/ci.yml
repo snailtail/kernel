@@ -46,6 +46,8 @@ jobs:
           "$(scripts/tool-image.sh greenmail)"
       - run: npm ci --ignore-scripts
       - run: npm run typecheck
+      # Unused files and exports fail the build (#174), so dead code doesn't pile up again.
+      - run: npm run knip
       - run: npm test
         env:
           GREENMAIL_HOST: 127.0.0.1

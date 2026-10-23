@@ -15,7 +15,7 @@ import { currentContext } from './context.js';
 
 export const ARTICLE_TYPES = ['how_to', 'troubleshooting', 'known_error', 'faq'] as const;
 export const AUDIENCES = ['internal', 'end_users'] as const;
-export const ARTICLE_STATUSES = ['draft', 'published', 'retired'] as const;
+const ARTICLE_STATUSES = ['draft', 'published', 'retired'] as const;
 
 const fields = {
   title: z.string().trim().min(3).max(200),

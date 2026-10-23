@@ -17,6 +17,8 @@ import { checkUrl, outboundFetch } from './outbound.js';
 import type { Db } from './problems.js';
 import { decryptSecret, encryptSecret } from './secrets.js';
 import { formatBody } from './webhooks.js';
+import { absoluteUrl } from './core/url.js';
+import { clip } from './core/text.js';
 
 /** The events people can be notified about, with quiet defaults per channel. */
 export const EVENTS = {
@@ -37,7 +39,6 @@ export const EVENTS = {
 } as const;
 export type NotificationEvent = keyof typeof EVENTS;
 
-const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
 
 export interface Notice {
   users: (number | null | undefined)[];
@@ -203,8 +204,7 @@ const unsubscribeSigWith = (raw: string, userId: number, event: string) =>
 const unsubscribeSig = (userId: number, event: string) => unsubscribeSigWith(activeKey()?.raw ?? '', userId, event);
 
 export function unsubscribeUrl(userId: number, event: string) {
-  const base = (config.publicUrl ?? '').replace(/\/$/, '');
-  return `${base}/api/notifications/unsubscribe?u=${userId}&e=${event}&t=${unsubscribeSig(userId, event)}`;
+  return absoluteUrl(`/api/notifications/unsubscribe?u=${userId}&e=${event}&t=${unsubscribeSig(userId, event)}`);
 }
 
 /** Checks a signed unsubscribe link without changing anything; returns what it would unsubscribe from. */
@@ -281,9 +281,6 @@ export async function sendOutsideMail(to: string, subject: string, lines: string
 
 export const mailConfigured = () => !!process.env.SMTP_URL;
 
-export const absoluteUrl = (path: string) => `${(config.publicUrl ?? '').replace(/\/$/, '')}${path}`;
-const absolute = absoluteUrl;
-
 /** A scheduled report to a Kernel user (#54): a summary, the report attached, and where to change or stop it. */
 export async function sendReportMail(to: string, subject: string, lines: string[], attachment: { filename: string; content: string }, manage: string) {
   const m = mailer();
@@ -308,7 +305,7 @@ async function sendEmail(userId: number, to: string, subject: string, lines: str
     to,
     ...(messageId ? { messageId } : {}),
     subject: clip(subject, 200),
-    text: [...lines, '', '—', `Notification settings: ${absolute('/settings')}`, `Unsubscribe: ${unsub}`].join('\n'),
+    text: [...lines, '', '—', `Notification settings: ${absoluteUrl('/settings')}`, `Unsubscribe: ${unsub}`].join('\n'),
     headers: { 'List-Unsubscribe': `<${unsub}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click', 'Auto-Submitted': 'auto-generated' },
   });
 }
@@ -357,7 +354,7 @@ export async function processNotificationDeliveries(limit = 20) {
           await query("UPDATE notification_deliveries SET status = 'skipped', lease_until = NULL WHERE id = $1", [d.id]);
           continue;
         }
-        await sendEmail(user.id, user.email, `Kernel: ${items.length} update${items.length === 1 ? '' : 's'} since yesterday`, items.flatMap((n) => [`${n.ref} ${n.title}`, `  ${n.summary}`, `  ${absolute(n.url)}`, '']), 'all');
+        await sendEmail(user.id, user.email, `Kernel: ${items.length} update${items.length === 1 ? '' : 's'} since yesterday`, items.flatMap((n) => [`${n.ref} ${n.title}`, `  ${n.summary}`, `  ${absoluteUrl(n.url)}`, '']), 'all');
       } else {
         const { rows: ns } = await query('SELECT * FROM notifications WHERE id = $1', [d.notification_id]);
         const n = ns[0];
@@ -369,11 +366,11 @@ export async function processNotificationDeliveries(limit = 20) {
           // Recorded first, so a reply to this mail finds its record even if the send is retried (#48 inbound).
           const messageId = `<${randomUUID()}@${ownMail().messageIdDomain}>`;
           await query('UPDATE notification_deliveries SET message_id = $2 WHERE id = $1', [d.id, messageId]);
-          await sendEmail(user.id, user.email, `[Kernel] ${n.ref ? `${n.ref}: ` : ''}${n.title}`, [n.summary, '', ...approvalLines(links), absolute(n.url)], n.event, messageId);
+          await sendEmail(user.id, user.email, `[Kernel] ${n.ref ? `${n.ref}: ` : ''}${n.title}`, [n.summary, '', ...approvalLines(links), absoluteUrl(n.url)], n.event, messageId);
         } else {
           if (!user.chat_url) throw new Error('No chat webhook');
           const actions = links && links !== 'sign_in' ? [{ title: 'Approve', url: links.approve }, { title: 'Reject', url: links.reject }] : undefined;
-          const body = JSON.stringify(formatBody(user.chat_format, { event: n.event, summary: n.summary, problem: { ref: n.ref, title: n.title, url: absolute(n.url) }, actions }));
+          const body = JSON.stringify(formatBody(user.chat_format, { event: n.event, summary: n.summary, problem: { ref: n.ref, title: n.title, url: absoluteUrl(n.url) }, actions }));
           const res = await outboundFetch(decryptSecret(user.chat_url), { method: 'POST', headers: { 'Content-Type': 'application/json', 'User-Agent': 'Kernel-Notifications/1' }, body, maxBytes: 16_384 });
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
         }

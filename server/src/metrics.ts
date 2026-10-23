@@ -2,7 +2,7 @@
 import { metrics, SpanStatusCode, trace } from '@opentelemetry/api';
 
 const meter = metrics.getMeter('kernel');
-export const tracer = trace.getTracer('kernel');
+const tracer = trace.getTracer('kernel');
 
 const transitions = meter.createCounter('kernel.problem.transitions', { description: 'Problem status changes', unit: '{transition}' });
 const created = meter.createCounter('kernel.problem.created', { description: 'Problems logged', unit: '{problem}' });

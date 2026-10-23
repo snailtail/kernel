@@ -45,7 +45,7 @@ export const operationSchema = z.discriminatedUnion('op', [
   z.object({ op: z.literal('acknowledge') }),
   z.object({ op: z.literal('close') }),
 ]);
-export type Operation = z.infer<typeof operationSchema>;
+type Operation = z.infer<typeof operationSchema>;
 type OpName = Operation['op'];
 
 export const bulkSchema = z
@@ -244,7 +244,7 @@ const DEFS: Record<Practice, PracticeDef> = {
 export const operationsFor = (practice: Practice) => Object.keys(DEFS[practice].ops) as OpName[];
 
 export type Outcome = 'changed' | 'would_change' | 'unchanged' | 'skipped' | 'failed';
-export interface ItemResult {
+interface ItemResult {
   id: string;
   title?: string;
   outcome: Outcome;
@@ -364,9 +364,6 @@ export async function bulk(user: User, practice: Practice, input: z.infer<typeof
     undo: !input.dry_run && undoable && undo.length ? { items: undo } : null,
   };
 }
-
-/** Who may use bulk at all: anyone who can do one of the operations on some practice. */
-export const canBulk = (user: User) => PRACTICES.some((p) => Object.values(DEFS[p].ops).some((o) => can(user.role, o!.action)));
 
 /** Reading the practice's list is the least a bulk request needs (each operation checks its own permission). */
 export const readActionOf = (practice: Practice) => DEFS[practice].read;

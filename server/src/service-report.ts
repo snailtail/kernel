@@ -24,7 +24,7 @@ export const serviceReportSchema = z
   .refine((r) => r.from <= r.to, 'from must be before to');
 
 /** Intervals merged so that overlaps count once. */
-export function mergeIntervals(intervals: [number, number][]) {
+function mergeIntervals(intervals: [number, number][]) {
   const out: [number, number][] = [];
   for (const [a, b] of intervals.filter(([x, y]) => y > x).sort((x, y) => x[0] - y[0])) {
     const last = out[out.length - 1];

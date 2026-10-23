@@ -46,7 +46,7 @@ async function listKind(ctx: RunContext, path: string): Promise<{ items: any[] }
 }
 
 /** providerID → the attribute the CMDB matches VMs on (resource_id or bios_uuid). */
-export function identityFromProviderId(providerId: string | undefined): Record<string, string> {
+function identityFromProviderId(providerId: string | undefined): Record<string, string> {
   if (!providerId) return {};
   const azure = /^azure:\/\/(\/subscriptions\/.+)$/i.exec(providerId);
   if (azure) return { resource_id: azure[1].toLowerCase() };
@@ -72,7 +72,7 @@ const gib = (q: string | undefined) => {
  * <daemonset>-<5>, <cronjob>-<schedule minute>-<5>. A name that has a workload's name as prefix but not its form
  * (a standalone Job "web-migrate-x7k2p" next to Deployment "web") belongs to none: better no alert than a wrong one.
  */
-export function podOwner(workloads: { id: string; kind: string; namespace: string; name: string }[], namespace: string, pod: string): string | undefined {
+function podOwner(workloads: { id: string; kind: string; namespace: string; name: string }[], namespace: string, pod: string): string | undefined {
   // Generated parts use Kubernetes' alphabet without vowels, 0, 1 and 3 (rand.String, the pod-template-hash), so
   // "migrate" is not one.
   const suffix: Record<string, RegExp> = {
@@ -94,7 +94,7 @@ const WORKLOADS = [
 ] as const;
 
 /** Exactly what the connector reads: the manifest grants this and the connection test checks it. */
-export const ACCESS = [
+const ACCESS = [
   { group: '', resource: 'nodes' },
   { group: '', resource: 'namespaces' },
   { group: 'apps', resource: 'deployments' },

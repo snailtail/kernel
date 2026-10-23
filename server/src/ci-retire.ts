@@ -60,11 +60,6 @@ export async function retireProposals(user: User) {
   return rows.map(({ id, ...r }) => ({ ...r, url: recordUrl(typeForRef(r.ref), r.ref), open_records: open.get(id) ?? [], can_retire: mayRetire(user, r.owner_id) }));
 }
 
-/** How many CIs are proposed for retirement (the guidance tip and the CMDB list). */
-export async function retireProposalCount() {
-  return (await query('SELECT count(*)::int AS n FROM ci_retire_due WHERE proposed_at <= now()')).rows[0].n as number;
-}
-
 /**
  * Retires missing CIs, one transaction each, and reports what happened to every one. Administrators and CMDB managers
  * may retire any; an owner may retire their own. A CI that is reported again, or that open records still name

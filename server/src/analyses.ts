@@ -12,7 +12,7 @@ import { getProblem, loadForUpdate, logActivity } from './problems.js';
 export const TECHNIQUES = ['five_whys', 'ishikawa', 'kepner_tregoe', 'timeline'] as const;
 export type Technique = (typeof TECHNIQUES)[number];
 
-export const TECHNIQUE_LABEL: Record<Technique, string> = {
+const TECHNIQUE_LABEL: Record<Technique, string> = {
   five_whys: '5 Whys',
   ishikawa: 'Ishikawa',
   kepner_tregoe: 'Kepner-Tregoe',
@@ -22,7 +22,7 @@ export const TECHNIQUE_LABEL: Record<Technique, string> = {
 const text = z.string().max(5000).default('');
 const isIsNot = z.object({ is: text, is_not: text, distinction: text }).default({ is: '', is_not: '', distinction: '' });
 
-export const DATA_SCHEMAS = {
+const DATA_SCHEMAS = {
   five_whys: z.object({
     problem_statement: text,
     whys: z
@@ -76,7 +76,7 @@ export const DATA_SCHEMAS = {
 } satisfies Record<Technique, z.ZodType>;
 
 /** Starting content for a new analysis, so the editor has the expected structure. */
-export function emptyData(technique: Technique): unknown {
+function emptyData(technique: Technique): unknown {
   switch (technique) {
     case 'five_whys':
       return { problem_statement: '', whys: [{ why: '', because: '' }] };

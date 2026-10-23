@@ -5,7 +5,7 @@
 // Sign-in is single sign-on (sso.ts, purpose "portal") or a link by mail: 256 random bits, of which only the SHA-256
 // is kept, 15 minutes, single use, minted when the mail is sent. There is no sign-up: the person must already be in
 // people. Every answer to a link request is the same, whether the address is known or not.
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { forPortal, PORTAL_REOPEN_DAYS } from './audience.js';
@@ -17,7 +17,7 @@ import { badRequest, conflict, forbidden, HttpError, notFound, unauthorized } fr
 import { insertIncident } from './incidents.js';
 import { logIncident } from './incident-log.js';
 import { moduleEnabled } from './modules.js';
-import { absoluteUrl, mailConfigured, notify, sendOutsideMail } from './notifications.js';
+import { mailConfigured, notify, sendOutsideMail } from './notifications.js';
 import { syncPaging } from './oncall.js';
 import type { Db } from './problems.js';
 import { rateLimit } from './ratelimit.js';
@@ -27,11 +27,12 @@ import { securityEvent } from './security-events.js';
 import { slaOnTransition } from './sla.js';
 import { signUp as statusSignUp, signUpOpen, unsubscribeUrl } from './status-subscriptions.js';
 import { notifyTeamQueue } from './teams.js';
+import { absoluteUrl } from './core/url.js';
+import { sha256Hex } from './core/hash.js';
 
 export const PORTAL_COOKIE = 'kernel_portal';
 const SESSION_HOURS = 8;
 const LINK_MINUTES = 15;
-const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 
 export interface PortalPerson { id: number; name: string; email: string | null; organisation_id: number | null }
 
@@ -53,7 +54,7 @@ export async function createPortalSession(req: FastifyRequest, reply: FastifyRep
   const token = randomBytes(32).toString('base64url');
   await query(
     `INSERT INTO portal_sessions (token_hash, person_id, method, ip, user_agent, expires_at) VALUES ($1, $2, $3, $4, $5, now() + $6 * interval '1 hour')`,
-    [sha256(token), personId, method, req.ip, String(req.headers['user-agent'] ?? '').slice(0, 300), SESSION_HOURS],
+    [sha256Hex(token), personId, method, req.ip, String(req.headers['user-agent'] ?? '').slice(0, 300), SESSION_HOURS],
   );
   await query('DELETE FROM portal_sessions WHERE expires_at < now()');
   reply.setCookie(PORTAL_COOKIE, token, {
@@ -69,7 +70,7 @@ export async function requirePerson(req: FastifyRequest): Promise<PortalPerson> 
   const { rows } = await query(
     `SELECT p.id, p.name, p.email, p.organisation_id FROM portal_sessions s JOIN people p ON p.id = s.person_id
      WHERE s.token_hash = $1 AND s.expires_at > now() AND p.active AND p.erased_at IS NULL`,
-    [sha256(token)],
+    [sha256Hex(token)],
   );
   if (!rows[0]) throw unauthorized('Not signed in');
   if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
@@ -81,7 +82,7 @@ export async function requirePerson(req: FastifyRequest): Promise<PortalPerson> 
 
 export async function endPortalSession(req: FastifyRequest, reply: FastifyReply) {
   const token = req.cookies[PORTAL_COOKIE];
-  if (token) await query('DELETE FROM portal_sessions WHERE token_hash = $1', [sha256(token)]);
+  if (token) await query('DELETE FROM portal_sessions WHERE token_hash = $1', [sha256Hex(token)]);
   reply.clearCookie(PORTAL_COOKIE, { path: '/api/portal' });
   return { ok: true };
 }
@@ -104,7 +105,7 @@ export async function requestLink(req: FastifyRequest, input: z.infer<typeof lin
   rateLimit(`portal-link:ip:${req.ip}`, 20, 3600_000);
   // Per address, quietly: beyond the limit the answer is the same and nothing is sent, so nobody can flood an inbox.
   try {
-    rateLimit(`portal-link:to:${sha256(input.email)}`, 5, 3600_000);
+    rateLimit(`portal-link:to:${sha256Hex(input.email)}`, 5, 3600_000);
   } catch {
     securityEvent({ action: 'portal.link_limited', category: 'authentication', outcome: 'denied', message: 'Portal sign-in links to one address limited' }, req);
     return { message: LINK_SENT };
@@ -128,7 +129,7 @@ export async function signInWithLink(req: FastifyRequest, reply: FastifyReply, t
     `UPDATE portal_links l SET used_at = now() FROM people p
      WHERE l.token_hash = $1 AND l.used_at IS NULL AND l.expires_at > now() AND p.id = l.person_id AND p.active AND p.erased_at IS NULL
      RETURNING l.person_id`,
-    [sha256(token)],
+    [sha256Hex(token)],
   );
   if (!rows[0]) {
     securityEvent({ action: 'portal.link_refused', category: 'authentication', outcome: 'failure', message: 'Portal sign-in link expired, used or unknown' }, req);
@@ -429,12 +430,6 @@ export async function queueReply(db: Db, kind: 'incident' | 'request', recordId:
   return true;
 }
 
-/** Whether a record has a requester the portal or mail can reach (for the "Reply to the requester" choice). */
-export async function requesterOf(db: Db, kind: 'incident' | 'request', recordId: number) {
-  const { rows } = await db.query(kind === 'incident' ? 'SELECT caller_id AS id FROM incidents WHERE id = $1' : 'SELECT requester_id AS id FROM requests WHERE id = $1', [recordId]);
-  return (rows[0]?.id as number | null) ?? null;
-}
-
 // ---- Delivery --------------------------------------------------------------------------------------------------
 
 async function deliver(m: any) {
@@ -444,7 +439,7 @@ async function deliver(m: any) {
     // Minted when sent, hash only; an earlier unused link for the person stops working.
     const token = randomBytes(32).toString('base64url');
     await query('UPDATE portal_links SET used_at = now() WHERE person_id = $1 AND used_at IS NULL', [m.person_id]);
-    await query(`INSERT INTO portal_links (person_id, token_hash, expires_at) VALUES ($1, $2, now() + $3 * interval '1 minute')`, [m.person_id, sha256(token), LINK_MINUTES]);
+    await query(`INSERT INTO portal_links (person_id, token_hash, expires_at) VALUES ($1, $2, now() + $3 * interval '1 minute')`, [m.person_id, sha256Hex(token), LINK_MINUTES]);
     await sendOutsideMail(p[0].email, 'Your sign-in link', [
       'Someone asked to sign in to the help portal with this address.',
       '',

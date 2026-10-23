@@ -11,6 +11,7 @@ import { query, tx } from './db.js';
 import { processEvents, SECURITY_SOURCE, type EventResult, type NormalisedEvent } from './events.js';
 import { notify } from './notifications.js';
 import { WEIGHT_SQL } from './security-events.js';
+import { plural } from './core/text.js';
 
 const threshold = (count: number, minutes: number) =>
   z.object({ enabled: z.boolean().default(true), threshold: z.number().int().min(2).max(100_000).default(count), window_minutes: z.number().int().min(1).max(1440).default(minutes) });
@@ -48,7 +49,6 @@ interface Detection { rule: keyof Omit<Alerting, 'enabled'>; check: string; seve
 
 /** How an account appears in an alert: the username, or a short part of the digest of a name with no account. */
 const ACCOUNT_SQL = `coalesce(u.username, CASE WHEN s.account <> '' THEN 'unknown account …' || right(s.account, 8) END)`;
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 // Far above the threshold is no longer a few typos: one step up.
 const graded = (n: number, t: number) => (n >= 5 * t ? 'major' : 'minor');
 

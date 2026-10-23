@@ -5,7 +5,7 @@ import { badRequest } from './errors.js';
 import { ciState, firstLine, iso, isRollback, pushCommits, type Adapter, type ItemType, type ParsedItem } from './dev-platform.js';
 
 /** GitHub signs each delivery: X-Hub-Signature-256 = sha256=HMAC(secret, raw body). */
-export function verifyGitHubSignature(secret: string, raw: string, header: string | undefined) {
+function verifyGitHubSignature(secret: string, raw: string, header: string | undefined) {
   if (!header?.startsWith('sha256=')) return false;
   const given = Buffer.from(header.slice(7), 'hex');
   const expected = createHmac('sha256', secret).update(raw).digest();

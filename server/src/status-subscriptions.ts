@@ -3,12 +3,11 @@
 // link (double opt-in), and a signed one-click unsubscribe in every mail. Contacts of organisations that use a service
 // hear about updates a person published. Outside recipients only ever get the published text under public names
 // (audience.ts forOutside); every send is a row in status_deliveries, which is also the communication log.
-import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import type { User } from './auth.js';
 import { forOutside } from './audience.js';
 import { audit } from './audit.js';
-import { config } from './config.js';
 import { query } from './db.js';
 import { badRequest, notFound } from './errors.js';
 import { activeKey, keyring } from './keys.js';
@@ -16,13 +15,12 @@ import { mailConfigured, sendOutsideMail } from './notifications.js';
 import { authorize } from './policy.js';
 import type { Db } from './problems.js';
 import { rateLimit } from './ratelimit.js';
-import { pageSettings } from './status.js';
+import { pageSettings, STATUS_LABEL } from './status.js';
+import { absoluteUrl } from './core/url.js';
+import { sha256Hex } from './core/hash.js';
+import { cap } from './core/text.js';
 
 const CONFIRM_HOURS = 48;
-const absolute = (path: string) => `${(config.publicUrl ?? '').replace(/\/$/, '')}${path}`;
-const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
-const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
-const LABEL: Record<string, string> = { operational: 'Operational', degraded: 'Degraded performance', partial_outage: 'Partial outage', major_outage: 'Major outage', maintenance: 'Maintenance' };
 
 // ---- Staff following services ------------------------------------------------------------------
 
@@ -61,7 +59,7 @@ export async function signUp(input: z.infer<typeof signUpSchema>, ip: string) {
   // Per address, quietly: a sign-up beyond the limit gets the same answer and sends nothing, so a stranger can neither
   // flood someone's inbox nor tell from the answer that the address was used.
   try {
-    rateLimit(`status-signup:to:${sha256(input.email)}`, 3, 86400_000);
+    rateLimit(`status-signup:to:${sha256Hex(input.email)}`, 3, 86400_000);
   } catch {
     return { message: SIGNED_UP };
   }
@@ -90,7 +88,7 @@ export async function checkConfirm(subscriberId: number, token: string) {
     `SELECT s.pending_ci_ids,
             (SELECT array_agg(st.public_name ORDER BY st.public_name) FROM service_status st WHERE st.public AND st.ci_id = ANY(s.pending_ci_ids)) AS services
      FROM status_subscribers s WHERE s.id = $1 AND s.confirm_hash = $2 AND s.confirm_expires_at > now()`,
-    [subscriberId, sha256(token)],
+    [subscriberId, sha256Hex(token)],
   );
   if (!rows[0]) throw badRequest('This link has expired or was already used. Sign up again on the status page.');
   return rows[0].pending_ci_ids?.length ? `updates on ${(rows[0].services ?? []).join(', ')}` : 'updates on every service on the status page';
@@ -102,7 +100,7 @@ export async function confirm(subscriberId: number, token: string) {
     `UPDATE status_subscribers SET confirmed_at = coalesce(confirmed_at, now()), ci_ids = coalesce(pending_ci_ids, ci_ids),
        pending_ci_ids = NULL, confirm_hash = NULL, confirm_expires_at = NULL
      WHERE id = $1 AND confirm_hash = $2 AND confirm_expires_at > now() RETURNING id`,
-    [subscriberId, sha256(token)],
+    [subscriberId, sha256Hex(token)],
   );
   if (!rows[0]) throw badRequest('This link has expired or was already used. Sign up again on the status page.');
   await audit(null, { entity_type: 'status_subscriber', entity_ref: `#${subscriberId}`, action: 'confirm' });
@@ -117,7 +115,7 @@ type Who = 's' | 'p' | 'r';
 const unsubscribeSigWith = (raw: string, who: Who, id: number) => createHmac('sha256', `kernel-status-unsubscribe:${raw}`).update(`${who}:${id}`).digest('base64url');
 
 export function unsubscribeUrl(who: Who, id: number) {
-  return absolute(`/status/unsubscribe?${who}=${id}&token=${unsubscribeSigWith(activeKey()?.raw ?? '', who, id)}`);
+  return absoluteUrl(`/status/unsubscribe?${who}=${id}&token=${unsubscribeSigWith(activeKey()?.raw ?? '', who, id)}`);
 }
 
 export function checkUnsubscribe(who: Who, id: number, token: string) {
@@ -176,7 +174,7 @@ export async function queueOutside(db: Db, updateId: number) {
   );
   const { title } = await pageSettings();
   const payload = {
-    event: 'status.published', occurred_at: new Date().toISOString(), title, url: absolute('/status'),
+    event: 'status.published', occurred_at: new Date().toISOString(), title, url: absoluteUrl('/status'),
     summary: `${cap(out.published.phase)}: ${out.published.message}`.slice(0, 200), status_update: out.published, problem: null, actor: null, data: { status_update_id: updateId },
   };
   for (const h of hooks) await db.query('INSERT INTO webhook_deliveries (webhook_id, event, payload) VALUES ($1, $2, $3)', [h.id, 'status.published', JSON.stringify(payload)]);
@@ -219,7 +217,7 @@ function updateLines(title: string, p: NonNullable<Awaited<ReturnType<typeof for
   return [
     ...intro,
     `${cap(p.phase)}: ${p.services.join(', ')}`,
-    ...(p.status ? [`Status: ${LABEL[p.status] ?? p.status}`] : []),
+    ...(p.status ? [`Status: ${STATUS_LABEL[p.status] ?? p.status}`] : []),
     '',
     p.message,
     '',
@@ -238,12 +236,12 @@ async function deliver(d: any) {
     if (!rows[0]) return 'skipped';
     // Minted when sent and stored as a hash only: a later sign-up's link replaces this one.
     const token = randomBytes(24).toString('base64url');
-    await query(`UPDATE status_subscribers SET confirm_hash = $2, confirm_expires_at = now() + $3 * interval '1 hour' WHERE id = $1`, [d.subscriber_id, sha256(token), CONFIRM_HOURS]);
+    await query(`UPDATE status_subscribers SET confirm_hash = $2, confirm_expires_at = now() + $3 * interval '1 hour' WHERE id = $1`, [d.subscriber_id, sha256Hex(token), CONFIRM_HOURS]);
     const what = rows[0].services?.length ? rows[0].services.join(', ') : 'every service on the page';
     await sendOutsideMail(rows[0].email, `Confirm your subscription to ${page.title}`, [
       `Someone asked to receive an email from ${page.title} when there is an update on: ${what}.`,
       '',
-      `Confirm: ${absolute(`/status/confirm?s=${d.subscriber_id}&token=${token}`)}`,
+      `Confirm: ${absoluteUrl(`/status/confirm?s=${d.subscriber_id}&token=${token}`)}`,
       '',
       `The link works once and expires in ${CONFIRM_HOURS} hours. If this was not you, ignore this message: nothing is sent to you unless the link is confirmed.`,
     ], unsubscribeUrl('s', d.subscriber_id));

@@ -1,8 +1,9 @@
 import { readdir, readFile } from 'node:fs/promises';
-import { createHash, createHmac, pbkdf2Sync, randomBytes } from 'node:crypto';
+import { createHmac, pbkdf2Sync, randomBytes } from 'node:crypto';
 import pg from 'pg';
 import { config } from './config.js';
 import { currentContext } from './context.js';
+import { sha256 } from './core/hash.js';
 
 // Return DATE columns as 'YYYY-MM-DD' strings instead of local-midnight Date objects.
 pg.types.setTypeParser(pg.types.builtins.DATE, (value) => value);
@@ -136,7 +137,7 @@ export function scramVerifier(password: string, iterations = 4096) {
   const salt = randomBytes(16);
   const salted = pbkdf2Sync(password.normalize('NFKC'), salt, iterations, 32, 'sha256');
   const clientKey = createHmac('sha256', salted).update('Client Key').digest();
-  const storedKey = createHash('sha256').update(clientKey).digest();
+  const storedKey = sha256(clientKey);
   const serverKey = createHmac('sha256', salted).update('Server Key').digest();
   return `SCRAM-SHA-256$${iterations}:${salt.toString('base64')}$${storedKey.toString('base64')}:${serverKey.toString('base64')}`;
 }

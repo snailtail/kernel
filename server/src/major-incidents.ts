@@ -23,7 +23,7 @@ import { communicationLog } from './status-subscriptions.js';
 /** Minutes between stakeholder updates by priority, until the lead changes it (settings `major_incident`). */
 const DEFAULT_CADENCE: Record<number, number> = { 1: 30, 2: 60, 3: 120, 4: 240, 5: 240 };
 
-export async function cadenceFor(db: Db, priority: number) {
+async function cadenceFor(db: Db, priority: number) {
   const { rows } = await db.query("SELECT value FROM settings WHERE key = 'major_incident'");
   const configured = rows[0]?.value?.update_minutes?.[priority];
   return Number.isInteger(configured) && configured >= 5 && configured <= 1440 ? configured : DEFAULT_CADENCE[priority] ?? 60;

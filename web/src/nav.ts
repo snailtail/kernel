@@ -6,7 +6,7 @@ import type { Home, Meta, NewKind, User } from './api';
 import { canEdit, isManager } from './session';
 
 export type Module = keyof Meta['modules'];
-export type IconName = 'home' | 'events' | 'incidents' | 'status' | 'candidates' | 'problems' | 'kedb' | 'changes' | 'actions' | 'improvements' | 'requests' | 'knowledge' | 'review' | 'pir' | 'dashboard' | 'reports' | 'services' | 'cmdb' | 'teams' | 'people' | 'rules' | 'help' | 'admin';
+type IconName = 'home' | 'events' | 'incidents' | 'status' | 'candidates' | 'problems' | 'kedb' | 'changes' | 'actions' | 'improvements' | 'requests' | 'knowledge' | 'review' | 'pir' | 'dashboard' | 'reports' | 'services' | 'cmdb' | 'teams' | 'people' | 'rules' | 'help' | 'admin';
 export type BadgeKey = 'my_work' | 'events' | 'incidents' | 'kedb' | 'actions' | 'reviews' | 'requests';
 
 export interface NavItem {

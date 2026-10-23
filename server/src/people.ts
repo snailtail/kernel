@@ -11,7 +11,7 @@ import { authorize, can } from './policy.js';
 import { registerProblemExtra, type Db } from './problems.js';
 
 const optionalText = (max: number) => z.string().trim().max(max);
-export const personFields = {
+const personFields = {
   name: z.string().trim().min(1).max(200),
   email: z.string().trim().max(200).email().nullable(),
   phone: optionalText(50),
@@ -48,7 +48,7 @@ export function withoutContact<T extends Record<string, any>>(p: T): T {
   const { email, phone, manager_id, manager, ...rest } = p;
   return rest as T;
 }
-export const contactFor = (user: User) => <T extends Record<string, any>>(p: T): T => (can(user.role, 'person.contact') ? p : withoutContact(p));
+const contactFor = (user: User) => <T extends Record<string, any>>(p: T): T => (can(user.role, 'person.contact') ? p : withoutContact(p));
 
 /** Audit keys for people: "person_name" and the other personal fields are digested by the audit trail. */
 const auditable = (o: Record<string, unknown>) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k === 'name' ? 'person_name' : k, v]));

@@ -14,7 +14,7 @@ import type { ListName } from './SavedViews';
 // uses it; a bulk change is previewed, applied in chunks, reported per record and can be undone for 30 seconds.
 
 
-export interface BulkSpec {
+interface BulkSpec {
   practice: Practice;
   /** "incident", "incidents". */
   noun: [string, string];
@@ -30,7 +30,7 @@ const CHANGE_STATUS = { draft: 'Draft', assess: 'Assess', authorize: 'Authorise'
 const RESOLUTION = { fixed: 'Fixed', workaround: 'Workaround applied', problem_fixed: 'Fixed by problem resolution', no_fault_found: 'No fault found', duplicate: 'Duplicate', cancelled: 'Cancelled' };
 
 /** What each list can do in bulk; the server checks the same per operation and role. */
-export const BULK: Record<string, BulkSpec> = {
+const BULK: Record<string, BulkSpec> = {
   incidents: { practice: 'incidents', noun: ['incident', 'incidents'], ops: ['assign', 'status', 'priority', 'link_problem', 'set_parent'], statuses: INCIDENT_STATUS, owner: 'assignee', teams: true },
   problems: { practice: 'problems', noun: ['problem', 'problems'], ops: ['assign', 'status', 'priority'], statuses: STATUS_LABEL, owner: 'assignee', teams: true },
   known_errors: { practice: 'problems', noun: ['known error', 'known errors'], ops: ['assign', 'status', 'priority'], statuses: STATUS_LABEL, owner: 'assignee', teams: true },
@@ -537,7 +537,7 @@ function Outcomes({ items, done }: { items: ItemResult[]; done?: boolean }): Rea
 // list's container lists the hidden ones in data-hide; styles.css has a rule per column (inline styles are not allowed
 // by the Content Security Policy), and a test checks that every column below has one.
 
-export const COLUMN_KEYS = [
+const COLUMN_KEYS = [
   'status', 'priority', 'sla', 'cis', 'assignee', 'problem', 'opened', 'service', 'age', 'updated', 'type', 'risk', 'window',
   'audience', 'used', 'helpful', 'env', 'criticality', 'team', 'sources', 'seen', 'host', 'source', 'count', 'incident',
 ] as const;

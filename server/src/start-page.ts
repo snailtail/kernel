@@ -11,9 +11,9 @@ import { authorize } from './policy.js';
 import { legacyRole } from './workflow.js';
 
 export const HOMES = ['my_work', 'dashboard', 'incidents', 'problems', 'changes', 'requests', 'improvements'] as const;
-export type Home = (typeof HOMES)[number];
+type Home = (typeof HOMES)[number];
 export const NEW_KINDS = ['incident', 'problem', 'change', 'article', 'improvement', 'request'] as const;
-export type NewKind = (typeof NEW_KINDS)[number];
+type NewKind = (typeof NEW_KINDS)[number];
 /** The roles that sign in to the web UI; integration accounts have no start page. */
 export const PERSON_ROLES = ['admin', 'manager', 'analyst', 'viewer'] as const;
 

@@ -1,17 +1,18 @@
 // One adapter per dev platform (#32): how its links look, where its status comes from, how its webhook deliveries are
 // verified, and which items and mentions they carry. dev.ts does the rest the same way for every platform.
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { timingSafeEqual } from 'node:crypto';
 import type { FastifyRequest } from 'fastify';
 import { outboundFetch } from './outbound.js';
+import { sha256 } from './core/hash.js';
 
 export const PLATFORMS = ['github', 'gitlab', 'azure_devops'] as const;
 export type Platform = (typeof PLATFORMS)[number];
-export const ITEM_TYPES = ['pull_request', 'issue', 'commit', 'workflow_run', 'release', 'deployment'] as const;
+const ITEM_TYPES = ['pull_request', 'issue', 'commit', 'workflow_run', 'release', 'deployment'] as const;
 export type ItemType = (typeof ITEM_TYPES)[number];
 
 /** A link as an item. `base` is where the platform lives (https://gitlab.com, a self-hosted GitLab…). */
 export interface ParsedItem { platform: Platform; base: string; repo: string; item_type: ItemType; key: string; url: string; data?: Record<string, unknown> }
-export interface ItemStatus { title?: string; state?: string; checks?: string | null; author?: string; data?: Record<string, unknown> }
+interface ItemStatus { title?: string; state?: string; checks?: string | null; author?: string; data?: Record<string, unknown> }
 export type UpsertItem = Omit<ParsedItem, 'base'> & ItemStatus & { environment?: string };
 
 /** What an adapter may do while handling a delivery; dev.ts owns the tables and the visibility rules. */
@@ -27,7 +28,7 @@ export interface EventContext {
 }
 
 /** One deployment as the platform reports it, on one scale: success, failure, cancelled, in_progress, queued. */
-export interface Deployment {
+interface Deployment {
   repo: string;
   key: string;
   url: string;
@@ -51,7 +52,7 @@ export type PostJson = (url: string, headers: Record<string, string>, body: unkn
 /** An outbound GET through the source's network settings: parsed JSON, or null when it failed (best effort). */
 export type GetJson = (url: string, headers: Record<string, string>) => Promise<any>;
 
-export interface Delivery { event: string; delivery: string; scope: string; ping?: boolean }
+interface Delivery { event: string; delivery: string; scope: string; ping?: boolean }
 
 export interface Adapter {
   label: string;
@@ -85,8 +86,8 @@ export const iso = (v: unknown) => (typeof v === 'string' && v && !Number.isNaN(
 /** Constant-time comparison of two secrets of any length (both hashed first, so the length leaks nothing). */
 export function sameSecret(given: string | undefined, expected: string) {
   if (!given) return false;
-  const a = createHash('sha256').update(given).digest();
-  const b = createHash('sha256').update(expected).digest();
+  const a = sha256(given);
+  const b = sha256(expected);
   return timingSafeEqual(a, b);
 }
 

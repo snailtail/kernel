@@ -282,7 +282,7 @@ export const groupSchema = z.object({
 const likeEscape = (v: string) => v.replace(/[\\%_]/g, (m) => '\\' + m);
 
 /** Builds a WHERE fragment for the rules, appending values to params. Returns null when there are no conditions. */
-export function ruleSql(rules: z.infer<typeof rulesSchema>, params: unknown[]): string | null {
+function ruleSql(rules: z.infer<typeof rulesSchema>, params: unknown[]): string | null {
   if (!rules.conditions.length) return null;
   const parts = rules.conditions.map((c) => {
     const p = (v: unknown) => { params.push(v); return `$${params.length}`; };

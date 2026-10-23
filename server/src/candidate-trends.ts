@@ -4,6 +4,7 @@
 import { z } from 'zod';
 import type { EvidenceRecord, Raw, Series } from './candidates.js';
 import type { Db } from './problems.js';
+import { plural } from './core/text.js';
 
 const days = (d: number, max = 30) => z.number().int().min(1).max(max).default(d);
 const count = (n: number) => z.number().int().min(2).max(1000).default(n);
@@ -51,7 +52,6 @@ export const TREND_RULES = {
 type Settings<R extends keyof typeof TREND_RULES> = z.infer<(typeof TREND_RULES)[R]['settings']>;
 
 const LIMIT = 200;
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const named = (name: string, ref: string | null) => (ref ? `${name} (${ref})` : name);
 const day = (d: Date) => d.toISOString().slice(0, 10);
 

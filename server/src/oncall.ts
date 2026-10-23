@@ -6,13 +6,12 @@
 // (trigger, acknowledge, resolve, with the incident ref as the dedup key) inside its transaction, and a worker
 // delivers it afterwards, so no HTTP call ever runs inside a transaction. The tool's own webhook tells Kernel who
 // acknowledged, which is the incident's first response for its SLA.
-import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import { audienceOf, BROADEST, mayCopyText } from './audience.js';
 import { audit } from './audit.js';
 import type { User } from './auth.js';
 import { businessMinutes, localDate, zonedToUtc } from './business-time.js';
-import { config as appConfig } from './config.js';
 import { asSystem, currentBulk, outsideBulk } from './context.js';
 import { query, tx } from './db.js';
 import { badRequest, forbidden, notFound } from './errors.js';
@@ -25,6 +24,8 @@ import type { Db } from './problems.js';
 import { decryptSecret, encryptSecret } from './secrets.js';
 import { loadCalendar } from './sla.js';
 import { standardSignature } from './webhooks.js';
+import { absoluteUrl } from './core/url.js';
+import { sha256Hex } from './core/hash.js';
 
 export const KINDS = ['pagerduty', 'opsgenie', 'grafana_oncall', 'webhook', 'rotation'] as const;
 type Kind = (typeof KINDS)[number];
@@ -82,7 +83,6 @@ export const rotationSchema = z.object({
 });
 export const overrideSchema = z.object({ user_id: z.number().int(), starts_at: z.iso.datetime({ offset: true }), ends_at: z.iso.datetime({ offset: true }), reason: z.string().trim().max(500).default('') });
 
-const hash = (token: string) => createHash('sha256').update(token).digest('hex');
 const PUBLIC = 'id, team_id, kind, config, rule, private_allow, enabled, created_at, updated_at, secret IS NOT NULL AS has_secret, inbound_token_hash IS NOT NULL AS has_inbound_token';
 
 // ---- Configuration (administrators; team leads manage their rotation) -----------------------
@@ -105,7 +105,7 @@ export async function getPaging(user: User, teamId: number) {
   return { target: rows[0] ?? null, rotation: rot[0] ?? null, overrides, inbound_url: rows[0] ? inboundUrl(rows[0].id) : null };
 }
 
-const inboundUrl = (id: number) => `${(appConfig.publicUrl || '').replace(/\/$/, '')}/api/paging/${id}/inbound`;
+const inboundUrl = (id: number) => absoluteUrl(`/api/paging/${id}/inbound`);
 
 /** Saves the team's paging target. Secrets are encrypted; the inbound token is returned once, when it is issued. */
 export async function savePaging(user: User, teamId: number, input: z.infer<typeof targetSchema>) {
@@ -130,7 +130,7 @@ export async function savePaging(user: User, teamId: number, input: z.infer<type
        ON CONFLICT (team_id) DO UPDATE SET kind = $2, config = $3, secret = $4, rule = $5, private_allow = $6, enabled = $7,
          inbound_token_hash = coalesce($9, paging_targets.inbound_token_hash), updated_at = now()
        RETURNING ${PUBLIC}`,
-      [...values, token ? hash(token) : null],
+      [...values, token ? sha256Hex(token) : null],
     );
     // What changed, never the secret.
     await audit(db, { entity_type: 'team', entity_ref: team.name, action: 'paging', changes: { kind: input.kind, config: cfg, rule: input.rule, enabled: input.enabled, secret: secret ? '[changed]' : undefined, inbound_token: token ? '[issued]' : undefined } });
@@ -428,11 +428,10 @@ async function coveredBy(page: { target_id: number; dedup_key: string }) {
 async function send(page: any, target: any, i: any, covered: string[]): Promise<{ status: number; skipped?: boolean; pagedUser?: number }> {
   const cfg = target.config;
   const secret = target.secret ? JSON.parse(decryptSecret(target.secret)) : {};
-  const base = (appConfig.publicUrl || '').replace(/\/$/, '');
   const many = covered.length > 1;
   // A bulk page (#125) is one page for many incidents: the tool knows it by the request's key, and links to the list.
   const key: string = page.dedup_key ?? i.ref;
-  const url = many ? `${base}/incidents?bulk=${key.slice(5)}&status=all` : `${base}/incidents/${i.ref}`;
+  const url = absoluteUrl(many ? `/incidents?bulk=${key.slice(5)}&status=all` : `/incidents/${i.ref}`);
   let title: string;
   if (many) {
     const { rows: by } = await query('SELECT display_name FROM users WHERE id = $1', [page.created_by]);
@@ -603,7 +602,7 @@ export function verifyPagerDutySignature(secret: string, raw: string, header: st
 export async function receiveInbound(targetId: number, auth: { token?: string; pagerDutySignature?: string; raw: string }, body: unknown) {
   const { rows } = await asSystem(() => query('SELECT id, team_id, kind, secret, inbound_token_hash FROM paging_targets WHERE id = $1', [targetId]));
   const t = rows[0];
-  const tokenOk = !!t?.inbound_token_hash && !!auth.token && timingSafeEqual(Buffer.from(hash(auth.token)), Buffer.from(t.inbound_token_hash));
+  const tokenOk = !!t?.inbound_token_hash && !!auth.token && timingSafeEqual(Buffer.from(sha256Hex(auth.token)), Buffer.from(t.inbound_token_hash));
   const pdSecret = t?.kind === 'pagerduty' && t.secret ? JSON.parse(decryptSecret(t.secret)).webhook_secret : undefined;
   const signatureOk = !!pdSecret && verifyPagerDutySignature(pdSecret, auth.raw, auth.pagerDutySignature);
   if (!tokenOk && !signatureOk) throw forbidden('Unknown paging target, token or signature');

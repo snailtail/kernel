@@ -17,7 +17,7 @@ const FLAG_TEXT: Record<string, string> = {
   personal_identity_number: 'may contain a personal identity number',
 };
 
-export const fileSize = (n: number) => (n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${Math.round(n / 1024)} kB` : `${(n / 1024 / 1024).toFixed(1)} MB`);
+const fileSize = (n: number) => (n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${Math.round(n / 1024)} kB` : `${(n / 1024 / 1024).toFixed(1)} MB`);
 
 /** Uploads a file to a record; the server decides the type from the content. */
 export async function uploadAttachment(recordRef: string, file: Blob, filename: string): Promise<Attachment> {
@@ -116,7 +116,7 @@ export function AttachmentsPanel({ recordRef, editable, canDelete }: { recordRef
 }
 
 /** A full-size view of one attachment, with the left/right keys moving between them. */
-export function AttachmentViewer({ attachment: a, siblings, onSelect, onClose, onDelete }: { attachment: Attachment; siblings: Attachment[]; onSelect: (a: Attachment) => void; onClose: () => void; onDelete?: () => void }) {
+function AttachmentViewer({ attachment: a, siblings, onSelect, onClose, onDelete }: { attachment: Attachment; siblings: Attachment[]; onSelect: (a: Attachment) => void; onClose: () => void; onDelete?: () => void }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement)?.tagName === 'INPUT') return;

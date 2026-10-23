@@ -6,6 +6,7 @@ import { forbidden, HttpError } from '../errors.js';
 import * as n from '../notifications.js';
 import { securityEvent } from '../security-events.js';
 import { checkSameOrigin } from '../security.js';
+import { esc } from '../core/text.js';
 
 export async function notificationRoutes(app: FastifyInstance) {
   app.get('/api/notifications', async (req) => {
@@ -23,7 +24,6 @@ export async function notificationRoutes(app: FastifyInstance) {
   await app.register(async (scope) => {
     scope.addContentTypeParser('application/x-www-form-urlencoded', { parseAs: 'string', bodyLimit: 16_384 }, (_req, body, done) => done(null, body));
     const params = z.object({ u: z.coerce.number().int(), e: z.string().max(40), t: z.string().max(100) });
-    const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
     // Every interpolated value is escaped (text) or URL-encoded and escaped (attribute).
     const page = (text: string, form = '') =>
       `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta name="color-scheme" content="light dark"><title>Kernel</title><body style="font-family:system-ui;max-width:32rem;margin:4rem auto;padding:0 1rem"><h1>Kernel</h1><p>${esc(text)}</p>${form}</body>`;

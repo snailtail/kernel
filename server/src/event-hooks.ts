@@ -1,7 +1,7 @@
 // Inbound monitoring webhooks (#30): one URL per configured source, authenticated with the source's token (header,
 // or query string for tools that cannot set headers), optionally signed (Standard Webhooks) with replay protection.
 // Each adapter parses its tool's payload strictly and produces normalised events; payloads are never stored.
-import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { User } from './auth.js';
@@ -13,11 +13,11 @@ import { authorize } from './policy.js';
 import { logger } from './log.js';
 import { moduleEnabled } from './modules.js';
 import { decryptSecret, encryptSecret } from './secrets.js';
+import { sha256Hex } from './core/hash.js';
 
-export const SOURCE_KINDS = ['generic', 'alertmanager', 'uptime_kuma', 'azure_monitor', 'op5'] as const;
+const SOURCE_KINDS = ['generic', 'alertmanager', 'uptime_kuma', 'azure_monitor', 'op5'] as const;
 type Kind = (typeof SOURCE_KINDS)[number];
 
-const sha256 = (v: string) => createHash('sha256').update(v).digest('hex');
 const SIGNATURE_TOLERANCE_S = 300;
 /** Events whose own timestamp is older than this are refused as replays (for formats that carry a send time). */
 const MAX_EVENT_AGE_MS = 60 * 60_000;
@@ -210,7 +210,7 @@ export async function createSource(user: User, input: z.infer<typeof sourceSchem
     const { rows } = await query(
       `INSERT INTO event_sources (name, kind, token_hash, token_prefix, signing_secret, ci_source_system, created_by)
        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-      [input.name, input.kind, sha256(token), token.slice(0, 16), secret ? encryptSecret(secret) : null, input.ci_source_system, user.id],
+      [input.name, input.kind, sha256Hex(token), token.slice(0, 16), secret ? encryptSecret(secret) : null, input.ci_source_system, user.id],
     );
     await audit(null, { entity_type: 'event_source', entity_ref: input.name, action: 'create', changes: { kind: input.kind, signed: input.signed, ci_source_system: input.ci_source_system } });
     // Shown once; only hashes (token) or encrypted values (secret) are stored.
@@ -224,7 +224,7 @@ export async function createSource(user: User, input: z.infer<typeof sourceSchem
 export async function rotateSource(user: User, id: number) {
   authorize(user, 'webhook.manage');
   const token = newToken();
-  const { rows } = await query('UPDATE event_sources SET token_hash = $2, token_prefix = $3, token_created_at = now() WHERE id = $1 RETURNING name', [id, sha256(token), token.slice(0, 16)]);
+  const { rows } = await query('UPDATE event_sources SET token_hash = $2, token_prefix = $3, token_created_at = now() WHERE id = $1 RETURNING name', [id, sha256Hex(token), token.slice(0, 16)]);
   if (!rows[0]) throw notFound('Source not found');
   await audit(null, { entity_type: 'event_source', entity_ref: rows[0].name, action: 'rotate_token', changes: {} });
   return { token };
@@ -282,7 +282,7 @@ export async function receiveHook(req: FastifyRequest, sourceId: number, raw: st
   const { rows } = await query('SELECT * FROM event_sources WHERE id = $1', [sourceId]);
   const source = rows[0];
   const token = tokenFrom(req);
-  const given = Buffer.from(sha256(token), 'hex');
+  const given = Buffer.from(sha256Hex(token), 'hex');
   const ok = !!source && !!token && timingSafeEqual(given, Buffer.from(source.token_hash, 'hex'));
   const reject = async (err: Error) => {
     if (source) await query('UPDATE event_sources SET rejected_count = rejected_count + 1 WHERE id = $1', [source.id]);

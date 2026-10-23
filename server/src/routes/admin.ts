@@ -155,11 +155,6 @@ export async function adminRoutes(app: FastifyInstance) {
     await webhooks.deleteWebhook(admin, Number(req.params.id), requireReason(body.reason));
     return { ok: true };
   });
-  // The old shape, kept for one release so callers learn where it moved.
-  app.delete<Id>('/api/webhooks/:id', async (req, reply) => {
-    requireUser(req, 'webhook.manage');
-    return reply.code(400).send({ error: 'Delete with POST /api/webhooks/:id/delete and { "reason": "…" } in the body' });
-  });
   app.post<Id>('/api/webhooks/:id/rotate', async (req) => {
     const admin = requireUser(req, 'webhook.manage');
     await requireStepUp(req);

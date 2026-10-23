@@ -7,7 +7,6 @@
 // - each Message-ID is handled once per mailbox, so a rerun never creates duplicates.
 // The sender is verified only by the receiving server's Authentication-Results (RFC 8601) with the authserv-id the
 // mailbox trusts; From alone proves nothing. The body is untrusted text (agents get it as untrusted_content).
-import { createHash } from 'node:crypto';
 import { convert } from 'html-to-text';
 import { simpleParser, type ParsedMail } from 'mailparser';
 import { z } from 'zod';
@@ -23,6 +22,8 @@ import { logger } from './log.js';
 import { notify, ownMail } from './notifications.js';
 import { resolvePerson } from './people.js';
 import { authorize } from './policy.js';
+import { clip } from './core/text.js';
+import { sha256Hex } from './core/hash.js';
 
 /** What a mailbox does with new mail; part of the connector's settings. */
 export const mailboxTargetSchema = z.object({
@@ -48,7 +49,6 @@ export interface Handled { outcome: Outcome; reason: string; ref?: string }
 
 const MAX_ATTACHMENTS = 10;
 type Queryable = { query: (sql: string, params?: unknown[]) => Promise<{ rowCount: number | null; rows: any[] }> };
-const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
 const domainOf = (address: string) => address.split('@').pop()!.toLowerCase();
 const header = (m: ParsedMail, name: string) => {
   const v = m.headers.get(name);
@@ -150,7 +150,7 @@ const viaEmail = <T>(fn: () => Promise<T>) => contextStore.run({ ...currentConte
  * was done; the mailbox then marks the message handled whatever the outcome (except an error).
  */
 export async function receiveMail(mailbox: { id: number; name: string }, owner: User, target: MailboxTarget, raw: Buffer): Promise<Handled> {
-  const fallbackId = `<sha256.${createHash('sha256').update(raw).digest('hex')}@${ownMail().messageIdDomain}.inbound>`;
+  const fallbackId = `<sha256.${sha256Hex(raw)}@${ownMail().messageIdDomain}.inbound>`;
   type Row = Partial<{ from_address: string; from_name: string; subject: string; body: string; verified: boolean; ref: string }>;
   // In the transaction that does the work, when there is one: the mail counts as handled only if the work commits.
   const record = async (messageId: string, row: Row, h: Handled, db: Queryable = { query }) => {

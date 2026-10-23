@@ -21,7 +21,6 @@ import { createProblemInTx, loadForUpdate, logActivity, registerProblemExtra, ty
 import { recordUrl, registerRecordType, type RecordType, type SearchHit } from './records.js';
 import { loadCalendar } from './sla.js';
 
-export const REVIEW_STATUSES = ['scheduled', 'draft', 'published', 'waived'] as const;
 export const ITEM_KINDS = ['factor', 'follow_up', 'gap'] as const;
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
 const text = z.string().max(20000);
@@ -553,7 +552,7 @@ export const listReviewsSchema = z.object({
  * Reviews that need the viewer: overdue, owned by them or by one of their teams (through the incident's team). The
  * menu badge and the list's "mine" view count the same rows.
  */
-export const ATTENTION_SQL = `r.status IN ('scheduled', 'draft') AND r.due < current_date
+const ATTENTION_SQL = `r.status IN ('scheduled', 'draft') AND r.due < current_date
   AND (r.owner_id = $1 OR i.team_id IN (SELECT team_id FROM team_members WHERE user_id = $1))`;
 
 export async function attentionCount(userId: number) {

@@ -18,7 +18,7 @@ export interface BulkResult {
 
 export type Post = <T>(path: string, body: unknown) => Promise<T>;
 
-export const CHUNK = 200;
+const CHUNK = 200;
 
 /**
  * Sends ids (or undo items) in chunks of 200, so a big selection shows progress and each request stays well within

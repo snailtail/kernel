@@ -24,9 +24,9 @@ import { typeForRef } from './records.js';
 import { decryptSecret, encryptSecret } from './secrets.js';
 
 
-export const TASKS = { summarize: 'Summaries ("catch me up")', analyze_log: 'Log analysis', review_wording: 'Blameless wording hints in post-incident reviews' } as const;
+const TASKS = { summarize: 'Summaries ("catch me up")', analyze_log: 'Log analysis', review_wording: 'Blameless wording hints in post-incident reviews' } as const;
 export type Task = keyof typeof TASKS;
-export const DATA_CLASSES = ['internal', 'personal', 'confidential', 'restricted'] as const;
+const DATA_CLASSES = ['internal', 'personal', 'confidential', 'restricted'] as const;
 type DataClass = (typeof DATA_CLASSES)[number];
 
 interface Provider {
@@ -40,7 +40,7 @@ declare const prepared: unique symbol;
 /** Model input that has passed the gate. Only prepareForModel() makes one; callModel() takes nothing else. */
 export type PreparedInput = { readonly [prepared]: true; task: Task; system: string; prompt: string; classes: DataClass[]; refs: string[] };
 
-export interface InputPart {
+interface InputPart {
   label: string;
   text: string;
   /** From a restricted record (or its attachment). */
@@ -57,7 +57,7 @@ export interface InputPart {
  * the provider may not receive. Redacts secrets in everything, and puts all record text in delimited blocks marked as
  * untrusted data, so instructions inside it are not followed.
  */
-export function prepareForModel(task: Task, provider: Provider, instructions: string, parts: InputPart[]): PreparedInput {
+function prepareForModel(task: Task, provider: Provider, instructions: string, parts: InputPart[]): PreparedInput {
   const classes = new Set<DataClass>(['internal']);
   for (const p of parts) {
     if (p.restricted) classes.add('restricted');
@@ -198,7 +198,7 @@ export async function summarize(user: User, ref: string) {
 }
 
 /** Keeps what matters in a log: errors, warnings and their context, with repeated lines collapsed. */
-export function prefilterLog(lines: string[], maxLines = 400) {
+function prefilterLog(lines: string[], maxLines = 400) {
   const normalise = (l: string) => l.replace(/\d+/g, '#').replace(/\s+/g, ' ').trim();
   const important = (l: string) => /\b(ERROR|FATAL|CRIT|WARN|Exception|Traceback|panic|refused|timed? ?out|denied|fail)/i.test(l);
   const keep = new Set<number>();

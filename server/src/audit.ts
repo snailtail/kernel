@@ -8,6 +8,7 @@ import { afterCommit, beforeCommit, query, tx } from './db.js';
 import { badRequest } from './errors.js';
 import { logger } from './log.js';
 import { fromAudit, originOf } from './security-events.js';
+import { sha256 } from './core/hash.js';
 
 type Db = { query: (sql: string, params?: unknown[]) => Promise<{ rows: any[] }> };
 
@@ -54,7 +55,7 @@ const chainKey = (id: string, version: number) => {
   const k = keyById(id);
   if (!k) return null;
   // Version 2 used sha256 of a label and the key; version 3 derives with HKDF.
-  return version === 2 ? createHash('sha256').update('kernel-audit-chain:' + k.raw).digest() : derive('kernel-audit-chain', k);
+  return version === 2 ? sha256('kernel-audit-chain:' + k.raw) : derive('kernel-audit-chain', k);
 };
 export const currentHashVersion = () => (activeKey() ? 3 : 1);
 

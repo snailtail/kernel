@@ -29,7 +29,7 @@ export async function refreshVisibility() {
   return state;
 }
 
-export const visibilitySettings = async () => (Date.now() - loadedAt > 30_000 ? refreshVisibility() : state);
+const visibilitySettings = async () => (Date.now() - loadedAt > 30_000 ? refreshVisibility() : state);
 
 /**
  * The viewer string for a signed-in user: id, role, team ids (read per request, so removing someone from a team

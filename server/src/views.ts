@@ -25,7 +25,7 @@ interface BuiltIn {
 }
 
 /** Built-in views: the queues most people start from. Queries use the list page's own URL parameters. */
-export const BUILT_IN: Record<ListName, BuiltIn[]> = {
+const BUILT_IN: Record<ListName, BuiltIn[]> = {
   problems: [
     { key: 'needs-decision', name: 'Needs a decision', query: 'needs_decision=true' },
     { key: 'major', name: 'Major problems', query: 'is_major=true' },

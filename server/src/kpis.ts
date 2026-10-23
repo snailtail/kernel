@@ -9,12 +9,12 @@ import { authorize, can } from './policy.js';
 import { hiddenRecordsExist } from './visibility.js';
 
 export const TILES = ['mttr', 'sla', 'change_success', 'recurring', 'problems_resolved', 'major_open', 'requests_fulfilled', 'satisfaction'] as const;
-export type TileId = (typeof TILES)[number];
+type TileId = (typeof TILES)[number];
 const PERIODS = 6;
 
 export const kpiSchema = z.object({ period: z.enum(['month', 'week']).default('month') });
 
-export interface Tile {
+interface Tile {
   id: TileId;
   label: string;
   /** The latest period's value (or the current one, for "open now" tiles). */

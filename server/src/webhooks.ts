@@ -9,6 +9,7 @@ import { audit } from './audit.js';
 import { minimiseData } from './minimise.js';
 import { checkUrl, outboundFetch } from './outbound.js';
 import { decryptSecret, encryptSecret, isEncrypted, secretsConfigured } from './secrets.js';
+import { absoluteUrl } from './core/url.js';
 
 type Db = { query: (sql: string, params?: unknown[]) => Promise<{ rows: any[]; rowCount: number | null }> };
 
@@ -50,7 +51,7 @@ export function eventFor(kind: string, data: any): EventType {
   }
 }
 
-const problemUrl = (ref: string) => (config.publicUrl ? `${config.publicUrl.replace(/\/$/, '')}/problems/${ref}` : null);
+const problemUrl = (ref: string) => (config.publicUrl ? absoluteUrl(`/problems/${ref}`) : null);
 
 const SUMMARY_MAX = 200;
 const summaryFor = (event: EventType, summary: string) =>

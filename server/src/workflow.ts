@@ -15,7 +15,7 @@ export const EC_DECISIONS = ['pending', 'fix', 'accept', 'defer'] as const;
 export const WORKAROUND_EFFECTIVENESS = ['effective', 'partial', 'ineffective'] as const;
 
 export const CLOSURE_CODES = ['resolved', 'workaround_accepted', 'duplicate', 'cancelled', 'no_fix'] as const;
-export type ClosureCode = (typeof CLOSURE_CODES)[number];
+type ClosureCode = (typeof CLOSURE_CODES)[number];
 
 export const TRANSITIONS: Record<Status, Status[]> = {
   new: ['analysis', 'closed'],
