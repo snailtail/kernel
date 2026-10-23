@@ -3,7 +3,7 @@
 // contributing factors into problems and follow-ups into actions, linked both ways. One per incident: scheduled when
 // a major incident is resolved, optional for any other. Shared by REST, MCP and the web UI.
 import { z } from 'zod';
-import { insertAction } from './actions.js';
+import { actionsOf, insertAction, type Parent } from './actions.js';
 import { audit } from './audit.js';
 import type { User } from './auth.js';
 import { audienceOf, copyText, mayCopyText, startNarrow, titleAudience, whyNotForEveryone } from './audience.js';
@@ -189,9 +189,10 @@ export async function getReview(user: User, ref: string) {
     query(
       `SELECT x.id, x.kind, x.body, x.created_at, u.display_name AS created_by, p.ref AS problem_ref, p.title AS problem_title, p.status AS problem_status,
               a.id AS action_id, a.title AS action_title, a.status AS action_status, a.due_date::text AS action_due, o.display_name AS action_owner, ap.ref AS action_problem_ref,
+              a.parent_kind AS action_parent_kind,
               m.ref AS improvement_ref, m.title AS improvement_title, m.status AS improvement_status
        FROM incident_review_items x LEFT JOIN users u ON u.id = x.created_by LEFT JOIN problems p ON p.id = x.problem_id
-       LEFT JOIN problem_actions a ON a.id = x.action_id LEFT JOIN users o ON o.id = a.owner_id LEFT JOIN problems ap ON ap.id = a.problem_id
+       LEFT JOIN actions a ON a.id = x.action_id LEFT JOIN users o ON o.id = a.owner_id LEFT JOIN problems ap ON a.parent_kind = 'problem' AND ap.id = a.parent_id
        LEFT JOIN improvements m ON m.id = x.improvement_id
        WHERE x.review_id = $1 ORDER BY x.kind, x.id`,
       [r.id],
@@ -200,7 +201,7 @@ export async function getReview(user: User, ref: string) {
     timeline(user, ref),
     impactFacts(user, ref),
   ]);
-  const comments = await commentsTagged('incident', r.incident_id, 'review', r.review_ref);
+  const [comments, actions] = await Promise.all([commentsTagged('incident', r.incident_id, 'review', r.review_ref), actionsOf('review', r.id)]);
   const name = (id: number | null) => owner.rows.find((u) => u.id === id)?.display_name ?? null;
   const dueIn = r.due ? Math.round((Date.parse(r.due) - Date.parse(new Date().toISOString().slice(0, 10))) / 86400_000) : null;
   const review = {
@@ -210,6 +211,7 @@ export async function getReview(user: User, ref: string) {
     attendees: r.attendees, what_happened: r.what_happened, impact_summary: r.impact_summary, went_well: r.went_well, was_hard: r.was_hard, lucky: r.lucky,
     waived_reason: r.waived_reason, published_at: r.published_at, published_by: name(r.published_by),
     items: items.rows,
+    actions,
     comments,
     may_finish: mayFinish(user, r),
     context: { timeline: t.entries, impact: facts.text, problem_ref: facts.incident.problem_ref ?? null },
@@ -378,7 +380,7 @@ export async function itemToProblem(user: User, ref: string, itemId: number, inp
   return getReview(user, ref);
 }
 
-/** Follow-up → action on a problem: the one named, the factor's, or the incident's. */
+/** Follow-up → action: on the problem named, otherwise on the review itself. */
 export async function itemToAction(user: User, ref: string, itemId: number, input: z.infer<typeof itemActionSchema>) {
   ref = await incidentRefOf(ref);
   authorize(user, 'incident.update');
@@ -391,28 +393,24 @@ export async function itemToAction(user: User, ref: string, itemId: number, inpu
     if (item.kind === 'factor') throw badRequest('A contributing factor becomes a problem; add the follow-up as its own item');
     if (item.action_id) throw conflict('This follow-up already has an action');
     if (item.improvement_id) throw conflict('This follow-up became an improvement');
-    let problemId: number | null = null;
-    if (input.problem) problemId = (await loadForUpdate(db, input.problem)).id;
-    else {
-      const { rows: factor } = await db.query("SELECT problem_id FROM incident_review_items WHERE review_id = $1 AND kind = 'factor' AND problem_id IS NOT NULL ORDER BY id LIMIT 1", [r.id]);
-      problemId = factor[0]?.problem_id ?? r.problem_id;
-    }
-    if (!problemId) throw badRequest('Actions live on a problem: turn a contributing factor into a problem first, or name one');
-    const { rows: p } = await db.query('SELECT id, ref, restricted, classification FROM problems WHERE id = $1 FOR UPDATE', [problemId]);
+    // On the problem named, otherwise on the review itself (#184): a follow-up needs no problem.
+    const problem = input.problem ? await loadForUpdate(db, input.problem) : null;
+    const parent: Parent = problem ? { kind: 'problem', id: problem.id, ref: problem.ref } : { kind: 'review', id: r.id, ref: r.review_ref };
     // On a problem more people can read, the action says where it came from but not what the review said.
-    const wide = !mayCopyText(await audienceOf(db, r.ref), await audienceOf(db, p[0].ref));
-    if (wide && !input.title) throw badRequest(`${p[0].ref} is readable by more people than ${r.ref}: give the action a title of its own`);
+    const wide = !!problem && !mayCopyText(await audienceOf(db, r.ref), await audienceOf(db, problem.ref));
+    if (wide && !input.title) throw badRequest(`${parent.ref} is readable by more people than ${r.ref}: give the action a title of its own`);
     // Words the caller cannot read stay behind too (#158), so the action needs a title of its own.
     const text = wide ? null : await readableText(db, user, r.review_ref, { body: item.body }, 'review-item-to-action');
     if (!wide && !text && !input.title) throw badRequest(`${r.review_ref} is confidential and you cannot read this follow-up: give the action a title of its own`);
-    const actionId = await insertAction(db, user, p[0], {
+    const actionId = await insertAction(db, user, parent, {
       title: (input.title ?? text!.body.split('\n')[0]).slice(0, 300),
       description: text ? `Follow-up from the post-incident review of ${r.ref}:\n\n${text.body}` : `Follow-up from the post-incident review of ${r.ref}.${wide ? '' : ` ${notCopied(r.review_ref)}`}`,
       ...(input.owner_id !== undefined ? { owner_id: input.owner_id } : {}),
       ...(input.due_date !== undefined ? { due_date: input.due_date } : {}),
     });
     await db.query('UPDATE incident_review_items SET action_id = $2 WHERE id = $1', [item.id, actionId]);
-    await logIncident(db, r.incident_id, user.id, 'link', `Follow-up → action on ${p[0].ref}`, { kind: 'problem', reference: p[0].ref, action: 'add', review_item: item.id, action_id: actionId });
+    // An action on the review is in the incident's history already (insertAction); one on a problem is a link too.
+    if (problem) await logIncident(db, r.incident_id, user.id, 'link', `Follow-up → action on ${problem.ref}`, { kind: 'problem', reference: problem.ref, action: 'add', review_item: item.id, action_id: actionId });
   });
   return getReview(user, ref);
 }
@@ -672,6 +670,7 @@ const REVIEW_TYPE: RecordType = {
   history: { entityType: 'incident_review', refs: (r) => [String(r.ref), String(r.incident_ref)] },
   // Its notes go in its incident's history; it is as confidential as its incident (confidential.ts).
   table: 'incident_reviews',
+  notesIn: { type: 'incident', fk: 'incident_id' },
   module: 'incident',
   comment: addReviewComment,
 };

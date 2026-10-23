@@ -49,7 +49,7 @@ export function registerReviewsTools({ user, tool }: McpContext) {
   );
   tool(
     'review_follow_up_to_action',
-    "Turn a follow-up (or gap) into an action with an owner (username) and due date, on the named problem, else the first factor's problem, else the incident's problem.",
+    "Turn a follow-up (or gap) into an action with an owner (username) and due date, on the named problem, else on the review itself.",
     { ref: z.string(), item_id: z.number().int(), title: z.string().optional(), owner: z.string().optional(), due_date: z.string().optional(), problem: z.string().optional() },
     false,
     async ({ ref, item_id, owner, ...args }) => reviewForAgent(await reviews.itemToAction(user, ref, item_id, reviews.itemActionSchema.parse({ ...args, ...(owner !== undefined ? { owner_id: await resolveAssignee(owner) } : {}) }))),

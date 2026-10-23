@@ -111,7 +111,7 @@ interface RedactResult {
 }
 const PLACE_LABEL: Record<string, string> = {
   problems: 'record fields', incidents: 'record fields', changes: 'record fields', problem_activity: 'comments and history', incident_activity: 'comments and history',
-  change_activity: 'comments and history', problem_actions: 'actions', problem_analyses: 'analyses', problem_links: 'links', incident_links: 'links', change_links: 'links',
+  change_activity: 'comments and history', actions: 'actions', problem_analyses: 'analyses', problem_links: 'links', incident_links: 'links', change_links: 'links',
   change_votes: 'votes', attachments: 'text attachments', notifications: 'in-app notifications', webhook_deliveries: 'queued and stored webhook payloads',
 };
 

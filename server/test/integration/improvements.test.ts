@@ -82,7 +82,7 @@ describe('continual improvement register (#52)', { skip }, () => {
     const chg = (await analyst.post('/api/changes', { title: 'Add canary stage' })).body.ref;
     const prb = (await analyst.post('/api/problems', { title: 'Deploys break checkout' })).body.ref;
     ok(await analyst.post(`/api/problems/${prb}/actions`, { title: 'Write the canary runbook' }));
-    const actionId = (await ownerQuery("SELECT a.id FROM problem_actions a JOIN problems p ON p.id = a.problem_id WHERE p.ref = $1", [prb])).rows[0].id;
+    const actionId = (await ownerQuery("SELECT a.id FROM actions a JOIN problems p ON a.parent_kind = 'problem' AND p.id = a.parent_id WHERE p.ref = $1", [prb])).rows[0].id;
     ok(await analyst.post(`/api/improvements/${ref}/links`, { kind: 'change', reference: chg }));
     ok(await analyst.post(`/api/records/${ref}/links`, { to: String(actionId), kind: 'action' }));
     ok(await analyst.post(`/api/records/${prb}/links`, { to: ref }));

@@ -67,7 +67,7 @@ const TOOL_ACTIONS: Record<string, Action> = {
   whoami: 'meta.read', list_reference_data: 'meta.read', search: 'meta.read', get_record: 'meta.read', next_steps: 'meta.read',
   my_work: 'problem.read', link_records: 'problem.link',
   search_problems: 'problem.read', get_problem: 'problem.read', get_history: 'meta.read', get_impact: 'ci.read', find_similar_problems: 'problem.read',
-  export_problem: 'problem.read', list_actions: 'problem.read', get_dashboard: 'report.read',
+  export_problem: 'problem.read', list_actions: 'action.read', get_dashboard: 'report.read',
   search_known_errors: 'kedb.read', get_report: 'report.read', get_review_agenda: 'review.read',
   list_problem_candidates: 'candidate.read', query_audit_log: 'audit.read', query_security_events: 'security.read', get_security_alerting: 'security.read',
   create_problem: 'problem.create', update_problem: 'problem.update', transition_problem: 'problem.transition',

@@ -118,7 +118,7 @@ export async function report({ from, to, bucket }: ReportParams) {
          count(*) FILTER (WHERE ${inPeriod('created_at')})::int AS created,
          count(*) FILTER (WHERE status = 'open' AND due_date < current_date)::int AS overdue_now,
          count(*) FILTER (WHERE status = 'open')::int AS open_now
-       FROM problem_actions`,
+       FROM actions WHERE parent_kind = 'problem'`,
       range,
     ),
     query(
@@ -188,7 +188,7 @@ export async function problemsCsv({ from, to }: ReportParams) {
        p.ec_decision, p.workaround_effectiveness,
        (SELECT count(*) FROM problem_links l WHERE l.problem_id = p.id AND l.kind = 'incident') AS incidents,
        (SELECT count(*) FROM problem_links l WHERE l.problem_id = p.id AND l.kind = 'event') AS events,
-       (SELECT count(*) FROM problem_actions x WHERE x.problem_id = p.id AND x.status = 'open') AS open_actions
+       (SELECT count(*) FROM actions x WHERE x.parent_kind = 'problem' AND x.parent_id = p.id AND x.status = 'open') AS open_actions
      FROM problems p LEFT JOIN categories c ON c.id = p.category_id LEFT JOIN users a ON a.id = p.assignee_id
      WHERE p.created_at < $2::date + 1 AND coalesce(p.closed_at, 'infinity') >= $1::date
      ORDER BY p.id`,

@@ -104,7 +104,7 @@ describe('confidential records (#61)', { skip }, () => {
     }
     await mcp.close();
     assert.deepEqual(await text(), was, 'the text is unchanged');
-    assert.equal((await ownerQuery('SELECT description FROM problem_actions WHERE id = $1', [action.body.id])).rows[0].description, SECRET_TEXT);
+    assert.equal((await ownerQuery('SELECT description FROM actions WHERE id = $1', [action.body.id])).rows[0].description, SECRET_TEXT);
   });
 
   test('list filters are not an oracle either: problems, the KEDB, incidents and changes (MCP too)', async () => {
@@ -208,7 +208,7 @@ describe('confidential records (#61)', { skip }, () => {
     // A follow-up → action on that problem needs a title of its own, and leaves the words behind.
     assert.equal((await analyst2.post(`/api/incidents/${inc}/review/items/${follow}/action`, { problem: p.ref })).status, 400);
     ok(await analyst2.post(`/api/incidents/${inc}/review/items/${follow}/action`, { problem: p.ref, title: 'Check the laptop' }));
-    const action = (await ownerQuery('SELECT a.title, a.description FROM incident_review_items x JOIN problem_actions a ON a.id = x.action_id WHERE x.id = $1', [follow])).rows[0];
+    const action = (await ownerQuery('SELECT a.title, a.description FROM incident_review_items x JOIN actions a ON a.id = x.action_id WHERE x.id = $1', [follow])).rows[0];
     assert.equal(`${action.title} ${action.description}`.includes(SECRET_TEXT), false);
     // A gap → improvement.
     ok(await analyst2.post(`/api/incidents/${inc}/review/items/${gap}/improvement`, {}));

@@ -192,7 +192,7 @@ export function MyWorkPage() {
           <section className="card">
             <h2>My actions <span className="count">{data.actions.length}</span></h2>
             {data.actions.length === 0 && <p className="empty">No open actions.</p>}
-            <ActionList actions={data.actions} editable showProblem onChange={() => reload()} />
+            <ActionList actions={data.actions} editable showParent onChange={() => reload()} />
           </section>
         </div>
       ),

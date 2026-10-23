@@ -51,6 +51,7 @@ import { devRoutes } from './routes/dev.js';
 import { aiRoutes } from './routes/ai.js';
 import { metaRoutes } from './routes/meta.js';
 import { problemRoutes } from './routes/problems.js';
+import { actionRoutes } from './routes/actions.js';
 import { originOf, recordResponse } from './security-events.js';
 
 declare module 'fastify' {
@@ -137,6 +138,7 @@ export async function buildApp(options: { logLevel?: string; serveWeb?: boolean 
   await app.register(authRoutes);
   await app.register(metaRoutes);
   await app.register(problemRoutes);
+  await app.register(actionRoutes);
   await app.register(adminRoutes);
   await app.register(integrationRoutes);
   await app.register(candidateRoutes);

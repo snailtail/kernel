@@ -117,9 +117,14 @@ type ActionStatus = 'open' | 'done' | 'cancelled';
 
 export interface Action {
   id: number;
-  problem_id: number;
+  /** The record it follows up (#184): its kind, ref, title and page. */
+  parent_kind: 'problem' | 'incident' | 'change' | 'request' | 'improvement' | 'review';
+  parent_id: number;
   ref: string;
-  problem_title: string;
+  parent_title: string;
+  path: string;
+  problem_id: number | null;
+  problem_title: string | null;
   title: string;
   description: string;
   owner_id: number | null;

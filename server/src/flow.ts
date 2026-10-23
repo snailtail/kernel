@@ -41,7 +41,7 @@ const COUNTS_SQL = `SELECT (SELECT count(*) FROM configuration_items WHERE statu
     (SELECT count(*) FROM problems WHERE status = 'resolved')::int AS c14,
     (SELECT count(*) FROM problems WHERE status = 'known_error' AND coalesce(ec_decision, 'pending') = 'pending' AND known_error_at < now() - interval '14 days')::int AS c15,
     (SELECT count(*) FROM problems WHERE assignee_id IS NULL AND status IN ('new', 'analysis'))::int AS c16,
-    (SELECT count(*) FROM problem_actions WHERE status = 'open' AND due_date < current_date)::int AS c17,
+    (SELECT count(*) FROM actions WHERE status = 'open' AND due_date < current_date)::int AS c17,
     (SELECT count(*) FROM incidents WHERE category_id IS NULL AND status NOT IN ('resolved', 'closed'))::int AS c18,
     (SELECT count(*) FROM incidents i WHERE priority <= 2 AND status NOT IN ('resolved', 'closed') AND NOT EXISTS (SELECT 1 FROM incident_cis x WHERE x.incident_id = i.id))::int AS c19,
     (SELECT count(*) FROM incident_reviews WHERE status IN ('scheduled', 'draft'))::int AS c21,

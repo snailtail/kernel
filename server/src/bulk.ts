@@ -178,15 +178,13 @@ const DEFS: Record<Practice, PracticeDef> = {
     },
   },
   actions: {
-    read: 'problem.read',
+    read: 'action.read',
     rows: async (ids) =>
-      (await query('SELECT a.id::text AS id, a.title, a.status, a.owner_id, p.ref AS problem FROM problem_actions a JOIN problems p ON p.id = a.problem_id WHERE a.id = ANY($1::int[])', [
-        ids.filter((i) => /^\d+$/.test(i)).map(Number),
-      ])).rows,
-    select: async (_user, f, limit) => (await actions.listActions(actions.listActionsSchema.parse(params(f, limit)))).map((r: any) => String(r.id)),
+      (await actions.actionsById(ids.filter((i) => /^\d+$/.test(i)).map(Number))).map((a) => ({ id: String(a.id), title: a.title, status: a.status, owner_id: a.owner_id, parent: a.ref })),
+    select: async (user, f, limit) => (await actions.listActions(user, actions.listActionsSchema.parse(params(f, limit)))).map((r: any) => String(r.id)),
     ops: {
-      assign: { action: 'action.write', noop: assignNoop('owner_id'), undo: assignUndo('owner_id'), apply: (u, r, op) => actions.updateAction(u, r.problem, Number(r.id), op.assignee_id !== undefined ? { owner_id: op.assignee_id } : {}) },
-      status: { action: 'action.write', noop: statusNoop, undo: (row) => ({ op: 'status', to: row.status, details: {} }), apply: (u, r, op) => actions.updateAction(u, r.problem, Number(r.id), { status: z.enum(actions.ACTION_STATUSES).parse(op.to) }) },
+      assign: { action: 'action.write', noop: assignNoop('owner_id'), undo: assignUndo('owner_id'), apply: (u, r, op) => actions.updateAction(u, Number(r.id), op.assignee_id !== undefined ? { owner_id: op.assignee_id } : {}) },
+      status: { action: 'action.write', noop: statusNoop, undo: (row) => ({ op: 'status', to: row.status, details: {} }), apply: (u, r, op) => actions.updateAction(u, Number(r.id), { status: z.enum(actions.ACTION_STATUSES).parse(op.to) }) },
     },
   },
   articles: {

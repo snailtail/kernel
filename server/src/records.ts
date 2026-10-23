@@ -21,8 +21,11 @@ export interface SearchHit {
 /** One entry in a record's activity log, as logActivity wrote it. */
 export interface ActivityEntry { id: number; recordId: number; userId: number | null; kind: string; body: string; data: object }
 
-/** A table that holds a record's free text: the rows of `key` = the record's id (redaction, #61). */
-export interface TextPlace { table: string; key: string; columns: string[]; json?: string[] }
+/**
+ * A table that holds a record's free text: the rows of `key` = the record's id (redaction, #61); in a register shared
+ * by several kinds (actions, #184) only those with `parent_kind` = `parentKind`.
+ */
+export interface TextPlace { table: string; key: string; columns: string[]; json?: string[]; parentKind?: string }
 
 /**
  * Who works on a record (confidential text, #61): the assignee column and the team column, or null where the kind
@@ -59,6 +62,8 @@ export interface RecordType {
    * (`after`: touch, audit, rules, notices…).
    */
   activity?: { table: string; fk: string; columns?: string[]; limit?: number; after?: (db: Db, entry: ActivityEntry) => Promise<void> };
+  /** For a kind without a log of its own: the kind whose log holds its notes, and the column of its table that points there. */
+  notesIn?: { type: string; fk: string };
   /** The module it belongs to, when it can be switched off (#36). */
   module?: Module;
   /**

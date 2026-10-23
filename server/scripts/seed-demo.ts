@@ -214,7 +214,7 @@ for (const d of demos) {
   if (target >= 3) await problems.transitionProblem(by, p.ref, { to: 'resolved', resolution: d.resolution });
   for (const [title, owner, due, done] of d.actions ?? []) {
     const r = await actions.createAction(by, p.ref, { title, owner_id: users[owner].id, due_date: due === null ? null : day(due) });
-    if (done) await actions.updateAction(users[owner], p.ref, r.actions.find((a: { title: string }) => a.title === title)!.id, { status: 'done' });
+    if (done) await actions.updateAction(users[owner], r.id, { status: 'done' });
   }
   if (target >= 4) await problems.transitionProblem(pm, p.ref, { to: 'closed', closure_code: d.closure, acknowledge_open_actions: true });
 

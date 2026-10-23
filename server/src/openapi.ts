@@ -115,9 +115,12 @@ export const OPERATIONS: Op[] = [
   { method: 'delete', path: '/api/problems/:ref/watch', tag: 'Problems', summary: 'Stop watching a problem' },
   { method: 'get', path: '/api/problems/:ref/export.md', tag: 'Problems', summary: 'Export a problem as Markdown', produces: 'text/markdown' },
 
-  { method: 'post', path: '/api/problems/:ref/actions', tag: 'Actions', summary: 'Add a follow-up action', body: actions.createActionSchema },
-  { method: 'patch', path: '/api/problems/:ref/actions/:id', tag: 'Actions', summary: 'Update, complete, cancel or reopen an action', body: actions.updateActionSchema },
-  { method: 'get', path: '/api/actions', tag: 'Actions', summary: 'Actions across problems', query: actions.listActionsSchema },
+  { method: 'get', path: '/api/actions', tag: 'Actions', summary: 'Follow-up actions on every record you may read (parent: one record\'s, by ref)', query: actions.listActionsSchema },
+  { method: 'post', path: '/api/actions', tag: 'Actions', summary: 'Add a follow-up action to a problem, incident, change, request, improvement or post-incident review (parent: its ref)', body: actions.newActionSchema },
+  { method: 'get', path: '/api/actions/:id', tag: 'Actions', summary: 'One action, with its parent record' },
+  { method: 'patch', path: '/api/actions/:id', tag: 'Actions', summary: 'Update, complete, cancel or reopen an action', body: actions.updateActionSchema },
+  { method: 'post', path: '/api/problems/:ref/actions', tag: 'Actions', summary: 'Add a follow-up action to a problem (returns the problem)', body: actions.createActionSchema },
+  { method: 'patch', path: '/api/problems/:ref/actions/:id', tag: 'Actions', summary: 'Update an action on a problem (returns the problem)', body: actions.updateActionSchema },
 
   { method: 'post', path: '/api/problems/:ref/analyses', tag: 'Analyses', summary: 'Start a root cause analysis (five_whys, ishikawa, kepner_tregoe, timeline)', body: analyses.createAnalysisSchema },
   { method: 'patch', path: '/api/problems/:ref/analyses/:id', tag: 'Analyses', summary: 'Update an analysis (data replaces the whole structure)', body: analyses.updateAnalysisSchema },
