@@ -19,6 +19,10 @@ import { formatBody } from './webhooks.js';
 import { absoluteUrl } from './core/url.js';
 import { clip } from './core/text.js';
 import { backoffMinutes, processOutbox } from './core/outbox.js';
+import { provided } from './core/hooks.js';
+
+/** Links to decide from the message itself (#48), from approval-links.ts (which depends on changes and approvals, and so on this module). */
+export const approvalLinks = provided<[n: { ref: string; approval_id: number | null }, userId: number, channel: 'email' | 'chat', deliveryId: number], ApprovalLinks | 'sign_in' | null>(() => null);
 
 /** The events people can be notified about, with quiet defaults per channel. */
 export const EVENTS = {
@@ -347,8 +351,7 @@ export async function processNotificationDeliveries(limit = 20) {
       const n = ns[0];
       if (!n) throw new Error('Notification is gone');
       // Something to approve: links to decide from the message itself, minted per delivery (#48).
-      // Loaded lazily: approval-links depends on changes and approvals, which depend on this module.
-      const links = n.event === 'approval_needed' ? await (await import('./approval-links.js')).mintApprovalLink(n, user.id, d.channel, d.id) : null;
+      const links = n.event === 'approval_needed' ? await approvalLinks.call(n, user.id, d.channel, d.id) : null;
       if (d.channel === 'email') {
         // Recorded first, so a reply to this mail finds its record even if the send is retried (#48 inbound).
         const messageId = `<${randomUUID()}@${ownMail().messageIdDomain}>`;

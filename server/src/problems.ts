@@ -19,6 +19,7 @@ import { enqueue as enqueueWebhooks, eventFor } from './webhooks.js';
 import { checkAssigneeInTeam, validTeam } from './teams.js';
 import { restrictedByCategory } from './visibility.js';
 import { checkTransition, CLOSURE_CODES, EC_DECISIONS, STATUSES, WORKAROUND_EFFECTIVENESS, type Status } from './workflow.js';
+import { provided } from './core/hooks.js';
 
 export const LINK_KINDS = ['incident', 'event', 'change', 'problem'] as const;
 
@@ -242,6 +243,9 @@ export async function listProblems(filter: z.infer<typeof listSchema>) {
   return rows;
 }
 
+/** Links to other systems get their URL from the system's template (integrations.ts). */
+export const linkUrls = provided<[links: any[]], any[]>((links) => links);
+
 /** Related data other modules add to a problem (affected CIs…), registered at startup. */
 type ProblemExtra = (problem: { id: number; impact: number }) => Promise<Record<string, unknown>>;
 const problemExtras: ProblemExtra[] = [];
@@ -271,7 +275,6 @@ export async function getProblem(ref: string) {
       [problem.id],
     ),
   ]);
-  const { resolveLinkUrls } = await import('./integrations.js');
   const { rows: approvals } = await query(
     `SELECT a.id, a.kind, a.summary, a.payload, a.human_confirmation, a.created_at, u.display_name AS requested_by, a.requested_via,
             $2::timestamptz > a.created_at AS changed_since_request
@@ -280,7 +283,7 @@ export async function getProblem(ref: string) {
     [problem.id, problem.updated_at],
   );
   const extra = Object.assign({}, ...(await Promise.all(problemExtras.map((fn) => fn(problem)))));
-  const detail = { ...problem, ...extra, links: await resolveLinkUrls(links.rows), activity, actions: actions.rows, analyses: analyses.rows, watchers: watchers.rows, pending_approvals: approvals };
+  const detail = { ...problem, ...extra, links: await linkUrls.call(links.rows), activity, actions: actions.rows, analyses: analyses.rows, watchers: watchers.rows, pending_approvals: approvals };
   return { type: 'problem', ...detail, url: problemUrl(detail.ref), next_steps: guidanceFor(detail) };
 }
 
@@ -703,6 +706,7 @@ const PROBLEM_TYPE: RecordType = {
   ],
   liveTopic: 'problem',
   comment: addComment,
+  update: (user, ref, input) => updateProblemLean(user, ref, input),
 };
 registerRecordType(PROBLEM_TYPE);
 

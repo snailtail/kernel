@@ -6,7 +6,7 @@ import { audit } from './audit.js';
 import { authorize } from './policy.js';
 import { type Db, query, savepoint, tx } from './db.js';
 import { conflict, notFound } from './errors.js';
-import { LINK_KINDS, loadForUpdate, logProblem } from './problems.js';
+import { LINK_KINDS, linkUrls, loadForUpdate, logProblem } from './problems.js';
 
 // ---- External systems ------------------------------------------------------------------------
 
@@ -38,6 +38,7 @@ export async function saveSystem(user: User, id: number | null, input: z.infer<t
 }
 
 /** Fills in link URLs from the system's template when the link has no URL of its own. */
+linkUrls.provide(resolveLinkUrls);
 export async function resolveLinkUrls<T extends { kind: string; reference: string; system: string; url: string }>(links: T[]) {
   if (!links.some((l) => !l.url && l.system)) return links;
   const systems = new Map((await listSystems()).filter((s) => s.active).map((s) => [s.name.toLowerCase(), s.url_templates]));

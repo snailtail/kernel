@@ -11,7 +11,7 @@ import { z } from 'zod';
 import { audienceOf, forRequester, startNarrow } from './audience.js';
 import type { User } from './auth.js';
 import { audit } from './audit.js';
-import { createChange, createChangeSchema } from './changes.js';
+import { changeConcluded, createChange, createChangeSchema } from './changes.js';
 import { assertMayWriteText, textFilterSql } from './confidential.js';
 import { asSystem, contextStore, currentContext } from './context.js';
 import { type Db, pool, query, tx, USER_COLUMNS } from './db.js';
@@ -25,11 +25,12 @@ import { queueReply } from './portal.js';
 import { authorize, can } from './policy.js';
 import { recordUrl, registerRecordType, typeForRef, typeOfPrefix, type RecordType } from './records.js';
 import { recomputeSla, slaClock, slaOnTransition } from './sla.js';
-import { checkAssigneeInTeam, teamMembers } from './teams.js';
+import { checkAssigneeInTeam, requestTasksOf, teamMembers } from './teams.js';
 import { assertVisibleRef } from './visibility.js';
 import { absoluteUrl } from './core/url.js';
 import { tokenHashBytes } from './core/hash.js';
 import { processOutbox } from './core/outbox.js';
+import { requestTaskPayload } from './webhooks.js';
 
 export const REQUEST_STATUSES = ['submitted', 'awaiting_approval', 'in_fulfilment', 'fulfilled', 'rejected', 'cancelled'] as const;
 type Status = (typeof REQUEST_STATUSES)[number];
@@ -864,6 +865,7 @@ export async function runAutomation(ref: string, actor?: User) {
 }
 
 /** A change's outcome completes the request task it carries out; a failed or rolled back change leaves it open. */
+changeConcluded.on(changeOutcome);
 export async function changeOutcome(changeRef: string) {
   const refs = await asSystem(() => tx(async (db) => {
     const { rows } = await db.query(
@@ -916,6 +918,7 @@ async function queueTaskWebhook(db: Db, requestId: number, t: { id: number; titl
  * only the SHA-256 kept, single use, expires) and adds where to call back. A retry mints a new one, so the token in a
  * failed attempt stops working. Null when the task is no longer open: nothing is sent.
  */
+requestTaskPayload.provide(withCallback);
 export async function withCallback(payload: any) {
   const token = randomBytes(32).toString('base64url');
   const { rows } = await query(
@@ -1061,6 +1064,7 @@ export async function myRequestWork(userId: number) {
 }
 
 /** A team's queue: the open request tasks of the team, unassigned first. */
+requestTasksOf.provide(teamRequestTasks);
 export async function teamRequestTasks(teamIds: number[]) {
   if (!teamIds.length) return [];
   const { rows } = await query(
@@ -1114,6 +1118,7 @@ const REQUEST_TYPE: RecordType = {
   ],
   liveTopic: 'request',
   comment: addRequestComment,
+  update: (user, ref, input) => updateRequestLean(user, ref, input),
 };
 registerRecordType(REQUEST_TYPE);
 

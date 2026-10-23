@@ -71,6 +71,10 @@ export interface RecordType {
   liveTopic?: string;
   /** A work note, through the practice's own rules (generic add_comment). */
   comment: (user: User, ref: string, body: string) => Promise<unknown>;
+  /** Changes fields through the practice's own rules (automation rules' set_field and assign_team). */
+  update?: (user: User, ref: string, input: Record<string, unknown>) => Promise<unknown>;
+  /** Moves the record to another status through the practice's own rules (automation rules' transition). */
+  transition?: (user: User, ref: string, input: { to: string }) => Promise<unknown>;
 }
 
 const registry = new Map<string, RecordType>();

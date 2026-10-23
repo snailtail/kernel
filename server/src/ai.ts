@@ -40,7 +40,7 @@ declare const prepared: unique symbol;
 /** Model input that has passed the gate. Only prepareForModel() makes one; callModel() takes nothing else. */
 export type PreparedInput = { readonly [prepared]: true; task: Task; system: string; prompt: string; classes: DataClass[]; refs: string[] };
 
-interface InputPart {
+export interface InputPart {
   label: string;
   text: string;
   /** From a restricted record (or its attachment). */
@@ -234,21 +234,10 @@ export async function analyzeLog(user: User, attachmentId: number) {
   return { ...(await callModel(user, provider, model, input, 1500)), lines_sent: f.kept, lines_total: f.total };
 }
 
-/**
- * Post-incident reviews (#109): flags blameful phrasing and suggests neutral wording. Only a hint for the team, opt-in
- * by routing the task to a model; nothing is changed in the review.
- */
-export async function reviewWording(user: User, ref: string) {
-  const { getReview } = await import('./reviews.js');
-  const r = await getReview(user, ref); // read access and visibility apply
-  const { rows } = await query('SELECT restricted, classification FROM incidents WHERE ref = $1', [r.incident_ref]);
-  const { provider, model } = await route('review_wording');
-  const sections = [['What happened', r.what_happened], ['What went well', r.went_well], ['What was hard', r.was_hard], ['Where we were lucky', r.lucky], ['Contributing factors', r.items.map((x: any) => `- ${x.body}`).join('\n')]]
-    .filter(([, v]) => String(v).trim()).map(([h, v]) => `## ${h}\n${v}`).join('\n\n');
-  const input = prepareForModel('review_wording', provider, 'You help a team write a blameless post-incident review. List sentences that blame or judge people (names, "forgot", "should have", "careless", "human error") and suggest a neutral rewrite that describes actions and conditions. Quote each sentence exactly. If the wording is already blameless, say so in one line. Do not judge the technical content.', [
-    { label: `review of ${r.ref}`, text: sections, restricted: !!rows[0]?.restricted, confidential: rows[0]?.classification === 'confidential', personal: true, ref: r.ref },
-  ]);
-  return callModel(user, provider, model, input, 800);
+/** Runs one task on the model routed to it, under the same data policy, for features that live in other modules. */
+export async function runTask(user: User, task: Task, instructions: string, parts: InputPart[], maxOutputTokens?: number) {
+  const { provider, model } = await route(task);
+  return callModel(user, provider, model, prepareForModel(task, provider, instructions, parts), maxOutputTokens);
 }
 
 // ---- Administration --------------------------------------------------------------------------------------------------

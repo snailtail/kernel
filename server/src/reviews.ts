@@ -20,6 +20,7 @@ import { authorize, can } from './policy.js';
 import { createProblemInTx, loadForUpdate, logProblem, registerProblemExtra } from './problems.js';
 import { recordUrl, registerRecordType, type RecordType, type SearchHit } from './records.js';
 import { loadCalendar } from './sla.js';
+import { runTask } from './ai.js';
 
 export const ITEM_KINDS = ['factor', 'follow_up', 'gap'] as const;
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
@@ -678,3 +679,17 @@ const REVIEW_TYPE: RecordType = {
   comment: addReviewComment,
 };
 registerRecordType(REVIEW_TYPE);
+
+/**
+ * Flags blameful phrasing and suggests neutral wording. Only a hint for the team, opt-in by routing the task to a
+ * model; nothing is changed in the review.
+ */
+export async function reviewWording(user: User, ref: string) {
+  const r = await getReview(user, ref); // read access and visibility apply
+  const { rows } = await query('SELECT restricted, classification FROM incidents WHERE ref = $1', [r.incident_ref]);
+  const sections = [['What happened', r.what_happened], ['What went well', r.went_well], ['What was hard', r.was_hard], ['Where we were lucky', r.lucky], ['Contributing factors', r.items.map((x: any) => `- ${x.body}`).join('\n')]]
+    .filter(([, v]) => String(v).trim()).map(([h, v]) => `## ${h}\n${v}`).join('\n\n');
+  return runTask(user, 'review_wording', 'You help a team write a blameless post-incident review. List sentences that blame or judge people (names, "forgot", "should have", "careless", "human error") and suggest a neutral rewrite that describes actions and conditions. Quote each sentence exactly. If the wording is already blameless, say so in one line. Do not judge the technical content.', [
+    { label: `review of ${r.ref}`, text: sections, restricted: !!rows[0]?.restricted, confidential: rows[0]?.classification === 'confidential', personal: true, ref: r.ref },
+  ], 800);
+}

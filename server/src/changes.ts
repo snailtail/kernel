@@ -18,6 +18,10 @@ import { authorize, can } from './policy.js';
 import { getProblem, loadForUpdate, logProblem, registerProblemExtra } from './problems.js';
 import { managers, notify } from './notifications.js';
 import { recordUrl, registerRecordType, type RecordType } from './records.js';
+import { event } from './core/hooks.js';
+
+/** A change reached review or was cancelled: a service request waiting on it (#44) takes its outcome. */
+export const changeConcluded = event<[changeRef: string]>();
 
 export const CHANGE_TYPES = ['standard', 'normal', 'emergency'] as const;
 export const CHANGE_STATUSES = ['draft', 'assess', 'authorize', 'scheduled', 'implementing', 'review', 'closed', 'rejected', 'cancelled'] as const;
@@ -509,7 +513,7 @@ export async function transitionChangeLean(user: User, ref: string, input: z.inf
     }
   });  await statusOnPullRequests(ref);
   // A standard change for a service request (#44): its outcome completes the request's task.
-  if (input.to === 'review' || input.to === 'cancelled') await (await import('./requests.js')).changeOutcome(ref);
+  if (input.to === 'review' || input.to === 'cancelled') await changeConcluded.emit(ref);
 }
 
 /** Dev platforms (#32): the change's status on its linked pull requests; best effort, never blocks the change. */
@@ -844,6 +848,7 @@ const CHANGE_TYPE: RecordType = {
   ],
   liveTopic: 'change',
   comment: addChangeComment,
+  update: (user, ref, input) => updateChangeLean(user, ref, input),
 };
 registerRecordType(CHANGE_TYPE);
 

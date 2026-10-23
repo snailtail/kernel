@@ -7,6 +7,10 @@ import { type Db, query, tx } from './db.js';
 import { badRequest, conflict, forbidden, notFound } from './errors.js';
 import { notify } from './notifications.js';
 import { authorize, can } from './policy.js';
+import { provided } from './core/hooks.js';
+
+/** Service request tasks (#44) waiting in these teams' queues, from requests.ts when the module is there. */
+export const requestTasksOf = provided<[teamIds: number[]], unknown[]>(() => []);
 
 /** Members who can be given work: active, and in a role that can update records (not viewers or integrations). */
 const CAN_WORK = "u.active AND u.role NOT IN ('viewer', 'integration')";
@@ -139,7 +143,7 @@ export async function teamQueue(user: User, id: number) {
     at_risk: rows.filter((r) => r.at_risk),
     all: rows,
     // Service request tasks (#44) wait in the same queue when the module is on.
-    request_tasks: can(user.role, 'request.read') ? await (await import('./requests.js')).teamRequestTasks([id]) : [],
+    request_tasks: can(user.role, 'request.read') ? await requestTasksOf.call([id]) : [],
   };
 }
 

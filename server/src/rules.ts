@@ -25,6 +25,7 @@ import { moduleEnabled } from './modules.js';
 import { audienceOf } from './audience.js';
 import { enqueueTo } from './webhooks.js';
 import { absoluteUrl } from './core/url.js';
+import { recordType } from './records.js';
 
 export { RULE_KINDS, type RuleKind };
 
@@ -612,25 +613,19 @@ async function runAction(kind: RuleKind, ref: string, a: RuleAction, rule: { id:
   const actor = actorOf(rule);
   const fields = (field: string, value: number | null): Record<string, unknown> =>
     field === 'priority' ? (kind === 'request' ? { priority: value } : LEVELS[value!]) : { [{ category: 'category_id', team: 'team_id', assignee: 'assignee_id' }[field]!]: value };
-  const update = async (input: Record<string, unknown>) => {
-    if (kind === 'incident') return (await import('./incidents.js')).updateIncidentLean(actor, ref, input);
-    if (kind === 'problem') return (await import('./problems.js')).updateProblemLean(actor, ref, input);
-    if (kind === 'change') return (await import('./changes.js')).updateChangeLean(actor, ref, input);
-    return (await import('./requests.js')).updateRequestLean(actor, ref, input);
-  };
+  // Through each practice's own rules, from the record registry (rules.ts sits below the practices).
+  const type = recordType(kind);
+  const update = (input: Record<string, unknown>) => type.update!(actor, ref, input);
   switch (a.type) {
     case 'set_field': return update(fields(a.field, a.value));
     case 'assign_team': return update({ team_id: a.team_id });
     case 'add_comment': {
-      if (kind === 'incident') return void (await (await import('./incidents.js')).addIncidentComment(actor, ref, { body: a.text, kind: 'comment', to_requester: false }));
-      if (kind === 'problem') return void (await (await import('./problems.js')).addComment(actor, ref, a.text));
-      if (kind === 'change') return void (await (await import('./changes.js')).addChangeComment(actor, ref, a.text));
-      return void (await (await import('./requests.js')).addRequestComment(actor, ref, a.text, false));
+      return void (await type.comment(actor, ref, a.text));
     }
     case 'transition': {
       const from = TRANSITIONS[kind]?.[a.to];
       if (facts.status !== from) return 'not needed';
-      return (await import('./incidents.js')).transitionIncidentLean(actor, ref, { to: a.to as 'closed' });
+      return type.transition!(actor, ref, { to: a.to });
     }
     case 'notify': {
       // Only people who may see the record are told (notify checks each one), and only its ref and title: never text.

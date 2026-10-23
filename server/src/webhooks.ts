@@ -11,6 +11,10 @@ import { checkUrl, outboundFetch } from './outbound.js';
 import { decryptSecret, encryptSecret, isEncrypted, secretsConfigured } from './secrets.js';
 import { absoluteUrl } from './core/url.js';
 import { GiveUp, processOutbox } from './core/outbox.js';
+import { provided } from './core/hooks.js';
+
+/** A request task's payload as it is sent (requests.ts adds its callback), or null when the task is no longer open. */
+export const requestTaskPayload = provided<[payload: any], any>((payload) => payload);
 
 type Db = { query: (sql: string, params?: unknown[]) => Promise<{ rows: any[]; rowCount: number | null }> };
 
@@ -178,7 +182,7 @@ export async function processDeliveries(options: { limit?: number; ids?: number[
     send: async (d: any, extra) => {
       extra.response_status = null;
       // A request task (#44) gets its single-use callback token as it is sent; a task no longer open is not sent.
-      const payload = d.event === 'request.task' ? await (await import('./requests.js')).withCallback(d.payload) : d.payload;
+      const payload = d.event === 'request.task' ? await requestTaskPayload.call(d.payload) : d.payload;
       if (!payload) throw new GiveUp('Skipped: the task is no longer open');
       const { rows: w } = await query('SELECT url, format, secret FROM webhooks WHERE id = $1', [d.webhook_id]);
       if (!w[0]) throw new GiveUp('The webhook is gone');
