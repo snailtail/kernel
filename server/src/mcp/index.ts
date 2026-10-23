@@ -22,6 +22,7 @@ import { registerKnowledgeTools } from './knowledge.js';
 import { registerPeopleTools } from './people.js';
 import { registerProblemsTools } from './problems.js';
 import { registerRecordsTools } from './records.js';
+import { registerReportsTools } from './reports.js';
 import { registerRequestsTools } from './requests.js';
 import { registerReviewsTools } from './reviews.js';
 import { registerRulesTools } from './rules.js';
@@ -71,6 +72,7 @@ function buildServer(user: User, scopes?: string[]) {
   registerChangesTools(ctx);
   registerImprovementsTools(ctx);
   registerRequestsTools(ctx);
+  registerReportsTools(ctx);
   registerEventsTools(ctx);
   registerRulesTools(ctx);
   registerSecurityTools(ctx);

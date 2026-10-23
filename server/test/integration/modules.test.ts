@@ -91,13 +91,14 @@ describe('modules and first-run setup (#36)', { skip }, () => {
     const mods = (await admin.put('/api/admin/modules', { problem: false, reason: 'Problems live in another tool' })).body;
     assert.equal(mods.find((m: any) => m.key === 'problem').enabled, false);
     try {
-      for (const path of ['/api/problems', `/api/problems/${prb}`, `/api/records/${prb}`, '/api/kedb', '/api/candidates', '/api/review', '/api/dashboard', '/api/reports/problems.csv']) {
+      for (const path of ['/api/problems', `/api/problems/${prb}`, `/api/records/${prb}`, '/api/kedb', '/api/candidates', '/api/review', '/api/reports/problems.csv']) {
         assert.equal((await analyst.get(path)).status, 404, path);
       }
       assert.equal((await analyst.post('/api/problems', { title: 'x' })).status, 404);
       assert.equal((await analyst.post(`/api/problems/${prb}/actions`, { title: 'x' })).status, 404);
       assert.ok(!(await analyst.get('/api/search?q=switching')).body.some((h: any) => h.type === 'problem'));
       assert.equal((await analyst.get('/api/meta')).body.modules.problem, false);
+      assert.deepEqual((await analyst.get('/api/dashboard')).body, { problems: false }, 'the dashboard stays, without the backlog');
       const report = (await analyst.get('/api/reports')).body;
       assert.equal(report.problems, false);
       assert.equal(report.summary, undefined, 'no problem sections');
@@ -126,13 +127,18 @@ describe('modules and first-run setup (#36)', { skip }, () => {
       const mcp = new McpClient({ name: 'mods', version: '1' });
       await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
       const tools = (await mcp.listTools()).tools.map((t) => t.name);
-      for (const gone of ['create_problem', 'search_problems', 'get_problem', 'search_known_errors', 'list_problem_candidates', 'get_review_agenda', 'get_dashboard', 'start_analysis']) {
+      for (const gone of ['create_problem', 'search_problems', 'get_problem', 'search_known_errors', 'list_problem_candidates', 'get_review_agenda', 'start_analysis']) {
         assert.ok(!tools.includes(gone), `${gone} is listed`);
       }
-      for (const kept of ['add_action', 'list_actions', 'update_action', 'my_work', 'add_comment', 'link_records', 'get_review', 'create_incident']) {
+      for (const kept of ['add_action', 'list_actions', 'update_action', 'my_work', 'add_comment', 'link_records', 'get_review', 'create_incident', 'get_dashboard', 'get_report']) {
         assert.ok(tools.includes(kept), `${kept} is missing`);
       }
       assert.ok(!(await mcp.listPrompts()).prompts.some((p) => p.name === 'five_whys' || p.name === 'problem_review_board'));
+      const dash: any = await mcp.callTool({ name: 'get_dashboard', arguments: {} });
+      const board = JSON.parse(dash.content[0].text);
+      assert.ok(!dash.isError && Array.isArray(board.kpis.tiles), 'the KPIs are there');
+      assert.equal(board.by_status, undefined, 'without the problem backlog');
+      assert.equal(board.problems, false);
       await mcp.close();
     } finally {
       await admin.put('/api/admin/modules', { problem: true, reason: 'Back on' });

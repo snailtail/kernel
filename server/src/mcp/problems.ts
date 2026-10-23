@@ -4,11 +4,9 @@ import * as analyses from '../analyses.js';
 import { badRequest } from '../errors.js';
 import { problemMarkdown } from '../export.js';
 import { idempotent } from '../idempotency.js';
-import * as kpiMod from '../kpis.js';
 import { categoryIdByName } from '../meta.js';
 import { problemContext } from '../problem-context.js';
 import * as problems from '../problems.js';
-import * as reports from '../reports.js';
 import * as review from '../review.js';
 import { CLOSURE_CODES, EC_DECISIONS, STATUSES, WORKAROUND_EFFECTIVENESS } from '../workflow.js';
 import { resolveAssignee, type McpContext } from './registrar.js';
@@ -127,14 +125,6 @@ export function registerProblemsTools({ user, tool, HUMAN_CONFIRMATION, decide }
       })),
   );
   tool(
-    'get_dashboard',
-    'The dashboard: cross-practice KPIs with a trend over the last six periods (MTTR, SLA compliance, change success, recurring incidents, problems resolved, open major incidents; each says how it is calculated), plus the problem backlog: counts by status and priority, aging, my open problems and recent activity.',
-    { period: z.enum(['month', 'week']).optional().describe('KPI trend per month (default) or per week') },
-    true,
-    // Extended compatibly (#54): the backlog fields stay as they were, the KPIs come in their own section.
-    async ({ period }) => ({ ...(await problems.dashboard(user)), kpis: await kpiMod.kpis(user, kpiMod.kpiSchema.parse({ period })) }),
-  );
-  tool(
     'get_review_agenda',
     'Agenda for the problem review meeting: problems to triage, without owner, major problems, known errors awaiting a decision or due for review, stale problems, resolved awaiting closure, and overdue actions. Returns structured data and a Markdown version.',
     { stale_days: z.number().int().min(1).max(365).optional().describe('Days without activity to count as stale (default 14)') },
@@ -143,17 +133,6 @@ export function registerProblemsTools({ user, tool, HUMAN_CONFIRMATION, decide }
       const agenda = await review.reviewAgenda(review.agendaSchema.parse({ stale_days }));
       return { ...agenda, markdown: review.agendaMarkdown(agenda) };
     },
-  );
-  tool(
-    'get_report',
-    'Problem management KPIs for a period: flow (opened, known errors, resolved, closed per week/month), backlog over time, lead times per priority (hours), closures, reopened, proactive vs reactive, service and category hotspots, known error health and action follow-up. Use it to write monthly reports or spot trends.',
-    {
-      from: z.string().optional().describe('YYYY-MM-DD, default 90 days before to'),
-      to: z.string().optional().describe('YYYY-MM-DD, default today'),
-      bucket: z.enum(['week', 'month']).optional(),
-    },
-    true,
-    async (args) => reports.report(reports.reportSchema.parse(args)),
   );
   tool(
     'create_problem',

@@ -10,7 +10,7 @@ import { afterCommit, type Db, query, tx } from './db.js';
 import { audit } from './audit.js';
 import { currentContext } from './context.js';
 import { recordUrl, registerRecordType, type ActivityEntry, type RecordType } from './records.js';
-import { authorize } from './policy.js';
+import { authorize, can } from './policy.js';
 import { logDomainEvent } from './log.js';
 import { recordActivity } from './metrics.js';
 import { badRequest, conflict, forbidden, notFound } from './errors.js';
@@ -500,7 +500,9 @@ export async function searchKnownErrors(q?: string, includeResolved = false) {
   return rows;
 }
 
+/** The problem backlog on the dashboard; without problem management (#184) only `problems: false`. */
 export async function dashboard(user: User) {
+  if (!can(user.role, 'problem.read')) return { problems: false as const };
   const [byStatus, byPriority, aging, mine, recent, links, myOpenActions, actionSummary, watched] = await Promise.all([
     query('SELECT status, count(*)::int AS count FROM problems GROUP BY status'),
     query("SELECT priority, count(*)::int AS count FROM problems WHERE status NOT IN ('resolved', 'closed') GROUP BY priority ORDER BY priority"),
@@ -528,6 +530,7 @@ export async function dashboard(user: User) {
            ORDER BY a.created_at DESC, a.id DESC LIMIT 10`, [user.id]),
   ]);
   return {
+    problems: true as const,
     by_status: Object.fromEntries(byStatus.rows.map((r) => [r.status, r.count])),
     open_by_priority: byPriority.rows,
     open_summary: aging.rows[0],
