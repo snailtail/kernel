@@ -4,6 +4,7 @@ import { maskForViewer } from './confidential.js';
 import * as serviceReports from './service-report.js';
 import * as kpiMod from './kpis.js';
 import { startFor } from './start-page.js';
+import { listAssignees, listCategories } from './meta.js';
 import * as statusMod from './status.js';
 import * as statusSubs from './status-subscriptions.js';
 import type { FastifyInstance } from 'fastify';
@@ -272,10 +273,7 @@ function buildServer(user: User, scopes?: string[]) {
     {},
     true,
     async () => {
-      const [categories, users] = await Promise.all([
-        query('SELECT name FROM categories WHERE active ORDER BY name'),
-        query("SELECT username, display_name, role FROM users WHERE active AND role NOT IN ('viewer', 'integration') ORDER BY username"),
-      ]);
+      const [categories, users] = await Promise.all([listCategories(), listAssignees()]);
       return {
         statuses: STATUSES,
         transitions: TRANSITIONS,
@@ -283,8 +281,8 @@ function buildServer(user: User, scopes?: string[]) {
         ec_decisions: EC_DECISIONS,
         workaround_effectiveness: WORKAROUND_EFFECTIVENESS,
         link_kinds: problems.LINK_KINDS,
-        categories: categories.rows.map((r) => r.name),
-        assignees: users.rows,
+        categories: categories.filter((c) => c.active).map((c) => c.name),
+        assignees: users.map(({ username, display_name, role }) => ({ username, display_name, role })).sort((a, b) => a.username.localeCompare(b.username)),
       };
     },
   );
