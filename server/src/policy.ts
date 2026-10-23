@@ -12,7 +12,7 @@ const ACTIONS = [
   'problem.create', 'problem.update', 'problem.transition', 'problem.comment', 'problem.link', 'problem.watch',
   'problem.assess', 'action.write', 'improvement.write', 'analysis.write', 'candidate.act', 'ci.annotate', 'incident.create', 'incident.update', 'event.ack', 'event.ingest', 'change.create', 'change.update', 'change.register', 'person.write', 'person.contact', 'attachment.add', 'article.write', 'article.publish', 'record.restrict', 'status.set', 'request.write', 'rule.propose',
   // Problem management decisions
-  'view.share', 'improvement.approve', 'request.manage', 'rule.manage',
+  'view.share', 'improvement.approve', 'request.manage', 'rule.manage', 'report.schedule',
   'problem.close', 'problem.reopen_closed', 'problem.flag_major', 'problem.accept_risk', 'problem.mark_duplicate',
   'candidate.rule', 'category.manage', 'system.manage', 'backup.read', 'ci.manage', 'incident.flag_major', 'event.manage', 'change.approve', 'change.manage', 'sla.manage', 'organisation.manage', 'article.publish_public', 'status.publish', 'record.redact',
   // Administration
@@ -24,7 +24,7 @@ export type Action = (typeof ACTIONS)[number];
 
 const READ: Action[] = ['rule.read', 'request.read', 'improvement.read', 'meta.read', 'problem.read', 'kedb.read', 'report.read', 'review.read', 'candidate.read', 'system.read', 'ci.read', 'incident.read', 'event.read', 'change.read', 'person.read', 'article.read', 'team.read'];
 const WORK: Action[] = ['rule.propose', 'request.write', 'improvement.write', 'problem.create', 'problem.update', 'problem.transition', 'problem.comment', 'problem.link', 'problem.watch', 'problem.assess', 'action.write', 'analysis.write', 'candidate.act', 'candidate.report', 'record.ingest', 'ci.annotate', 'incident.create', 'incident.update', 'event.ack', 'event.ingest', 'change.create', 'change.update', 'change.register', 'person.write', 'person.contact', 'attachment.add', 'article.write', 'article.publish', 'record.restrict', 'status.set'];
-const MANAGE: Action[] = ['rule.manage', 'request.manage', 'improvement.approve', 'view.share', 'problem.close', 'problem.reopen_closed', 'problem.flag_major', 'problem.accept_risk', 'problem.mark_duplicate', 'candidate.rule', 'category.manage', 'system.manage', 'backup.read', 'ci.manage', 'ci.ingest', 'incident.flag_major', 'event.manage', 'change.approve', 'change.manage', 'sla.manage', 'organisation.manage', 'article.publish_public', 'status.publish', 'record.redact'];
+const MANAGE: Action[] = ['report.schedule', 'rule.manage', 'request.manage', 'improvement.approve', 'view.share', 'problem.close', 'problem.reopen_closed', 'problem.flag_major', 'problem.accept_risk', 'problem.mark_duplicate', 'candidate.rule', 'category.manage', 'system.manage', 'backup.read', 'ci.manage', 'ci.ingest', 'incident.flag_major', 'event.manage', 'change.approve', 'change.manage', 'sla.manage', 'organisation.manage', 'article.publish_public', 'status.publish', 'record.redact'];
 const ADMIN: Action[] = ['user.manage', 'webhook.manage', 'audit.read', 'security.read', 'mfa.policy', 'team.manage', 'record.break_glass'];
 
 export const PERMISSIONS: Record<Role, ReadonlySet<Action>> = {
