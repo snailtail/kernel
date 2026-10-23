@@ -9,6 +9,7 @@ import { badRequest } from './errors.js';
 import { logger } from './log.js';
 import { fromAudit, originOf } from './security-events.js';
 import { sha256 } from './core/hash.js';
+import { csvCell } from './core/text.js';
 
 type Db = { query: (sql: string, params?: unknown[]) => Promise<{ rows: any[] }> };
 
@@ -251,6 +252,14 @@ export async function queryAudit(f: Partial<z.infer<typeof auditQuerySchema>> & 
     params,
   );
   return rows;
+}
+
+/** The audit trail as CSV; the export itself is audited. */
+export async function auditCsv(filter: z.infer<typeof auditQuerySchema>) {
+  const rows = await queryAudit(filter);
+  await audit(null, { entity_type: 'audit_log', action: 'export', changes: { filter, rows: rows.length } });
+  const cols = ['id', 'at', 'actor_name', 'actor_type', 'channel', 'ip', 'entity_type', 'entity_ref', 'action', 'changes', 'reason'] as const;
+  return [cols.join(','), ...rows.map((r) => cols.map((c) => csvCell(c === 'changes' ? JSON.stringify(r[c]) : c === 'at' ? (r.at as Date).toISOString() : r[c])).join(','))].join('\r\n') + '\r\n';
 }
 
 /** Recomputes the hash chain; returns the first broken entry, if any. */

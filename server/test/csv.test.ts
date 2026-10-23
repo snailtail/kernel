@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { csvCell } from '../src/reports.js';
+import { csvCell } from '../src/core/text.js';
 
 test('CSV cells neutralise formulas and quote special characters', () => {
   assert.equal(csvCell('=HYPERLINK("http://evil","x")'), `"'=HYPERLINK(""http://evil"",""x"")"`);

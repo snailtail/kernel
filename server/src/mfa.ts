@@ -4,7 +4,7 @@ import bcrypt from 'bcryptjs';
 import type { FastifyRequest } from 'fastify';
 import QRCode from 'qrcode';
 import { currentSessionHash, type User } from './auth.js';
-import { query, tx } from './db.js';
+import { pool, query, tx } from './db.js';
 import { badRequest, conflict, forbidden, HttpError } from './errors.js';
 import { audit } from './audit.js';
 import { decryptSecret, encryptSecret } from './secrets.js';
@@ -12,6 +12,7 @@ import { clearMfaPolicyCache } from './mfapolicy.js';
 import { generateSecret, otpauthUrl, verifyCode } from './totp.js';
 import type { Role } from './workflow.js';
 import { tokenHash } from './core/hash.js';
+import { notify } from './notifications.js';
 
 const STEP_UP_MINUTES = Number(process.env.KERNEL_STEPUP_MINUTES ?? 10);
 
@@ -208,6 +209,13 @@ export async function isKnownDevice(token: string | undefined, username: string)
 }
 
 /** Forgets the user's known devices (all, or all but the current one). */
+/** A sign-in from a device this account has not used before is worth knowing about (#75), unless it is the first. */
+export async function noticeNewDevice(userId: number, device: string, userAgent: string | undefined) {
+  const { rows } = await query('SELECT count(*)::int AS n FROM known_devices WHERE user_id = $1', [userId]);
+  if (rows[0].n <= 1) return;
+  await notify(pool, { users: [userId], event: 'account_security', ref: '', title: 'New sign-in', summary: `Your account was signed in to from a new device (${(userAgent ?? 'unknown browser').slice(0, 80)}). If it was not you, change your password.`, path: '/settings', dedupe: `device:${userId}:${device.slice(0, 12)}` });
+}
+
 export async function forgetDevices(userId: number, keep?: string) {
   await query('DELETE FROM known_devices WHERE user_id = $1 AND token_hash <> $2', [userId, keep ? tokenHash(keep) : '']);
 }

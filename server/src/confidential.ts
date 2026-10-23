@@ -12,6 +12,7 @@ import { badRequest, forbidden, notFound } from './errors.js';
 import { authorize } from './policy.js';
 import { recordType, textKindOfRef, textKinds, typeForRef, type People } from './records.js';
 import { addEntry } from './activity.js';
+import { clearSensitivePolicyCache, sensitivePolicy, type SensitivePolicy } from './sensitive.js';
 
 // The kinds that can be confidential, and who works on each, come from the record types (records.ts: people).
 const REVEAL_MINUTES = 15;
@@ -252,3 +253,14 @@ export async function readableText<T extends Record<string, unknown>>(db: Parame
 
 /** What a new record says instead of the text it could not copy (#158). */
 export const notCopied = (ref: string) => `Copied from ${ref.toUpperCase()} (confidential, its text is not included).`;
+
+// ---- The sensitive-data policy (#61) ------------------------------------------------------------------------------
+// Here rather than in sensitive.ts, which the audit trail itself uses to scan what it stores.
+
+export async function saveSensitivePolicy(value: SensitivePolicy, reason: string) {
+  const before = await sensitivePolicy();
+  await query("INSERT INTO settings (key, value) VALUES ('sensitive_data', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", [value]);
+  clearSensitivePolicyCache();
+  await audit(null, { entity_type: 'setting', entity_ref: 'sensitive_data', action: 'update', changes: { from: before, to: value }, reason });
+  return sensitivePolicy();
+}

@@ -4,6 +4,7 @@ import { moduleEnabled } from './modules.js';
 import { z } from 'zod';
 import { query } from './db.js';
 import { reviewStats } from './reviews.js';
+import { csvCell } from './core/text.js';
 
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
 
@@ -228,14 +229,6 @@ export async function report({ from, to, bucket }: ReportParams) {
     },
   };
 }
-
-export const csvCell = (v: unknown) => {
-  if (v === null || v === undefined) return '';
-  let s = v instanceof Date ? v.toISOString() : String(v);
-  // Neutralise spreadsheet formulas (CSV injection): text starting with = + - @ tab or CR is prefixed with '.
-  if (typeof v === 'string' && /^[=+\-@\t\r]/.test(s)) s = `'${s}`;
-  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-};
 
 /** All problems logged in, or active during, the period as CSV (one row per problem). */
 export async function problemsCsv({ from, to }: ReportParams) {

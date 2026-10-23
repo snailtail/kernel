@@ -11,3 +11,12 @@ export const cap = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 
 /** Escape for HTML text and quoted attributes. */
 export const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+/** One CSV cell: quoted when needed, and spreadsheet formulas neutralised. */
+export const csvCell = (v: unknown) => {
+  if (v === null || v === undefined) return '';
+  let s = v instanceof Date ? v.toISOString() : String(v);
+  // Neutralise spreadsheet formulas (CSV injection): text starting with = + - @ tab or CR is prefixed with '.
+  if (typeof v === 'string' && /^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+};

@@ -10,8 +10,8 @@ import { notFound } from './errors.js';
 import { authorize } from './policy.js';
 import { maskedRefs } from './confidential.js';
 import { currentContext } from './context.js';
-import { csvCell } from './reports.js';
 import { hiddenRecordsExist } from './visibility.js';
+import { csvCell } from './core/text.js';
 
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
 export const serviceReportSchema = z
