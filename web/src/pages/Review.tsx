@@ -92,7 +92,7 @@ export function ReviewPage() {
       {data && (!hideEmpty || data.overdue_actions.length > 0) && (
         <section className="card">
           <h2>Overdue follow-up actions <span className="count">{data.overdue_actions.length}</span></h2>
-          {data.overdue_actions.length === 0 ? <p className="empty">None.</p> : <ActionList actions={data.overdue_actions} editable={editable} showProblem onChange={() => reload()} />}
+          {data.overdue_actions.length === 0 ? <p className="empty">None.</p> : <ActionList actions={data.overdue_actions} editable={editable} showParent onChange={() => reload()} />}
         </section>
       )}
     </>

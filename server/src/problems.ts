@@ -1,6 +1,7 @@
 // Problem record service. Shared by the REST API and the MCP server so both
 // enforce the same rules, permissions and audit trail.
 import { historyOf, logActivity } from './activity.js';
+import { actionCounts, actionsOf, myActions, openActionCount } from './actions.js';
 import { assertMayWriteText, forgetExists, onlyTitleMatches, textFilterSql } from './confidential.js';
 import { z } from 'zod';
 import { queueRuleRuns } from './rule-queue.js';
@@ -114,15 +115,6 @@ const SELECT_PROBLEM = `
   LEFT JOIN users cb ON cb.id = p.created_by
   LEFT JOIN users db ON db.id = p.ec_decided_by`;
 
-export const SELECT_ACTION = `
-  SELECT a.id, a.problem_id, p.ref, p.title AS problem_title, a.title, a.description, a.owner_id,
-         o.display_name AS owner, a.due_date::text AS due_date, a.status, a.change_ref,
-         (a.status = 'open' AND a.due_date < current_date) AS overdue,
-         cb.display_name AS created_by, a.created_at, a.updated_at, a.completed_at
-  FROM problem_actions a
-  JOIN problems p ON p.id = a.problem_id
-  LEFT JOIN users o ON o.id = a.owner_id
-  LEFT JOIN users cb ON cb.id = a.created_by`;
 
 
 
@@ -262,7 +254,7 @@ export async function getProblem(ref: string) {
       [problem.id],
     ),
     historyOf('problem', problem.id),
-    query(`${SELECT_ACTION} WHERE a.problem_id = $1 ORDER BY a.status = 'open' DESC, a.due_date NULLS LAST, a.id`, [problem.id]),
+    actionsOf('problem', problem.id),
     query(
       `SELECT a.id, a.technique, a.title, a.data, a.conclusion, a.created_at, a.updated_at, u.display_name AS updated_by,
               a.proposed_via_mcp, a.confirmed_at, cu.display_name AS confirmed_by
@@ -283,7 +275,7 @@ export async function getProblem(ref: string) {
     [problem.id, problem.updated_at],
   );
   const extra = Object.assign({}, ...(await Promise.all(problemExtras.map((fn) => fn(problem)))));
-  const detail = { ...problem, ...extra, links: await linkUrls.call(links.rows), activity, actions: actions.rows, analyses: analyses.rows, watchers: watchers.rows, pending_approvals: approvals };
+  const detail = { ...problem, ...extra, links: await linkUrls.call(links.rows), activity, actions, analyses: analyses.rows, watchers: watchers.rows, pending_approvals: approvals };
   return { type: 'problem', ...detail, url: problemUrl(detail.ref), next_steps: guidanceFor(detail) };
 }
 
@@ -421,9 +413,9 @@ export async function transitionProblemLean(user: User, ref: string, input: z.in
     const reason = checkTransition({ ...current, ...fields, closure_code }, input.to, user.role);
     if (reason) throw conflict(reason);
     if (input.to === 'closed' && !input.acknowledge_open_actions) {
-      const { rows } = await db.query("SELECT count(*)::int AS n FROM problem_actions WHERE problem_id = $1 AND status = 'open'", [current.id]);
-      if (rows[0].n > 0) {
-        throw conflict(`${rows[0].n} follow-up action(s) are still open. Complete or cancel them, or set acknowledge_open_actions to close anyway.`);
+      const open = await openActionCount(db, 'problem', current.id);
+      if (open > 0) {
+        throw conflict(`${open} follow-up action(s) are still open. Complete or cancel them, or set acknowledge_open_actions to close anyway.`);
       }
     }
 
@@ -509,7 +501,7 @@ export async function searchKnownErrors(q?: string, includeResolved = false) {
 }
 
 export async function dashboard(user: User) {
-  const [byStatus, byPriority, aging, mine, recent, links, myActions, actionSummary, watched] = await Promise.all([
+  const [byStatus, byPriority, aging, mine, recent, links, myOpenActions, actionSummary, watched] = await Promise.all([
     query('SELECT status, count(*)::int AS count FROM problems GROUP BY status'),
     query("SELECT priority, count(*)::int AS count FROM problems WHERE status NOT IN ('resolved', 'closed') GROUP BY priority ORDER BY priority"),
     query(`SELECT
@@ -527,10 +519,8 @@ export async function dashboard(user: User) {
            ORDER BY a.created_at DESC, a.id DESC LIMIT 15`),
     query(`SELECT l.kind, count(*)::int AS count FROM problem_links l JOIN problems p ON p.id = l.problem_id
            WHERE p.status NOT IN ('resolved', 'closed') GROUP BY l.kind`),
-    query(`${SELECT_ACTION} WHERE a.owner_id = $1 AND a.status = 'open' ORDER BY a.due_date NULLS LAST, a.id LIMIT 20`, [user.id]),
-    query(`SELECT count(*) FILTER (WHERE status = 'open')::int AS open,
-                  count(*) FILTER (WHERE status = 'open' AND due_date < current_date)::int AS overdue
-           FROM problem_actions`),
+    myActions(user, 20),
+    actionCounts(user),
     query(`SELECT a.id, a.kind, a.body, a.data, a.created_at, u.display_name AS user_name, p.ref, p.title
            FROM problem_activity a JOIN problems p ON p.id = a.problem_id LEFT JOIN users u ON u.id = a.user_id
            JOIN problem_watchers w ON w.problem_id = a.problem_id AND w.user_id = $1
@@ -543,8 +533,8 @@ export async function dashboard(user: User) {
     open_summary: aging.rows[0],
     open_links_by_kind: Object.fromEntries(links.rows.map((r) => [r.kind, r.count])),
     my_problems: mine.rows,
-    my_actions: myActions.rows,
-    actions: actionSummary.rows[0],
+    my_actions: myOpenActions,
+    actions: { open: actionSummary.open, overdue: actionSummary.overdue },
     watched_activity: watched.rows,
     recent_activity: recent.rows,
   };
@@ -700,7 +690,7 @@ const PROBLEM_TYPE: RecordType = {
   textPlaces: [
     { table: 'problems', key: 'id', columns: ['title', 'description', 'affected_service', 'root_cause', 'workaround', 'resolution', 'major_review', 'ec_risk', 'ec_fix_cost', 'ec_decision_note'] },
     { table: 'problem_activity', key: 'problem_id', columns: ['body'], json: ['data'] },
-    { table: 'problem_actions', key: 'problem_id', columns: ['title', 'description'] },
+    { table: 'actions', key: 'parent_id', parentKind: 'problem', columns: ['title', 'description'] },
     { table: 'problem_analyses', key: 'problem_id', columns: ['title', 'conclusion'], json: ['data'] },
     { table: 'problem_links', key: 'problem_id', columns: ['note', 'url'] },
   ],

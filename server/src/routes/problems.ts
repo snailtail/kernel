@@ -83,20 +83,17 @@ export async function problemRoutes(app: FastifyInstance) {
     problems.removeLink(requireUser(req), req.params.ref, Number(req.params.id)),
   );
 
-  app.get('/api/actions', async (req) => {
-    requireUser(req, 'problem.read');
-    return actions.listActions(actions.listActionsSchema.parse(req.query));
-  });
-
+  // The action routes before #184 (routes/actions.ts has the register): they answer with the problem.
   app.post<RefParams>('/api/problems/:ref/actions', { config: { idempotent: 'action.write' } }, async (req, reply) => {
-    const result = await actions.createAction(requireUser(req), req.params.ref, actions.createActionSchema.parse(req.body));
+    await actions.createAction(requireUser(req), req.params.ref, actions.createActionSchema.parse(req.body), 'problem');
     reply.code(201);
-    return result;
+    return problems.getProblem(req.params.ref);
   });
 
-  app.patch<{ Params: { ref: string; id: string } }>('/api/problems/:ref/actions/:id', async (req) =>
-    actions.updateAction(requireUser(req), req.params.ref, Number(req.params.id), actions.updateActionSchema.parse(req.body)),
-  );
+  app.patch<{ Params: { ref: string; id: string } }>('/api/problems/:ref/actions/:id', async (req) => {
+    await actions.updateAction(requireUser(req), Number(req.params.id), actions.updateActionSchema.parse(req.body), req.params.ref);
+    return problems.getProblem(req.params.ref);
+  });
 
   app.post<RefParams>('/api/problems/:ref/analyses', { config: { idempotent: 'analysis.write' } }, async (req, reply) => {
     const result = await analyses.createAnalysis(requireUser(req), req.params.ref, analyses.createAnalysisSchema.parse(req.body));

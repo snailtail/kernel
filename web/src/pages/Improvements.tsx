@@ -2,7 +2,8 @@
 // of one improvement. Lightweight on purpose: the work itself happens in the changes, problems and actions it links.
 import { useEffect, useState, type DragEvent, type FormEvent } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
-import { api, type Guidance } from '../api';
+import { api, type Action, type Guidance } from '../api';
+import { ActionsCard } from '../components/Actions';
 import { askReason, askText } from '../components/Ask';
 import { GuidePanel, isGuided } from '../components/Guide';
 import { HistoryPanel } from '../components/History';
@@ -36,12 +37,13 @@ interface Row {
   ref: string; title: string; status: Status; source: string; source_ref: string | null; value: number | null; effort: number | null; kpi: string | null;
   owner_id: number | null; owner: string | null; service_ref: string | null; service_name: string | null; created_at: string; updated_at: string; links: number;
 }
-interface LinkRow { id: number; kind: string; reference: string; system: string; url: string; note: string; title: string | null; status: string | null; action_problem_ref: string | null }
+interface LinkRow { id: number; kind: string; reference: string; system: string; url: string; note: string; title: string | null; status: string | null; action_problem_ref: string | null; action_path?: string }
 interface Detail extends Omit<Row, 'links'> {
   id: number; description: string | null; benefit: string | null; reject_reason: string | null; created_by: number | null; created_by_name: string | null;
   decided_by_name: string | null; decided_at: string | null; done_at: string | null;
   service: { ref: string; name: string } | null; restricted: boolean; restricted_teams: number[]; classification: 'normal' | 'confidential'; confidential_masked?: boolean;
   links: LinkRow[];
+  actions: Action[];
   kpi_tile: { id: string; label: string; value: number | null; unit: 'minutes' | 'percent' | 'count'; trend: (number | null)[]; trend_label: string; lower_is_better: boolean; starts: string[]; link: string } | null;
   transitions: Status[];
   may_decide: boolean;
@@ -377,7 +379,7 @@ function EditImprovement({ m, onClose, onDone }: { m: Detail; onClose: () => voi
 
 const LINK_PATH: Record<string, (ref: string, x: LinkRow) => string | null> = {
   change: (r) => `/changes/${r}`, problem: (r) => `/problems/${r}`, incident: (r) => `/incidents/${r}`, review: (r) => `/reviews/${r}`,
-  action: (_r, x) => (x.action_problem_ref ? `/problems/${x.action_problem_ref}` : null), document: () => null,
+  action: (_r, x) => x.action_path ?? null, document: () => null,
 };
 
 function LinksCard({ m, editable, onChange }: { m: Detail; editable: boolean; onChange: (fn: () => Promise<Detail>) => Promise<boolean> }) {
@@ -487,6 +489,8 @@ export function ImprovementPage() {
           {(m.status === 'done' || m.benefit) && <section className="card"><h2>Benefit</h2>{m.benefit ? <Markdown text={m.benefit} /> : <p className="placeholder">Confidential.</p>}</section>}
           {m.status === 'rejected' && <section className="card"><h2>Why it was rejected</h2>{m.reject_reason ? <Markdown text={m.reject_reason} /> : <p className="placeholder">Confidential.</p>}{m.decided_by_name && <p className="muted small">{m.decided_by_name}, {m.decided_at && formatDate(m.decided_at)}</p>}</section>}
           <LinksCard m={m} editable={editable} onChange={run} />
+          <ActionsCard parent={m.ref} actions={m.actions} editable={editable} onChanged={reload}
+            placeholder="No follow-up actions. Add the steps that carry the improvement out, each with an owner and a date." />
           <section className="card">
             <h2>Notes &amp; history</h2>
             {editable && (

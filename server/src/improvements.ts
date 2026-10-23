@@ -2,6 +2,7 @@
 // reviews or anyone's idea. Lightweight on purpose: a title, value and effort, an owner, a manager's decision and the
 // benefit it brought, linked to the changes, problems and actions that carry it out and to a dashboard KPI whose
 // trend shows whether it worked. Shared by REST, MCP and the web UI.
+import { actionsById, actionsOf } from './actions.js';
 import { historyOf, logActivity, touchAndAudit } from './activity.js';
 import { z } from 'zod';
 import { audienceOf, BROADEST, startNarrow, type Audience } from './audience.js';
@@ -122,9 +123,10 @@ export async function getImprovement(user: User, ref: string) {
   const { rows } = await query(`${SELECT} WHERE m.ref = $1`, [ref.toUpperCase()]);
   const m = rows[0];
   if (!m) throw notFound(`Improvement ${ref.toUpperCase()} not found`);
-  const [activity, links] = await Promise.all([
+  const [activity, links, actions] = await Promise.all([
     historyOf('improvement', m.id),
     linksOf(m.id),
+    actionsOf('improvement', m.id),
   ]);
   const { search: _s, service_id: _sid, shown_source_ref, ...rest } = m;
   const detail = {
@@ -134,6 +136,7 @@ export async function getImprovement(user: User, ref: string) {
     source_ref: shown_source_ref,
     service: m.service_ref ? { ref: m.service_ref, name: m.service_name } : null,
     links,
+    actions,
     activity,
     kpi_tile: m.kpi ? await kpiTile(user, m.kpi) : null,
     may_decide: can(user.role, 'improvement.approve'),
@@ -147,17 +150,23 @@ export async function getImprovement(user: User, ref: string) {
 async function linksOf(improvementId: number) {
   const { rows } = await query(
     `SELECT l.id, l.kind, l.reference, l.system, l.url, l.note, l.created_at,
-            coalesce(p.title, c.title, i.title, a.title, ri.title) AS title, coalesce(p.status, c.status, i.status, a.status, r.status) AS status, ap.ref AS action_problem_ref
+            coalesce(p.title, c.title, i.title, ri.title) AS title, coalesce(p.status, c.status, i.status, r.status) AS status
      FROM improvement_links l
      LEFT JOIN problems p ON l.kind = 'problem' AND l.system IN ('', 'Kernel') AND p.ref = l.reference
      LEFT JOIN changes c ON l.kind = 'change' AND l.system IN ('', 'Kernel') AND c.ref = l.reference
      LEFT JOIN incidents i ON l.kind = 'incident' AND l.system IN ('', 'Kernel') AND i.ref = l.reference
      LEFT JOIN incident_reviews r ON l.kind = 'review' AND r.ref = l.reference LEFT JOIN incidents ri ON ri.id = r.incident_id
-     LEFT JOIN problem_actions a ON l.kind = 'action' AND a.id::text = l.reference LEFT JOIN problems ap ON ap.id = a.problem_id
-     WHERE l.improvement_id = $1 AND (l.kind <> 'action' OR a.id IS NOT NULL) ORDER BY l.kind, l.created_at`,
+     WHERE l.improvement_id = $1 ORDER BY l.kind, l.created_at`,
     [improvementId],
   );
-  return rows;
+  // A linked action shows with its record (any kind, #184); one the viewer cannot see is left out.
+  const linked = await actionsById(rows.filter((l) => l.kind === 'action').map((l) => Number(l.reference)).filter(Number.isInteger));
+  const byId = new Map(linked.map((a) => [String(a.id), a]));
+  return rows.flatMap((l) => {
+    if (l.kind !== 'action') return [l];
+    const a = byId.get(l.reference);
+    return a ? [{ ...l, title: a.title, status: a.status, action_problem_ref: a.ref, action_path: a.path }] : [];
+  });
 }
 
 /** The linked dashboard tile (read-only, the dashboard's own rights): its trend shows whether it worked. */
@@ -345,9 +354,8 @@ export async function addImprovementLink(user: User, ref: string, input: z.infer
   const kernel = !input.system || input.system === 'Kernel';
   let reference = input.reference;
   if (kernel && input.kind === 'action') {
-    // An action by its id; RLS hides the actions of problems the caller cannot see.
-    const { rows } = await query('SELECT id FROM problem_actions WHERE id = $1', [/^\d+$/.test(reference) ? Number(reference) : 0]);
-    if (!rows[0]) throw notFound(`Action ${reference} not found`);
+    // An action by its id; RLS hides the actions of records the caller cannot see.
+    if (!/^\d+$/.test(reference) || !(await actionsById([Number(reference)])).length) throw notFound(`Action ${reference} not found`);
   } else if (kernel && input.kind !== 'document') {
     reference = reference.toUpperCase();
     await assertVisibleRef(reference);
@@ -454,6 +462,7 @@ const IMPROVEMENT_TYPE: RecordType = {
   textPlaces: [
     { table: 'improvements', key: 'id', columns: ['title', 'description', 'benefit', 'reject_reason'] },
     { table: 'improvement_activity', key: 'improvement_id', columns: ['body'], json: ['data'] },
+    { table: 'actions', key: 'parent_id', parentKind: 'improvement', columns: ['title', 'description'] },
     { table: 'improvement_links', key: 'improvement_id', columns: ['note', 'url'] },
   ],
   liveTopic: 'improvement',

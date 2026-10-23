@@ -250,7 +250,7 @@ describe('automation rules (#49)', { skip }, () => {
   test('time triggers are allowlisted like everything else', async () => {
     assert.equal((await pm.post('/api/rules', rule({ trigger: { type: 'in_status_for', status: 'parked', hours: 2 } }))).status, 400, 'an unknown status');
     assert.equal((await pm.post('/api/rules', rule({ trigger: { type: 'in_status_for', status: 'new', hours: 0.1 } }))).status, 400, 'at least 15 minutes');
-    assert.equal((await pm.post('/api/rules', rule({ trigger: { type: 'due_in', hours: 24 } }))).status, 400, 'incidents have no due actions');
+    assert.equal((await pm.post('/api/rules', rule({ trigger: { type: 'due_in', hours: 24 }, actions: [{ type: 'notify', roles: ['owner'] }] }))).status, 201, 'incidents have due actions too (#184)');
     assert.equal((await pm.post('/api/rules', rule({ actions: [{ type: 'notify', roles: ['owner'] }] }))).status, 400, 'the owner only with a due date');
     assert.equal((await pm.post('/api/rules', rule({ actions: [{ type: 'notify', roles: ['approvers'] }] }))).status, 400, 'incidents have no approvers');
     assert.equal((await pm.post('/api/rules', rule({ actions: [{ type: 'webhook', webhook_id: 99999 }] }))).status, 400, 'only a webhook that is set up');

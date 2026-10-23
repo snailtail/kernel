@@ -672,6 +672,7 @@ const INCIDENT_TYPE: RecordType = {
   textPlaces: [
     { table: 'incidents', key: 'id', columns: ['title', 'description', 'reporter', 'hold_reason', 'resolution'] },
     { table: 'incident_activity', key: 'incident_id', columns: ['body'], json: ['data'] },
+    { table: 'actions', key: 'parent_id', parentKind: 'incident', columns: ['title', 'description'] },
     { table: 'incident_links', key: 'incident_id', columns: ['note', 'url'] },
     { table: 'portal_feedback', key: 'incident_id', columns: ['comment'] },
   ],

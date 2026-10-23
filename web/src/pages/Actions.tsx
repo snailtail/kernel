@@ -24,7 +24,7 @@ export function ActionsPage() {
   if (!query.has('owner_id') && !params.has('everyone') && !params.has('bulk')) query.set('owner_id', String(user.id));
   query.delete('everyone');
   const { data, reload } = useApi<Action[]>(`/api/actions?${query}`);
-  const tk = useListToolkit({ list: 'actions', rows: data, idOf: (a) => String(a.id), hrefOf: (a) => `/problems/${a.ref}`, filter: query.toString(), onChanged: reload });
+  const tk = useListToolkit({ list: 'actions', rows: data, idOf: (a) => String(a.id), hrefOf: (a) => a.path, filter: query.toString(), onChanged: reload });
   const owner = params.get('owner_id') ?? (params.has('everyone') || params.has('bulk') ? '' : String(user.id));
 
   return (
@@ -32,12 +32,12 @@ export function ActionsPage() {
       <header className="page-head">
         <div>
           <h1>Follow-up actions</h1>
-          <p className="muted">Work that follows from problem analysis, error control and major problem reviews.</p>
+          <p className="muted">Work that follows from problems, incidents and their reviews, changes, requests and improvements.</p>
         </div>
         <SavedViews list="actions" />
       </header>
       <div className="filters">
-        <input className="search" placeholder="Search actions or problems…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <input className="search" placeholder="Search actions or records…" value={q} onChange={(e) => setQ(e.target.value)} />
         <select value={params.get('status') ?? 'open'} onChange={(e) => setParam('status', e.target.value === 'open' ? '' : e.target.value)}>
           <option value="open">Open</option>
           <option value="done">Done</option>
@@ -69,7 +69,7 @@ export function ActionsPage() {
       {tk.scope}
       <section className="card">
         {data?.length === 0 && <p className="empty">No actions match.</p>}
-        {data && <ActionList actions={data} editable={canEdit(user)} showProblem onChange={() => reload()} toolkit={tk} />}
+        {data && <ActionList actions={data} editable={canEdit(user)} showParent onChange={() => reload()} toolkit={tk} />}
       </section>
       {tk.bar}
     </>

@@ -236,16 +236,19 @@ export async function encryptLegacySecrets(log: (msg: string) => void) {
   }
 }
 
-/** Queues action.overdue once per action when its due date passes. */
+/**
+ * Queues action.overdue once per action when its due date passes. The webhooks carry problem events, so an action on
+ * another kind of record is only marked (its owner sees it in My Work, and due-date rules can remind them, #49).
+ */
 export async function notifyOverdueActions() {
   await tx(async (db) => {
     const { rows } = await db.query(
-      `UPDATE problem_actions SET overdue_notified_at = now()
+      `UPDATE actions SET overdue_notified_at = now()
        WHERE status = 'open' AND due_date < current_date AND overdue_notified_at IS NULL
-       RETURNING id, problem_id, title, due_date::text AS due_date, owner_id`,
+       RETURNING id, parent_kind, parent_id, title, due_date::text AS due_date, owner_id`,
     );
-    for (const a of rows) {
-      await enqueue(db, 'action.overdue', a.problem_id, null, `Action overdue: ${a.title} (due ${a.due_date})`, { action_id: a.id, due_date: a.due_date, owner_id: a.owner_id });
+    for (const a of rows.filter((r) => r.parent_kind === 'problem')) {
+      await enqueue(db, 'action.overdue', a.parent_id, null, `Action overdue: ${a.title} (due ${a.due_date})`, { action_id: a.id, due_date: a.due_date, owner_id: a.owner_id });
     }
   });
 }

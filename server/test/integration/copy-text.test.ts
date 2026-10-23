@@ -47,7 +47,7 @@ describe('copying text between records (#117)', { skip }, () => {
   };
   const dumpProblem = async (ref: string) => JSON.stringify((await ownerQuery(
     `SELECT p.title, p.description, p.root_cause, p.workaround, p.resolution, (SELECT json_agg(l) FROM problem_links l WHERE l.problem_id = p.id) AS links,
-            (SELECT json_agg(a) FROM problem_activity a WHERE a.problem_id = p.id) AS activity, (SELECT json_agg(x) FROM problem_actions x WHERE x.problem_id = p.id) AS actions
+            (SELECT json_agg(a) FROM problem_activity a WHERE a.problem_id = p.id) AS activity, (SELECT json_agg(x) FROM actions x WHERE x.parent_kind = 'problem' AND x.parent_id = p.id) AS actions
      FROM problems p WHERE p.ref = $1`, [ref])).rows[0]);
   const webhooks = async () => JSON.stringify((await ownerQuery('SELECT payload FROM webhook_deliveries')).rows);
   /** A known error, narrowed before the text is written, so nothing about it went out while it was broad. */

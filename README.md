@@ -253,8 +253,10 @@ may keep it, so rotate those tokens regularly (the source list shows each token'
 
 Scripts and agents can also report events with a token (`POST /api/events`) or the MCP tool `report_event`.
 
-**Follow-up actions** track work that follows from a problem (vendor fixes, monitoring, runbook updates, review
-outcomes) with an owner and due date.
+**Follow-up actions** track work that follows from a record (vendor fixes, monitoring, runbook updates, review
+outcomes) with an owner and due date. They are a register of their own: an action hangs off a problem, an incident,
+a change, a request, an improvement or a post-incident review (`POST /api/actions` with `parent`, or MCP `add_action`
+with the record's ref), and is visible to whoever can see that record.
 
 **Linked records** connect a problem to records in other systems: *incidents* (reactive), *events* (proactive),
 *changes* (implementing the fix) and other *problems*. Each link can have the source system name and a URL.

@@ -1,7 +1,7 @@
 // Agenda for the regular problem review meeting: everything in the backlog that needs a decision or attention.
 import { z } from 'zod';
 import { query } from './db.js';
-import { SELECT_ACTION } from './problems.js';
+import { overdueActions } from './actions.js';
 
 export const agendaSchema = z.object({ stale_days: z.coerce.number().int().min(1).max(365).default(14) });
 
@@ -19,7 +19,7 @@ export async function reviewAgenda({ stale_days }: z.infer<typeof agendaSchema>)
     query(`SELECT ${ITEM} ${FROM} WHERE ${OPEN} AND p.updated_at < now() - $1 * interval '1 day' ORDER BY p.updated_at`, [stale_days]),
     query(`SELECT ${ITEM} ${FROM} WHERE p.is_major AND (${OPEN} OR (p.status = 'resolved' AND p.major_review = '')) ORDER BY p.priority, p.created_at`),
     query(`SELECT ${ITEM} ${FROM} WHERE p.status = 'resolved' ORDER BY p.resolved_at`),
-    query(`${SELECT_ACTION} WHERE a.status = 'open' AND a.due_date < current_date ORDER BY a.due_date`),
+    overdueActions(['problem']),
   ]);
   return {
     generated_at: new Date().toISOString(),
@@ -33,7 +33,7 @@ export async function reviewAgenda({ stale_days }: z.infer<typeof agendaSchema>)
       { id: 'stale', title: `No activity for ${stale_days}+ days`, hint: 'Still relevant? Unblock, re-prioritise, or close.', problems: stale.rows },
       { id: 'awaiting_closure', title: 'Resolved, awaiting closure', hint: 'Verify the fix held, then close.', problems: awaitingClosure.rows },
     ],
-    overdue_actions: overdue.rows,
+    overdue_actions: overdue,
   };
 }
 

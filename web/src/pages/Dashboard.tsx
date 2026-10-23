@@ -146,7 +146,7 @@ export function DashboardPage() {
             <Link to="/actions" className="small">All actions →</Link>
           </div>
           {data.my_actions.length === 0 && <p className="empty">No open actions.</p>}
-          <ActionList actions={data.my_actions} editable showProblem onChange={() => reload()} />
+          <ActionList actions={data.my_actions} editable showParent onChange={() => reload()} />
         </section>
       </div>
 

@@ -7,6 +7,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import type { User } from '../auth.js';
 import { HttpError } from '../errors.js';
 import { createContext } from './registrar.js';
+import { registerActionsTools } from './actions.js';
 import { registerAiTools } from './ai.js';
 import { registerAttachmentsTools } from './attachments.js';
 import { registerCandidatesTools } from './candidates.js';
@@ -57,6 +58,7 @@ function buildServer(user: User, scopes?: string[]) {
   const ctx = createContext(server, user, scopes);
   registerRecordsTools(ctx);
   registerProblemsTools(ctx);
+  registerActionsTools(ctx);
   registerCmdbTools(ctx);
   registerIncidentsTools(ctx);
   registerReviewsTools(ctx);

@@ -168,7 +168,7 @@ describe('bulk actions on lists (#110)', { skip }, () => {
     const p = (await pm.post('/api/problems', { title: 'Patch the switches' })).body.ref;
     await pm.post(`/api/problems/${p}/actions`, { title: 'Order firmware' });
     await pm.post(`/api/problems/${p}/actions`, { title: 'Plan window' });
-    const acts = (await ownerQuery('SELECT a.id FROM problem_actions a JOIN problems p ON p.id = a.problem_id WHERE p.ref = $1', [p])).rows.map((r: any) => r.id);
+    const acts = (await ownerQuery("SELECT a.id FROM actions a JOIN problems p ON a.parent_kind = 'problem' AND p.id = a.parent_id WHERE p.ref = $1", [p])).rows.map((r: any) => r.id);
     const res = (await pm.post('/api/actions/bulk', { ids: acts, operation: { op: 'assign', assignee_id: ids.analyst } })).body;
     assert.equal(res.summary.changed, 2);
     assert.equal((await pm.post('/api/actions/bulk', { ids: acts, operation: { op: 'status', to: 'done' } })).body.summary.changed, 2);

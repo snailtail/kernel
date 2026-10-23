@@ -64,16 +64,18 @@ describe('post-incident reviews (#109)', { skip }, () => {
     assert.equal((await analyst.post(`/api/incidents/${inc}/review/items/${factor.id}/problem`, {})).status, 409, 'once');
   });
 
-  test("a follow-up becomes an action with owner and due date on the factor's problem", async () => {
+  test('a follow-up becomes an action with owner and due date on the review itself (#184)', async () => {
     let r = (await analyst.post(`/api/incidents/${inc}/review/items`, { kind: 'follow_up', body: 'Alert 30 days before any certificate expires' })).body;
     const item = r.items.find((x: any) => x.kind === 'follow_up');
     const owner = await userId('analyst2');
     r = (await analyst.post(`/api/incidents/${inc}/review/items/${item.id}/action`, { owner_id: owner, due_date: '2026-12-01' })).body;
     const done = r.items.find((x: any) => x.id === item.id);
-    assert.equal(done.action_problem_ref, factorProblem);
+    assert.equal(done.action_parent_kind, 'review');
+    assert.equal(done.action_problem_ref, null, "not on the factor's problem");
     assert.equal(done.action_owner, 'Analyst2');
+    assert.deepEqual(r.actions.map((x: any) => [x.ref, x.title, x.path]), [[r.ref, 'Alert 30 days before any certificate expires', `/reviews/${r.ref}`]]);
     const work = (await analyst2.get('/api/my-work')).body;
-    assert.ok(work.actions.some((a: any) => a.title === 'Alert 30 days before any certificate expires' && a.due_date === '2026-12-01'));
+    assert.ok(work.actions.some((a: any) => a.title === 'Alert 30 days before any certificate expires' && a.due_date === '2026-12-01' && a.parent_title === 'Checkout down'));
     assert.equal((await analyst.del(`/api/incidents/${inc}/review/items/${item.id}`)).status, 409, 'an item that became an action stays');
   });
 
@@ -163,7 +165,7 @@ describe('post-incident reviews (#109)', { skip }, () => {
       const fu = r.items.find((x: any) => x.kind === 'follow_up');
       assert.equal((await pm.post(`/api/incidents/${ref}/review/items/${fu.id}/action`, { problem: open })).status, 400);
       ok(await pm.post(`/api/incidents/${ref}/review/items/${fu.id}/action`, { problem: open, title: 'Rotate shared admin credentials' }));
-      const actions = JSON.stringify((await ownerQuery('SELECT a.* FROM problem_actions a JOIN problems p ON p.id = a.problem_id WHERE p.ref = $1', [open])).rows);
+      const actions = JSON.stringify((await ownerQuery("SELECT a.* FROM actions a JOIN problems p ON a.parent_kind = 'problem' AND p.id = a.parent_id WHERE p.ref = $1", [open])).rows);
       assert.equal(actions.includes(SECRET), false, `${narrow}: no follow-up text in the broader problem's action`);
     }
     // Positive control: an ordinary incident's review becomes an article, and its factor text goes into the problem.

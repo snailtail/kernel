@@ -24,7 +24,7 @@ import { recordTypes, recordUrl, typeForRef, type SearchHit } from './records.js
 import { attentionCount, incidentRefOf, myReviews } from './reviews.js';
 import { addImprovementLink, improvementLinkSchema, myImprovements } from './improvements.js';
 import { addRequestLink, myRequestWork, requestLinkSchema, teamRequestTasks } from './requests.js';
-import { myActions } from './actions.js';
+import { actionCounts, myActions } from './actions.js';
 
 export const searchSchema = z.object({
   q: z.string().trim().min(1).max(200),
@@ -160,7 +160,7 @@ export async function myWork(user: User) {
   const incidentRead = can(user.role, 'incident.read');
   const [problemWork, actions, incidentWork, changeWork] = await Promise.all([
     myProblemWork(user.id, decide),
-    myActions(user.id),
+    myActions(user),
     incidentRead ? myIncidentWork(user.id, teams.map((t) => t.id)) : null,
     myChangeWork(user.id, can(user.role, 'change.approve'), can(user.role, 'change.read')),
   ]);
@@ -196,16 +196,15 @@ export async function myWork(user: User) {
 export async function navCounts(user: User) {
   const n = async (sql: string, params: unknown[] = []) => Number((await query(sql, params)).rows[0].n);
   const zero = Promise.resolve(0);
-  const [myProblems, myIncidents, myActions, alerts, queue, decisions, overdue] = await Promise.all([
+  const [myProblems, myIncidents, actions, alerts, queue, decisions] = await Promise.all([
     n("SELECT count(*) AS n FROM problems WHERE assignee_id = $1 AND status NOT IN ('resolved', 'closed')", [user.id]),
     can(user.role, 'incident.read') && moduleEnabled('incident') ? n("SELECT count(*) AS n FROM incidents WHERE assignee_id = $1 AND status NOT IN ('resolved', 'closed')", [user.id]) : zero,
-    n("SELECT count(*) AS n FROM problem_actions WHERE owner_id = $1 AND status = 'open'", [user.id]),
+    actionCounts(user),
     can(user.role, 'event.read') && moduleEnabled('event') ? n("SELECT count(*) AS n FROM alerts WHERE status = 'open' AND incident_id IS NULL AND suppressed = ''") : zero,
     can(user.role, 'incident.read') && moduleEnabled('incident')
       ? n("SELECT count(*) AS n FROM incidents i WHERE i.assignee_id IS NULL AND i.status NOT IN ('resolved', 'closed') AND i.team_id IN (SELECT team_id FROM team_members WHERE user_id = $1)", [user.id])
       : zero,
     can(user.role, 'problem.accept_risk') ? n("SELECT count(*) AS n FROM problems WHERE status = 'known_error' AND coalesce(ec_decision, 'pending') = 'pending'") : zero,
-    n("SELECT count(*) AS n FROM problem_actions WHERE status = 'open' AND due_date < current_date"),
   ]);
   const reviews = can(user.role, 'incident.read') && moduleEnabled('incident') ? await attentionCount(user.id) : 0;
   // Service requests (#44): unassigned tasks in my teams, and requests waiting for my approval.
@@ -216,5 +215,5 @@ export async function navCounts(user: User) {
         [user.id],
       )
     : 0;
-  return { my_work: myProblems + myIncidents + myActions, events: alerts, incidents: queue, kedb: decisions, actions: overdue, reviews, requests };
+  return { my_work: myProblems + myIncidents + actions.mine, events: alerts, incidents: queue, kedb: decisions, actions: actions.overdue, reviews, requests };
 }

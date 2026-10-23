@@ -1,6 +1,5 @@
-// MCP: Problem records, the known error database, analyses and follow-up actions.
+// MCP: Problem records, the known error database and analyses.
 import { z } from 'zod';
-import * as actions from '../actions.js';
 import * as analyses from '../analyses.js';
 import { badRequest } from '../errors.js';
 import { problemMarkdown } from '../export.js';
@@ -314,52 +313,6 @@ export function registerProblemsTools({ user, tool, HUMAN_CONFIRMATION, decide }
       (await analyses.updateAnalysis(user, ref, analysis_id, analyses.updateAnalysisSchema.parse(input))).analyses.find(
         (a: { id: number }) => a.id === analysis_id,
       ),
-  );
-  const actionShape = {
-    title: z.string().describe('What needs to be done'),
-    description: z.string().optional(),
-    owner: z.string().nullable().optional().describe('Username of the person responsible'),
-    due_date: z.string().nullable().optional().describe('YYYY-MM-DD'),
-    change_ref: z.string().optional().describe('Change implementing the action, e.g. CHG0042'),
-  };
-  const actionInput = async ({ owner, ...rest }: { owner?: string | null; [k: string]: unknown }) => {
-    const owner_id = await resolveAssignee(owner);
-    return owner_id === undefined ? rest : { ...rest, owner_id };
-  };
-  tool(
-    'list_actions',
-    'List follow-up actions across all problems, e.g. my open actions or everything overdue.',
-    {
-      status: z.enum([...actions.ACTION_STATUSES, 'all']).optional().describe('Default "open"'),
-      owner: z.string().optional().describe('Username'),
-      overdue: z.boolean().optional(),
-      q: z.string().optional().describe('Matches action title, problem ref or problem title'),
-    },
-    true,
-    async ({ owner, ...args }) =>
-      actions.listActions(actions.listActionsSchema.parse({ ...args, owner_id: (await resolveAssignee(owner)) ?? undefined, limit: 100 })),
-  );
-  tool(
-    'add_action',
-    'Add a follow-up action to a problem, with an owner and due date.',
-    { ref: z.string(), ...actionShape, idempotency_key: z.string().max(200).optional().describe('Retry-safe key') },
-    false,
-    async ({ ref, idempotency_key, ...args }) =>
-      idempotent(user.id, idempotency_key, `add_action ${ref}`, args, async () => (await actions.createAction(user, ref, actions.createActionSchema.parse(await actionInput(args)))).actions),
-  );
-  tool(
-    'update_action',
-    'Update a follow-up action, or complete/cancel/reopen it via status. Get the action id from get_problem or list_actions.',
-    {
-      ref: z.string(),
-      action_id: z.number().int(),
-      ...actionShape,
-      title: actionShape.title.optional(),
-      status: z.enum(actions.ACTION_STATUSES).optional(),
-    },
-    false,
-    async ({ ref, action_id, ...args }) =>
-      (await actions.updateAction(user, ref, action_id, actions.updateActionSchema.parse(await actionInput(args)))).actions,
   );
   tool(
     'unlink_record',

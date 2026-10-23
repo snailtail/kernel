@@ -1,8 +1,8 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
-import { api, asConflict, type Action, type Activity, type Conflict, type LinkKind, type ProblemDetail, type Status } from '../api';
+import { api, asConflict, type Activity, type Conflict, type LinkKind, type ProblemDetail, type Status } from '../api';
 import { MajorBadge, PriorityBadge, StatusBadge } from '../components/Badges';
-import { ActionList, ActionModal } from '../components/Actions';
+import { ActionsCard } from '../components/Actions';
 import { ApprovalDetails } from '../components/ApprovalDetails';
 import { AffectedCisPanel } from '../components/AffectedCis';
 import { AnalysesSection } from '../components/Analyses';
@@ -526,28 +526,9 @@ function AssessmentModal({ problem: p, onClose, onDone }: { problem: ProblemDeta
 
 function ActionsSection({ problem: p, onChange }: { problem: ProblemDetail; onChange: (p: ProblemDetail) => void }) {
   const { user } = useSession();
-  const [editing, setEditing] = useState<Action | 'new' | null>(null);
-  const [showClosed, setShowClosed] = useState(false);
-  const open = p.actions.filter((a) => a.status === 'open');
-  const closed = p.actions.filter((a) => a.status !== 'open');
-  const editable = canEdit(user);
   return (
-    <section className="card">
-      <div className="section-head">
-        <h2>Follow-up actions {open.length > 0 && <span className="count">{open.length} open</span>}</h2>
-        {editable && <button className="btn-link" onClick={() => setEditing('new')}>+ Action</button>}
-      </div>
-      {p.actions.length === 0 && <p className="placeholder">No follow-up actions. Add actions for fixes, vendor follow-ups, monitoring or review outcomes.</p>}
-      <ActionList actions={showClosed ? [...open, ...closed] : open} editable={editable} onChange={onChange} onEdit={setEditing} />
-      {closed.length > 0 && (
-        <button className="btn-link small" onClick={() => setShowClosed(!showClosed)}>
-          {showClosed ? 'Hide' : 'Show'} {closed.length} completed or cancelled
-        </button>
-      )}
-      {editing && (
-        <ActionModal refId={p.ref} action={editing === 'new' ? null : editing} onClose={() => setEditing(null)} onDone={(np) => { onChange(np); setEditing(null); }} />
-      )}
-    </section>
+    <ActionsCard parent={p.ref} actions={p.actions} editable={canEdit(user)} onChanged={() => api.get<ProblemDetail>(`/api/problems/${p.ref}`).then(onChange)}
+      placeholder="No follow-up actions. Add actions for fixes, vendor follow-ups, monitoring or review outcomes." />
   );
 }
 

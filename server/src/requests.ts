@@ -1113,6 +1113,7 @@ const REQUEST_TYPE: RecordType = {
   textPlaces: [
     { table: 'requests', key: 'id', columns: ['title', 'reject_reason', 'cancel_reason'], json: ['answers'] },
     { table: 'request_activity', key: 'request_id', columns: ['body'], json: ['data'] },
+    { table: 'actions', key: 'parent_id', parentKind: 'request', columns: ['title', 'description'] },
     { table: 'request_tasks', key: 'request_id', columns: ['title', 'note'] },
     { table: 'request_links', key: 'request_id', columns: ['note', 'url'] },
     { table: 'portal_feedback', key: 'request_id', columns: ['comment'] },

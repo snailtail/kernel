@@ -46,7 +46,7 @@ kinds of rules with their own pages. The rules page links to both.
 | `field_changed` (`field`) | priority, category, team or assignee changes | incidents and problems (all four), changes (team, assignee), requests (priority) |
 | `status_changed` (`to`, optional) | it moves to that status (any status without `to`) | all |
 | `in_status_for` (`status`, `hours`) | it has been in the status for that long: 15 minutes (0.25) to a year | all |
-| `due_in` (`hours`) | a follow-up action on a problem is due within that long (1 to 720 hours) | problems |
+| `due_in` (`hours`) | a follow-up action on the record is due within that long (1 to 720 hours) | incidents, problems, changes, requests |
 
 **Time triggers** are found by a scan every minute and queued into the same `rule_runs`.
 - Each run carries a **window key**: the moment the record entered the status (`in:<status>:<time>`) or the action and
@@ -116,7 +116,8 @@ Four rules ship **disabled**. Each turns on with one click on the rules page:
 
 - **Close resolved incidents after 5 days**: not when the caller said "still a problem" in the portal, and not
   for major incidents (a person closes those after the review).
-- **Remind the owner of actions due tomorrow**: problem follow-up actions, once per action and due date.
+- **Remind the owner of actions due tomorrow**: problem follow-up actions, once per action and due date (a copy of
+  the rule on another kind reminds about that kind's actions).
 - **Escalate an unassigned P1 to the team lead after 15 minutes**: a P1 still new and unassigned.
 - **Remind the approver of a request after 2 days**: a request still waiting for approval.
 

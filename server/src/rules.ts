@@ -67,13 +67,13 @@ export const CONDITION_FIELDS: Record<RuleKind, readonly string[]> = {
 };
 /** Who a notification can go to besides named people and teams: people the record itself names. */
 export const NOTIFY_ROLES: Record<RuleKind, readonly string[]> = {
-  incident: ['assignee', 'team_lead'],
+  incident: ['assignee', 'team_lead', 'owner'],
   problem: ['assignee', 'team_lead', 'owner'],
-  change: ['assignee', 'team_lead'],
-  request: ['approvers'],
+  change: ['assignee', 'team_lead', 'owner'],
+  request: ['approvers', 'owner'],
 };
-/** The kinds whose follow-ups have due dates (problem actions), for the due_in trigger. */
-const DUE_KINDS: readonly RuleKind[] = ['problem'];
+/** The kinds whose follow-up actions (#184) have due dates, for the due_in trigger. */
+const DUE_KINDS: readonly RuleKind[] = ['incident', 'problem', 'change', 'request'];
 const OPERATORS: Record<FieldType, readonly string[]> = {
   ci: ['is', 'is_not', 'in', 'is_empty'],
   category: ['is', 'is_not', 'in', 'is_empty'],
@@ -671,7 +671,7 @@ async function runOne(run: any) {
   // A time trigger is checked again when it runs: the record may have moved on since the scan.
   if (run.event.type === 'in_status_for' && facts.status !== run.event.status) return finish(run.id, 'skipped', `No longer ${words(run.event.status)}`);
   if (run.event.type === 'due_in') {
-    const { rows: open } = await query("SELECT 1 FROM problem_actions WHERE id = $1 AND status = 'open' AND due_date = $2::date", [run.event.action_id, run.event.due]);
+    const { rows: open } = await query("SELECT 1 FROM actions WHERE id = $1 AND status = 'open' AND due_date = $2::date", [run.event.action_id, run.event.due]);
     if (!open[0]) return finish(run.id, 'skipped', 'The action is done or its due date moved');
   }
   if (!matches(rule.conditions, facts)) return finish(run.id, 'not_matched');
@@ -763,13 +763,13 @@ export async function scanTimeTriggers(): Promise<number> {
         )
         : await db.query(
           `INSERT INTO rule_runs (rule_id, kind, record_ref, event, window_key)
-           SELECT $1, 'problem', p.ref, jsonb_build_object('type', 'due_in', 'hours', $2::int, 'action_id', a.id, 'owner_id', a.owner_id, 'due', a.due_date::text),
+           SELECT $1, $3, p.ref, jsonb_build_object('type', 'due_in', 'hours', $2::int, 'action_id', a.id, 'owner_id', a.owner_id, 'due', a.due_date::text),
                   'due:' || a.id || ':' || a.due_date::text
-           FROM problem_actions a JOIN problems p ON p.id = a.problem_id
+           FROM actions a JOIN ${t.table} p ON a.parent_kind = $3 AND p.id = a.parent_id
            WHERE a.status = 'open' AND a.due_date >= current_date AND a.due_date::timestamptz <= now() + $2 * interval '1 hour'
            ORDER BY a.due_date LIMIT ${SCAN_BATCH}
            ON CONFLICT (rule_id, record_ref, window_key) WHERE window_key IS NOT NULL DO NOTHING`,
-          [r.id, r.trigger.hours],
+          [r.id, r.trigger.hours, kind],
         )) as { rowCount: number | null };
       queued += rowCount ?? 0;
     }

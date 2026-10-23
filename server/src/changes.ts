@@ -843,6 +843,7 @@ const CHANGE_TYPE: RecordType = {
   textPlaces: [
     { table: 'changes', key: 'id', columns: ['title', 'description', 'implementation_plan', 'test_plan', 'backout_plan', 'outcome', 'review', 'cancel_reason'] },
     { table: 'change_activity', key: 'change_id', columns: ['body'], json: ['data'] },
+    { table: 'actions', key: 'parent_id', parentKind: 'change', columns: ['title', 'description'] },
     { table: 'change_votes', key: 'change_id', columns: ['comment'] },
     { table: 'change_links', key: 'change_id', columns: ['note', 'url'] },
   ],

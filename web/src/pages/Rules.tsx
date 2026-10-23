@@ -51,7 +51,7 @@ const CONDITION_FIELDS: Record<Kind, string[]> = {
 };
 const TRIGGER_FIELDS: Record<Kind, string[]> = { incident: ['priority', 'category', 'team', 'assignee'], problem: ['priority', 'category', 'team', 'assignee'], change: ['team', 'assignee'], request: ['priority'] };
 const SETTABLE = TRIGGER_FIELDS;
-const NOTIFY_ROLES: Record<Kind, Role[]> = { incident: ['assignee', 'team_lead'], problem: ['assignee', 'team_lead', 'owner'], change: ['assignee', 'team_lead'], request: ['approvers'] };
+const NOTIFY_ROLES: Record<Kind, Role[]> = { incident: ['assignee', 'team_lead', 'owner'], problem: ['assignee', 'team_lead', 'owner'], change: ['assignee', 'team_lead', 'owner'], request: ['approvers', 'owner'] };
 const ROLE_LABEL: Record<Role, string> = { assignee: 'the assignee', team_lead: "the team's leads", approvers: 'the approvers', owner: "the action's owner" };
 const DURATIONS = [0.25, 0.5, 1, 2, 4, 8, 24, 48, 72, 120, 168, 336, 720];
 /** 0.25 → "15 minutes", 24 → "1 day", 120 → "5 days". */
@@ -420,7 +420,7 @@ function RuleEditor({ rule, manage, webhooks, onClose, onSaved }: { rule?: Rule;
               {STATUSES[k].map((s) => <option key={s} value={`status:${s}`}>moves to {words(s)}</option>)}
               {TRIGGER_FIELDS[k].map((f) => <option key={f} value={`field:${f}`}>gets a new {FIELD_LABEL[f]}</option>)}
               <option value="in_status_for">has been in a status for a while</option>
-              {k === 'problem' && <option value="due_in">has a follow-up action coming due</option>}
+              <option value="due_in">has a follow-up action coming due</option>
             </select>
             {t.type === 'in_status_for' && (
               <select aria-label="Status" value={t.status} onChange={(e) => set({ trigger: { ...t, status: e.target.value } })}>

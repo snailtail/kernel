@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
-import { api, type Action, type ProblemDetail } from '../api';
+import { api, type Action } from '../api';
 import { daysUntil, formatDay } from '../format';
 import type { Toolkit } from './ListToolkit';
 import { Modal } from './Modal';
@@ -14,19 +14,19 @@ function DueLabel({ action }: { action: Action }) {
   return <span className={`due ${days < 0 ? 'overdue' : days <= 2 ? 'soon' : ''}`} title={formatDay(action.due_date)}>{label}</span>;
 }
 
-/** A list of follow-up actions with a completion checkbox. Set showProblem in cross-problem lists. */
+/** A list of follow-up actions with a completion checkbox. Set showParent in lists across records. */
 export function ActionList({
   actions,
   editable,
-  showProblem,
+  showParent,
   onChange,
   onEdit,
   toolkit,
 }: {
   actions: Action[];
   editable: boolean;
-  showProblem?: boolean;
-  onChange: (p: ProblemDetail) => void;
+  showParent?: boolean;
+  onChange: () => void;
   onEdit?: (a: Action) => void;
   /** Selection and bulk changes in cross-problem lists (#110). */
   toolkit?: Toolkit<Action>;
@@ -35,7 +35,8 @@ export function ActionList({
   const toggle = async (a: Action) => {
     setBusy(a.id);
     try {
-      onChange(await api.patch<ProblemDetail>(`/api/problems/${a.ref}/actions/${a.id}`, { status: a.status === 'open' ? 'done' : 'open' }));
+      await api.patch<Action>(`/api/actions/${a.id}`, { status: a.status === 'open' ? 'done' : 'open' });
+      onChange();
     } finally {
       setBusy(null);
     }
@@ -60,8 +61,8 @@ export function ActionList({
               {a.change_ref && <span className="tag mono">{a.change_ref}</span>}
             </div>
             <div className="action-meta">
-              {showProblem && (
-                <Link to={`/problems/${a.ref}`} className="action-problem"><span className="mono">{a.ref}</span> {a.problem_title}</Link>
+              {showParent && (
+                <Link to={a.path} className="action-problem"><span className="mono">{a.ref}</span> {a.parent_title}</Link>
               )}
               <span>{a.owner ?? 'No owner'}</span>
               <DueLabel action={a} />
@@ -76,7 +77,8 @@ export function ActionList({
   );
 }
 
-export function ActionModal({ refId, action, onClose, onDone }: { refId: string; action: Action | null; onClose: () => void; onDone: (p: ProblemDetail) => void }) {
+/** Adds an action to the record `parent` (a ref), or edits one. */
+function ActionModal({ parent, action, onClose, onDone }: { parent: string; action: Action | null; onClose: () => void; onDone: () => void }) {
   const { meta } = useSession();
   const [form, setForm] = useState({
     title: action?.title ?? '',
@@ -88,10 +90,11 @@ export function ActionModal({ refId, action, onClose, onDone }: { refId: string;
   const [error, setError] = useState<string | null>(null);
   const body = () => ({ ...form, owner_id: form.owner_id ? Number(form.owner_id) : null, due_date: form.due_date || null });
 
-  const run = async (fn: () => Promise<ProblemDetail>) => {
+  const run = async (fn: () => Promise<unknown>) => {
     setError(null);
     try {
-      onDone(await fn());
+      await fn();
+      onDone();
     } catch (err) {
       setError((err as Error).message);
     }
@@ -100,8 +103,8 @@ export function ActionModal({ refId, action, onClose, onDone }: { refId: string;
     e.preventDefault();
     run(() =>
       action
-        ? api.patch<ProblemDetail>(`/api/problems/${refId}/actions/${action.id}`, body())
-        : api.post<ProblemDetail>(`/api/problems/${refId}/actions`, body()),
+        ? api.patch<Action>(`/api/actions/${action.id}`, body())
+        : api.post<Action>('/api/actions', { ...body(), parent }),
     );
   };
 
@@ -129,12 +132,12 @@ export function ActionModal({ refId, action, onClose, onDone }: { refId: string;
         {error && <div className="error full">{error}</div>}
         <div className="actions full">
           {action && action.status !== 'cancelled' && (
-            <button type="button" className="btn-link danger spacer-right" onClick={() => run(() => api.patch(`/api/problems/${refId}/actions/${action.id}`, { status: 'cancelled' }))}>
+            <button type="button" className="btn-link danger spacer-right" onClick={() => run(() => api.patch(`/api/actions/${action.id}`, { status: 'cancelled' }))}>
               Cancel action
             </button>
           )}
           {action && action.status === 'cancelled' && (
-            <button type="button" className="btn-link spacer-right" onClick={() => run(() => api.patch(`/api/problems/${refId}/actions/${action.id}`, { status: 'open' }))}>
+            <button type="button" className="btn-link spacer-right" onClick={() => run(() => api.patch(`/api/actions/${action.id}`, { status: 'open' }))}>
               Reopen action
             </button>
           )}
@@ -143,5 +146,33 @@ export function ActionModal({ refId, action, onClose, onDone }: { refId: string;
         </div>
       </form>
     </Modal>
+  );
+}
+
+/** The follow-up actions of one record (#184): open first, the rest behind a toggle, and the add and edit dialog. */
+export function ActionsCard({ parent, actions, editable, onChanged, placeholder }: {
+  parent: string; actions: Action[]; editable: boolean; onChanged: () => void; placeholder: string;
+}) {
+  const [editing, setEditing] = useState<Action | 'new' | null>(null);
+  const [showClosed, setShowClosed] = useState(false);
+  const open = actions.filter((a) => a.status === 'open');
+  const closed = actions.filter((a) => a.status !== 'open');
+  return (
+    <section className="card">
+      <div className="section-head">
+        <h2>Follow-up actions {open.length > 0 && <span className="count">{open.length} open</span>}</h2>
+        {editable && <button className="btn-link" onClick={() => setEditing('new')}>+ Action</button>}
+      </div>
+      {actions.length === 0 && <p className="placeholder">{placeholder}</p>}
+      <ActionList actions={showClosed ? [...open, ...closed] : open} editable={editable} onChange={onChanged} onEdit={setEditing} />
+      {closed.length > 0 && (
+        <button className="btn-link small" onClick={() => setShowClosed(!showClosed)}>
+          {showClosed ? 'Hide' : 'Show'} {closed.length} completed or cancelled
+        </button>
+      )}
+      {editing && (
+        <ActionModal parent={parent} action={editing === 'new' ? null : editing} onClose={() => setEditing(null)} onDone={() => { onChanged(); setEditing(null); }} />
+      )}
+    </section>
   );
 }

@@ -65,7 +65,7 @@ function cleanJson(value: unknown, clean: (s: string) => [string, number], count
 
 async function cleanPlace(db: Db, place: TextPlace, recordId: number, clean: (s: string) => [string, number]) {
   const cols = [...place.columns, ...(place.json ?? [])];
-  const { rows } = await db.query(`SELECT ctid::text AS row_id, ${cols.join(', ')} FROM ${place.table} WHERE ${place.key} = $1`, [recordId]);
+  const { rows } = await db.query(`SELECT ctid::text AS row_id, ${cols.join(', ')} FROM ${place.table} WHERE ${place.key} = $1${place.parentKind ? ' AND parent_kind = $2' : ''}`, place.parentKind ? [recordId, place.parentKind] : [recordId]);
   let total = 0;
   for (const row of rows) {
     const set: Record<string, unknown> = {};
