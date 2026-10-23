@@ -58,6 +58,9 @@ export type Db = Pick<pg.PoolClient, 'query'>;
 /** The signed-in user's columns (auth.ts's User), selected from users aliased u. */
 export const USER_COLUMNS = 'u.id, u.username, u.display_name, u.email, u.role, u.preferences, u.must_change_password, u.mfa_enabled_at IS NOT NULL AS mfa_enabled';
 
+/** A column within a period, in a query whose $1 and $2 are the period's first and last day (reports). */
+export const inPeriod = (col: string) => `${col} >= $1::date AND ${col} < $2::date + 1`;
+
 export const pool = {
   query: (sql: string, params?: unknown[]) => query(sql, params),
   end: () => rawPool.end(),

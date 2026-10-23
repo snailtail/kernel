@@ -15,21 +15,23 @@ import { asSystem, contextStore, currentContext } from './context.js';
 import { type Db, query, tx } from './db.js';
 import { recordType } from './records.js';
 import { badRequest, conflict, forbidden, HttpError, notFound, unauthorized } from './errors.js';
-import { insertIncident } from './incidents.js';
+import { callerConfirms, insertPortalIncident } from './incidents.js';
 import { logIncident } from './incident-log.js';
 import { moduleEnabled } from './modules.js';
 import { mailConfigured, notify, sendOutsideMail } from './notifications.js';
-import { syncPaging } from './oncall.js';
 import { rateLimit } from './ratelimit.js';
-import { logRequest, runAutomation, submitRequest } from './requests.js';
+import { catalogueItems, logRequest, openTaskTeams, runAutomation, submitRequest } from './requests.js';
 import { checkSameOrigin } from './security.js';
 import { securityEvent } from './security-events.js';
-import { slaOnTransition } from './sla.js';
 import { signUp as statusSignUp, signUpOpen, unsubscribeUrl } from './status-subscriptions.js';
-import { notifyTeamQueue } from './teams.js';
+import { notifyTeamQueue, teamMembers } from './teams.js';
 import { absoluteUrl } from './core/url.js';
 import { sha256Hex, tokenHash } from './core/hash.js';
 import { processOutbox } from './core/outbox.js';
+import { ciIdOf } from './cmdb.js';
+import { requesterOf } from './people.js';
+import { publishedFor, servicesFor } from './status.js';
+import { endUserArticle, endUserArticles } from './knowledge.js';
 
 export const PORTAL_COOKIE = 'kernel_portal';
 const SESSION_HOURS = 8;
@@ -154,43 +156,21 @@ export async function ticket(person: PortalPerson, ref: string) {
   return t;
 }
 
-/**
- * How a service is named for people outside IT: its public name, else the catalogue's own name. An internal service
- * with neither has no such name and is left out. (configuration_items c, service_status st joined on public.)
- */
-const PORTAL_NAME = "coalesce(nullif(st.public_name, ''), CASE WHEN c.in_catalogue THEN c.name END)";
-
 /** Services the person can choose when reporting: their organisation's services and the service catalogue. */
-export async function services(person: PortalPerson) {
-  const { rows } = await query(
-    `SELECT c.ref, ${PORTAL_NAME} AS name FROM configuration_items c
-     LEFT JOIN service_status st ON st.ci_id = c.id AND st.public
-     WHERE c.class = 'service' AND c.status <> 'retired'
-       AND (c.in_catalogue OR EXISTS (SELECT 1 FROM organisation_services os WHERE os.ci_id = c.id AND os.organisation_id = $1))
-       AND ${PORTAL_NAME} IS NOT NULL
-     ORDER BY 2 LIMIT 200`,
-    [person.organisation_id ?? 0],
-  );
-  return rows;
-}
+export const services = (person: PortalPerson) => servicesFor(person.organisation_id);
 
 /** Help articles written for end users, suggested while the person describes the problem. */
 export async function suggest(text: string) {
   const words = text.toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) ?? [];
   if (!words.length || !moduleEnabled('knowledge')) return [];
-  const { rows } = await query(
-    `SELECT a.ref, a.title FROM articles a, to_tsquery('simple', $1) q
-     WHERE a.status = 'published' AND a.audience = 'end_users' AND a.search @@ q ORDER BY ts_rank(a.search, q) DESC LIMIT 5`,
-    [[...new Set(words)].slice(0, 12).map((w) => `${w}:*`).join(' | ')],
-  );
-  return rows;
+  return endUserArticles([...new Set(words)].slice(0, 12));
 }
 
 export async function article(ref: string) {
   if (!moduleEnabled('knowledge')) throw notFound('Not found');
-  const { rows } = await query("SELECT ref, title, body, updated_at FROM articles WHERE ref = $1 AND status = 'published' AND audience = 'end_users'", [ref.toUpperCase()]);
-  if (!rows[0]) throw notFound('Not found');
-  return rows[0];
+  const found = await endUserArticle(ref);
+  if (!found) throw notFound('Not found');
+  return found;
 }
 
 // ---- Reporting a problem ---------------------------------------------------------------------------------------
@@ -219,16 +199,11 @@ export async function reportProblem(person: PortalPerson, input: z.infer<typeof 
   if (input.service) {
     const allowed = await services(person);
     if (!allowed.some((s) => s.ref === input.service!.toUpperCase())) throw badRequest('Choose a service from the list');
-    const { rows } = await query('SELECT id FROM configuration_items WHERE ref = $1', [input.service.toUpperCase()]);
-    ciIds = rows.map((r) => r.id);
+    const id = await ciIdOf(input.service);
+    ciIds = id ? [id] : [];
   }
   const { impact, urgency } = AFFECTED[input.affected];
-  const created = await tx(async (db) => {
-    const inc = await insertIncident(db, null, { title: titleFrom(input.what), description: input.what, impact, urgency, reporter: '' }, ciIds, 'portal');
-    await db.query('UPDATE incidents SET caller_id = $2 WHERE id = $1', [inc.id, person.id]);
-    await logIncident(db, inc.id, null, 'update', `Reported in the portal by person #${person.id}`, { caller: { to: person.id }, via: 'portal', affected: input.affected });
-    return inc;
-  });
+  const created = await tx((db) => insertPortalIncident(db, person.id, { title: titleFrom(input.what), description: input.what, impact, urgency }, ciIds, input.affected));
   return ticket(person, created.ref);
 }
 
@@ -257,8 +232,7 @@ async function tellHandlers(db: Db, t: Own, summary: string) {
   if (t.assignee_id) await notify(db, { users: [t.assignee_id], event: 'watched_update', ref: t.ref, title: t.title, summary, path, dedupe: `portal:${t.ref}:${Date.now()}`, actorId: null });
   else if (t.team_id) await notifyTeamQueue(db, t.team_id, { ref: t.ref, title: t.title, path }, null);
   if (t.kind === 'request') {
-    const { rows } = await db.query("SELECT DISTINCT team_id FROM request_tasks WHERE request_id = $1 AND status = 'open' AND team_id IS NOT NULL", [t.id]);
-    for (const r of rows) await notify(db, { users: (await db.query('SELECT user_id FROM team_members WHERE team_id = $1', [r.team_id])).rows.map((m) => m.user_id), event: 'watched_update', ref: t.ref, title: t.title, summary, path, dedupe: `portal:${t.ref}:${r.team_id}:${Date.now()}`, actorId: null });
+    for (const team of await openTaskTeams(db, t.id)) await notify(db, { users: await teamMembers(db, team), event: 'watched_update', ref: t.ref, title: t.title, summary, path, dedupe: `portal:${t.ref}:${team}:${Date.now()}`, actorId: null });
   }
 }
 
@@ -288,23 +262,7 @@ export async function confirm(person: PortalPerson, ref: string, input: z.infer<
     const [view] = await forPortal(db, person.id, t.ref);
     if (t.kind !== 'incident' || !view.can.confirm) throw conflict(`This can no longer be confirmed. If you still need help, report it again (it was solved more than ${PORTAL_REOPEN_DAYS} days ago or is closed).`);
     if (input.body) await logIncident(db, t.id, null, 'comment', input.body, { from_requester: true, person_id: person.id });
-    const { rows } = await db.query('SELECT is_major FROM incidents WHERE id = $1', [t.id]);
-    if (input.works) {
-      if (rows[0].is_major) {
-        await logIncident(db, t.id, null, 'update', 'The caller confirmed in the portal that it works', { by_requester: true, confirmed: true });
-        return;
-      }
-      await db.query("UPDATE incidents SET status = 'closed', closed_at = now() WHERE id = $1", [t.id]);
-      await slaOnTransition(db, t.id, 'closed');
-      await logIncident(db, t.id, null, 'status', 'The caller confirmed in the portal that it works', { from: 'resolved', to: 'closed', by_requester: true });
-    } else {
-      await db.query("UPDATE incidents SET status = 'in_progress', resolved_at = NULL, closed_at = NULL, reopen_count = reopen_count + 1 WHERE id = $1", [t.id]);
-      await slaOnTransition(db, t.id, 'in_progress');
-      if (rows[0].is_major) await db.query("UPDATE incidents SET major_next_update_at = now() + coalesce(major_update_minutes, 60) * interval '1 minute', major_overdue_notified_for = NULL WHERE id = $1", [t.id]);
-      await logIncident(db, t.id, null, 'status', 'The caller says it is still a problem (portal)', { from: 'resolved', to: 'in_progress', by_requester: true });
-      await syncPaging(db, t.id, null);
-      await tellHandlers(db, t, 'The caller says it is still a problem: reopened from the portal.');
-    }
+    if (await callerConfirms(db, t.id, input.works)) await tellHandlers(db, t, 'The caller says it is still a problem: reopened from the portal.');
   });
   return ticket(person, ref);
 }
@@ -317,14 +275,7 @@ const PORTAL_FIELDS = ['text', 'textarea', 'choice', 'date'];
 
 async function catalogueRows(itemId: number | null) {
   if (!moduleEnabled('request')) throw notFound('Not found');
-  const { rows } = await query(
-    `SELECT i.id, i.name, i.description, i.form, i.approval <> 'none' AS needs_approval, ${PORTAL_NAME} AS service
-     FROM request_items i JOIN configuration_items c ON c.id = i.service_id LEFT JOIN service_status st ON st.ci_id = c.id AND st.public
-     WHERE i.active AND ($1::int IS NULL OR i.id = $1)
-       AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(i.form) f WHERE NOT (f->>'type' = ANY($2)))
-     ORDER BY 6 NULLS LAST, i.name LIMIT 300`,
-    [itemId, PORTAL_FIELDS],
-  );
+  const rows = await catalogueItems(itemId, PORTAL_FIELDS);
   return rows.map(({ form, ...i }) => ({ ...i, form: (form as any[]).map((f) => ({ key: f.key, label: f.label, type: f.type, required: !!f.required, choices: f.choices ?? [] })) }));
 }
 
@@ -346,8 +297,7 @@ export const orderSchema = z.object({ item_id: z.number().int(), answers: z.reco
 export async function order(person: PortalPerson, input: z.infer<typeof orderSchema>) {
   await catalogueItem(input.item_id);
   const ref = await tx(async (db) => {
-    const { rows } = await db.query('SELECT id, name, user_id FROM people WHERE id = $1', [person.id]);
-    return submitRequest(db, input.item_id, rows[0], input.answers, { loggerId: null });
+    return submitRequest(db, input.item_id, await requesterOf(db, person.id), input.answers, { loggerId: null });
   });
   await runAutomation(ref);
   return ticket(person, ref);
@@ -360,20 +310,7 @@ export async function order(person: PortalPerson, input: z.infer<typeof orderSch
  * the published status and published, unretracted updates of the last 14 days. Nothing else about the services.
  */
 export async function serviceStatus(person: PortalPerson) {
-  const { rows: services } = await query(
-    `SELECT st.ci_id, st.public_name AS name, st.public_description AS description, st.public_status AS status
-     FROM service_status st JOIN organisation_services os ON os.ci_id = st.ci_id AND os.organisation_id = $1
-     WHERE st.public AND coalesce(st.public_name, '') <> '' ORDER BY st.public_name`,
-    [person.organisation_id ?? 0],
-  );
-  const ids = services.map((s) => s.ci_id);
-  const { rows: updates } = ids.length ? await query(
-    `SELECT su.phase, su.status, su.message, su.created_at,
-            (SELECT array_agg(st.public_name ORDER BY st.public_name) FROM service_status st WHERE st.public AND st.ci_id = ANY(su.ci_ids) AND st.ci_id = ANY($1)) AS services
-     FROM status_updates su WHERE su.public AND su.retracted_at IS NULL AND su.ci_ids && $1 AND su.created_at > now() - interval '14 days'
-     ORDER BY su.created_at DESC LIMIT 20`,
-    [ids],
-  ) : { rows: [] as any[] };
+  const { services, updates } = await publishedFor(person.organisation_id);
   return {
     services: services.map(({ ci_id: _id, ...s }) => s),
     updates: updates.filter((u) => u.services?.length).map((u) => ({ ...u, created_at: new Date(u.created_at).toISOString() })),

@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { User } from './auth.js';
 import { computeImpact, impactSchema } from './cmdb-graph.js';
 import { loadCi, logCi, registerCiExtra } from './cmdb.js';
-import { query, tx } from './db.js';
+import { inPeriod, query, tx } from './db.js';
 import { conflict, notFound } from './errors.js';
 import { authorize } from './policy.js';
 import { getProblem, loadForUpdate, logProblem, registerProblemExtra } from './problems.js';
@@ -123,3 +123,32 @@ registerCiExtra(async (ciId) => {
     recent_records: records,
   };
 });
+
+/** CI hotspots (#26) for the problem report: records and problems per CI and per CI type, and records nobody has linked to a problem yet. */
+export async function ciHotspots(from: string, to: string) {
+  const range = [from, to];
+  const [cis, types] = await Promise.all([
+    query(
+      `SELECT c.ref, c.name, c.class, t.label AS type_label, c.criticality,
+         (SELECT count(*) FROM external_records r WHERE r.ci_id = c.id AND ${inPeriod('r.occurred_at')})::int AS records,
+         (SELECT count(*) FROM external_records r WHERE r.ci_id = c.id AND r.problem_id IS NULL AND NOT r.dismissed AND ${inPeriod('r.occurred_at')})::int AS unlinked,
+         (SELECT count(*) FROM problem_cis pc JOIN problems p ON p.id = pc.problem_id WHERE pc.ci_id = c.id AND p.status NOT IN ('resolved', 'closed'))::int AS open_problems,
+         (SELECT count(*) FROM problem_cis pc JOIN problems p ON p.id = pc.problem_id WHERE pc.ci_id = c.id AND p.status = 'known_error')::int AS known_errors
+       FROM configuration_items c JOIN ci_types t ON t.name = c.ci_type
+       WHERE EXISTS (SELECT 1 FROM external_records r WHERE r.ci_id = c.id AND ${inPeriod('r.occurred_at')})
+          OR EXISTS (SELECT 1 FROM problem_cis pc JOIN problems p ON p.id = pc.problem_id WHERE pc.ci_id = c.id AND p.status NOT IN ('resolved', 'closed'))
+       ORDER BY unlinked DESC, records DESC, open_problems DESC LIMIT 10`,
+      range,
+    ),
+    query(
+      `SELECT t.label AS name, count(DISTINCT r.id)::int AS records, count(DISTINCT pc.problem_id)::int AS problems
+       FROM configuration_items c JOIN ci_types t ON t.name = c.ci_type
+       LEFT JOIN external_records r ON r.ci_id = c.id AND ${inPeriod('r.occurred_at')}
+       LEFT JOIN problem_cis pc ON pc.ci_id = c.id
+       GROUP BY t.label HAVING count(DISTINCT r.id) > 0 OR count(DISTINCT pc.problem_id) > 0
+       ORDER BY 2 DESC, 3 DESC LIMIT 10`,
+      range,
+    ),
+  ]);
+  return { cis: cis.rows, ci_types: types.rows };
+}

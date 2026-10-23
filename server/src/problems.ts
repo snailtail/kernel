@@ -713,3 +713,25 @@ registerRecordType(PROBLEM_TYPE);
 function problemUrl(ref: string) {
   return recordUrl(PROBLEM_TYPE, ref);
 }
+
+/** My Work (#110): my open problems, recent changes on problems I watch, and known errors waiting for a decision. */
+export async function myProblemWork(userId: number, decide: boolean) {
+  const [problems, watched, decisions] = await Promise.all([
+    query(
+      `SELECT ref, title, status, priority, updated_at FROM problems WHERE assignee_id = $1 AND status NOT IN ('resolved', 'closed') ORDER BY priority, updated_at DESC LIMIT 50`,
+      [userId],
+    ),
+    query(
+      `SELECT p.ref, p.title, a.kind, a.body, a.created_at, u.display_name AS by
+       FROM problem_activity a JOIN problems p ON p.id = a.problem_id LEFT JOIN users u ON u.id = a.user_id
+       JOIN problem_watchers w ON w.problem_id = a.problem_id AND w.user_id = $1
+       WHERE a.user_id IS DISTINCT FROM $1 AND a.created_at > now() - interval '7 days' ORDER BY a.created_at DESC LIMIT 30`,
+      [userId],
+    ),
+    decide
+      ? query(`SELECT ref, title, priority, known_error_at FROM problems WHERE status = 'known_error' AND coalesce(ec_decision, 'pending') = 'pending' ORDER BY priority, known_error_at LIMIT 30`)
+      : Promise.resolve({ rows: [] as any[] }),
+  ]);
+  return { problems: problems.rows, watched: watched.rows, decisions: decisions.rows };
+}
+

@@ -12,7 +12,7 @@ import { computeImpact, impactSchema } from './cmdb-graph.js';
 import { loadCi, logCi, registerCiExtra } from './cmdb.js';
 import { assertMayWriteText, forgetExists, notCopied, readableText, textFilterSql } from './confidential.js';
 import { currentContext } from './context.js';
-import { type Db, query, tx } from './db.js';
+import { type Db, inPeriod, query, tx } from './db.js';
 import { badRequest, conflict, forbidden, notFound } from './errors.js';
 import { authorize, can } from './policy.js';
 import { getProblem, loadForUpdate, logProblem, registerProblemExtra } from './problems.js';
@@ -854,4 +854,43 @@ registerRecordType(CHANGE_TYPE);
 
 function changeUrl(ref: string) {
   return recordUrl(CHANGE_TYPE, ref);
+}
+
+/** My Work (#110): changes waiting for my vote (when I may approve), and my own open changes (when I may read them). */
+export async function myChangeWork(userId: number, vote: boolean, own: boolean) {
+  const [votes, changes] = await Promise.all([
+    vote
+      ? query(
+          `SELECT c.ref, c.title, c.change_type, c.planned_start FROM changes c WHERE c.status = 'authorize' AND c.created_by IS DISTINCT FROM $1 AND c.assignee_id IS DISTINCT FROM $1
+           AND NOT EXISTS (SELECT 1 FROM change_votes v WHERE v.change_id = c.id AND v.user_id = $1) ORDER BY c.planned_start NULLS LAST LIMIT 30`,
+          [userId],
+        )
+      : Promise.resolve({ rows: [] as any[] }),
+    own
+      ? query(
+          `SELECT ref, title, status, change_type, planned_start FROM changes WHERE (assignee_id = $1 OR created_by = $1)
+           AND status NOT IN ('closed', 'rejected', 'cancelled') ORDER BY planned_start NULLS LAST LIMIT 30`,
+          [userId],
+        )
+      : Promise.resolve({ rows: [] as any[] }),
+  ]);
+  return { votes: votes.rows, changes: changes.rows };
+}
+
+/** For the report: success rate, emergency ratio, and changes followed by incidents on their CIs within a day. */
+export async function changeReport(from: string, to: string) {
+  const { rows } = await query(
+    `SELECT count(*) FILTER (WHERE ${inPeriod('c.created_at')})::int AS requested,
+       count(*) FILTER (WHERE c.outcome IS NOT NULL AND ${inPeriod('c.actual_end')})::int AS implemented,
+       count(*) FILTER (WHERE c.outcome = 'successful' AND ${inPeriod('c.actual_end')})::int AS successful,
+       count(*) FILTER (WHERE c.outcome IN ('failed', 'rolled_back') AND ${inPeriod('c.actual_end')})::int AS failed,
+       count(*) FILTER (WHERE c.change_type = 'emergency' AND ${inPeriod('c.created_at')})::int AS emergency,
+       count(*) FILTER (WHERE c.change_type = 'standard' AND ${inPeriod('c.created_at')})::int AS standard,
+       count(*) FILTER (WHERE c.actual_start IS NOT NULL AND ${inPeriod('c.actual_start')} AND EXISTS (
+         SELECT 1 FROM change_cis x JOIN incident_cis y ON y.ci_id = x.ci_id JOIN incidents i ON i.id = y.incident_id
+         WHERE x.change_id = c.id AND i.created_at BETWEEN c.actual_start AND c.actual_start + interval '24 hours'))::int AS followed_by_incidents
+     FROM changes c`,
+    [from, to],
+  );
+  return rows[0];
 }

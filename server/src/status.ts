@@ -272,3 +272,47 @@ ${p.sign_up && p.services.length ? `<h2>Get updates by email</h2><form method="p
 <button type="submit">Subscribe</button><p class="m">We send a link to confirm the address first. Every message has a link to unsubscribe.</p></form>` : ''}
 </body></html>`;
 }
+
+// ---- For people outside IT (the help portal, #45) --------------------------------------------------------------
+
+/**
+ * How a service is named for people outside IT: its public name, else the catalogue's own name. An internal service
+ * with neither has no such name and is left out. (configuration_items c, service_status st joined on public.)
+ */
+export const PUBLIC_SERVICE_NAME = "coalesce(nullif(st.public_name, ''), CASE WHEN c.in_catalogue THEN c.name END)";
+
+/** The services an organisation uses, and the service catalogue, by their name for people outside IT. */
+export async function servicesFor(organisationId: number | null) {
+  const { rows } = await query(
+    `SELECT c.ref, ${PUBLIC_SERVICE_NAME} AS name FROM configuration_items c
+     LEFT JOIN service_status st ON st.ci_id = c.id AND st.public
+     WHERE c.class = 'service' AND c.status <> 'retired'
+       AND (c.in_catalogue OR EXISTS (SELECT 1 FROM organisation_services os WHERE os.ci_id = c.id AND os.organisation_id = $1))
+       AND ${PUBLIC_SERVICE_NAME} IS NOT NULL
+     ORDER BY 2 LIMIT 200`,
+    [organisationId ?? 0],
+  );
+  return rows;
+}
+
+/**
+ * The status of the services an organisation uses, as the status page publishes them (#46): public names, the
+ * published status and published, unretracted updates of the last 14 days.
+ */
+export async function publishedFor(organisationId: number | null) {
+  const { rows: services } = await query(
+    `SELECT st.ci_id, st.public_name AS name, st.public_description AS description, st.public_status AS status
+     FROM service_status st JOIN organisation_services os ON os.ci_id = st.ci_id AND os.organisation_id = $1
+     WHERE st.public AND coalesce(st.public_name, '') <> '' ORDER BY st.public_name`,
+    [organisationId ?? 0],
+  );
+  const ids = services.map((s) => s.ci_id);
+  const { rows: updates } = ids.length ? await query(
+    `SELECT su.phase, su.status, su.message, su.created_at,
+            (SELECT array_agg(st.public_name ORDER BY st.public_name) FROM service_status st WHERE st.public AND st.ci_id = ANY(su.ci_ids) AND st.ci_id = ANY($1)) AS services
+     FROM status_updates su WHERE su.public AND su.retracted_at IS NULL AND su.ci_ids && $1 AND su.created_at > now() - interval '14 days'
+     ORDER BY su.created_at DESC LIMIT 20`,
+    [ids],
+  ) : { rows: [] as any[] };
+  return { services, updates };
+}
