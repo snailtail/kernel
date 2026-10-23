@@ -14,6 +14,10 @@ import { CLOSURE_CODES, EC_DECISIONS, ROLES, STATUSES, TRANSITIONS, WORKAROUND_E
 /** All categories, inactive ones too (records may still carry them). */
 export const listCategories = async () => (await query('SELECT id, name, active FROM categories ORDER BY name')).rows as { id: number; name: string; active: boolean }[];
 
+/** A category's id by its name, in any case. */
+export const categoryIdByName = async (name: string): Promise<number | undefined> =>
+  (await query('SELECT id FROM categories WHERE lower(name) = lower($1)', [name])).rows[0]?.id;
+
 export async function createCategory(name: string) {
   const { rows } = await query('INSERT INTO categories (name) VALUES ($1) ON CONFLICT (name) DO NOTHING RETURNING *', [name]);
   if (!rows[0]) throw conflict('Category already exists');

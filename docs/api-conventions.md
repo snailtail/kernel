@@ -116,7 +116,7 @@ clients send large selections in chunks so each request stays well within proxy 
 
 - Tools are renamed only by adding the new name next to the old one; an old name is never removed.
 - Tool descriptions briefly explain the ITIL purpose so agents follow the process. Tools a role or token scope may
-  not use are not listed. Every tool maps to a policy action (`TOOL_ACTIONS` in `mcp.ts`).
+  not use are not listed. Every tool maps to a policy action (`TOOL_ACTIONS` in `server/src/mcp/registrar.ts`).
 - Every practice also ships **guided flows**: a method guide (`server/src/methods.ts`, UI + MCP resource
   `kernel://guides/<id>`), an MCP prompt per flow, a server-side check (like `check_analysis`) and `next_steps`.
   Content written through MCP is marked as proposed until a person confirms it; decisions through MCP take a

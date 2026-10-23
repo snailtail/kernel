@@ -110,6 +110,10 @@ export async function eraseUser(admin: User, id: number, reason: string) {
 /** The account as the web UI gets it after signing in. */
 export const signedInUser = async (id: number) => (await query(`SELECT ${USER_COLUMNS} FROM users u WHERE u.id = $1`, [id])).rows[0];
 
+/** An active account's id by its username, in any case. */
+export const activeUserId = async (username: string): Promise<number | undefined> =>
+  (await query('SELECT id FROM users WHERE lower(username) = lower($1) AND active', [username])).rows[0]?.id;
+
 export const usernameOf = async (id: number): Promise<string> => (await query('SELECT username FROM users WHERE id = $1', [id])).rows[0].username;
 
 export const preferencesSchema = z
