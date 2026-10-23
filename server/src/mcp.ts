@@ -3,6 +3,7 @@
 import { maskForViewer } from './confidential.js';
 import * as serviceReports from './service-report.js';
 import * as kpiMod from './kpis.js';
+import { startFor } from './start-page.js';
 import * as statusMod from './status.js';
 import * as statusSubs from './status-subscriptions.js';
 import type { FastifyInstance } from 'fastify';
@@ -185,7 +186,7 @@ function buildServer(user: User, scopes?: string[]) {
     whoami: 'meta.read', list_reference_data: 'meta.read', search: 'meta.read', get_record: 'meta.read', next_steps: 'meta.read',
     my_work: 'problem.read', link_records: 'problem.link',
     search_problems: 'problem.read', get_problem: 'problem.read', get_history: 'meta.read', get_impact: 'ci.read', find_similar_problems: 'problem.read',
-    export_problem: 'problem.read', list_actions: 'problem.read', get_dashboard: 'problem.read',
+    export_problem: 'problem.read', list_actions: 'problem.read', get_dashboard: 'report.read',
     search_known_errors: 'kedb.read', get_report: 'report.read', get_review_agenda: 'review.read',
     list_problem_candidates: 'candidate.read', query_audit_log: 'audit.read', query_security_events: 'security.read', get_security_alerting: 'security.read',
     create_problem: 'problem.create', update_problem: 'problem.update', transition_problem: 'problem.transition',
@@ -257,7 +258,13 @@ function buildServer(user: User, scopes?: string[]) {
     return run();
   };
 
-  tool('whoami', 'Show the Kernel user this connection acts as, and its role.', {}, true, async () => user);
+  tool(
+    'whoami',
+    'Show the Kernel user this connection acts as, its role, and its focus: home (the start page) and default_new (the record it creates first). Follow that focus when the person has not said what to work on.',
+    {},
+    true,
+    async () => ({ ...user, ...(await startFor(user)) }),
+  );
 
   tool(
     'list_reference_data',
@@ -1327,7 +1334,7 @@ Actions: set_field (priority, category, team or assignee where the kind has it),
     { period: z.enum(['month', 'week']).optional().describe('KPI trend per month (default) or per week') },
     true,
     // Extended compatibly (#54): the backlog fields stay as they were, the KPIs come in their own section.
-    async ({ period }) => ({ ...(await problems.dashboard(user)), ...(can(user.role, 'report.read') ? { kpis: await kpiMod.kpis(user, kpiMod.kpiSchema.parse({ period })) } : {}) }),
+    async ({ period }) => ({ ...(await problems.dashboard(user)), kpis: await kpiMod.kpis(user, kpiMod.kpiSchema.parse({ period })) }),
   );
 
   tool(

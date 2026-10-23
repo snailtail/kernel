@@ -51,7 +51,9 @@ calculated and a link to the list behind it:
 
 Tiles of switched-off practices, and of practices the reader may not read, are left out. Which tiles show, and in
 what order, is each person's own preference
-(`dashboard_tiles`; unknown ids are ignored); there is no query language. `GET /api/dashboard` and MCP
-`get_dashboard` keep the problem backlog summary; `get_dashboard` adds the KPIs as `kpis`.
+(`dashboard_tiles`; unknown ids are ignored); until someone chooses, the tiles of their own practice (from their start
+page or default record, #171) come first. There is no query language. `GET /api/dashboard` and MCP
+`get_dashboard` keep the problem backlog summary; `get_dashboard` adds the KPIs as `kpis`. Both need `report.read`,
+the permission the KPIs use, not the problem one.
 
 For Power BI or Grafana, read the `reporting` views instead; see [reporting.md](reporting.md).

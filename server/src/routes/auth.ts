@@ -5,6 +5,7 @@ import { MFA_PENDING_COOKIE, ssoSettings } from '../sso.js';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { TILES } from '../kpis.js';
+import { HOMES, NEW_KINDS, startFor } from '../start-page.js';
 import { TOKEN_MAX_DAYS, TOKEN_SCOPES, createApiToken, createSession, currentSessionHash, destroySession, guardLogin, hashPassword, listSessions, loginFailed, loginSucceeded, requireUser, revokeSession, verifyLogin } from '../auth.js';
 import { audit } from '../audit.js';
 import { config } from '../config.js';
@@ -166,7 +167,7 @@ export async function authRoutes(app: FastifyInstance) {
 
   app.get('/api/auth/me', async (req) => {
     const user = requireUser(req);
-    return { ...user, mfa_enrollment_required: !user.mfa_enabled && (await mfaRequiredFor(user.role)) };
+    return { ...user, ...(await startFor(user)), mfa_enrollment_required: !user.mfa_enabled && (await mfaRequiredFor(user.role)) };
   });
 
   app.put('/api/auth/preferences', async (req) => {
@@ -179,6 +180,9 @@ export async function authRoutes(app: FastifyInstance) {
         live_presence: z.boolean().optional(),
         nav_collapsed: z.array(z.enum(['respond', 'improve', 'learn', 'directory'])).max(4).optional(),
         // Unknown tile ids are dropped (a tile may go when a module is switched off), and each tile counts once.
+        home: z.enum(HOMES).nullable().optional(),
+        default_new: z.enum(NEW_KINDS).nullable().optional(),
+        start_seen: z.boolean().optional(),
         dashboard_tiles: z.array(z.string().max(40)).max(20).transform((t) => [...new Set(t)].filter((id): id is (typeof TILES)[number] => (TILES as readonly string[]).includes(id))).optional(),
       })
       .strict()

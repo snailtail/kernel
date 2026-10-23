@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { requireUser } from '../auth.js';
 import { requireStepUp } from '../mfa.js';
 import * as setup from '../setup.js';
+import * as startPage from '../start-page.js';
 
 export async function setupRoutes(app: FastifyInstance) {
   app.get('/api/admin/modules', async (req) => {
@@ -15,6 +16,16 @@ export async function setupRoutes(app: FastifyInstance) {
     const body = setup.modulesSchema.extend({ reason: z.string().trim().max(1000).optional() }).parse(req.body);
     const { reason, ...modules } = body;
     return setup.setModules(user, modules, reason);
+  });
+  app.get('/api/admin/start-pages', async (req) => {
+    requireUser(req, 'user.manage');
+    return startPage.getRoleDefaults();
+  });
+  app.put('/api/admin/start-pages', async (req) => {
+    const user = requireUser(req, 'user.manage');
+    const body = startPage.roleDefaultsSchema.extend({ reason: z.string().trim().max(1000).optional() }).parse(req.body);
+    const { reason, ...defaults } = body;
+    return startPage.setRoleDefaults(user, defaults, reason);
   });
   app.get('/api/setup', async (req) => {
     requireUser(req, 'user.manage');

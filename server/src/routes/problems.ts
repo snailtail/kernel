@@ -1,12 +1,8 @@
 import type { FastifyInstance } from 'fastify';
-import { hiddenRecordsExist } from '../visibility.js';
 import { z } from 'zod';
-import { modules } from '../modules.js';
 import * as flow from '../flow.js';
 import { requireUser } from '../auth.js';
-import { config } from '../config.js';
 import { notFound } from '../errors.js';
-import { query } from '../db.js';
 import * as actions from '../actions.js';
 import * as analyses from '../analyses.js';
 import * as approvals from '../approvals.js';
@@ -18,40 +14,10 @@ import * as reports from '../reports.js';
 import { problemMarkdown } from '../export.js';
 import { securityEvent } from '../security-events.js';
 import * as review from '../review.js';
-import { CLOSURE_CODES, EC_DECISIONS, ROLES, STATUSES, TRANSITIONS, WORKAROUND_EFFECTIVENESS } from '../workflow.js';
 
 type RefParams = { Params: { ref: string } };
 
 export async function problemRoutes(app: FastifyInstance) {
-  app.get('/api/meta', async (req) => {
-    requireUser(req, 'meta.read');
-    const [categories, users] = await Promise.all([
-      query('SELECT id, name, active FROM categories ORDER BY name'),
-      query("SELECT id, display_name, role FROM users WHERE active AND role NOT IN ('viewer', 'integration') ORDER BY display_name"),
-    ]);
-    const { rows: setupRows } = await query("SELECT value FROM settings WHERE key = 'setup'");
-    return {
-      modules: modules(),
-      setup_completed: !!setupRows[0]?.value?.completed,
-      statuses: STATUSES,
-      transitions: TRANSITIONS,
-      closure_codes: CLOSURE_CODES,
-      roles: ROLES,
-      link_kinds: problems.LINK_KINDS,
-      action_statuses: actions.ACTION_STATUSES,
-      techniques: analyses.TECHNIQUES,
-      ec_decisions: EC_DECISIONS,
-      workaround_effectiveness: WORKAROUND_EFFECTIVENESS,
-      mcp_url: config.mcpUrl,
-      categories: categories.rows,
-      assignees: users.rows,
-      // Managers' numbers leave out restricted records they cannot see; the UI says so (a yes/no, never a count).
-      hidden_records: ['admin', 'problem_manager'].includes(req.user!.role) ? await hiddenRecordsExist() : false,
-    };
-  });
-
-  app.get('/api/dashboard', async (req) => problems.dashboard(requireUser(req, 'problem.read')));
-
   app.get('/api/problems', async (req) => {
     requireUser(req, 'problem.read');
     return problems.listProblems(problems.listSchema.parse(req.query));

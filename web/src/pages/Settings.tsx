@@ -7,7 +7,8 @@ import { formatDate, relativeTime, ROLE_LABEL } from '../format';
 import { useApi } from '../hooks';
 import { CopyBlock } from '../components/CopyBlock';
 import { TwoFactor } from '../components/TwoFactor';
-import { useSession } from '../session';
+import { StartPageSelects } from '../components/StartPage';
+import { canEdit, useSession } from '../session';
 
 interface Token {
   scopes?: string[];
@@ -46,7 +47,7 @@ export function SettingsPage() {
 }
 
 function PreferencesCard() {
-  const { user, setPreferences } = useSession();
+  const { user, meta, setPreferences } = useSession();
   const theme = user.preferences.theme ?? 'system';
   const guided = user.preferences.guided ?? true;
   const presence = user.preferences.live_presence ?? true;
@@ -65,6 +66,19 @@ function PreferencesCard() {
             </button>
           ))}
         </div>
+      </div>
+      <div className="pref-row">
+        <div>
+          <strong>Start page</strong>
+          <p className="muted small">Where Kernel opens, and what "+ New" and the n key create first. "Role default" follows what your administrator set for your role.</p>
+        </div>
+        <StartPageSelects
+          value={{ home: user.preferences.home, default_new: user.preferences.default_new }}
+          meta={meta}
+          creates={canEdit(user)}
+          inherit={{ home: 'Role default', default_new: 'Role default' }}
+          onChange={(c) => setPreferences({ ...c, start_seen: true })}
+        />
       </div>
       <div className="pref-row">
         <div>
