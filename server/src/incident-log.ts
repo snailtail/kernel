@@ -2,8 +2,8 @@
 import { logActivity } from './activity.js';
 import type { ActivityEntry } from './records.js';
 import { audit } from './audit.js';
-import type { Db } from './problems.js';
 import { queueRuleRuns } from './rule-queue.js';
+import type { Db } from './db.js';
 
 export const logIncident = (db: Db, incidentId: number, userId: number | null, kind: string, body = '', data: object = {}) => logActivity(db, 'incident', incidentId, userId, kind, body, data);
 

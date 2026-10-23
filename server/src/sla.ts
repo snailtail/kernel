@@ -7,14 +7,13 @@ import type { User } from './auth.js';
 import { audit } from './audit.js';
 import { addBusinessMinutes, businessMinutes, swedishHolidays, type Calendar } from './business-time.js';
 import { computeImpact, impactSchema } from './cmdb-graph.js';
-import { query, tx } from './db.js';
+import { type Db, query, tx } from './db.js';
 import { conflict, notFound } from './errors.js';
 import { addEntry, logActivity } from './activity.js';
 import { managers, notify } from './notifications.js';
 import { teamMembers } from './teams.js';
 import { moduleEnabled } from './modules.js';
 import { authorize } from './policy.js';
-import type { Db } from './problems.js';
 import { recordType } from './records.js';
 
 type Target = 'response' | 'resolution';

@@ -15,7 +15,7 @@ import { z } from 'zod';
 import { audit } from './audit.js';
 import type { User } from './auth.js';
 import { contextStore, currentContext, type RequestContext } from './context.js';
-import { query, tx } from './db.js';
+import { type Db, query, tx } from './db.js';
 import { badRequest, conflict, forbidden, notFound } from './errors.js';
 import { logger } from './log.js';
 import { notify } from './notifications.js';
@@ -24,7 +24,6 @@ import { RULE_KINDS, type RuleKind } from './rule-queue.js';
 import { moduleEnabled } from './modules.js';
 import { audienceOf } from './audience.js';
 import { enqueueTo } from './webhooks.js';
-import type { Db } from './problems.js';
 import { absoluteUrl } from './core/url.js';
 
 export { RULE_KINDS, type RuleKind };

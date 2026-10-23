@@ -5,10 +5,9 @@ import { z } from 'zod';
 import type { User } from './auth.js';
 import { audit } from './audit.js';
 import type { EvidenceCi, EvidenceRecord, Raw } from './candidates.js';
-import { query, tx } from './db.js';
+import { type Db, query, tx } from './db.js';
 import { conflict, notFound } from './errors.js';
 import { authorize } from './policy.js';
-import type { Db } from './problems.js';
 import { plural } from './core/text.js';
 
 const count = (n: number) => z.number().int().min(2).max(1000).default(n);

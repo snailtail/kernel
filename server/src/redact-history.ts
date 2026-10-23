@@ -6,8 +6,7 @@
 import { z } from 'zod';
 import { audit, digestOf, requireReason } from './audit.js';
 import type { User } from './auth.js';
-import { tx } from './db.js';
-import type { Db } from './problems.js';
+import { type Db, tx } from './db.js';
 import { badRequest, notFound } from './errors.js';
 import { authorize } from './policy.js';
 import { textKindOfRef, typeForRef, type TextPlace } from './records.js';

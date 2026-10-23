@@ -3,8 +3,8 @@
 // day. Imports from candidates.ts are types only, so the two modules load in either order.
 import { z } from 'zod';
 import type { EvidenceRecord, Raw, Series } from './candidates.js';
-import type { Db } from './problems.js';
 import { plural } from './core/text.js';
+import type { Db } from './db.js';
 
 const days = (d: number, max = 30) => z.number().int().min(1).max(max).default(d);
 const count = (n: number) => z.number().int().min(2).max(1000).default(n);

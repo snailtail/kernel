@@ -6,11 +6,11 @@ import { z } from 'zod';
 import { audienceOf, whyNotForEveryone } from './audience.js';
 import type { User } from './auth.js';
 import { audit } from './audit.js';
-import { pool, query, tx } from './db.js';
+import { type Db, pool, query, tx } from './db.js';
 import { badRequest, conflict, notFound } from './errors.js';
 import { logIncident } from './incident-log.js';
 import { authorize, can } from './policy.js';
-import { logProblem, registerProblemExtra, type Db } from './problems.js';
+import { logProblem, registerProblemExtra } from './problems.js';
 import { recordUrl, registerRecordType, type RecordType } from './records.js';
 
 export const ARTICLE_TYPES = ['how_to', 'troubleshooting', 'known_error', 'faq'] as const;

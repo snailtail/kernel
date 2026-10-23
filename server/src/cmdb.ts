@@ -2,16 +2,14 @@
 // links (vCenter, Azure, OP5…); attributes are a small typed set per CI type. Changes are audited like any record.
 import { historyOf, logActivity } from './activity.js';
 import { z } from 'zod';
-import type pg from 'pg';
 import type { User } from './auth.js';
 import { audit } from './audit.js';
 import { currentContext } from './context.js';
-import { query, tx } from './db.js';
+import { type Db, query, tx } from './db.js';
 import { badRequest, conflict, forbidden, notFound } from './errors.js';
 import { authorize } from './policy.js';
 import { recordUrl, registerRecordType, type ActivityEntry, type RecordType } from './records.js';
 
-export type Db = Pick<pg.PoolClient, 'query'>;
 
 export const CI_STATUSES = ['planned', 'active', 'maintenance', 'retired', 'missing'] as const;
 export const ENVIRONMENTS = ['prod', 'test', 'dev', 'other'] as const;

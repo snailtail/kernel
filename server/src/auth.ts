@@ -3,7 +3,7 @@ import { notify } from './notifications.js';
 import bcrypt from 'bcryptjs';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { config } from './config.js';
-import { pool, query } from './db.js';
+import { pool, query, USER_COLUMNS } from './db.js';
 import { forbidden, HttpError } from './errors.js';
 import { audit } from './audit.js';
 import { mfaRequiredFor } from './mfapolicy.js';
@@ -51,7 +51,6 @@ declare module 'fastify' {
 }
 
 const SESSION_COOKIE = 'kernel_session';
-export const USER_COLUMNS = 'u.id, u.username, u.display_name, u.email, u.role, u.preferences, u.must_change_password, u.mfa_enabled_at IS NOT NULL AS mfa_enabled';
 
 
 export const hashPassword = (password: string) => bcrypt.hash(password, 12);

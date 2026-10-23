@@ -4,9 +4,9 @@ import type { User } from './auth.js';
 import { linkRecordCis } from './problem-cis.js';
 import { audit } from './audit.js';
 import { authorize } from './policy.js';
-import { query, savepoint, tx } from './db.js';
+import { type Db, query, savepoint, tx } from './db.js';
 import { conflict, notFound } from './errors.js';
-import { LINK_KINDS, loadForUpdate, logProblem, type Db } from './problems.js';
+import { LINK_KINDS, loadForUpdate, logProblem } from './problems.js';
 
 // ---- External systems ------------------------------------------------------------------------
 

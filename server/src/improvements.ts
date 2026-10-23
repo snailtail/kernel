@@ -7,12 +7,12 @@ import { z } from 'zod';
 import { audienceOf, BROADEST, startNarrow, type Audience } from './audience.js';
 import type { User } from './auth.js';
 import { assertMayWriteText, forgetExists, textFilterSql } from './confidential.js';
-import { query, tx } from './db.js';
+import { type Db, query, tx } from './db.js';
 import { badRequest, conflict, notFound } from './errors.js';
 import { kpis, TILES } from './kpis.js';
 import { notify } from './notifications.js';
 import { authorize, can } from './policy.js';
-import { logProblem, registerProblemExtra, type Db, type StartNarrow } from './problems.js';
+import { logProblem, registerProblemExtra, type StartNarrow } from './problems.js';
 import { recordType, recordUrl, refRegex, registerRecordType, typeForRef, typeOfPrefix, type RecordType } from './records.js';
 import { assertVisibleRef } from './visibility.js';
 
