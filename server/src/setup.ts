@@ -93,7 +93,7 @@ async function remember(kind: 'problem' | 'incident' | 'change' | 'ci', ref: str
 }
 
 /** A small, coherent example: a service on a VM and a database, an incident, a known error and a change. */
-export async function loadDemoData(user: User) {
+async function loadDemoData(user: User) {
   authorize(user, 'user.manage');
   if (await hasRealData()) throw conflict('Kernel already has real data; demo data is only offered on an empty installation');
   const { rows: existing } = await query('SELECT count(*)::int AS n FROM demo_records');
@@ -137,7 +137,7 @@ export async function loadDemoData(user: User) {
 const DEMO = (kind: string, alias: string) => `EXISTS (SELECT 1 FROM demo_records d WHERE d.kind = '${kind}' AND d.record_id = ${alias})`;
 
 /** Real records that point at demo records; removing the demo unlinks them, so they are shown first. */
-export async function demoReferences(db: Pick<import('pg').PoolClient, 'query'> = { query } as any) {
+async function demoReferences(db: Pick<import('pg').PoolClient, 'query'> = { query } as any) {
   const { rows } = await db.query(
     `SELECT 'incident' AS type, i.id, i.ref, p.ref AS demo_ref FROM incidents i JOIN problems p ON p.id = i.problem_id WHERE NOT ${DEMO('incident', 'i.id')} AND ${DEMO('problem', 'p.id')}
      UNION ALL SELECT 'change', c.id, c.ref, p.ref FROM changes c JOIN problems p ON p.id = c.problem_id WHERE NOT ${DEMO('change', 'c.id')} AND ${DEMO('problem', 'p.id')}

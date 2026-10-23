@@ -29,7 +29,7 @@ const PEOPLE: Record<Kind, People> = {
     extra: (a, u) => `EXISTS (SELECT 1 FROM request_tasks t WHERE t.request_id = ${a}.id AND (t.assignee_id = ${u}::int OR EXISTS (SELECT 1 FROM team_members m WHERE m.user_id = ${u}::int AND m.team_id = t.team_id)))`,
   },
 };
-export const REVEAL_MINUTES = 15;
+const REVEAL_MINUTES = 15;
 
 /** The free-text fields that are masked, wherever they appear inside a confidential record's data. */
 export const MASKED_FIELDS = new Set([
@@ -129,7 +129,7 @@ export function textFilterSql(a: string, kind: Kind, tsquery: string, params: un
 }
 
 /** Masks free text in place: in objects that carry a masked ref, and – for a page about one record – everywhere. */
-export function maskValue(value: unknown, masked: Set<string>, all = false, depth = 0): unknown {
+function maskValue(value: unknown, masked: Set<string>, all = false, depth = 0): unknown {
   if (depth > 40 || !value || typeof value !== 'object') return value;
   if (Array.isArray(value)) {
     for (const v of value) maskValue(v, masked, all, depth + 1);

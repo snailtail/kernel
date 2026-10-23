@@ -107,7 +107,7 @@ export function SavedViews({ list }: { list: ListName }) {
 }
 
 /** The query as people read it: "status = all · q = printer". */
-export const describeQuery = (query: string) =>
+const describeQuery = (query: string) =>
   [...new URLSearchParams(query)].map(([k, v]) => `${k.replace(/_/g, ' ')} = ${v}`).join(' · ') || 'no filters';
 
 function SaveView({ list, query, onClose, onSaved }: { list: ListName; query: string; onClose: () => void; onSaved: () => void }) {

@@ -18,6 +18,7 @@ import { createProblemInTx, createProblemSchema, getProblem, loadForUpdate, logA
 import { redact, scan } from './sensitive.js';
 import { capacityWarnings, changeCorrelation, flapping, risingWarnings, selfClearing, TREND_RULES } from './candidate-trends.js';
 import { CONFIG_RULES, eolVersions, repeatedlyMissing, singlePointOfFailure } from './candidate-config.js';
+import { plural } from './core/text.js';
 
 // ---- Rules ------------------------------------------------------------------------------------------------------
 
@@ -70,7 +71,7 @@ export type RuleId = keyof typeof RULES;
 export const RULE_IDS = Object.keys(RULES) as [RuleId, ...RuleId[]];
 type Settings<R extends RuleId> = z.infer<(typeof RULES)[R]['settings']>;
 
-export async function getRules(db?: Db) {
+async function getRules(db?: Db) {
   const { rows } = await (db ?? { query }).query('SELECT rule, enabled, settings FROM candidate_rules');
   const stored = new Map(rows.map((r: any) => [r.rule as string, r]));
   return RULE_IDS.map((rule) => {
@@ -161,7 +162,6 @@ export interface Raw {
 const EVIDENCE_SHOWN = 50;
 const LIMIT = 200;
 
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const recordWords = (rs: EvidenceRecord[]) => {
   const inc = rs.filter((r) => r.kind === 'incident').length, ev = rs.length - inc;
   return inc && ev ? `${plural(inc, 'incident')} and ${plural(ev, 'event')}` : inc ? plural(inc, 'incident') : plural(ev, 'event');
@@ -422,7 +422,7 @@ const COMPUTE: Record<RuleId, (db: Db, settings: any) => Promise<Raw[]>> = {
 
 interface Decision { key: string; rule: string; decision: 'dismissed' | 'snoozed'; until: string | null; evidence: string[]; reason: string; decided_by_name: string | null; decided_at: string }
 
-export type Candidate = ReturnType<typeof present>;
+type Candidate = ReturnType<typeof present>;
 
 function present(raw: Raw, records: EvidenceRecord[], reason: string, decision?: Decision) {
   // As ISO strings, whether the database gave a Date or a string, so they sort in time order.
@@ -719,7 +719,7 @@ async function draft(db: Db, c: Resolved, creating: boolean) {
 }
 
 /** Problems found from incidents that already happened are reactive; only events, or external analysis, proactive. */
-export function detectionOf(rule: RuleId, records: EvidenceRecord[]): 'reactive' | 'proactive' {
+function detectionOf(rule: RuleId, records: EvidenceRecord[]): 'reactive' | 'proactive' {
   if (rule === 'recurring_records' || rule === 'change_correlation') return records.some((r) => r.kind === 'incident') ? 'reactive' : 'proactive';
   return RULES[rule].detection;
 }

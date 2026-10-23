@@ -5,8 +5,10 @@ import { query } from './db.js';
 import { checkAnalysis } from './analysis-checks.js';
 import { authorize } from './policy.js';
 import { findSimilar, getProblem } from './problems.js';
+import { clip } from './core/text.js';
 
-const clip = (s: unknown, n: number) => (typeof s === 'string' && s.length > n ? s.slice(0, n - 1) + '…' : s);
+// Text fields may be null; only strings are cut.
+const clipField = (s: unknown, n: number) => (typeof s === 'string' ? clip(s, n) : s);
 
 export async function problemContext(user: User, ref: string) {
   authorize(user, 'problem.read');
@@ -59,19 +61,19 @@ export async function problemContext(user: User, ref: string) {
     similar_problems: similar.map((s: any) => ({ ref: s.ref, status: s.status })),
     untrusted_content: {
       title: p.title,
-      description: clip(p.description, 4000),
-      root_cause: clip(p.root_cause, 4000),
-      workaround: clip(p.workaround, 2000),
-      resolution: clip(p.resolution, 2000),
-      link_notes: p.links.filter((l: any) => l.note).map((l: any) => ({ reference: l.reference, note: clip(l.note, 300) })),
+      description: clipField(p.description, 4000),
+      root_cause: clipField(p.root_cause, 4000),
+      workaround: clipField(p.workaround, 2000),
+      resolution: clipField(p.resolution, 2000),
+      link_notes: p.links.filter((l: any) => l.note).map((l: any) => ({ reference: l.reference, note: clipField(l.note, 300) })),
       ci_names: Object.fromEntries([...(p.affected_cis ?? []), ...(p.affected_services ?? [])].map((c: any) => [c.ref, c.name])),
-      ci_record_summaries: ciRecords.rows.filter((r: any) => r.summary).map((r: any) => ({ reference: r.reference, summary: clip(r.summary, 300) })),
-      known_error_workarounds: ciKnownErrors.rows.map((k: any) => ({ ref: k.ref, workaround: clip(k.workaround, 500) })),
-      record_summaries: sameService.rows.filter((r: any) => r.summary).map((r: any) => ({ reference: r.reference, summary: clip(r.summary, 300) })),
-      analysis_conclusions: p.analyses.map((a: any) => ({ id: a.id, title: a.title, conclusion: clip(a.conclusion, 1000) })),
+      ci_record_summaries: ciRecords.rows.filter((r: any) => r.summary).map((r: any) => ({ reference: r.reference, summary: clipField(r.summary, 300) })),
+      known_error_workarounds: ciKnownErrors.rows.map((k: any) => ({ ref: k.ref, workaround: clipField(k.workaround, 500) })),
+      record_summaries: sameService.rows.filter((r: any) => r.summary).map((r: any) => ({ reference: r.reference, summary: clipField(r.summary, 300) })),
+      analysis_conclusions: p.analyses.map((a: any) => ({ id: a.id, title: a.title, conclusion: clipField(a.conclusion, 1000) })),
       action_titles: p.actions.filter((a: any) => a.status === 'open').map((a: any) => ({ id: a.id, title: a.title })),
-      work_notes: p.activity.filter((a: any) => a.kind === 'comment').slice(0, 15).map((a: any) => ({ at: a.created_at, by: a.user_name, via: a.channel, note: clip(a.body, 800) })),
-      similar_problems: similar.map((s: any) => ({ ref: s.ref, title: s.title, workaround: clip(s.workaround, 300) })),
+      work_notes: p.activity.filter((a: any) => a.kind === 'comment').slice(0, 15).map((a: any) => ({ at: a.created_at, by: a.user_name, via: a.channel, note: clipField(a.body, 800) })),
+      similar_problems: similar.map((s: any) => ({ ref: s.ref, title: s.title, workaround: clipField(s.workaround, 300) })),
     },
   };
 }

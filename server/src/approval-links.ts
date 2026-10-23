@@ -10,7 +10,6 @@ import { approvalAction, decideApproval, type ApprovalKind } from './approvals.j
 import { audit } from './audit.js';
 import { USER_COLUMNS, type User } from './auth.js';
 import { RISKS, changePolicy, getChange, voteOnChange } from './changes.js';
-import { config } from './config.js';
 import { asSystem, contextStore, type RequestContext } from './context.js';
 import { query } from './db.js';
 import { decideRequest, requestForApprover } from './requests.js';
@@ -21,8 +20,9 @@ import { can } from './policy.js';
 import { rateLimit } from './ratelimit.js';
 import { securityEvent } from './security-events.js';
 import { viewerFor } from './visibility.js';
+import { absoluteUrl } from './core/url.js';
+import { sha256 } from './core/hash.js';
 
-const hashOf = (token: string) => createHash('sha256').update(token).digest();
 
 /** The form on the GET page carries this instead of the token itself; it proves the POST comes from that page. */
 const formTokenOf = (token: string, linkId: number) => createHmac('sha256', token).update(`kernel-approval-form:${linkId}`).digest('base64url');
@@ -128,9 +128,9 @@ export async function mintApprovalLink(n: { ref: string; approval_id: number | n
   const expires = new Date(Math.min(Date.now() + APPROVAL_LINK_HOURS * 3600_000, s.deadline?.getTime() ?? Infinity));
   await query(
     'INSERT INTO approval_links (token_hash, user_id, change_id, approval_id, request_id, version, channel, delivery_id, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
-    [hashOf(token), user.id, target.change_id ?? null, target.approval_id ?? null, target.request_id ?? null, s.version, channel, deliveryId, expires],
+    [sha256(token), user.id, target.change_id ?? null, target.approval_id ?? null, target.request_id ?? null, s.version, channel, deliveryId, expires],
   );
-  const base = `${(config.publicUrl ?? '').replace(/\/$/, '')}/api/public/approval-links?token=${token}`;
+  const base = absoluteUrl(`/api/public/approval-links?token=${token}`);
   return { approve: `${base}&decision=approve`, reject: `${base}&decision=reject` };
 }
 
@@ -158,7 +158,7 @@ export type LinkState =
 /** Checks a link without changing anything; refusals are security events. */
 export async function checkApprovalLink(req: FastifyRequest, token: string): Promise<LinkState> {
   rateLimit(`approval-link:ip:${req.ip}`, 120, 60_000);
-  const hash = hashOf(token);
+  const hash = sha256(token);
   rateLimit(`approval-link:t:${hash.toString('hex').slice(0, 32)}`, 10, 600_000);
   const refuse = (reason: Refusal, linkId?: number, userId?: number, path?: string): LinkState => {
     securityEvent({

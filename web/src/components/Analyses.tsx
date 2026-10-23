@@ -3,7 +3,7 @@ import { api, asConflict, type Analysis, type Conflict, type ProblemDetail, type
 import { relativeTime } from '../format';
 import { canEdit, useSession } from '../session';
 
-export const TECHNIQUE_LABEL: Record<Technique, string> = {
+const TECHNIQUE_LABEL: Record<Technique, string> = {
   five_whys: '5 Whys',
   ishikawa: 'Ishikawa',
   kepner_tregoe: 'Kepner-Tregoe',

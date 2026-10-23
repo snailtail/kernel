@@ -2,9 +2,9 @@
 // the same conventions, so generic REST/MCP tools (search, get_record, link_records, next_steps, my_work) and the
 // parity test work for all of them. See docs/api-conventions.md.
 import type { User } from './auth.js';
-import { config } from './config.js';
 import { notFound } from './errors.js';
 import type { Action } from './policy.js';
+import { absoluteUrl } from './core/url.js';
 
 export interface SearchHit {
   type: string;
@@ -47,7 +47,7 @@ export function registerRecordType(t: RecordType) {
 export const recordTypes = () => [...registry.values()];
 
 /** Deep link to the record in the web UI (absolute when KERNEL_PUBLIC_URL is set). */
-export const recordUrl = (t: RecordType, ref: string) => `${(config.publicUrl ?? '').replace(/\/$/, '')}${t.uiPath(ref)}`;
+export const recordUrl = (t: RecordType, ref: string) => absoluteUrl(t.uiPath(ref));
 
 export function typeForRef(ref: string) {
   const prefix = ref.toUpperCase().match(/^[A-Z]+/)?.[0];

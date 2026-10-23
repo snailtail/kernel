@@ -9,6 +9,7 @@ import { query, tx } from './db.js';
 import { conflict, notFound } from './errors.js';
 import { authorize } from './policy.js';
 import type { Db } from './problems.js';
+import { plural } from './core/text.js';
 
 const count = (n: number) => z.number().int().min(2).max(1000).default(n);
 
@@ -38,7 +39,6 @@ export const CONFIG_RULES = {
 type Settings<R extends keyof typeof CONFIG_RULES> = z.infer<(typeof CONFIG_RULES)[R]['settings']>;
 
 const LIMIT = 200;
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const named = (name: string, ref: string | null) => (ref ? `${name} (${ref})` : name);
 const ciRecord = (c: { ref: string; name: string; at?: string | null; note?: string }): EvidenceRecord => ({
   key: `ci:${c.ref}`, kind: 'ci', id: null, incident_ref: null, alert_id: null, system: 'Kernel', reference: c.ref,

@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { notify } from './notifications.js';
 import bcrypt from 'bcryptjs';
 import type { FastifyReply, FastifyRequest } from 'fastify';
@@ -11,6 +11,7 @@ import { authorize, type Action } from './policy.js';
 import { checkSameOrigin } from './security.js';
 import { originOf, securityEvent } from './security-events.js';
 import type { Role } from './workflow.js';
+import { sha256Hex } from './core/hash.js';
 
 export interface User {
   id: number;
@@ -23,7 +24,7 @@ export interface User {
   mfa_enabled: boolean;
 }
 
-export interface Preferences {
+interface Preferences {
   theme?: 'system' | 'light' | 'dark';
   /** Step-by-step guidance through the process; on unless turned off. */
   guided?: boolean;
@@ -49,10 +50,9 @@ declare module 'fastify' {
   }
 }
 
-export const SESSION_COOKIE = 'kernel_session';
+const SESSION_COOKIE = 'kernel_session';
 export const USER_COLUMNS = 'u.id, u.username, u.display_name, u.email, u.role, u.preferences, u.must_change_password, u.mfa_enabled_at IS NOT NULL AS mfa_enabled';
 
-const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
 
 export const hashPassword = (password: string) => bcrypt.hash(password, 12);
 
@@ -74,7 +74,7 @@ export async function createSession(req: FastifyRequest, reply: FastifyReply, us
   const token = randomBytes(32).toString('base64url');
   await query(
     `INSERT INTO sessions (token_hash, user_id, expires_at, ip, user_agent, auth_method, idp_mfa) VALUES ($1, $2, now() + $3 * interval '1 day', $4, $5, $6, $7)`,
-    [sha256(token), userId, config.sessionDays, req.ip, String(req.headers['user-agent'] ?? '').slice(0, 300), method, idpMfa],
+    [sha256Hex(token), userId, config.sessionDays, req.ip, String(req.headers['user-agent'] ?? '').slice(0, 300), method, idpMfa],
   );
   reply.setCookie(SESSION_COOKIE, token, {
     path: '/',
@@ -88,7 +88,7 @@ export async function createSession(req: FastifyRequest, reply: FastifyReply, us
 
 export async function destroySession(req: FastifyRequest, reply: FastifyReply) {
   const token = req.cookies[SESSION_COOKIE];
-  if (token) await query('DELETE FROM sessions WHERE token_hash = $1', [sha256(token)]);
+  if (token) await query('DELETE FROM sessions WHERE token_hash = $1', [sha256Hex(token)]);
   reply.clearCookie(SESSION_COOKIE, { path: '/' });
 }
 
@@ -103,7 +103,7 @@ export async function createApiToken(userId: number, name: string, expiresInDays
     `INSERT INTO api_tokens (user_id, name, token_hash, prefix, expires_at, scopes)
      VALUES ($1, $2, $3, $4, now() + $5 * interval '1 day', $6)
      RETURNING id, name, prefix, created_at, last_used_at, expires_at, scopes`,
-    [userId, name, sha256(token), token.slice(0, 16), expiresInDays, scopes],
+    [userId, name, sha256Hex(token), token.slice(0, 16), expiresInDays, scopes],
   );
   return { ...rows[0], token };
 }
@@ -118,12 +118,12 @@ async function userFromSession(token: string): Promise<User | null> {
        RETURNING user_id)
      SELECT ${USER_COLUMNS}, ss.auth_method, ss.idp_mfa, u.sso_subject IS NOT NULL AS sso FROM sessions ss JOIN users u ON u.id = ss.user_id
      WHERE ss.token_hash = $1 AND ss.expires_at > now() AND ss.last_seen_at > now() - $2 * interval '1 hour' AND u.active`,
-    [sha256(token), config.sessionIdleHours],
+    [sha256Hex(token), config.sessionIdleHours],
   );
   return rows[0] ?? null;
 }
 
-export const currentSessionHash = (req: FastifyRequest) => sha256(req.cookies[SESSION_COOKIE] ?? '');
+export const currentSessionHash = (req: FastifyRequest) => sha256Hex(req.cookies[SESSION_COOKIE] ?? '');
 
 export async function listSessions(user: User, req: FastifyRequest) {
   const current = currentSessionHash(req);
@@ -194,7 +194,7 @@ async function userFromApiToken(req: FastifyRequest, token: string): Promise<(Us
     `UPDATE api_tokens t SET last_used_at = now(), last_used_ip = $2 FROM users u, api_tokens old
      WHERE old.id = t.id AND u.id = t.user_id AND t.token_hash = $1 AND u.active AND t.revoked_at IS NULL AND (t.expires_at IS NULL OR t.expires_at > now())
      RETURNING ${USER_COLUMNS}, t.scopes, t.prefix AS token_prefix, t.id AS token_id, old.last_used_ip AS previous_ip`,
-    [sha256(token), ip],
+    [sha256Hex(token), ip],
   );
   if (!rows[0]) return null;
   const { token_id, previous_ip, ...found } = rows[0];
@@ -221,7 +221,7 @@ async function noteTokenAddress(req: FastifyRequest, tokenId: number, userId: nu
  * What a token may do: GET needs read, other methods need write, /mcp needs mcp (plus read/write per tool),
  * and reporting records needs ingest (or write). /api/auth/me is always allowed so clients can check who they are.
  */
-export function checkTokenScope(req: FastifyRequest) {
+function checkTokenScope(req: FastifyRequest) {
   const scopes = req.tokenScopes;
   if (!scopes) return;
   const path = req.url.split('?')[0];

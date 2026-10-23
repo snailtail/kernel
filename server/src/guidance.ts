@@ -25,7 +25,7 @@ interface GuidanceInput {
   activity: { kind: string }[];
 }
 
-export interface Step {
+interface Step {
   id: string;
   label: string;
   hint: string;
@@ -34,7 +34,7 @@ export interface Step {
 }
 
 /** The hand-over to the next practice in the flow (#37), e.g. a known error ready for a change. */
-export interface Handover {
+interface Handover {
   label: string;
   hint: string;
   /** What the button does; absent for advice only. */

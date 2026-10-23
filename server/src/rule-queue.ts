@@ -17,7 +17,7 @@ export const onRulesQueued = (fn: () => void) => {
 };
 
 /** The events one activity entry is, as rule triggers see them. */
-export function eventsOf(activity: string, data: any): { type: string; field?: string; to?: string }[] {
+function eventsOf(activity: string, data: any): { type: string; field?: string; to?: string }[] {
   if (activity === 'created') return [{ type: 'created' }];
   if (activity === 'status') {
     const to = data?.to ?? data?.status?.to;

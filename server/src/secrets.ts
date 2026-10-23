@@ -3,9 +3,10 @@
 //
 //   v2:<key id>:<base64 iv | tag | ciphertext>   current format, names the key (#63)
 //   v1:<base64 …>                                 before key ids: the key "k0" (KERNEL_SECRET_KEY), read only
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { HttpError } from './errors.js';
 import { activeKey, derive, keyById, keyring } from './keys.js';
+import { sha256 } from './core/hash.js';
 
 export const secretsConfigured = () => keyring().length > 0;
 
@@ -40,7 +41,7 @@ export function decryptSecret(stored: string): string {
   if (stored.startsWith('v1:')) {
     const k = keyById('k0');
     if (!k) throw new Error('KERNEL_SECRET_KEY is not set; cannot decrypt stored secrets');
-    return open(createHash('sha256').update(k.raw).digest(), stored.slice(3));
+    return open(sha256(k.raw), stored.slice(3));
   }
   return stored; // legacy plaintext, encrypted on next start (encryptLegacy)
 }

@@ -6,11 +6,11 @@ import { useSession } from '../session';
 import { Modal } from './Modal';
 import type { Team } from '../pages/Teams';
 
-export interface OnCall { team_id: number; team: string; source: string; people: { name: string; until: string | null }[]; unavailable?: string }
+interface OnCall { team_id: number; team: string; source: string; people: { name: string; until: string | null }[]; unavailable?: string }
 let cache: { at: number; list: OnCall[] } | null = null;
 
 /** Who is on call per team; the server caches a minute too. */
-export function useOnCall() {
+function useOnCall() {
   const [list, setList] = useState<OnCall[]>(cache?.list ?? []);
   useEffect(() => {
     if (cache && Date.now() - cache.at < 60_000) return;
@@ -18,7 +18,7 @@ export function useOnCall() {
   }, []);
   return list;
 }
-export const forgetOnCall = () => { cache = null; };
+const forgetOnCall = () => { cache = null; };
 
 const time = (iso: string) => new Date(iso).toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' });
 

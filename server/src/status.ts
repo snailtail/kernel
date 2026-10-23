@@ -11,6 +11,7 @@ import { logIncident } from './incident-log.js';
 import { notify } from './notifications.js';
 import { authorize } from './policy.js';
 import { cancelOutside, followers, queueOutside, signUpOpen } from './status-subscriptions.js';
+import { cap, esc } from './core/text.js';
 
 export const STATUSES = ['operational', 'degraded', 'partial_outage', 'major_outage', 'maintenance'] as const;
 export const PHASES = ['investigating', 'identified', 'monitoring', 'resolved', 'maintenance'] as const;
@@ -254,8 +255,7 @@ export function outsidePage(text: string, form = '') {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><title>Service status</title><style>${STYLE}</style></head><body><p>${esc(text)}</p>${form}</body></html>`;
 }
 
-const LABEL: Record<string, string> = { operational: 'Operational', degraded: 'Degraded performance', partial_outage: 'Partial outage', major_outage: 'Major outage', maintenance: 'Maintenance' };
-export const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+export const STATUS_LABEL: Record<string, string> = { operational: 'Operational', degraded: 'Degraded performance', partial_outage: 'Partial outage', major_outage: 'Major outage', maintenance: 'Maintenance' };
 
 /** The public page as plain HTML: no scripts, no external resources, every value escaped. */
 export function publicStatusHtml(p: NonNullable<Awaited<ReturnType<typeof publicStatus>>>) {
@@ -263,9 +263,9 @@ export function publicStatusHtml(p: NonNullable<Awaited<ReturnType<typeof public
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(p.title)}</title>
 <style>${STYLE}</style></head><body>
 <h1>${esc(p.title)}</h1>
-<div class="banner s-${esc(worst)}">${worst === 'operational' ? 'All services are operating normally' : esc(LABEL[worst])}</div>
-<ul>${p.services.map((s: any) => `<li><span>${esc(s.name)}${s.description ? `<br><span class="m">${esc(s.description)}</span>` : ''}</span><span class="tag s-${esc(s.status)}">${esc(LABEL[s.status] ?? s.status)}</span></li>`).join('')}</ul>
-${p.updates.length ? `<h2>Updates</h2>${p.updates.map((u: any) => `<div class="u"><strong>${esc(u.phase[0].toUpperCase() + u.phase.slice(1))}</strong> · ${esc((u.services ?? []).join(', '))}<p>${esc(u.message)}</p><div class="m">${esc(new Date(u.created_at).toUTCString())}</div></div>`).join('')}` : ''}
+<div class="banner s-${esc(worst)}">${worst === 'operational' ? 'All services are operating normally' : esc(STATUS_LABEL[worst])}</div>
+<ul>${p.services.map((s: any) => `<li><span>${esc(s.name)}${s.description ? `<br><span class="m">${esc(s.description)}</span>` : ''}</span><span class="tag s-${esc(s.status)}">${esc(STATUS_LABEL[s.status] ?? s.status)}</span></li>`).join('')}</ul>
+${p.updates.length ? `<h2>Updates</h2>${p.updates.map((u: any) => `<div class="u"><strong>${esc(cap(u.phase))}</strong> · ${esc((u.services ?? []).join(', '))}<p>${esc(u.message)}</p><div class="m">${esc(new Date(u.created_at).toUTCString())}</div></div>`).join('')}` : ''}
 ${p.sign_up && p.services.length ? `<h2>Get updates by email</h2><form method="post" action="/status/subscribe">
 <input type="email" name="email" required maxlength="254" autocomplete="email" placeholder="you@example.com" aria-label="Email address">
 <fieldset><legend class="m">Services (choose none for all)</legend>${p.services.map((s: any) => `<label><input type="checkbox" name="service" value="${esc(s.name)}"> ${esc(s.name)}</label>`).join('')}</fieldset>

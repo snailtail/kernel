@@ -4,10 +4,10 @@
 //   reserved ranges are always blocked; private ranges (RFC 1918, ULA, CGNAT) only via KERNEL_OUTBOUND_ALLOW;
 // - redirects are followed manually (max 3), each hop re-checked; timeout and response size limit.
 import { lookup as dnsLookup, type LookupAddress } from 'node:dns';
-import { createHash } from 'node:crypto';
 import { BlockList, isIP } from 'node:net';
 import { rootCertificates } from 'node:tls';
 import { Agent, fetch as undiciFetch } from 'undici';
+import { sha256Hex } from './core/hash.js';
 
 export class OutboundBlockedError extends Error {}
 
@@ -93,7 +93,7 @@ const allowAgents = new Map<string, { agent: Agent; list: BlockList | undefined 
  */
 function agentFor(privateAllow?: string[], ca?: string) {
   if (!privateAllow?.length && !ca) return { agent, list: undefined };
-  const key = `${[...(privateAllow ?? [])].sort().join(',')}|${ca ? createHash('sha256').update(ca).digest('hex') : ''}`;
+  const key = `${[...(privateAllow ?? [])].sort().join(',')}|${ca ? sha256Hex(ca) : ''}`;
   let entry = allowAgents.get(key);
   if (!entry) {
     const list = privateAllow?.length ? parseList(privateAllow) : undefined;

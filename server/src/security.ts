@@ -1,7 +1,6 @@
 // HTTP hardening (security headers, CSP, CSRF origin checks) and the security status checklist.
 import helmet from '@fastify/helmet';
 import rateLimit_ from '@fastify/rate-limit';
-import { createHash } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { backupStatus } from './backups.js';
 import { config } from './config.js';
@@ -14,6 +13,7 @@ import { storageUse } from './attachments.js';
 import { secretsConfigured } from './secrets.js';
 import { activeKey, keyring } from './keys.js';
 import { keyUsage } from './rotate-keys.js';
+import { sha256Hex } from './core/hash.js';
 
 
 // Applied to the root instance (not as an encapsulated plugin) so headers and hooks cover every route.
@@ -57,7 +57,7 @@ export async function registerSecurity(app: FastifyInstance<any, any, any, any>)
     allowList: (req) => req.url === '/healthz' || !(req.url.startsWith('/api/') || req.url.startsWith('/mcp')),
     keyGenerator: (req) => {
       const auth = req.headers.authorization ?? /(?:^|;\s*)kernel_session=([^;]+)/.exec(req.headers.cookie ?? '')?.[1];
-      return auth ? `c:${createHash('sha256').update(auth).digest('hex').slice(0, 32)}` : `ip:${req.ip}`;
+      return auth ? `c:${sha256Hex(auth).slice(0, 32)}` : `ip:${req.ip}`;
     },
     errorResponseBuilder: (_req, ctx) => new HttpError(429, 'Too many requests, try again later', { retry_after_seconds: Math.ceil(ctx.ttl / 1000) }),
   });

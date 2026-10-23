@@ -49,7 +49,7 @@ export async function requestApproval(user: User, ref: string, kind: ApprovalKin
 const EXPIRE_DAYS = 14;
 
 /** Marks requests older than 14 days as expired (they are probably no longer what anyone wants). */
-export async function expireApprovals() {
+async function expireApprovals() {
   await query(`UPDATE pending_approvals SET status = 'expired' WHERE status = 'pending' AND created_at < now() - $1 * interval '1 day'`, [EXPIRE_DAYS]);
 }
 

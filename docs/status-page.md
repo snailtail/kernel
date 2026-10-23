@@ -34,8 +34,7 @@ The internal status board (`/service-status` in the app) stays behind sign-in.
 
 A manager retracts a published update with `POST /api/status/updates/:id/retract` and `{ "reason": "…" }` in
 the body. The update leaves the public page, mail that has not gone out yet is stopped, and the reason is audited.
-The reason travels in the body because query strings end up in proxy, gateway and request logs. The old
-`DELETE /api/status/updates/:id?reason=…` answers 400 with a pointer for one release.
+The reason travels in the body because query strings end up in proxy, gateway and request logs.
 
 ## Subscriptions
 

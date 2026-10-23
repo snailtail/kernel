@@ -7,7 +7,6 @@
 import { maskedRefs } from './confidential.js';
 import { currentContext } from './context.js';
 import { markPersonalData, redact, remainingFlags, scan, sensitivePolicy } from './sensitive.js';
-import { createHash } from 'node:crypto';
 import sharp from 'sharp';
 import type { User } from './auth.js';
 import { audit } from './audit.js';
@@ -20,6 +19,7 @@ import { logIncident } from './incident-log.js';
 import { authorize, type Action } from './policy.js';
 import { logActivity, type Db } from './problems.js';
 import { typeForRef } from './records.js';
+import { sha256Hex } from './core/hash.js';
 
 /** What it takes to attach to (or remove from) each record type. Reading follows the record's own access. */
 const WRITE: Record<string, Action> = { problem: 'problem.comment', incident: 'incident.update', change: 'change.update', ci: 'ci.annotate', service: 'ci.annotate', article: 'article.write' };
@@ -41,7 +41,7 @@ export const maxUploadBytes = async () => (await settings()).max_file_mb * 1024 
 export const HARD_LIMIT = 100 * 1024 * 1024;
 
 /** A name that is safe to show and to put in a Content-Disposition header. */
-export function cleanFilename(name: string) {
+function cleanFilename(name: string) {
   const base = name.split(/[\\/]/).pop() ?? '';
   const cleaned = base.replace(/[\u0000-\u001f\u007f"<>|*?:]/g, '').replace(/\s+/g, ' ').trim().slice(0, 150);
   return cleaned || 'attachment';
@@ -60,7 +60,7 @@ function isUtf8Text(buf: Buffer) {
 type Sniffed = { kind: 'image'; format: 'png' | 'jpeg' | 'gif' | 'webp' } | { kind: 'pdf' } | { kind: 'text' } | { kind: 'file'; contentType: string };
 
 /** Decides the type from the content. Anything not recognised is refused. */
-export function sniff(buf: Buffer, filename: string): Sniffed {
+function sniff(buf: Buffer, filename: string): Sniffed {
   const head = (n: number) => buf.subarray(0, n).toString('hex');
   if (head(8) === '89504e470d0a1a0a') return { kind: 'image', format: 'png' };
   if (head(3) === 'ffd8ff') return { kind: 'image', format: 'jpeg' };
@@ -162,7 +162,7 @@ export async function addAttachment(user: User, ref: string, filename: string, d
     const { rows } = await db.query(
       `INSERT INTO attachments (record_type, record_ref, filename, kind, content_type, size, sha256, width, height, flags, uploaded_by)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
-      [r.type, r.ref, name, type.kind, contentType, stored.length, createHash('sha256').update(stored).digest('hex'), width, height, flags, user.id],
+      [r.type, r.ref, name, type.kind, contentType, stored.length, sha256Hex(stored), width, height, flags, user.id],
     );
     for (const v of variants) await db.query('INSERT INTO attachment_blobs (attachment_id, variant, content_type, data) VALUES ($1, $2, $3, $4)', [rows[0].id, v.variant, v.contentType, v.data]);
     if (personal.length) await markPersonalData(r.ref);

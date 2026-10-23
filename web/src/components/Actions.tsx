@@ -6,7 +6,7 @@ import type { Toolkit } from './ListToolkit';
 import { Modal } from './Modal';
 import { useSession } from '../session';
 
-export function DueLabel({ action }: { action: Action }) {
+function DueLabel({ action }: { action: Action }) {
   if (!action.due_date) return <span className="muted">No due date</span>;
   if (action.status !== 'open') return <span className="muted">{formatDay(action.due_date)}</span>;
   const days = daysUntil(action.due_date);

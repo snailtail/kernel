@@ -4,7 +4,7 @@
 // for a person by the user who logs it, may wait for its approver, and is fulfilled when its last task is done. The
 // item's SLA runs from submission to fulfilment and pauses while the request waits for approval. Shared by REST, MCP
 // and the web UI; agents may log and follow requests, but only a person approves.
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { queueRuleRuns } from './rule-queue.js';
@@ -17,7 +17,7 @@ import { asSystem, contextStore, currentContext } from './context.js';
 import { pool, query, tx } from './db.js';
 import { badRequest, conflict, forbidden, HttpError, notFound } from './errors.js';
 import { moduleEnabled } from './modules.js';
-import { absoluteUrl, notify, sendOutsideMail } from './notifications.js';
+import { notify, sendOutsideMail } from './notifications.js';
 import { rateLimit } from './ratelimit.js';
 import { securityEvent } from './security-events.js';
 import { unsubscribeUrl } from './status-subscriptions.js';
@@ -28,6 +28,8 @@ import { recordUrl, registerRecordType, typeForRef, type RecordType } from './re
 import { recomputeSla, slaClock, slaOnTransition } from './sla.js';
 import { checkAssigneeInTeam, teamMembers } from './teams.js';
 import { assertVisibleRef } from './visibility.js';
+import { absoluteUrl } from './core/url.js';
+import { sha256 } from './core/hash.js';
 
 export const REQUEST_STATUSES = ['submitted', 'awaiting_approval', 'in_fulfilment', 'fulfilled', 'rejected', 'cancelled'] as const;
 type Status = (typeof REQUEST_STATUSES)[number];
@@ -921,7 +923,6 @@ async function queueTaskWebhook(db: Db, requestId: number, t: { id: number; titl
   await logRequest(db, requestId, null, 'task', `Sent to its webhook: ${t.title}`, { task: t.id, webhook: t.webhook_id });
 }
 
-const sha256 = (token: string) => createHash('sha256').update(token).digest();
 
 /**
  * Called by the webhook worker as it sends a request.task delivery: mints the task's callback token (256 random bits,
@@ -1108,18 +1109,6 @@ export async function teamRequestTasks(teamIds: number[]) {
     [teamIds],
   );
   return rows;
-}
-
-/** For the dashboard (#54): requests fulfilled in a period, and how many met their SLA. */
-export async function requestsFulfilled(from: Date, to: Date) {
-  const { rows } = await query(
-    `SELECT count(*)::int AS fulfilled,
-            count(*) FILTER (WHERE resolution_due_at IS NOT NULL AND resolution_breached_at IS NULL AND resolved_at <= resolution_due_at)::int AS met,
-            count(*) FILTER (WHERE resolution_due_at IS NOT NULL)::int AS with_target
-     FROM requests WHERE status = 'fulfilled' AND resolved_at >= $1 AND resolved_at < $2`,
-    [from, to],
-  );
-  return rows[0] as { fulfilled: number; met: number; with_target: number };
 }
 
 // ---- Registry (#35) ----------------------------------------------------------------------------

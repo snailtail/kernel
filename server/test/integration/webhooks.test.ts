@@ -77,10 +77,9 @@ describe('webhooks and watching', { skip }, () => {
     const hook = (await admin.post('/api/webhooks', { name: 'Short-lived', url: 'https://hooks.example.com/gone', events: [] })).body;
     const { pool } = await import('../../src/db.js');
     const audited = async () => (await ownerQuery("SELECT reason FROM audit_log WHERE entity_type = 'webhook' AND entity_ref = $1 AND action = 'delete'", [String(hook.id)])).rows;
-    // The old shape put the reason in the query string, where proxy and request logs keep it: refused, nothing stored.
+    // The old DELETE shape, with the reason in the query string, is gone: nothing stored.
     const old = await admin.del(`/api/webhooks/${hook.id}?reason=${encodeURIComponent('Query reason about Bob')}`);
-    assert.equal(old.status, 400);
-    assert.match(old.body.error, /POST \/api\/webhooks\/:id\/delete/);
+    assert.equal(old.status, 404);
     assert.deepEqual(await audited(), []);
     assert.equal((await pool.query('SELECT count(*)::int AS n FROM webhooks WHERE id = $1', [hook.id])).rows[0].n, 1, 'not deleted');
     assert.equal((await admin.post(`/api/webhooks/${hook.id}/delete`, {})).status, 400, 'a reason is required');

@@ -38,7 +38,7 @@ const niceMax = (v: number) => {
   return Math.ceil(v / (pow / 2)) * (pow / 2);
 };
 
-export function Legend({ series }: { series: Series[] }) {
+function Legend({ series }: { series: Series[] }) {
   return (
     <div className="legend">
       {series.map((s) => (

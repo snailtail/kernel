@@ -2,7 +2,7 @@
 // check_analysis, so an agent cannot conclude an analysis while the method's basics are missing.
 import type { Technique } from './analyses.js';
 
-export interface Finding {
+interface Finding {
   level: 'error' | 'warning';
   message: string;
 }

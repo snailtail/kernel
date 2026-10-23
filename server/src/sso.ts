@@ -22,6 +22,7 @@ import { createPortalSession } from './portal.js';
 import { moduleEnabled } from './modules.js';
 import { authorize } from './policy.js';
 import { decryptSecret, encryptSecret } from './secrets.js';
+import { absoluteUrl } from './core/url.js';
 
 /** A second-factor challenge waiting after SSO (cookie, path /api/auth, five minutes). */
 export const MFA_PENDING_COOKIE = 'kernel_mfa_pending';
@@ -63,7 +64,7 @@ export async function ssoSettings(): Promise<SsoSettings> {
   return rows[0]?.value ?? { enabled: false };
 }
 
-const redirectUri = () => `${(config.publicUrl ?? '').replace(/\/$/, '')}/api/auth/sso/callback`;
+const redirectUri = () => absoluteUrl(`/api/auth/sso/callback`);
 
 let discovered: { key: string; at: number; config: client.Configuration } | null = null;
 
@@ -110,7 +111,7 @@ export async function startSso(req: FastifyRequest, reply: FastifyReply, purpose
  * The provider's email when it may identify a person: email_verified must be true, or absent with trust_email_claim
  * on. It decides who you are in the portal (#45) and which person a new account is linked to.
  */
-export function verifiedEmail(claims: Record<string, unknown>, s: Pick<SsoSettings, 'trust_email_claim'>) {
+function verifiedEmail(claims: Record<string, unknown>, s: Pick<SsoSettings, 'trust_email_claim'>) {
   if (typeof claims.email !== 'string' || !claims.email.trim()) return '';
   const ok = claims.email_verified === true || (claims.email_verified === undefined && s.trust_email_claim === true);
   return ok ? claims.email.trim().toLowerCase() : '';

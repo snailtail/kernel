@@ -1,16 +1,17 @@
-import { createHash } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { requireReason } from '../audit.js';
 import { requireUser } from '../auth.js';
 import * as status from '../status.js';
 import * as subs from '../status-subscriptions.js';
+import { sha256Hex } from '../core/hash.js';
+import { esc } from '../core/text.js';
 
 type Ref = { Params: { ref: string } };
 
 /** Cacheable public answers: a short max-age and an ETag, so a busy outage does not load Kernel. */
 function cached(req: FastifyRequest, reply: FastifyReply, body: string, type: string) {
-  const etag = `"${createHash('sha256').update(body).digest('hex').slice(0, 32)}"`;
+  const etag = `"${sha256Hex(body).slice(0, 32)}"`;
   reply.header('Cache-Control', 'public, max-age=30');
   reply.header('ETag', etag);
   if (req.headers['if-none-match'] === etag) return reply.code(304).send();
@@ -30,11 +31,6 @@ export async function statusRoutes(app: FastifyInstance) {
     const user = requireUser(req);
     const body = z.object({ reason: z.string().max(1000).optional() }).parse(req.body ?? {});
     return status.retractUpdate(user, Number(req.params.id), requireReason(body.reason));
-  });
-  // The old shape, kept for one release so callers learn where it moved.
-  app.delete('/api/status/updates/:id', async (req, reply) => {
-    requireUser(req);
-    return reply.code(400).send({ error: 'Retract with POST /api/status/updates/:id/retract and { "reason": "…" } in the body' });
   });
   app.put<Ref>('/api/status/:ref/follow', async (req) => subs.followService(requireUser(req), req.params.ref, z.object({ follow: z.boolean() }).parse(req.body).follow));
   app.put('/api/admin/status-page', async (req) => {
@@ -76,7 +72,7 @@ export async function statusRoutes(app: FastifyInstance) {
         return answer(req, reply, err instanceof z.ZodError ? 'Enter a valid email address.' : (err as Error).message, '', code);
       }
     };
-    const form = (action: string, label: string) => `<form method="post" action="${status.esc(action)}"><button type="submit">${status.esc(label)}</button></form>`;
+    const form = (action: string, label: string) => `<form method="post" action="${esc(action)}"><button type="submit">${esc(label)}</button></form>`;
 
     scope.post('/status/subscribe', guarded(async (req, reply) => {
       const raw = typeof req.body === 'string' ? new URLSearchParams(req.body) : null;

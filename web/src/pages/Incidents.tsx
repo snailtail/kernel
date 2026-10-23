@@ -54,13 +54,13 @@ interface Incident extends IncidentRow {
 
 interface SlaClock { target_minutes: number | null; due_at: string | null; elapsed_minutes: number; remaining_minutes: number | null; state: string; met_at?: string | null }
 
-export const INCIDENT_STATUS: Record<IncidentStatus, string> = { new: 'New', in_progress: 'In progress', on_hold: 'On hold', resolved: 'Resolved', closed: 'Closed' };
+const INCIDENT_STATUS: Record<IncidentStatus, string> = { new: 'New', in_progress: 'In progress', on_hold: 'On hold', resolved: 'Resolved', closed: 'Closed' };
 const RESOLUTION: Record<string, string> = {
   fixed: 'Fixed', workaround: 'Workaround applied', problem_fixed: 'Fixed by problem resolution', no_fault_found: 'No fault found', duplicate: 'Duplicate', cancelled: 'Cancelled',
 };
 const LEVEL = ['', 'High', 'Medium', 'Low'];
 
-export function IncidentStatusBadge({ status }: { status: IncidentStatus }) {
+function IncidentStatusBadge({ status }: { status: IncidentStatus }) {
   return <span className={`badge inc-${status}`}>{INCIDENT_STATUS[status]}</span>;
 }
 

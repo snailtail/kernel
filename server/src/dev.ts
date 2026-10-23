@@ -6,7 +6,6 @@ import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { User } from './auth.js';
 import { audit } from './audit.js';
-import { config } from './config.js';
 import { asSystem, contextStore } from './context.js';
 import { query, tx } from './db.js';
 import { badRequest, forbidden, HttpError, notFound, unauthorized } from './errors.js';
@@ -21,11 +20,11 @@ import { azureDevOps, AZURE_DEVOPS } from './dev-azure.js';
 import { github } from './dev-github.js';
 import { gitlab, GITLAB_COM } from './dev-gitlab.js';
 import { getJsonVia, iso, PLATFORMS, postJsonVia, refsIn, type Adapter, type CommitStatus, type EventContext, type ItemType, type ParsedItem, type Platform, type UpsertItem } from './dev-platform.js';
+import { absoluteUrl } from './core/url.js';
 
-export { ITEM_TYPES, refsIn, type ParsedItem } from './dev-platform.js';
-export { verifyGitHubSignature } from './dev-github.js';
+export type { ParsedItem } from './dev-platform.js';
 
-export const ADAPTERS: Record<Platform, Adapter> = { github, gitlab, azure_devops: azureDevOps };
+const ADAPTERS: Record<Platform, Adapter> = { github, gitlab, azure_devops: azureDevOps };
 const WRITE: Record<string, Action> = { problem: 'problem.link', change: 'change.update', incident: 'incident.update' };
 const LOG: Record<string, [string, string, string]> = {
   problem: ['problem_activity', 'problem_id', 'problems'],
@@ -34,7 +33,7 @@ const LOG: Record<string, [string, string, string]> = {
 };
 
 /** A GitHub, GitLab or Azure DevOps URL as an item. `gitlabBases` are the self-hosted GitLabs of the sources. */
-export function parseDevUrl(raw: string, gitlabBases: string[] = []): ParsedItem {
+function parseDevUrl(raw: string, gitlabBases: string[] = []): ParsedItem {
   let u: URL;
   try {
     u = new URL(raw.trim());
@@ -198,7 +197,7 @@ function checkSource(platform: Platform, input: Partial<SourceInput>) {
   if (input.ca_pem && !/-----BEGIN CERTIFICATE-----/.test(input.ca_pem)) throw badRequest('The CA certificate must be PEM');
 }
 
-const webhookUrl = (id: number) => `${(config.publicUrl ?? '').replace(/\/$/, '')}/api/dev-hooks/${id}`;
+const webhookUrl = (id: number) => absoluteUrl(`/api/dev-hooks/${id}`);
 
 export async function listSources(user: User) {
   authorize(user, 'change.manage');
@@ -509,7 +508,7 @@ const RANK = { failure: 2, pending: 1, success: 0 } as const;
  * several changes gets the least ready of them. Restricted changes are left out: the platform is told nothing about
  * them. Best effort: the outcome is kept on the item (kernel_status), and a failure never blocks Kernel.
  */
-export async function postStatusForItems(ids: number[]) {
+async function postStatusForItems(ids: number[]) {
   if (!ids.length) return;
   await asSystem(async () => {
     const { rows } = await query(
@@ -563,7 +562,7 @@ export async function refreshWindowStatuses(minutes = 6) {
   await postStatusForItems(rows.map((r) => r.dev_item_id as number));
 }
 
-const changeLink = (ref: string) => `${(config.publicUrl ?? '').replace(/\/$/, '')}/changes/${ref}`;
+const changeLink = (ref: string) => absoluteUrl(`/changes/${ref}`);
 
 /** For change guidance: the latest deployment per environment among the change's links. */
 export async function deploymentSummary(ref: string) {

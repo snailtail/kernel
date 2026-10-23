@@ -324,7 +324,7 @@ export async function testConnector(user: User, id: number) {
 const moduleOf = (type: string) => (CONNECTOR_TYPES[type]?.receive ? 'incident' : 'cmdb');
 
 /** How long a run may fetch before it is stopped; well inside the 30-minute lease. */
-export const RUN_TIMEOUT_MS = 10 * 60_000;
+const RUN_TIMEOUT_MS = 10 * 60_000;
 const duration = (ms: number) => (ms >= 60_000 ? `${Math.round(ms / 60_000)} minutes` : `${ms / 1000} s`);
 
 /**

@@ -1,5 +1,5 @@
 // Two-factor authentication (TOTP + recovery codes), step-up re-authentication and the MFA policy.
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import type { FastifyRequest } from 'fastify';
 import QRCode from 'qrcode';
@@ -11,10 +11,10 @@ import { decryptSecret, encryptSecret } from './secrets.js';
 import { clearMfaPolicyCache } from './mfapolicy.js';
 import { generateSecret, otpauthUrl, verifyCode } from './totp.js';
 import type { Role } from './workflow.js';
+import { sha256Hex } from './core/hash.js';
 
 // Digests of random 256-bit challenge and device ids, never of passwords (those use bcrypt): a fast hash is right here.
 // codeql[js/insufficient-password-hash] -- random 256-bit server-generated challenge id, not a user password; SHA-256 lookup hash like session tokens
-const sha256 = (v: string) => createHash('sha256').update(v).digest('hex');
 const STEP_UP_MINUTES = Number(process.env.KERNEL_STEPUP_MINUTES ?? 10);
 
 export async function requiredRoles(): Promise<Role[]> {
@@ -41,12 +41,6 @@ export async function mfaStatus(user: User) {
     requiredRoles(),
   ]);
   return { enabled: !!rows[0].mfa_enabled_at, enabled_at: rows[0].mfa_enabled_at, recovery_codes_left: rows[0].recovery_codes_left, required: roles.includes(user.role) };
-}
-
-/** Whether the user must enrol before using Kernel (their role requires MFA and they have none). */
-export async function enrollmentRequired(user: User) {
-  const { rows } = await query('SELECT mfa_enabled_at FROM users WHERE id = $1', [user.id]);
-  return !rows[0]?.mfa_enabled_at && (await requiredRoles()).includes(user.role);
 }
 
 /** Checks a TOTP code (no replays) or an unused recovery code for the user. */
@@ -82,34 +76,34 @@ async function hasMfa(userId: number) {
 
 export async function createChallenge(userId: number) {
   const token = randomBytes(32).toString('base64url');
-  await query(`INSERT INTO mfa_challenges (token_hash, user_id, expires_at) VALUES ($1, $2, now() + interval '5 minutes')`, [sha256(token), userId]);
+  await query(`INSERT INTO mfa_challenges (token_hash, user_id, expires_at) VALUES ($1, $2, now() + interval '5 minutes')`, [sha256Hex(token), userId]);
   return token;
 }
 
 /** Consumes a login challenge when the code is right; returns the user id. */
 export async function completeChallenge(token: string, code: string): Promise<number | null> {
-  const { rows } = await query('SELECT user_id FROM mfa_challenges WHERE token_hash = $1 AND expires_at > now() AND attempts < 5', [sha256(token)]);
+  const { rows } = await query('SELECT user_id FROM mfa_challenges WHERE token_hash = $1 AND expires_at > now() AND attempts < 5', [sha256Hex(token)]);
   if (!rows[0]) throw new HttpError(401, 'The sign-in has expired; start again');
   if (!(await checkSecondFactor(rows[0].user_id, code))) {
     // Five wrong codes end the challenge; the password has to be entered again.
-    await query('UPDATE mfa_challenges SET attempts = attempts + 1 WHERE token_hash = $1', [sha256(token)]);
+    await query('UPDATE mfa_challenges SET attempts = attempts + 1 WHERE token_hash = $1', [sha256Hex(token)]);
     return null;
   }
-  await query('DELETE FROM mfa_challenges WHERE token_hash = $1 OR expires_at < now()', [sha256(token)]);
+  await query('DELETE FROM mfa_challenges WHERE token_hash = $1 OR expires_at < now()', [sha256Hex(token)]);
   return rows[0].user_id;
 }
 
 /** The account a pending sign-in challenge belongs to (for a passkey as the second factor). */
 export const challengeUserId = async (token: string) =>
-  (await query('SELECT user_id FROM mfa_challenges WHERE token_hash = $1 AND expires_at > now() AND attempts < 5', [sha256(token)])).rows[0]?.user_id as number | undefined;
+  (await query('SELECT user_id FROM mfa_challenges WHERE token_hash = $1 AND expires_at > now() AND attempts < 5', [sha256Hex(token)])).rows[0]?.user_id as number | undefined;
 
 /** Ends a pending sign-in challenge once its second factor (here: a passkey) was verified elsewhere. */
 export async function consumeChallenge(token: string) {
-  await query('DELETE FROM mfa_challenges WHERE token_hash = $1', [sha256(token)]);
+  await query('DELETE FROM mfa_challenges WHERE token_hash = $1', [sha256Hex(token)]);
 }
 
 export const challengeUser = async (token: string) =>
-  (await query('SELECT u.username FROM mfa_challenges c JOIN users u ON u.id = c.user_id WHERE c.token_hash = $1', [sha256(token)])).rows[0]?.username as string | undefined;
+  (await query('SELECT u.username FROM mfa_challenges c JOIN users u ON u.id = c.user_id WHERE c.token_hash = $1', [sha256Hex(token)])).rows[0]?.username as string | undefined;
 
 // ---- Enrolment ---------------------------------------------------------------------------------
 
@@ -196,11 +190,11 @@ export const DEVICE_COOKIE = 'kernel_device';
 
 export async function rememberDevice(userId: number, existing?: string) {
   if (existing) {
-    const { rowCount } = await query('UPDATE known_devices SET last_used_at = now() WHERE token_hash = $1 AND user_id = $2', [sha256(existing), userId]);
+    const { rowCount } = await query('UPDATE known_devices SET last_used_at = now() WHERE token_hash = $1 AND user_id = $2', [sha256Hex(existing), userId]);
     if (rowCount) return existing;
   }
   const token = randomBytes(24).toString('base64url');
-  await query('INSERT INTO known_devices (token_hash, user_id) VALUES ($1, $2)', [sha256(token), userId]);
+  await query('INSERT INTO known_devices (token_hash, user_id) VALUES ($1, $2)', [sha256Hex(token), userId]);
   return token;
 }
 
@@ -210,12 +204,12 @@ export async function isKnownDevice(token: string | undefined, username: string)
   const { rows } = await query(
     `SELECT 1 FROM known_devices d JOIN users u ON u.id = d.user_id
      WHERE d.token_hash = $1 AND lower(u.username) = lower($2) AND d.last_used_at > now() - interval '180 days'`,
-    [sha256(token), username],
+    [sha256Hex(token), username],
   );
   return !!rows[0];
 }
 
 /** Forgets the user's known devices (all, or all but the current one). */
 export async function forgetDevices(userId: number, keep?: string) {
-  await query('DELETE FROM known_devices WHERE user_id = $1 AND token_hash <> $2', [userId, keep ? sha256(keep) : '']);
+  await query('DELETE FROM known_devices WHERE user_id = $1 AND token_hash <> $2', [userId, keep ? sha256Hex(keep) : '']);
 }

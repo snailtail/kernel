@@ -8,10 +8,11 @@ import { audit } from './audit.js';
 import { contextStore, currentContext } from './context.js';
 import { query } from './db.js';
 import { badRequest, forbidden, notFound } from './errors.js';
-import { absoluteUrl, sendReportMail } from './notifications.js';
+import { sendReportMail } from './notifications.js';
 import { authorize, can } from './policy.js';
 import { serviceReport, serviceReportMarkdown } from './service-report.js';
 import { viewerFor } from './visibility.js';
+import { absoluteUrl } from './core/url.js';
 
 export const FREQUENCIES = ['monthly', 'quarterly'] as const;
 export const scheduleSchema = z
@@ -71,7 +72,7 @@ export async function deleteSchedule(user: User, id: number) {
 }
 
 /** The last complete period before `now`: the previous month or quarter, as a key and dates (UTC). */
-export function lastPeriod(frequency: (typeof FREQUENCIES)[number], now = new Date()) {
+function lastPeriod(frequency: (typeof FREQUENCIES)[number], now = new Date()) {
   const y = now.getUTCFullYear();
   const m = now.getUTCMonth();
   const months = frequency === 'monthly' ? 1 : 3;

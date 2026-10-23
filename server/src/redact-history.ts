@@ -12,7 +12,7 @@ import { badRequest, notFound } from './errors.js';
 import { authorize } from './policy.js';
 import { typeForRef } from './records.js';
 import { redact } from './sensitive.js';
-import { createHash } from 'node:crypto';
+import { sha256Hex } from './core/hash.js';
 
 type Kind = 'problem' | 'incident' | 'change' | 'improvement' | 'request';
 interface Place { table: string; key: string; columns: string[]; json?: string[] }
@@ -160,7 +160,7 @@ export async function redactHistory(user: User, ref: string, input: z.infer<type
       if (!n) continue;
       const data = Buffer.from(out, 'utf8');
       await db.query('UPDATE attachment_blobs SET data = $3 WHERE attachment_id = $1 AND variant = $2', [f.attachment_id, f.variant, data]);
-      await db.query('UPDATE attachments SET size = $2, sha256 = $3 WHERE id = $1', [f.attachment_id, data.length, createHash('sha256').update(data).digest('hex')]);
+      await db.query('UPDATE attachments SET size = $2, sha256 = $3 WHERE id = $1', [f.attachment_id, data.length, sha256Hex(data)]);
       places.attachments = (places.attachments ?? 0) + n;
     }
     // Copies Kernel keeps of the record's text: in-app notifications and webhook payloads (queued ones then go out clean).

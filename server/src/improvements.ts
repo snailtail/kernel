@@ -21,7 +21,7 @@ export const IMPROVEMENT_STATUSES = ['idea', 'approved', 'in_progress', 'done', 
 export const IMPROVEMENT_SOURCES = ['review', 'problem', 'service_review', 'idea'] as const;
 /** The dashboard tiles an improvement can watch. */
 export const TILES_FOR_IMPROVEMENTS = TILES;
-export const IMPROVEMENT_LINK_KINDS = ['change', 'problem', 'action', 'incident', 'review', 'document'] as const;
+const IMPROVEMENT_LINK_KINDS = ['change', 'problem', 'action', 'incident', 'review', 'document'] as const;
 type Status = (typeof IMPROVEMENT_STATUSES)[number];
 
 /** Where an improvement can go from each status; moves marked as decisions need improvement.approve. */
@@ -89,7 +89,7 @@ export const improvementLinkSchema = z.object({
   note: z.string().trim().max(2000).default(''),
 });
 
-export async function logImprovement(db: Db, id: number, userId: number | null, kind: string, body = '', data: object = {}) {
+async function logImprovement(db: Db, id: number, userId: number | null, kind: string, body = '', data: object = {}) {
   await db.query('INSERT INTO improvement_activity (improvement_id, user_id, kind, body, data, channel) VALUES ($1, $2, $3, $4, $5, $6)', [
     id, userId, kind, body, JSON.stringify(data), currentContext().channel,
   ]);
@@ -421,11 +421,6 @@ export async function myImprovements(userId: number) {
     [userId],
   );
   return rows;
-}
-
-/** For managers: ideas waiting for a decision. */
-export async function ideasAwaitingDecision() {
-  return Number((await query("SELECT count(*)::int AS n FROM improvements WHERE status = 'idea'")).rows[0].n);
 }
 
 // A problem shows the improvements that came from it or are linked to it.

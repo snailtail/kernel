@@ -83,10 +83,9 @@ describe('service status page (#46)', { skip }, () => {
     const board = (await pm.get('/api/status')).body;
     const published = board.updates.find((u: any) => u.public);
     assert.equal((await pm.post(`/api/status/updates/${published.id}/retract`, {})).status, 400, 'a reason is required');
-    // The old shape put the reason in the query string, where proxy and request logs keep it: refused, nothing stored.
+    // The old DELETE shape, with the reason in the query string, is gone: nothing stored.
     const old = await pm.del(`/api/status/updates/${published.id}?reason=${encodeURIComponent('Query reason about Bob')}`);
-    assert.equal(old.status, 400);
-    assert.match(old.body.error, /POST \/api\/status\/updates\/:id\/retract/);
+    assert.equal(old.status, 404);
     assert.equal((await ownerQuery("SELECT count(*)::int AS n FROM audit_log WHERE action = 'retract'")).rows[0].n, 0);
     assert.equal((await pm.post(`/api/status/updates/${published.id}/retract`, { reason: 'Wrong service' })).status, 200);
     const page = await fetch(`${k.base}/api/public/status`).then((r) => r.json() as any);

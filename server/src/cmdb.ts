@@ -101,7 +101,7 @@ export const upsertSchema = z.object({
   override_reason: z.string().trim().max(1000).optional(),
 });
 
-export const SELECT_CI = `
+const SELECT_CI = `
   SELECT c.id, c.ref, c.class, c.name, c.ci_type, t.label AS type_label, c.status, c.environment, c.criticality,
          c.owner_id, o.display_name AS owner, c.team, c.description, c.tags, c.attributes, c.created_at, c.updated_at,
          c.sla_id, c.user_description, c.how_to_get_help, c.in_catalogue, c.has_end_users,

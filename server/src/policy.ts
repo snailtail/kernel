@@ -5,7 +5,7 @@ import { forbidden, notFound } from './errors.js';
 import type { Role } from './workflow.js';
 import { actionEnabled, moduleEnabled, moduleOfAction, MODULES } from './modules.js';
 
-export const ACTIONS = [
+const ACTIONS = [
   // Reading
   'meta.read', 'problem.read', 'kedb.read', 'report.read', 'review.read', 'candidate.read', 'system.read', 'ci.read', 'incident.read', 'event.read', 'change.read', 'person.read', 'article.read', 'team.read', 'improvement.read', 'request.read', 'rule.read',
   // Problem work

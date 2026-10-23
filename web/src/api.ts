@@ -87,10 +87,10 @@ export interface Problem {
   mcp_proposed: string[];
 }
 
-export type EcDecision = 'pending' | 'fix' | 'accept' | 'defer';
-export type Effectiveness = 'effective' | 'partial' | 'ineffective';
+type EcDecision = 'pending' | 'fix' | 'accept' | 'defer';
+type Effectiveness = 'effective' | 'partial' | 'ineffective';
 
-export interface Link {
+interface Link {
   id: number;
   kind: LinkKind;
   reference: string;
@@ -113,7 +113,7 @@ export interface Activity {
   title?: string;
 }
 
-export type ActionStatus = 'open' | 'done' | 'cancelled';
+type ActionStatus = 'open' | 'done' | 'cancelled';
 
 export interface Action {
   id: number;
