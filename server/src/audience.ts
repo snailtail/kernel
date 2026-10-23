@@ -10,7 +10,8 @@
 // path with a restricted and a confidential source.
 import { audit } from './audit.js';
 import { type Db, query } from './db.js';
-import { recordType, textKindOfRef } from './records.js';
+import { textKindOfRef } from './records.js';
+import { requesterThread } from './activity.js';
 
 export interface Audience { ref: string | null; restricted: boolean; restricted_teams: number[]; classification: 'normal' | 'confidential' }
 
@@ -185,14 +186,7 @@ export async function forPortal(db: Queryable | null, personId: number, ref?: st
     };
     if (one) {
       // Replies to the requester and the requester's own messages; nothing at all from a narrow record.
-      const log = recordType(incident ? 'incident' : 'request').activity!;
-      const { rows: acts } = r.narrow ? { rows: [] as any[] } : await db.query(
-        `SELECT created_at, body, data->>'from_requester' = 'true' AS mine FROM ${log.table}
-         WHERE ${log.fk} = $1 AND kind = 'comment'
-           AND (data->>'for_requester' = 'true' OR (data->>'from_requester' = 'true' AND (data->>'person_id')::int = $2))
-         ORDER BY created_at, id`,
-        [r.id, personId],
-      );
+      const acts = r.narrow ? [] : await requesterThread(db, incident ? 'incident' : 'request', r.id, personId);
       t.updates = acts.map((a) => ({ at: new Date(a.created_at).toISOString(), from: a.mine ? ('you' as const) : ('it' as const), by: a.mine ? 'You' : handledBy, body: a.body }));
     }
     out.push(t);

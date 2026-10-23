@@ -375,3 +375,18 @@ registerProblemExtra(async (p: { id: number }) => {
   const { rows } = await query("SELECT ref, status FROM articles WHERE problem_id = $1 AND synced_with_problem ORDER BY id DESC LIMIT 1", [p.id]);
   return { knowledge_article: rows[0] ?? null };
 });
+
+// ---- For people outside IT (the help portal, #45) --------------------------------------------------------------
+
+/** Published end-user articles matching any of these words (prefixes), best first. */
+export async function endUserArticles(words: string[]) {
+  const { rows } = await query(
+    `SELECT a.ref, a.title FROM articles a, to_tsquery('simple', $1) q
+     WHERE a.status = 'published' AND a.audience = 'end_users' AND a.search @@ q ORDER BY ts_rank(a.search, q) DESC LIMIT 5`,
+    [words.map((w) => `${w}:*`).join(' | ')],
+  );
+  return rows;
+}
+
+export const endUserArticle = async (ref: string) =>
+  (await query("SELECT ref, title, body, updated_at FROM articles WHERE ref = $1 AND status = 'published' AND audience = 'end_users'", [ref.toUpperCase()])).rows[0];

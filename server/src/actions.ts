@@ -122,3 +122,7 @@ export async function updateAction(user: User, ref: string, actionId: number, in
   });
   return getProblem(ref);
 }
+
+/** My Work (#110): my open follow-up actions, the next due first. */
+export const myActions = async (userId: number) =>
+  (await query(`${SELECT_ACTION} WHERE a.owner_id = $1 AND a.status = 'open' ORDER BY a.due_date NULLS LAST LIMIT 50`, [userId])).rows;

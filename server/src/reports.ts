@@ -2,9 +2,12 @@
 import { slaCompliance } from './sla.js';
 import { moduleEnabled } from './modules.js';
 import { z } from 'zod';
-import { query } from './db.js';
+import { inPeriod, query } from './db.js';
 import { reviewStats } from './reviews.js';
 import { csvCell } from './core/text.js';
+import { ciHotspots } from './problem-cis.js';
+import { incidentReport } from './incidents.js';
+import { changeReport } from './changes.js';
 
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
 
@@ -29,19 +32,18 @@ const hours = (col: string) => `extract(epoch FROM ${col}) / 3600`;
 export async function report({ from, to, bucket }: ReportParams) {
   // [from, to] inclusive, as timestamps
   const range = [from, to];
-  const inRange = (col: string) => `${col} >= $1::date AND ${col} < $2::date + 1`;
 
-  const [flow, backlog, leadTimes, closures, reopened, detection, services, categories, knownErrors, actionStats, totals, cis, ciTypes, incidentStats, incidentCis, changeStats] = await Promise.all([
+  const [flow, backlog, leadTimes, closures, reopened, detection, services, categories, knownErrors, actionStats, totals, cis, incidentStats, changeStats] = await Promise.all([
     query(
       `WITH buckets AS (
          SELECT generate_series(date_trunc('${bucket}', $1::date), date_trunc('${bucket}', $2::date), '1 ${bucket}') AS start
        ),
        transitions AS (
          SELECT date_trunc('${bucket}', created_at) AS b, data->>'to' AS to_status
-         FROM problem_activity WHERE kind = 'status' AND ${inRange('created_at')}
+         FROM problem_activity WHERE kind = 'status' AND ${inPeriod('created_at')}
        )
        SELECT b.start::date::text AS bucket,
-         (SELECT count(*) FROM problems p WHERE date_trunc('${bucket}', p.created_at) = b.start AND ${inRange('p.created_at')})::int AS opened,
+         (SELECT count(*) FROM problems p WHERE date_trunc('${bucket}', p.created_at) = b.start AND ${inPeriod('p.created_at')})::int AS opened,
          (SELECT count(*) FROM transitions t WHERE t.b = b.start AND t.to_status = 'known_error')::int AS known_errors,
          (SELECT count(*) FROM transitions t WHERE t.b = b.start AND t.to_status = 'resolved')::int AS resolved,
          (SELECT count(*) FROM transitions t WHERE t.b = b.start AND t.to_status = 'closed')::int AS closed
@@ -63,34 +65,34 @@ export async function report({ from, to, bucket }: ReportParams) {
     ),
     query(
       `SELECT priority,
-         count(*) FILTER (WHERE ${inRange('known_error_at')})::int AS known_error_count,
-         percentile_cont(0.5) WITHIN GROUP (ORDER BY ${hours('known_error_at - created_at')}) FILTER (WHERE ${inRange('known_error_at')}) AS known_error_median_h,
-         percentile_cont(0.9) WITHIN GROUP (ORDER BY ${hours('known_error_at - created_at')}) FILTER (WHERE ${inRange('known_error_at')}) AS known_error_p90_h,
-         count(*) FILTER (WHERE ${inRange('resolved_at')})::int AS resolved_count,
-         percentile_cont(0.5) WITHIN GROUP (ORDER BY ${hours('resolved_at - created_at')}) FILTER (WHERE ${inRange('resolved_at')}) AS resolved_median_h,
-         percentile_cont(0.9) WITHIN GROUP (ORDER BY ${hours('resolved_at - created_at')}) FILTER (WHERE ${inRange('resolved_at')}) AS resolved_p90_h
+         count(*) FILTER (WHERE ${inPeriod('known_error_at')})::int AS known_error_count,
+         percentile_cont(0.5) WITHIN GROUP (ORDER BY ${hours('known_error_at - created_at')}) FILTER (WHERE ${inPeriod('known_error_at')}) AS known_error_median_h,
+         percentile_cont(0.9) WITHIN GROUP (ORDER BY ${hours('known_error_at - created_at')}) FILTER (WHERE ${inPeriod('known_error_at')}) AS known_error_p90_h,
+         count(*) FILTER (WHERE ${inPeriod('resolved_at')})::int AS resolved_count,
+         percentile_cont(0.5) WITHIN GROUP (ORDER BY ${hours('resolved_at - created_at')}) FILTER (WHERE ${inPeriod('resolved_at')}) AS resolved_median_h,
+         percentile_cont(0.9) WITHIN GROUP (ORDER BY ${hours('resolved_at - created_at')}) FILTER (WHERE ${inPeriod('resolved_at')}) AS resolved_p90_h
        FROM problems GROUP BY priority ORDER BY priority`,
       range,
     ),
     query(
       `SELECT data->>'closure_code' AS closure_code, count(*)::int AS count
-       FROM problem_activity WHERE kind = 'status' AND data->>'to' = 'closed' AND ${inRange('created_at')}
+       FROM problem_activity WHERE kind = 'status' AND data->>'to' = 'closed' AND ${inPeriod('created_at')}
        GROUP BY 1 ORDER BY 2 DESC`,
       range,
     ),
     query(
       `SELECT count(*)::int AS count FROM problem_activity
-       WHERE kind = 'status' AND data->>'to' = 'analysis' AND data->>'from' IN ('resolved', 'closed') AND ${inRange('created_at')}`,
+       WHERE kind = 'status' AND data->>'to' = 'analysis' AND data->>'from' IN ('resolved', 'closed') AND ${inPeriod('created_at')}`,
       range,
     ),
-    query(`SELECT detection, count(*)::int AS count FROM problems WHERE ${inRange('created_at')} GROUP BY detection`, range),
+    query(`SELECT detection, count(*)::int AS count FROM problems WHERE ${inPeriod('created_at')} GROUP BY detection`, range),
     query(
       `SELECT coalesce(nullif(p.affected_service, ''), 'Unspecified') AS name,
-         count(DISTINCT l.id) FILTER (WHERE l.kind = 'incident' AND ${inRange('l.created_at')})::int AS incidents,
-         count(DISTINCT l.id) FILTER (WHERE l.kind = 'event' AND ${inRange('l.created_at')})::int AS events,
+         count(DISTINCT l.id) FILTER (WHERE l.kind = 'incident' AND ${inPeriod('l.created_at')})::int AS incidents,
+         count(DISTINCT l.id) FILTER (WHERE l.kind = 'event' AND ${inPeriod('l.created_at')})::int AS events,
          count(DISTINCT p.id) FILTER (WHERE p.status NOT IN ('resolved', 'closed'))::int AS open_problems
        FROM problems p LEFT JOIN problem_links l ON l.problem_id = p.id
-       GROUP BY 1 HAVING count(DISTINCT l.id) FILTER (WHERE l.kind IN ('incident', 'event') AND ${inRange('l.created_at')}) > 0
+       GROUP BY 1 HAVING count(DISTINCT l.id) FILTER (WHERE l.kind IN ('incident', 'event') AND ${inPeriod('l.created_at')}) > 0
          OR count(DISTINCT p.id) FILTER (WHERE p.status NOT IN ('resolved', 'closed')) > 0
        ORDER BY 2 DESC, 4 DESC LIMIT 10`,
       range,
@@ -99,7 +101,7 @@ export async function report({ from, to, bucket }: ReportParams) {
       `SELECT coalesce(c.name, 'Uncategorised') AS name, count(*)::int AS logged,
          count(*) FILTER (WHERE p.status NOT IN ('resolved', 'closed'))::int AS open
        FROM problems p LEFT JOIN categories c ON c.id = p.category_id
-       WHERE ${inRange('p.created_at')} GROUP BY 1 ORDER BY 2 DESC`,
+       WHERE ${inPeriod('p.created_at')} GROUP BY 1 ORDER BY 2 DESC`,
       range,
     ),
     query(`SELECT count(*)::int AS count,
@@ -110,77 +112,25 @@ export async function report({ from, to, bucket }: ReportParams) {
              count(*) FILTER (WHERE ec_review_date <= current_date)::int AS review_due
            FROM problems WHERE status = 'known_error'`),
     query(
-      `SELECT count(*) FILTER (WHERE status = 'done' AND ${inRange('completed_at')})::int AS completed,
-         count(*) FILTER (WHERE status = 'done' AND ${inRange('completed_at')} AND due_date IS NOT NULL AND completed_at::date <= due_date)::int AS completed_on_time,
-         count(*) FILTER (WHERE status = 'done' AND ${inRange('completed_at')} AND due_date IS NOT NULL)::int AS completed_with_due,
-         count(*) FILTER (WHERE ${inRange('created_at')})::int AS created,
+      `SELECT count(*) FILTER (WHERE status = 'done' AND ${inPeriod('completed_at')})::int AS completed,
+         count(*) FILTER (WHERE status = 'done' AND ${inPeriod('completed_at')} AND due_date IS NOT NULL AND completed_at::date <= due_date)::int AS completed_on_time,
+         count(*) FILTER (WHERE status = 'done' AND ${inPeriod('completed_at')} AND due_date IS NOT NULL)::int AS completed_with_due,
+         count(*) FILTER (WHERE ${inPeriod('created_at')})::int AS created,
          count(*) FILTER (WHERE status = 'open' AND due_date < current_date)::int AS overdue_now,
          count(*) FILTER (WHERE status = 'open')::int AS open_now
        FROM problem_actions`,
       range,
     ),
     query(
-      `SELECT count(*) FILTER (WHERE ${inRange('created_at')})::int AS opened,
-         count(*) FILTER (WHERE is_major AND ${inRange('created_at')})::int AS major_opened,
+      `SELECT count(*) FILTER (WHERE ${inPeriod('created_at')})::int AS opened,
+         count(*) FILTER (WHERE is_major AND ${inPeriod('created_at')})::int AS major_opened,
          count(*) FILTER (WHERE status NOT IN ('resolved', 'closed'))::int AS open_now
        FROM problems`,
       range,
     ),
-    // CI hotspots (#26): records and problems per CI, and records nobody has linked to a problem yet.
-    query(
-      `SELECT c.ref, c.name, c.class, t.label AS type_label, c.criticality,
-         (SELECT count(*) FROM external_records r WHERE r.ci_id = c.id AND ${inRange('r.occurred_at')})::int AS records,
-         (SELECT count(*) FROM external_records r WHERE r.ci_id = c.id AND r.problem_id IS NULL AND NOT r.dismissed AND ${inRange('r.occurred_at')})::int AS unlinked,
-         (SELECT count(*) FROM problem_cis pc JOIN problems p ON p.id = pc.problem_id WHERE pc.ci_id = c.id AND p.status NOT IN ('resolved', 'closed'))::int AS open_problems,
-         (SELECT count(*) FROM problem_cis pc JOIN problems p ON p.id = pc.problem_id WHERE pc.ci_id = c.id AND p.status = 'known_error')::int AS known_errors
-       FROM configuration_items c JOIN ci_types t ON t.name = c.ci_type
-       WHERE EXISTS (SELECT 1 FROM external_records r WHERE r.ci_id = c.id AND ${inRange('r.occurred_at')})
-          OR EXISTS (SELECT 1 FROM problem_cis pc JOIN problems p ON p.id = pc.problem_id WHERE pc.ci_id = c.id AND p.status NOT IN ('resolved', 'closed'))
-       ORDER BY unlinked DESC, records DESC, open_problems DESC LIMIT 10`,
-      range,
-    ),
-    query(
-      `SELECT t.label AS name, count(DISTINCT r.id)::int AS records, count(DISTINCT pc.problem_id)::int AS problems
-       FROM configuration_items c JOIN ci_types t ON t.name = c.ci_type
-       LEFT JOIN external_records r ON r.ci_id = c.id AND ${inRange('r.occurred_at')}
-       LEFT JOIN problem_cis pc ON pc.ci_id = c.id
-       GROUP BY t.label HAVING count(DISTINCT r.id) > 0 OR count(DISTINCT pc.problem_id) > 0
-       ORDER BY 2 DESC, 3 DESC LIMIT 10`,
-      range,
-    ),
-    // Incidents (#28): volumes, time to respond (MTTA) and to resolve (MTTR), reopen rate, major incidents.
-    query(
-      `SELECT count(*) FILTER (WHERE ${inRange('created_at')})::int AS opened,
-         count(*) FILTER (WHERE ${inRange('resolved_at')})::int AS resolved,
-         count(*) FILTER (WHERE is_major AND ${inRange('created_at')})::int AS major,
-         count(*) FILTER (WHERE status NOT IN ('resolved', 'closed'))::int AS open_now,
-         count(*) FILTER (WHERE reopen_count > 0 AND ${inRange('created_at')})::int AS reopened,
-         count(*) FILTER (WHERE problem_id IS NOT NULL AND ${inRange('created_at')})::int AS with_problem,
-         percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM responded_at - created_at) / 60) FILTER (WHERE responded_at IS NOT NULL AND ${inRange('created_at')}) AS mtta_median_min,
-         percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM resolved_at - created_at) / 3600) FILTER (WHERE ${inRange('resolved_at')}) AS mttr_median_h
-       FROM incidents`,
-      range,
-    ),
-    query(
-      `SELECT c.ref, c.name, count(*)::int AS incidents, count(*) FILTER (WHERE i.problem_id IS NULL)::int AS without_problem
-       FROM incidents i JOIN incident_cis x ON x.incident_id = i.id JOIN configuration_items c ON c.id = x.ci_id
-       WHERE ${inRange('i.created_at')} GROUP BY c.ref, c.name ORDER BY 3 DESC LIMIT 10`,
-      range,
-    ),
-    // Changes (#29): success rate, emergency ratio, and changes followed by incidents on their CIs within a day.
-    query(
-      `SELECT count(*) FILTER (WHERE ${inRange('c.created_at')})::int AS requested,
-         count(*) FILTER (WHERE c.outcome IS NOT NULL AND ${inRange('c.actual_end')})::int AS implemented,
-         count(*) FILTER (WHERE c.outcome = 'successful' AND ${inRange('c.actual_end')})::int AS successful,
-         count(*) FILTER (WHERE c.outcome IN ('failed', 'rolled_back') AND ${inRange('c.actual_end')})::int AS failed,
-         count(*) FILTER (WHERE c.change_type = 'emergency' AND ${inRange('c.created_at')})::int AS emergency,
-         count(*) FILTER (WHERE c.change_type = 'standard' AND ${inRange('c.created_at')})::int AS standard,
-         count(*) FILTER (WHERE c.actual_start IS NOT NULL AND ${inRange('c.actual_start')} AND EXISTS (
-           SELECT 1 FROM change_cis x JOIN incident_cis y ON y.ci_id = x.ci_id JOIN incidents i ON i.id = y.incident_id
-           WHERE x.change_id = c.id AND i.created_at BETWEEN c.actual_start AND c.actual_start + interval '24 hours'))::int AS followed_by_incidents
-       FROM changes c`,
-      range,
-    ),
+    ciHotspots(from, to),
+    incidentReport(from, to),
+    changeReport(from, to),
   ]);
 
   const sum = (key: string) => flow.rows.reduce((n, r) => n + r[key], 0);
@@ -214,11 +164,11 @@ export async function report({ from, to, bucket }: ReportParams) {
         resolved_p90_h: round(r.resolved_p90_h),
       })),
     closures: closures.rows,
-    hotspots: { services: services.rows, categories: categories.rows, cis: moduleEnabled('cmdb') ? cis.rows : [], ci_types: moduleEnabled('cmdb') ? ciTypes.rows : [] },
+    hotspots: { services: services.rows, categories: categories.rows, cis: moduleEnabled('cmdb') ? cis.cis : [], ci_types: moduleEnabled('cmdb') ? cis.ci_types : [] },
     // Sections of switched-off modules are left out (#36).
-    changes: moduleEnabled('change') ? changeStats.rows[0] : null,
+    changes: moduleEnabled('change') ? changeStats : null,
     sla: moduleEnabled('sla') && moduleEnabled('incident') ? await slaCompliance(from, to) : null,
-    incidents: !moduleEnabled('incident') ? null : { ...incidentStats.rows[0], mtta_median_min: round(incidentStats.rows[0].mtta_median_min), mttr_median_h: round(incidentStats.rows[0].mttr_median_h), by_ci: incidentCis.rows, reviews: await reviewStats(from, to) },
+    incidents: !moduleEnabled('incident') ? null : { ...incidentStats.stats, mtta_median_min: round(incidentStats.stats.mtta_median_min), mttr_median_h: round(incidentStats.stats.mttr_median_h), by_ci: incidentStats.by_ci, reviews: await reviewStats(from, to) },
     known_errors: knownErrors.rows[0],
     actions: {
       created: a.created,

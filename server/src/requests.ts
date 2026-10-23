@@ -31,6 +31,7 @@ import { absoluteUrl } from './core/url.js';
 import { tokenHashBytes } from './core/hash.js';
 import { processOutbox } from './core/outbox.js';
 import { requestTaskPayload } from './webhooks.js';
+import { PUBLIC_SERVICE_NAME } from './status.js';
 
 export const REQUEST_STATUSES = ['submitted', 'awaiting_approval', 'in_fulfilment', 'fulfilled', 'rejected', 'cancelled'] as const;
 type Status = (typeof REQUEST_STATUSES)[number];
@@ -1124,4 +1125,23 @@ registerRecordType(REQUEST_TYPE);
 
 function requestUrl(ref: string) {
   return recordUrl(REQUEST_TYPE, ref);
+}
+
+/** The teams with an open task on a request (the portal tells them when the requester writes). */
+export async function openTaskTeams(db: Db, requestId: number): Promise<number[]> {
+  const { rows } = await db.query("SELECT DISTINCT team_id FROM request_tasks WHERE request_id = $1 AND status = 'open' AND team_id IS NOT NULL", [requestId]);
+  return rows.map((r) => r.team_id);
+}
+
+/** Active catalogue items whose form uses only these field types, named by their service's name for outsiders (the portal). */
+export async function catalogueItems(itemId: number | null, fieldTypes: string[]) {
+  const { rows } = await query(
+    `SELECT i.id, i.name, i.description, i.form, i.approval <> 'none' AS needs_approval, ${PUBLIC_SERVICE_NAME} AS service
+     FROM request_items i JOIN configuration_items c ON c.id = i.service_id LEFT JOIN service_status st ON st.ci_id = c.id AND st.public
+     WHERE i.active AND ($1::int IS NULL OR i.id = $1)
+       AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(i.form) f WHERE NOT (f->>'type' = ANY($2)))
+     ORDER BY 6 NULLS LAST, i.name LIMIT 300`,
+    [itemId, fieldTypes],
+  );
+  return rows;
 }

@@ -15,15 +15,16 @@ import { authorize, can } from './policy.js';
 import { listApprovals } from './approvals.js';
 import { addCiLink, CI_LINK_KINDS } from './cmdb.js';
 import { linkCiToProblem } from './problem-cis.js';
-import { addIncidentLink, linkIncidentToProblem, setIncidentCi } from './incidents.js';
-import { addChangeLink, setChangeCi } from './changes.js';
+import { addIncidentLink, linkIncidentToProblem, myIncidentWork, setIncidentCi } from './incidents.js';
+import { addChangeLink, myChangeWork, setChangeCi } from './changes.js';
 
 const incidentExists = async (ref: string) => (await query('SELECT 1 FROM incidents WHERE ref = $1', [ref.toUpperCase()])).rows.length > 0;
-import { addLink, LINK_KINDS, SELECT_ACTION } from './problems.js';
+import { addLink, LINK_KINDS, myProblemWork } from './problems.js';
 import { recordTypes, recordUrl, typeForRef, type SearchHit } from './records.js';
 import { attentionCount, incidentRefOf, myReviews } from './reviews.js';
 import { addImprovementLink, improvementLinkSchema, myImprovements } from './improvements.js';
 import { addRequestLink, myRequestWork, requestLinkSchema, teamRequestTasks } from './requests.js';
+import { myActions } from './actions.js';
 
 export const searchSchema = z.object({
   q: z.string().trim().min(1).max(200),
@@ -155,84 +156,35 @@ export async function linkRecords(user: User, from: string, to: string, options:
 /** What the user should work on: their open problems and actions, and recent changes on what they watch. */
 export async function myWork(user: User) {
   const decide = can(user.role, 'problem.accept_risk');
-  const [problems, actions, watched, decisions, incidents, changeVotes, myChanges] = await Promise.all([
-    query(
-      `SELECT ref, title, status, priority, updated_at FROM problems WHERE assignee_id = $1 AND status NOT IN ('resolved', 'closed') ORDER BY priority, updated_at DESC LIMIT 50`,
-      [user.id],
-    ),
-    query(`${SELECT_ACTION} WHERE a.owner_id = $1 AND a.status = 'open' ORDER BY a.due_date NULLS LAST LIMIT 50`, [user.id]),
-    query(
-      `SELECT p.ref, p.title, a.kind, a.body, a.created_at, u.display_name AS by
-       FROM problem_activity a JOIN problems p ON p.id = a.problem_id LEFT JOIN users u ON u.id = a.user_id
-       JOIN problem_watchers w ON w.problem_id = a.problem_id AND w.user_id = $1
-       WHERE a.user_id IS DISTINCT FROM $1 AND a.created_at > now() - interval '7 days' ORDER BY a.created_at DESC LIMIT 30`,
-      [user.id],
-    ),
-    decide
-      ? query(`SELECT ref, title, priority, known_error_at FROM problems WHERE status = 'known_error' AND coalesce(ec_decision, 'pending') = 'pending' ORDER BY priority, known_error_at LIMIT 30`)
-      : Promise.resolve({ rows: [] as any[] }),
-    can(user.role, 'incident.read')
-      ? query(
-          `SELECT ref, title, status, priority, is_major, created_at,
-                  (is_major AND major_next_update_at < now()) AS update_overdue FROM incidents
-           WHERE assignee_id = $1 AND status NOT IN ('resolved', 'closed') ORDER BY priority, created_at LIMIT 50`,
-          [user.id],
-        )
-      : Promise.resolve({ rows: [] as any[] }),
-    can(user.role, 'change.approve')
-      ? query(
-          `SELECT c.ref, c.title, c.change_type, c.planned_start FROM changes c WHERE c.status = 'authorize' AND c.created_by IS DISTINCT FROM $1 AND c.assignee_id IS DISTINCT FROM $1
-           AND NOT EXISTS (SELECT 1 FROM change_votes v WHERE v.change_id = c.id AND v.user_id = $1) ORDER BY c.planned_start NULLS LAST LIMIT 30`,
-          [user.id],
-        )
-      : Promise.resolve({ rows: [] as any[] }),
-    can(user.role, 'change.read')
-      ? query(
-          `SELECT ref, title, status, change_type, planned_start FROM changes WHERE (assignee_id = $1 OR created_by = $1)
-           AND status NOT IN ('closed', 'rejected', 'cancelled') ORDER BY planned_start NULLS LAST LIMIT 30`,
-          [user.id],
-        )
-      : Promise.resolve({ rows: [] as any[] }),
+  const teams = can(user.role, 'team.read') ? await myTeams(user.id) : [];
+  const incidentRead = can(user.role, 'incident.read');
+  const [problemWork, actions, incidentWork, changeWork] = await Promise.all([
+    myProblemWork(user.id, decide),
+    myActions(user.id),
+    incidentRead ? myIncidentWork(user.id, teams.map((t) => t.id)) : null,
+    myChangeWork(user.id, can(user.role, 'change.approve'), can(user.role, 'change.read')),
   ]);
-  // Major incidents I lead or communicate for (#108): the next stakeholder update, overdue first.
-  const majorUpdates = can(user.role, 'incident.read')
-    ? (await query(
-        `SELECT ref, title, priority, major_next_update_at AS next_update_at, major_next_update_at < now() AS update_overdue,
-                CASE WHEN major_comms_id = $1 THEN 'communications lead' ELSE 'incident lead' END AS role
-         FROM incidents WHERE is_major AND status NOT IN ('resolved', 'closed') AND (major_lead_id = $1 OR major_comms_id = $1)
-         ORDER BY major_next_update_at NULLS LAST LIMIT 20`,
-        [user.id],
-      )).rows
-    : [];
-  const reviews = can(user.role, 'incident.read') ? await myReviews(user.id) : [];
+  const reviews = incidentRead ? await myReviews(user.id) : [];
   const improvements = can(user.role, 'improvement.read') ? await myImprovements(user.id) : [];
   // Service requests (#44), when the module is on: my tasks, my teams' open tasks and what waits for my approval.
   const requests = can(user.role, 'request.read') ? await myRequestWork(user.id) : null;
   const problemType = recordTypes().find((t) => t.type === 'problem')!;
-  const teams = can(user.role, 'team.read') ? await myTeams(user.id) : [];
-  const teamQueue = can(user.role, 'incident.read') && teams.length
-    ? (await query(
-        `SELECT i.ref, i.title, i.status, i.priority, i.is_major, i.created_at, i.team_id, t.name AS team FROM incidents i JOIN teams t ON t.id = i.team_id
-         WHERE i.assignee_id IS NULL AND i.status NOT IN ('resolved', 'closed') AND i.team_id = ANY($1) ORDER BY i.priority, i.created_at LIMIT 50`,
-        [teams.map((t) => t.id)],
-      )).rows
-    : [];
   return {
     teams,
-    team_queue: teamQueue,
-    problems: problems.rows.map((p) => ({ type: 'problem', ...p, url: recordUrl(problemType, p.ref) })),
-    incidents: incidents.rows,
-    major_updates: majorUpdates,
+    team_queue: incidentWork?.team_queue ?? [],
+    problems: problemWork.problems.map((p) => ({ type: 'problem', ...p, url: recordUrl(problemType, p.ref) })),
+    incidents: incidentWork?.incidents ?? [],
+    major_updates: incidentWork?.major_updates ?? [],
     reviews,
     improvements,
     request_tasks: requests?.tasks ?? [],
     request_approvals: requests?.approvals ?? [],
     request_queue: requests && teams.length ? (await teamRequestTasks(teams.map((t) => t.id))).filter((t) => !t.assignee_id) : [],
-    change_votes: changeVotes.rows,
-    changes: myChanges.rows,
-    actions: actions.rows,
-    watched_changes: watched.rows,
-    decisions: decisions.rows.map((p) => ({ type: 'problem', ...p, url: recordUrl(problemType, p.ref) })),
+    change_votes: changeWork.votes,
+    changes: changeWork.changes,
+    actions,
+    watched_changes: problemWork.watched,
+    decisions: problemWork.decisions.map((p) => ({ type: 'problem', ...p, url: recordUrl(problemType, p.ref) })),
     approvals: decide ? await listApprovals() : [],
   };
 }

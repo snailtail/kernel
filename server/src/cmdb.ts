@@ -623,3 +623,6 @@ registerRecordType(SERVICE_TYPE);
 function urlFor(cls: string, ref: string) {
   return recordUrl(cls === 'service' ? SERVICE_TYPE : CI_TYPE, ref);
 }
+
+/** A CI's id by its ref, if there is one. */
+export const ciIdOf = async (ref: string): Promise<number | undefined> => (await query('SELECT id FROM configuration_items WHERE ref = $1', [ref.toUpperCase()])).rows[0]?.id;

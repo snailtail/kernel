@@ -7,7 +7,7 @@ import type { User } from './auth.js';
 import { loadCi, logCi, registerCiExtra } from './cmdb.js';
 import { assertMayWriteText, notCopied, readableText, textFilterSql } from './confidential.js';
 import { currentContext } from './context.js';
-import { type Db, query, tx } from './db.js';
+import { type Db, inPeriod, query, tx } from './db.js';
 import { badRequest, conflict, notFound } from './errors.js';
 import { authorize, can } from './policy.js';
 import { affectedFrom } from './problem-cis.js';
@@ -684,4 +684,94 @@ registerRecordType(INCIDENT_TYPE);
 
 function incidentUrl(ref: string) {
   return recordUrl(INCIDENT_TYPE, ref);
+}
+
+/**
+ * My Work (#110): my open incidents, the major incidents I lead or communicate for (#108) with their next stakeholder
+ * update, and my teams' unassigned queue.
+ */
+export async function myIncidentWork(userId: number, teamIds: number[]) {
+  const [incidents, majorUpdates, teamQueue] = await Promise.all([
+    query(
+      `SELECT ref, title, status, priority, is_major, created_at,
+              (is_major AND major_next_update_at < now()) AS update_overdue FROM incidents
+       WHERE assignee_id = $1 AND status NOT IN ('resolved', 'closed') ORDER BY priority, created_at LIMIT 50`,
+      [userId],
+    ),
+    query(
+      `SELECT ref, title, priority, major_next_update_at AS next_update_at, major_next_update_at < now() AS update_overdue,
+              CASE WHEN major_comms_id = $1 THEN 'communications lead' ELSE 'incident lead' END AS role
+       FROM incidents WHERE is_major AND status NOT IN ('resolved', 'closed') AND (major_lead_id = $1 OR major_comms_id = $1)
+       ORDER BY major_next_update_at NULLS LAST LIMIT 20`,
+      [userId],
+    ),
+    teamIds.length
+      ? query(
+          `SELECT i.ref, i.title, i.status, i.priority, i.is_major, i.created_at, i.team_id, t.name AS team FROM incidents i JOIN teams t ON t.id = i.team_id
+           WHERE i.assignee_id IS NULL AND i.status NOT IN ('resolved', 'closed') AND i.team_id = ANY($1) ORDER BY i.priority, i.created_at LIMIT 50`,
+          [teamIds],
+        )
+      : Promise.resolve({ rows: [] as any[] }),
+  ]);
+  return { incidents: incidents.rows, major_updates: majorUpdates.rows, team_queue: teamQueue.rows };
+}
+
+/** For the report: volumes, time to respond (MTTA) and to resolve (MTTR), reopen rate, major incidents, and the CIs with most incidents. */
+export async function incidentReport(from: string, to: string) {
+  const range = [from, to];
+  const [stats, byCi] = await Promise.all([
+    query(
+      `SELECT count(*) FILTER (WHERE ${inPeriod('created_at')})::int AS opened,
+         count(*) FILTER (WHERE ${inPeriod('resolved_at')})::int AS resolved,
+         count(*) FILTER (WHERE is_major AND ${inPeriod('created_at')})::int AS major,
+         count(*) FILTER (WHERE status NOT IN ('resolved', 'closed'))::int AS open_now,
+         count(*) FILTER (WHERE reopen_count > 0 AND ${inPeriod('created_at')})::int AS reopened,
+         count(*) FILTER (WHERE problem_id IS NOT NULL AND ${inPeriod('created_at')})::int AS with_problem,
+         percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM responded_at - created_at) / 60) FILTER (WHERE responded_at IS NOT NULL AND ${inPeriod('created_at')}) AS mtta_median_min,
+         percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM resolved_at - created_at) / 3600) FILTER (WHERE ${inPeriod('resolved_at')}) AS mttr_median_h
+       FROM incidents`,
+      range,
+    ),
+    query(
+      `SELECT c.ref, c.name, count(*)::int AS incidents, count(*) FILTER (WHERE i.problem_id IS NULL)::int AS without_problem
+       FROM incidents i JOIN incident_cis x ON x.incident_id = i.id JOIN configuration_items c ON c.id = x.ci_id
+       WHERE ${inPeriod('i.created_at')} GROUP BY c.ref, c.name ORDER BY 3 DESC LIMIT 10`,
+      range,
+    ),
+  ]);
+  return { stats: stats.rows[0], by_ci: byCi.rows };
+}
+
+// ---- The help portal (#45) -------------------------------------------------------------------------------------
+
+/** A problem reported in the portal: an incident with the person as its caller. */
+export async function insertPortalIncident(db: Db, personId: number, fields: { title: string; description: string; impact: number; urgency: number }, ciIds: number[], affected: string) {
+  const inc = await insertIncident(db, null, { ...fields, reporter: '' }, ciIds, 'portal');
+  await db.query('UPDATE incidents SET caller_id = $2 WHERE id = $1', [inc.id, personId]);
+  await logIncident(db, inc.id, null, 'update', `Reported in the portal by person #${personId}`, { caller: { to: personId }, via: 'portal', affected });
+  return inc;
+}
+
+/**
+ * The caller's answer on a solved incident: "it works" closes it, "still a problem" reopens it. A major incident only
+ * records the answer: it closes through its review. Returns whether it was reopened.
+ */
+export async function callerConfirms(db: Db, id: number, works: boolean) {
+  const { rows } = await db.query('SELECT is_major FROM incidents WHERE id = $1', [id]);
+  if (works) {
+    if (rows[0].is_major) {
+      await logIncident(db, id, null, 'update', 'The caller confirmed in the portal that it works', { by_requester: true, confirmed: true });
+      return false;
+    }
+    await db.query("UPDATE incidents SET status = 'closed', closed_at = now() WHERE id = $1", [id]);
+    await slaOnTransition(db, id, 'closed');
+    await logIncident(db, id, null, 'status', 'The caller confirmed in the portal that it works', { from: 'resolved', to: 'closed', by_requester: true });
+    return false;
+  }
+  await db.query("UPDATE incidents SET status = 'in_progress', resolved_at = NULL, closed_at = NULL, reopen_count = reopen_count + 1 WHERE id = $1", [id]);
+  await slaOnTransition(db, id, 'in_progress');
+  if (rows[0].is_major) await db.query("UPDATE incidents SET major_next_update_at = now() + coalesce(major_update_minutes, 60) * interval '1 minute', major_overdue_notified_for = NULL WHERE id = $1", [id]);
+  await logIncident(db, id, null, 'status', 'The caller says it is still a problem (portal)', { from: 'resolved', to: 'in_progress', by_requester: true });
+  await syncPaging(db, id, null);
+  return true;
 }

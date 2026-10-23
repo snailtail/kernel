@@ -56,3 +56,27 @@ export async function historyOf(type: string, recordId: number) {
   );
   return rows;
 }
+
+/** A record's comments that carry this data value (e.g. those about one review), oldest first, with who wrote them. */
+export async function commentsTagged(type: string, recordId: number, key: string, value: string) {
+  const { log } = logOf(type);
+  const { rows } = await query(
+    `SELECT a.id, a.body, a.created_at, a.channel, u.display_name AS created_by FROM ${log.table} a LEFT JOIN users u ON u.id = a.user_id
+     WHERE a.${log.fk} = $1 AND a.kind = 'comment' AND a.data->>$3 = $2 ORDER BY a.id`,
+    [recordId, value, key],
+  );
+  return rows;
+}
+
+/** The conversation with a requester (#45): replies sent to them and their own messages, oldest first. */
+export async function requesterThread(db: { query: (sql: string, params?: unknown[]) => Promise<{ rows: any[] }> }, type: string, recordId: number, personId: number) {
+  const { log } = logOf(type);
+  const { rows } = await db.query(
+    `SELECT created_at, body, data->>'from_requester' = 'true' AS mine FROM ${log.table}
+     WHERE ${log.fk} = $1 AND kind = 'comment'
+       AND (data->>'for_requester' = 'true' OR (data->>'from_requester' = 'true' AND (data->>'person_id')::int = $2))
+     ORDER BY created_at, id`,
+    [recordId, personId],
+  );
+  return rows;
+}

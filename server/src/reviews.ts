@@ -21,6 +21,7 @@ import { createProblemInTx, loadForUpdate, logProblem, registerProblemExtra } fr
 import { recordUrl, registerRecordType, type RecordType, type SearchHit } from './records.js';
 import { loadCalendar } from './sla.js';
 import { runTask } from './ai.js';
+import { commentsTagged } from './activity.js';
 
 export const ITEM_KINDS = ['factor', 'follow_up', 'gap'] as const;
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
@@ -199,11 +200,7 @@ export async function getReview(user: User, ref: string) {
     timeline(user, ref),
     impactFacts(user, ref),
   ]);
-  const { rows: comments } = await query(
-    `SELECT a.id, a.body, a.created_at, a.channel, u.display_name AS created_by FROM incident_activity a LEFT JOIN users u ON u.id = a.user_id
-     WHERE a.incident_id = $1 AND a.kind = 'comment' AND a.data->>'review' = $2 ORDER BY a.id`,
-    [r.incident_id, r.review_ref],
-  );
+  const comments = await commentsTagged('incident', r.incident_id, 'review', r.review_ref);
   const name = (id: number | null) => owner.rows.find((u) => u.id === id)?.display_name ?? null;
   const dueIn = r.due ? Math.round((Date.parse(r.due) - Date.parse(new Date().toISOString().slice(0, 10))) / 86400_000) : null;
   const review = {

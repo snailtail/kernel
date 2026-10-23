@@ -288,3 +288,6 @@ registerProblemExtra(async (p) => {
   );
   return { affected_organisations: rows };
 });
+
+/** A person as a request's requester (id, name and their Kernel account, if any). */
+export const requesterOf = async (db: Db, personId: number) => (await db.query('SELECT id, name, user_id FROM people WHERE id = $1', [personId])).rows[0];
