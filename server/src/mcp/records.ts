@@ -4,6 +4,7 @@ import * as bulk from '../bulk.js';
 import { badRequest } from '../errors.js';
 import * as flow from '../flow.js';
 import * as generic from '../generic.js';
+import { idempotent } from '../idempotency.js';
 import { listAssignees, listCategories } from '../meta.js';
 import * as notifications from '../notifications.js';
 import * as problems from '../problems.js';
@@ -59,6 +60,17 @@ export function registerRecordsTools({ user, tool }: McpContext) {
     async ({ ref }) => generic.nextSteps(user, ref),
   );
   tool('my_work', 'What you should work on: your open problems and actions, and recent changes on records you watch.', {}, true, () => generic.myWork(user));
+  tool(
+    'add_comment',
+    'Add a work note to any record (problem, incident, change, CI, service, article, review): findings, analysis steps, decisions.',
+    { ref: z.string(), body: z.string(), idempotency_key: z.string().max(200).optional().describe('Retry-safe key') },
+    false,
+    async ({ ref, body, idempotency_key }) =>
+      idempotent(user.id, idempotency_key, `add_comment ${ref}`, { body }, async () => {
+        await generic.addComment(user, ref, body);
+        return { ok: true };
+      }),
+  );
   tool(
     'link_records',
     'Link a record to another Kernel record (by ref) or to an external record (give kind: incident, event, change, problem).',

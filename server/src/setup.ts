@@ -116,19 +116,24 @@ async function loadDemoData(user: User) {
     await addRelationship(user, host.ref, { type: 'member_of', target: svc.ref, direction: 'outgoing' });
     await addRelationship(user, host.ref, { type: 'uses_database', target: database.ref, direction: 'outgoing' });
   }
-  const p = await createProblem(user, { title: 'Checkout times out under load (demo)', description: 'Customers see timeouts at checkout during campaigns.', impact: 2, urgency: 2 });
-  await remember('problem', p.ref);
-  refs.push(p.ref);
-  await transitionProblem(user, p.ref, { to: 'analysis' });
-  await transitionProblem(user, p.ref, { to: 'known_error', root_cause: 'The database connection pool is too small for campaign traffic.', workaround: 'Restart the shop service to release connections.' });
-  if (dbCi) await query('INSERT INTO problem_cis (problem_id, ci_id, added_by) SELECT p.id, c.id, $3 FROM problems p, configuration_items c WHERE p.ref = $1 AND c.ref = $2 ON CONFLICT DO NOTHING', [p.ref, dbCi.ref, user.id]);
+  // Problem management (#184), like the other practices, only while it is on.
+  let p: { ref: string } | null = null;
+  if (moduleEnabled('problem')) {
+    const created = await createProblem(user, { title: 'Checkout times out under load (demo)', description: 'Customers see timeouts at checkout during campaigns.', impact: 2, urgency: 2 });
+    p = created;
+    await remember('problem', created.ref);
+    refs.push(created.ref);
+    await transitionProblem(user, created.ref, { to: 'analysis' });
+    await transitionProblem(user, created.ref, { to: 'known_error', root_cause: 'The database connection pool is too small for campaign traffic.', workaround: 'Restart the shop service to release connections.' });
+    if (dbCi) await query('INSERT INTO problem_cis (problem_id, ci_id, added_by) SELECT p.id, c.id, $3 FROM problems p, configuration_items c WHERE p.ref = $1 AND c.ref = $2 ON CONFLICT DO NOTHING', [created.ref, dbCi.ref, user.id]);
+  }
   if (moduleEnabled('incident')) {
     const i = await createIncident(user, { title: 'Checkout is slow (demo)', impact: 2, urgency: 1, cis: vm ? [vm.ref] : [] });
     await remember('incident', i.ref);
     refs.push(i.ref);
   }
   if (moduleEnabled('change')) {
-    const c = await createChange(user, { title: 'Increase the database pool (demo)', cis: dbCi ? [dbCi.ref] : [], problem: p.ref, implementation_plan: 'Raise max_connections and the pool size.', backout_plan: 'Restore the previous configuration.' });
+    const c = await createChange(user, { title: 'Increase the database pool (demo)', cis: dbCi ? [dbCi.ref] : [], ...(p ? { problem: p.ref } : {}), implementation_plan: 'Raise max_connections and the pool size.', backout_plan: 'Restore the previous configuration.' });
     await remember('change', c.ref);
     refs.push(c.ref);
   }

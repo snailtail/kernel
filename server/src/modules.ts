@@ -4,6 +4,7 @@
 import { query } from './db.js';
 
 export const MODULES = {
+  problem: { label: 'Problems', description: 'Find and remove the causes of incidents: problems, root cause analysis, known errors and problem candidates.' },
   incident: { label: 'Incidents', description: 'Log and restore service for disruptions, with SLAs and hand-over to problem management.' },
   change: { label: 'Changes', description: 'Assess, authorise and schedule changes; standard changes from pipelines.' },
   event: { label: 'Events from monitoring', description: 'Receive alerts from Alertmanager, Uptime Kuma, Azure Monitor, OP5…; rules open incidents.' },
@@ -17,7 +18,7 @@ export type Module = keyof typeof MODULES;
 
 // Service requests (#44) and the portal (#45) are off until someone turns them on: existing installations keep the
 // menus they know, and nothing faces people outside IT unless an administrator chose it.
-export const MODULE_DEFAULTS: Record<Module, boolean> = { incident: true, change: true, event: true, cmdb: true, sla: true, knowledge: true, request: false, portal: false };
+export const MODULE_DEFAULTS: Record<Module, boolean> = { problem: true, incident: true, change: true, event: true, cmdb: true, sla: true, knowledge: true, request: false, portal: false };
 let state: Record<Module, boolean> = { ...MODULE_DEFAULTS };
 let loadedAt = 0;
 
@@ -36,9 +37,14 @@ export const modules = () => {
 
 export const moduleEnabled = (m: Module) => modules()[m] !== false;
 
-/** The module an action belongs to; problem management and administration belong to none (always on). */
+/**
+ * The module an action belongs to; administration and the registers every practice shares (actions, improvements,
+ * rules…) belong to none (always on). Problem management (#184) is the problems, their analyses, the known error
+ * database, problem candidates and the problem review board.
+ */
 export function moduleOfAction(action: string): Module | null {
   const prefix = action.split('.')[0];
+  if (prefix === 'problem' || prefix === 'kedb' || prefix === 'analysis' || prefix === 'candidate' || action === 'review.read') return 'problem';
   if (prefix === 'incident' || prefix === 'change' || prefix === 'event' || prefix === 'sla' || prefix === 'request') return prefix;
   if (prefix === 'ci') return 'cmdb';
   if (prefix === 'article') return 'knowledge';
@@ -51,4 +57,4 @@ export const actionEnabled = (action: string) => {
 };
 
 /** OpenAPI tags and MCP prompts per module, so the documentation and agent surface follow the switches too. */
-export const MODULE_TAGS: Record<string, Module> = { Incidents: 'incident', Changes: 'change', Events: 'event', CMDB: 'cmdb', 'Service levels': 'sla', 'Service requests': 'request', Portal: 'portal' };
+export const MODULE_TAGS: Record<string, Module> = { Problems: 'problem', Analyses: 'problem', 'Known errors': 'problem', 'Problem candidates': 'problem', Incidents: 'incident', Changes: 'change', Events: 'event', CMDB: 'cmdb', 'Service levels': 'sla', 'Service requests': 'request', Portal: 'portal' };

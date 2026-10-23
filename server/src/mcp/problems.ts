@@ -3,7 +3,6 @@ import { z } from 'zod';
 import * as analyses from '../analyses.js';
 import { badRequest } from '../errors.js';
 import { problemMarkdown } from '../export.js';
-import * as generic from '../generic.js';
 import { idempotent } from '../idempotency.js';
 import * as kpiMod from '../kpis.js';
 import { categoryIdByName } from '../meta.js';
@@ -210,17 +209,6 @@ export function registerProblemsTools({ user, tool, HUMAN_CONFIRMATION, decide }
     { ref: z.string(), watching: z.boolean().optional().describe('Default true; false to stop watching') },
     false,
     async ({ ref, watching }) => (await problems.setWatching(user, ref, watching ?? true)).watchers,
-  );
-  tool(
-    'add_comment',
-    'Add a work note to any record (problem, incident, change, CI, service, article, review): findings, analysis steps, decisions.',
-    { ref: z.string(), body: z.string(), idempotency_key: z.string().max(200).optional().describe('Retry-safe key') },
-    false,
-    async ({ ref, body, idempotency_key }) =>
-      idempotent(user.id, idempotency_key, `add_comment ${ref}`, { body }, async () => {
-        await generic.addComment(user, ref, body);
-        return { ok: true };
-      }),
   );
   tool(
     'link_record',

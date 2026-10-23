@@ -422,7 +422,7 @@ export function IncidentPage() {
           <AttachmentsPanel recordRef={i.ref} editable={editable} canDelete={(a) => a.uploaded_by === user.id || manager} />
           <HistoryPanel recordRef={i.ref} version={i} />
           {meta.modules?.cmdb !== false && <AffectedCisPanel record={i} basePath={path} editable={editable} onChange={setData} />}
-          <section className="card">
+          {meta.modules?.problem !== false && <section className="card">
             <h2>Problem</h2>
             {i.problem_ref ? (
               <p><Link to={`/problems/${i.problem_ref}`} className="mono">{i.problem_ref}</Link> {i.problem_title} <span className="muted small">{i.problem_status?.replace('_', ' ')}</span></p>
@@ -435,7 +435,7 @@ export function IncidentPage() {
                 {i.problem_ref && <button className="btn-link" onClick={() => run(() => api.put(`${path}/problem`, { problem: '' }))}>Unlink</button>}
               </div>
             )}
-          </section>
+          </section>}
           {i.alerts.length > 0 && (
             <section className="card">
               <h2>Alerts <span className="count">{i.alerts.filter((a) => a.status === 'open').length} open of {i.alerts.length}</span></h2>

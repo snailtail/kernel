@@ -17,12 +17,14 @@ export function registerGuidesTools({ server, user }: McpContext) {
 - Record progress as you go (analysis tools, add_comment for findings). Everything you write is shown as "proposed via MCP" until a person confirms it.
 - Run check_analysis before concluding and address every error.
 - Decisions (closing, accepting or deferring risk, marking duplicates) are mine: ask, then pass my answer as human_confirmation.`;
+  // The method prompts are problem management's (#184): gone while that module is off.
+  const problemsOn = moduleEnabled('problem');
   const prompt = (name: string, title: string, description: string, body: (ref: string) => string, guide?: string) =>
-    server.registerPrompt(name, { title, description, argsSchema: { ref: z.string().describe('Problem reference, e.g. PRB000012') } }, ({ ref }) => ({
+    problemsOn && server.registerPrompt(name, { title, description, argsSchema: { ref: z.string().describe('Problem reference, e.g. PRB000012') } }, ({ ref }) => ({
       messages: [{ role: 'user', content: { type: 'text', text: `${body(ref.toUpperCase())}\n\n${guide ? `Method guide: kernel://guides/${guide}\n` : ''}${RULES}` } }],
     }));
   const globalPrompt = (name: string, title: string, description: string, text: string, guide: string) =>
-    server.registerPrompt(name, { title, description }, () => ({
+    problemsOn && server.registerPrompt(name, { title, description }, () => ({
       messages: [{ role: 'user', content: { type: 'text', text: `${text}\n\nMethod guide: kernel://guides/${guide}\n${RULES}` } }],
     }));
   prompt('five_whys', '5 Whys analysis', 'Facilitate a 5 Whys root cause analysis on a problem, recording it in Kernel.', (ref) =>

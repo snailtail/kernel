@@ -33,7 +33,7 @@ export const START_PAGES: { id: Home; label: string; to: string; module?: Module
   { id: 'my_work', label: 'My work', to: '/my-work' },
   { id: 'dashboard', label: 'Dashboard', to: '/dashboard' },
   { id: 'incidents', label: 'Incidents', to: '/incidents', module: 'incident' },
-  { id: 'problems', label: 'Problems', to: '/problems' },
+  { id: 'problems', label: 'Problems', to: '/problems', module: 'problem' },
   { id: 'changes', label: 'Changes', to: '/changes', module: 'change' },
   { id: 'requests', label: 'Service requests', to: '/requests', module: 'request' },
   { id: 'improvements', label: 'Improvements', to: '/improvements' },
@@ -60,9 +60,9 @@ export const NAV: NavGroup[] = [
   {
     id: 'improve', label: 'Improve', purpose: 'find causes and fix them',
     items: [
-      { to: '/candidates', label: 'Problem candidates', icon: 'candidates', hint: 'Recurring incidents and alerts worth a problem', key: 'c' },
-      { to: '/problems', label: 'Problems', icon: 'problems', key: 'p', match: ['/problems/'] },
-      { to: '/kedb', label: 'Known errors', icon: 'kedb', hint: 'Workarounds and decisions on fixes', badge: 'kedb', key: 'k' },
+      { to: '/candidates', label: 'Problem candidates', icon: 'candidates', hint: 'Recurring incidents and alerts worth a problem', module: 'problem', key: 'c' },
+      { to: '/problems', label: 'Problems', icon: 'problems', module: 'problem', key: 'p', match: ['/problems/'] },
+      { to: '/kedb', label: 'Known errors', icon: 'kedb', hint: 'Workarounds and decisions on fixes', module: 'problem', badge: 'kedb', key: 'k' },
       { to: '/changes', label: 'Changes', icon: 'changes', hint: 'Implement the fix', module: 'change', key: 'h' },
       { to: '/actions', label: 'Actions', icon: 'actions', hint: 'Follow-ups with an owner and a date', badge: 'actions', key: 'a' },
       { to: '/improvements', label: 'Improvements', icon: 'improvements', hint: 'Continual improvement register: ideas, quick wins and their benefit', key: 'o', match: ['/improvements/'] },
@@ -73,7 +73,7 @@ export const NAV: NavGroup[] = [
     items: [
       { to: '/knowledge', label: 'Knowledge', icon: 'knowledge', hint: 'Articles and workarounds', module: 'knowledge', key: 'b' },
       { to: '/incident-reviews', label: 'Post-incident reviews', icon: 'pir', hint: 'Blameless look-backs on major incidents', module: 'incident', badge: 'reviews', key: 'w', match: ['/incident-reviews'] },
-      { to: '/review', label: 'Problem review board', icon: 'review', hint: 'The problem review meeting', key: 'v' },
+      { to: '/review', label: 'Problem review board', icon: 'review', hint: 'The problem review meeting', module: 'problem', key: 'v' },
       { to: '/dashboard', label: 'Dashboard', icon: 'dashboard', key: 'd' },
       { to: '/reports', label: 'Reports', icon: 'reports', hint: 'KPIs and service reports', key: 'r' },
     ],
@@ -118,7 +118,7 @@ export function focusPractice(user: User): Practice | null {
 export interface NewItem { kind: NewKind; to: string; label: string; module?: Module }
 export const NEW_ITEMS: NewItem[] = [
   { kind: 'incident', to: '/incidents?new=1', label: 'Incident', module: 'incident' },
-  { kind: 'problem', to: '/problems/new', label: 'Problem' },
+  { kind: 'problem', to: '/problems/new', label: 'Problem', module: 'problem' },
   { kind: 'change', to: '/changes?new=1', label: 'Change', module: 'change' },
   { kind: 'article', to: '/knowledge?new=1', label: 'Article', module: 'knowledge' },
   { kind: 'improvement', to: '/improvements?new=1', label: 'Improvement' },

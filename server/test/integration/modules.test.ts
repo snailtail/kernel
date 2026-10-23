@@ -84,6 +84,62 @@ describe('modules and first-run setup (#36)', { skip }, () => {
     assert.equal((await analyst.get(`/api/incidents/${inc.ref}`)).body.title, 'Before switching off', 'nothing was deleted');
   });
 
+  test('problem management can be switched off (#184): its routes and tools go, actions and reviews stay', async () => {
+    const prb = (await analyst.post('/api/problems', { title: 'Problems before switching off' })).body.ref;
+    const inc = (await analyst.post('/api/incidents', { title: 'An incident with a review' })).body.ref;
+    const pir = (await pm.post(`/api/incidents/${inc}/review`, {})).body.ref;
+    const mods = (await admin.put('/api/admin/modules', { problem: false, reason: 'Problems live in another tool' })).body;
+    assert.equal(mods.find((m: any) => m.key === 'problem').enabled, false);
+    try {
+      for (const path of ['/api/problems', `/api/problems/${prb}`, `/api/records/${prb}`, '/api/kedb', '/api/candidates', '/api/review', '/api/dashboard', '/api/reports/problems.csv']) {
+        assert.equal((await analyst.get(path)).status, 404, path);
+      }
+      assert.equal((await analyst.post('/api/problems', { title: 'x' })).status, 404);
+      assert.equal((await analyst.post(`/api/problems/${prb}/actions`, { title: 'x' })).status, 404);
+      assert.ok(!(await analyst.get('/api/search?q=switching')).body.some((h: any) => h.type === 'problem'));
+      assert.equal((await analyst.get('/api/meta')).body.modules.problem, false);
+      const report = (await analyst.get('/api/reports')).body;
+      assert.equal(report.problems, false);
+      assert.equal(report.summary, undefined, 'no problem sections');
+      assert.ok(!(await analyst.get('/api/dashboard/kpis?period=month')).body.tiles.some((t: any) => ['problems_resolved', 'recurring'].includes(t.id)));
+      const openapi = (await analyst.get('/api/openapi.json')).body;
+      assert.equal(openapi.paths['/api/problems'], undefined);
+      assert.ok(openapi.paths['/api/actions']);
+
+      // The actions register, My Work and the post-incident review keep working.
+      const action = await analyst.post('/api/actions', { parent: inc, title: 'Document the restart' });
+      assert.equal(action.status, 201, JSON.stringify(action.body));
+      assert.ok((await analyst.get('/api/actions?status=all')).body.some((a: any) => a.id === action.body.id));
+      const work = await analyst.get('/api/my-work');
+      assert.equal(work.status, 200);
+      assert.deepEqual(work.body.problems, []);
+      let r = (await analyst.post(`/api/incidents/${inc}/review/items`, { kind: 'follow_up', body: 'Add a restart runbook' })).body;
+      const item = r.items.find((x: any) => x.kind === 'follow_up');
+      r = (await analyst.post(`/api/incidents/${inc}/review/items/${item.id}/action`, {})).body;
+      assert.deepEqual(r.actions.map((a: any) => [a.ref, a.title]), [[pir, 'Add a restart runbook']]);
+      r = (await analyst.post(`/api/incidents/${inc}/review/items`, { kind: 'factor', body: 'No runbook' })).body;
+      const factor = r.items.find((x: any) => x.kind === 'factor');
+      assert.equal((await analyst.post(`/api/incidents/${inc}/review/items/${factor.id}/problem`, {})).status, 404, 'no problem from a factor');
+      assert.equal((await analyst.post(`/api/incidents/${inc}/review/items/${item.id}/action`, { problem: prb })).status, 409, 'already an action');
+      assert.equal((await analyst.get(`/api/incidents/${inc}`)).body.next_steps.handover, null, 'no hand-over to problem management');
+
+      const mcp = new McpClient({ name: 'mods', version: '1' });
+      await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
+      const tools = (await mcp.listTools()).tools.map((t) => t.name);
+      for (const gone of ['create_problem', 'search_problems', 'get_problem', 'search_known_errors', 'list_problem_candidates', 'get_review_agenda', 'get_dashboard', 'start_analysis']) {
+        assert.ok(!tools.includes(gone), `${gone} is listed`);
+      }
+      for (const kept of ['add_action', 'list_actions', 'update_action', 'my_work', 'add_comment', 'link_records', 'get_review', 'create_incident']) {
+        assert.ok(tools.includes(kept), `${kept} is missing`);
+      }
+      assert.ok(!(await mcp.listPrompts()).prompts.some((p) => p.name === 'five_whys' || p.name === 'problem_review_board'));
+      await mcp.close();
+    } finally {
+      await admin.put('/api/admin/modules', { problem: true, reason: 'Back on' });
+    }
+    assert.equal((await analyst.get(`/api/problems/${prb}`)).body.title, 'Problems before switching off', 'nothing was deleted');
+  });
+
   test('event hooks answer 503 while events are off; the CMDB can be switched off too', async () => {
     const src = (await admin.get('/api/event-sources')).body[0];
     const token = (await admin.post(`/api/event-sources/${src.id}/rotate`, {})).body.token;

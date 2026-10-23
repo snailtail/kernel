@@ -116,6 +116,7 @@ export async function problemRoutes(app: FastifyInstance) {
 
   app.get('/api/reports/problems.csv', async (req, reply) => {
     requireUser(req, 'report.read');
+    requireUser(req, 'problem.read');
     const params = reports.reportSchema.parse(req.query);
     reply.header('Content-Type', 'text/csv; charset=utf-8');
     reply.header('Content-Disposition', `attachment; filename="kernel-problems-${params.from}-${params.to}.csv"`);
@@ -145,18 +146,18 @@ export async function problemRoutes(app: FastifyInstance) {
   app.get<RefParams>('/api/records/:ref/history', async (req) =>
     generic.recordHistory(requireUser(req), req.params.ref, z.object({ limit: z.coerce.number().int().min(1).max(500).default(100) }).parse(req.query).limit));
   app.get<RefParams>('/api/records/:ref/impact', async (req) => generic.getImpact(requireUser(req), req.params.ref, z.object({ max_depth: z.coerce.number().int().optional() }).parse(req.query)));
-  app.post<RefParams>('/api/records/:ref/comments', { config: { idempotent: 'problem.comment' } }, async (req, reply) => {
+  app.post<RefParams>('/api/records/:ref/comments', { config: { idempotent: 'action.write' } }, async (req, reply) => {
     await generic.addComment(requireUser(req), req.params.ref, z.object({ body: z.string().max(20000) }).parse(req.body).body);
     return reply.code(201).send({ ok: true });
   });
-  app.post<RefParams>('/api/records/:ref/links', { config: { idempotent: 'problem.link' } }, async (req) => {
+  app.post<RefParams>('/api/records/:ref/links', { config: { idempotent: 'action.write' } }, async (req) => {
     const user = requireUser(req);
     const body = generic.linkBodySchema.parse(req.body);
     return generic.linkRecords(user, req.params.ref, body.to, body);
   });
   app.get('/api/flow', async (req) => flow.processMap(requireUser(req, 'meta.read')));
   app.get('/api/health-tips', async (req) => flow.healthTips(requireUser(req, 'meta.read')));
-  app.get('/api/my-work', async (req) => generic.myWork(requireUser(req, 'problem.read')));
+  app.get('/api/my-work', async (req) => generic.myWork(requireUser(req, 'action.read')));
   app.get('/api/nav/counts', async (req) => generic.navCounts(requireUser(req, 'meta.read')));
 
   app.get('/api/guides', async (req) => {

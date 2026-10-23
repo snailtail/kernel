@@ -94,4 +94,21 @@ describe('record kinds (#172)', { skip }, () => {
       assert.ok(onRecords.some((r) => r.table === t.table && r.m![1] === t.liveTopic), `${t.type}: ${t.table} has no live trigger for "${t.liveTopic}"`);
     }
   });
+  test('every kind an action can hang off is in the CHECK, the visibility policy and has a drop trigger (#184)', async () => {
+    const { ACTION_PARENTS } = await import('../../src/actions.js');
+    const { recordType } = await import('../../src/records.js');
+    const check = (await ownerQuery("SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conrelid = 'actions'::regclass AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%parent_kind%'")).rows[0].def as string;
+    const policy = (await ownerQuery("SELECT qual FROM pg_policies WHERE tablename = 'actions' AND policyname = 'actions_visible'")).rows[0].qual as string;
+    const drops = (await ownerQuery(
+      "SELECT c.relname AS tbl, encode(t.tgargs, 'escape') AS args FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid JOIN pg_proc p ON p.oid = t.tgfoid WHERE p.proname = 'kernel_drop_actions'",
+    )).rows.map((r) => `${r.tbl}:${r.args.replace(/\\000$/, '').replace(/\u0000$/, '')}`);
+    for (const kind of ACTION_PARENTS) {
+      const t = recordType(kind);
+      assert.ok(check.includes(`'${kind}'`), `${kind}: not in the parent_kind CHECK`);
+      assert.match(policy, new RegExp(`WHEN '${kind}'::text THEN \\(EXISTS \\( SELECT 1\\s+FROM ${t.table} p`), `${kind}: no branch for ${t.table} in actions_visible`);
+      assert.ok(drops.includes(`${t.table}:${kind}`), `${kind}: no drop trigger on ${t.table} (has ${drops.join(', ')})`);
+    }
+    const kinds = [...check.matchAll(/'([a-z_]+)'::text/g)].map((m) => m[1]).sort();
+    assert.deepEqual(kinds, [...ACTION_PARENTS].sort(), 'the CHECK and ACTION_PARENTS list the same kinds');
+  });
 });

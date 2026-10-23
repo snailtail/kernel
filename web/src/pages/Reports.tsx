@@ -4,9 +4,12 @@ import { useState } from 'react';
 import { GroupedBars, HBars, LineChart } from '../components/Charts';
 import { CLOSURE_LABEL, formatDay, PRIORITY_LABEL } from '../format';
 import { useApi } from '../hooks';
+import { useSession } from '../session';
 
 interface Report {
   period: { from: string; to: string; bucket: 'week' | 'month' };
+  /** Problem management is on (#184); its fields are left out otherwise. */
+  problems: boolean;
   summary: {
     opened: number; major_opened: number; known_errors_raised: number; resolved: number; closed: number;
     reopened: number; open_now: number; proactive: number; reactive: number;
@@ -55,6 +58,7 @@ const duration = (h: number | null) => (h === null ? '–' : h < 48 ? `${Math.ro
 const pct = (n: number, of: number) => (of ? `${Math.round((n / of) * 100)}%` : '–');
 
 export function ReportsPage() {
+  const { meta } = useSession();
   const [range, setRange] = useState<{ name: string; from: string; to: string }>(() => {
     const [from, to] = preset('90d');
     return { name: '90d', from, to };
@@ -78,10 +82,10 @@ export function ReportsPage() {
       <header className="page-head">
         <div>
           <h1>Reports</h1>
-          <p className="muted">How problem management is performing: flow, lead times, quality and where problems come from.</p>
+          <p className="muted">{meta.modules?.problem !== false ? 'How problem management is performing: flow, lead times, quality and where problems come from.' : 'How the practices are performing: service levels, incidents and changes.'}</p>
         </div>
         <div className="head-actions no-print">
-          <a className="btn" href={`/api/reports/problems.csv?${query}`}>Export CSV</a>
+          {meta.modules?.problem !== false && <a className="btn" href={`/api/reports/problems.csv?${query}`}>Export CSV</a>}
           <button className="btn" onClick={() => window.print()}>Print</button>
         </div>
       </header>
@@ -112,6 +116,8 @@ export function ReportsPage() {
       {error && <div className="error">{error}</div>}
       {r && (
         <div className={`reports ${loading ? 'is-loading' : ''}`}>
+          {/* Problem management's sections, while it is on (#184). */}
+          {r.problems && (<>
           <section className="stat-row">
             <div className="stat"><span className="stat-label">Logged</span><span className="stat-value">{r.summary.opened}</span><span className="stat-sub">{r.summary.major_opened} major</span></div>
             <div className="stat"><span className="stat-label">Known errors raised</span><span className="stat-value">{r.summary.known_errors_raised}</span></div>
@@ -208,6 +214,8 @@ export function ReportsPage() {
             </div>
           )}
 
+          </>)}
+
           {r.sla && r.sla.overall.resolved > 0 && (
             <section className="card flush">
               <h2 className="pad">SLA compliance <span className="muted small">incidents resolved in the period</span></h2>
@@ -237,7 +245,7 @@ export function ReportsPage() {
                   <dt>Median time to respond (MTTA)</dt><dd>{r.incidents.mtta_median_min === null ? '–' : `${r.incidents.mtta_median_min} min`}</dd>
                   <dt>Median time to resolve (MTTR)</dt><dd>{r.incidents.mttr_median_h === null ? '–' : `${r.incidents.mttr_median_h} h`}</dd>
                   <dt>Reopened</dt><dd className={r.incidents.reopened ? 'attention' : ''}>{r.incidents.opened ? Math.round((r.incidents.reopened / r.incidents.opened) * 100) : 0}%</dd>
-                  <dt>Linked to a problem</dt><dd>{r.incidents.opened ? Math.round((r.incidents.with_problem / r.incidents.opened) * 100) : 0}%</dd>
+                  {r.problems && <><dt>Linked to a problem</dt><dd>{r.incidents.opened ? Math.round((r.incidents.with_problem / r.incidents.opened) * 100) : 0}%</dd></>}
                   {r.incidents.reviews && r.incidents.reviews.major_resolved > 0 && (
                     <>
                       <dt>Major incidents with a published review</dt><dd className={(r.incidents.reviews.reviewed_share ?? 0) < 100 ? 'attention' : ''}>{r.incidents.reviews.reviewed_share}% <span className="muted small">({r.incidents.reviews.reviewed} of {r.incidents.reviews.major_resolved}{r.incidents.reviews.waived ? `, ${r.incidents.reviews.waived} waived` : ''})</span></dd>
@@ -266,6 +274,7 @@ export function ReportsPage() {
             </div>
           )}
 
+          {r.problems && (
           <div className="grid-3">
             <section className="card">
               <h2>Known error database</h2>
@@ -293,6 +302,7 @@ export function ReportsPage() {
               <HBars rows={r.closures.map((c) => ({ label: CLOSURE_LABEL[c.closure_code] ?? c.closure_code, value: c.count }))} empty="Nothing closed in the period." />
             </section>
           </div>
+          )}
         </div>
       )}
     </>

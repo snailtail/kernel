@@ -153,13 +153,17 @@ export async function linkRecords(user: User, from: string, to: string, options:
   return result.links;
 }
 
-/** What the user should work on: their open problems and actions, and recent changes on what they watch. */
+/**
+ * What the user should work on: their open records and actions, and recent changes on what they watch. Each practice
+ * only while its module is on and the user may read it; the actions register is always there (#184).
+ */
 export async function myWork(user: User) {
+  const problemRead = can(user.role, 'problem.read');
   const decide = can(user.role, 'problem.accept_risk');
   const teams = can(user.role, 'team.read') ? await myTeams(user.id) : [];
   const incidentRead = can(user.role, 'incident.read');
   const [problemWork, actions, incidentWork, changeWork] = await Promise.all([
-    myProblemWork(user.id, decide),
+    problemRead ? myProblemWork(user.id, decide) : { problems: [], watched: [], decisions: [] },
     myActions(user),
     incidentRead ? myIncidentWork(user.id, teams.map((t) => t.id)) : null,
     myChangeWork(user.id, can(user.role, 'change.approve'), can(user.role, 'change.read')),
@@ -197,7 +201,7 @@ export async function navCounts(user: User) {
   const n = async (sql: string, params: unknown[] = []) => Number((await query(sql, params)).rows[0].n);
   const zero = Promise.resolve(0);
   const [myProblems, myIncidents, actions, alerts, queue, decisions] = await Promise.all([
-    n("SELECT count(*) AS n FROM problems WHERE assignee_id = $1 AND status NOT IN ('resolved', 'closed')", [user.id]),
+    can(user.role, 'problem.read') ? n("SELECT count(*) AS n FROM problems WHERE assignee_id = $1 AND status NOT IN ('resolved', 'closed')", [user.id]) : zero,
     can(user.role, 'incident.read') && moduleEnabled('incident') ? n("SELECT count(*) AS n FROM incidents WHERE assignee_id = $1 AND status NOT IN ('resolved', 'closed')", [user.id]) : zero,
     actionCounts(user),
     can(user.role, 'event.read') && moduleEnabled('event') ? n("SELECT count(*) AS n FROM alerts WHERE status = 'open' AND incident_id IS NULL AND suppressed = ''") : zero,

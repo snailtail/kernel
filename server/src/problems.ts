@@ -685,6 +685,7 @@ const PROBLEM_TYPE: RecordType = {
   },
   mcp: { list: 'search_problems', get: 'get_problem', create: 'create_problem', update: 'update_problem', transition: 'transition_problem' },
   table: 'problems',
+  module: 'problem',
   activity: { table: 'problem_activity', fk: 'problem_id', after: afterProblemLog },
   people: { assignee: 'assignee_id', team: 'team_id' },
   textPlaces: [

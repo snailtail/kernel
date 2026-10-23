@@ -137,8 +137,8 @@ export async function report({ from, to, bucket }: ReportParams) {
   const round = (v: number | null) => (v === null ? null : Math.round(v * 10) / 10);
   const det = Object.fromEntries(detection.rows.map((r) => [r.detection, r.count]));
   const a = actionStats.rows[0];
-  return {
-    period: { from, to, bucket },
+  // Problem management's sections only while it is on (#184); the other practices' sections follow their modules.
+  const problemSections = moduleEnabled('problem') ? {
     summary: {
       opened: totals.rows[0].opened,
       major_opened: totals.rows[0].major_opened,
@@ -165,10 +165,6 @@ export async function report({ from, to, bucket }: ReportParams) {
       })),
     closures: closures.rows,
     hotspots: { services: services.rows, categories: categories.rows, cis: moduleEnabled('cmdb') ? cis.cis : [], ci_types: moduleEnabled('cmdb') ? cis.ci_types : [] },
-    // Sections of switched-off modules are left out (#36).
-    changes: moduleEnabled('change') ? changeStats : null,
-    sla: moduleEnabled('sla') && moduleEnabled('incident') ? await slaCompliance(from, to) : null,
-    incidents: !moduleEnabled('incident') ? null : { ...incidentStats.stats, mtta_median_min: round(incidentStats.stats.mtta_median_min), mttr_median_h: round(incidentStats.stats.mttr_median_h), by_ci: incidentStats.by_ci, reviews: await reviewStats(from, to) },
     known_errors: knownErrors.rows[0],
     actions: {
       created: a.created,
@@ -177,6 +173,15 @@ export async function report({ from, to, bucket }: ReportParams) {
       open_now: a.open_now,
       overdue_now: a.overdue_now,
     },
+  } : null;
+  return {
+    period: { from, to, bucket },
+    problems: !!problemSections,
+    ...problemSections,
+    // Sections of switched-off modules are left out (#36).
+    changes: moduleEnabled('change') ? changeStats : null,
+    sla: moduleEnabled('sla') && moduleEnabled('incident') ? await slaCompliance(from, to) : null,
+    incidents: !moduleEnabled('incident') ? null : { ...incidentStats.stats, mtta_median_min: round(incidentStats.stats.mtta_median_min), mttr_median_h: round(incidentStats.stats.mttr_median_h), by_ci: incidentStats.by_ci, reviews: await reviewStats(from, to) },
   };
 }
 

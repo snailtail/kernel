@@ -203,9 +203,11 @@ change", "A known error matches: link it", "Recurring? Create a problem" – and
 for the week. Agents get the same through MCP (`get_process_map`, `get_health_tips`, `next_steps.handover`).
 
 **Keep it simple**: a first-run setup wizard (administrators) chooses the modules, the support hours, a first
-monitoring source and optional example data – every step can be skipped and run again. Incidents, changes, events,
-the CMDB and service levels are modules that can be switched off under Administration: they disappear from menus,
-the API (404), MCP, search and reports, and nothing is deleted. Forms ask for the essentials first, with the rest
+monitoring source and optional example data – every step can be skipped and run again. Problems, incidents, changes,
+events, the CMDB and service levels are modules that can be switched off under Administration: they disappear from
+menus, the API (404), MCP, search and reports, and nothing is deleted. With problems off, the known error database,
+problem candidates, problem KPIs and the problem review board go too; follow-up actions, My Work and post-incident
+reviews keep working, and a major incident closes without a problem record. Forms ask for the essentials first, with the rest
 behind "More details"; templates prefill new incidents and problems. See `docs/ux-guidelines.md`.
 
 **Notifications**: everything that concerns you – assignments, approvals waiting for you, decisions on what you
