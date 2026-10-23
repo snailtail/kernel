@@ -1,6 +1,6 @@
 // Removing sensitive text from a record and its history (#61). Secrets are redacted on the way in, but text written
 // before that – or personal details that should not have been written at all – can still sit in a record's fields,
-// comments, actions, analyses, links and text attachments. A problem manager or administrator can remove it, with
+// comments, actions, analyses, links and text attachments. A manager or administrator can remove it, with
 // step-up and a reason. The fact of every change stays (the history keeps its entries, with "[REDACTED]" in place of
 // the text), and the removal itself is recorded in the record's history and the audit trail – without the text.
 import { z } from 'zod';

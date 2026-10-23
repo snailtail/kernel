@@ -12,13 +12,13 @@ problem records directly.
 | Under Analysis | Problem control | Analysis under way; workarounds can be documented at any time |
 | Known Error | Error control | Analysed (root cause documented) but not resolved; listed in the known error database |
 | Resolved | | Permanent solution in place, usually through a change |
-| Closed | | Closed with a closure code by a problem manager |
+| Closed | | Closed with a closure code by a manager |
 
 Rules enforced by the server:
 
 - Known error requires a documented root cause.
 - Resolved requires a documented resolution.
-- Closing and reopening a closed problem require the Problem Manager (or Administrator) role and a closure code.
+- Closing and reopening a closed problem require the Manager (or Administrator) role and a closure code.
 - **Major problems** need a major problem review before closure (unless closed as duplicate or cancelled).
 - Priority = impact + urgency − 1 (1 Critical … 5 Planning), where impact and urgency are 1 (high) to 3 (low).
 - Closing with closure code *no fix* requires a recorded decision to accept the risk (error control).
@@ -29,7 +29,7 @@ Rules enforced by the server:
 
 **Error control**: each known error can be assessed — risk of not fixing, cost of a permanent fix, workaround
 effectiveness — and gets a decision: fix, accept the risk, defer or pending, with a review date. Accepting or
-deferring is reserved for problem managers. Dashboards and filters show known errors awaiting a decision or past
+deferring is reserved for managers. Dashboards and filters show known errors awaiting a decision or past
 their review date.
 
 **Root cause analysis**: problems can carry structured analyses — 5 Whys, Ishikawa (with a fishbone diagram),
@@ -51,7 +51,7 @@ shows a checklist of the next steps, derived from the record itself; the same gu
 `next_steps` in `get_problem`. New users are offered a short introduction, "Problem management in 5 minutes".
 
 **Duplicates**: while a problem is being logged, similar problems and known errors (with their workarounds) are
-shown live. A problem manager can close a problem as a duplicate of another, which links the two and moves its
+shown live. A manager can close a problem as a duplicate of another, which links the two and moves its
 incidents and events to the original.
 
 **Problem review**: an agenda for the regular review meeting — problems to triage or without owner, major problems,
@@ -174,7 +174,7 @@ MCP: `get_review`, `create_review`, `update_review`, `add_review_item`, `review_
 reviews (a follow-up or gap becomes an improvement instead of an action), resolved or closed problems ("lessons
 learned"), service reports ("Suggest an improvement", with the service and period filled in) and anyone's idea. Each
 has a value and an effort (1–5), an owner, a service, and goes idea → approved → in progress → done, or rejected with a
-reason; a problem manager approves and rejects, and done needs the benefit it brought. The list has saved views and
+reason; a manager approves and rejects, and done needs the benefit it brought. The list has saved views and
 bulk actions, the board shows a Kanban by status (dragging a card changes its status with the API's rules; on a phone
 each card has a move menu), and the value/effort matrix puts quick wins top left. An improvement links the changes,
 problems and actions that carry it out, and can watch a dashboard KPI: its page shows that tile's trend. Restricted and
@@ -223,7 +223,7 @@ reports show compliance per priority, service and team. Services can be publishe
 plain description and how to get help.
 
 **Changes**: change enablement with standard (pre-approved templates), normal and emergency changes. Risk is assessed
-from the most critical CI or service the change affects through the CMDB; the change authority (problem managers and
+from the most critical CI or service the change affects through the CMDB; the change authority (managers and
 administrators) approves in the web UI – one approval for low and medium risk, two for high, never the requester's
 own. Plans are locked once a change is submitted. The schedule shows collisions on the same CI and change freezes,
 which block normal changes unless the change authority overrides with a reason. A problem raises a change for its
@@ -265,12 +265,15 @@ Permissions are defined in one place (`server/src/policy.ts`, deny by default) a
 UI, REST and MCP; MCP lists only the tools a role and token may use. An authorisation test matrix covers every role
 against every endpoint, plus mass assignment and IDOR cases.
 
+The roles favour no practice (#171): `manager` was called `problem_manager` until 2026-10. The API, the SSO group
+mapping and the MFA policy still accept the old name for one release and store the new one.
+
 | Role | Can |
 | --- | --- |
 | Viewer | Read everything |
 | Integration | Only report incidents/events (and link them to problems) via the API; cannot read the rest of Kernel |
-| Problem Analyst | Log and work problems, add notes and links, resolve |
-| Problem Manager | Also close/reopen, flag major problems, manage categories |
+| Analyst | Log and work incidents, problems, changes, requests and improvements; add notes and links, resolve |
+| Manager | Also close/reopen, flag major incidents and problems, approve changes, manage categories, rules and catalogues |
 | Administrator | Also manage users |
 
 ## Running with Docker
@@ -478,7 +481,7 @@ and its article, follow-up actions (one overdue), an earlier major incident with
 contacts and organisations, maintenance next week and a change waiting for approval, plus a quarter of everyday
 incidents and changes for the reports. Dates are relative to the time of seeding. Everything goes through the service
 layer, so CI runs the seed against a fresh database and a change that breaks it fails the build. Demo users have the
-password `demo-password` (admin, anna as problem manager, erik, sara and jonas as analysts, lena as viewer).
+password `demo-password` (admin, anna as manager, erik, sara and jonas as analysts, lena as viewer).
 
 Schema changes go in a new numbered file in `server/migrations/`.
 

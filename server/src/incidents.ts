@@ -594,7 +594,7 @@ export async function createProblemFromIncident(user: User, ref: string, overrid
     urgency: inc.urgency,
     category_id: inc.category_id,
     detection: 'reactive',
-    // A major problem only when the person may flag one; otherwise a problem manager decides later.
+    // A major problem only when the person may flag one; otherwise a manager decides later.
     is_major: (inc.is_major && can(user.role, 'problem.flag_major')) || undefined,
     ...overrides,
   };

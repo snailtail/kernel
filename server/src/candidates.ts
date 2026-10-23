@@ -86,7 +86,7 @@ export async function getRules(db?: Db) {
 
 export const ruleUpdateSchema = z.object({ enabled: z.boolean().optional(), settings: z.record(z.string(), z.number()).optional() });
 
-/** Turns a rule on or off, or changes its thresholds (problem managers). Audited with before and after. */
+/** Turns a rule on or off, or changes its thresholds (managers). Audited with before and after. */
 export async function setRule(user: User, rule: string, input: z.infer<typeof ruleUpdateSchema>) {
   authorize(user, 'candidate.rule');
   if (!(RULE_IDS as string[]).includes(rule)) throw notFound(`Unknown candidate rule "${rule}". Rules: ${RULE_IDS.join(', ')}.`);

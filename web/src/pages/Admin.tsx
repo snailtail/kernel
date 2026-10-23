@@ -29,7 +29,7 @@ interface AdminUser {
 
 export function AdminPage() {
   const { user, meta } = useSession();
-  if (!isManager(user)) return <p className="empty">Administration requires the Problem Manager or Administrator role.</p>;
+  if (!isManager(user)) return <p className="empty">Administration requires the Manager or Administrator role.</p>;
   return (
     <>
       <header className="page-head">
@@ -690,7 +690,7 @@ function ModulesCard() {
   );
 }
 
-const PERSON_ROLES = ['admin', 'problem_manager', 'analyst', 'viewer'] as const;
+const PERSON_ROLES = ['admin', 'manager', 'analyst', 'viewer'] as const;
 type RoleDefaults = Partial<Record<(typeof PERSON_ROLES)[number], StartChoice>>;
 
 /** Where each role starts until a person chooses for themselves (#171). */

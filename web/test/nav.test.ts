@@ -38,13 +38,13 @@ test('with only problem management on, the menu shows Improve, Learn and the aut
 
 test('"+ New" offers what the role may create, the person\'s default first (#171)', () => {
   assert.deepEqual(newItems(user('viewer'), meta({})), []);
-  assert.equal(newItems(user('problem_manager'), meta({}))[0].label, 'Incident', 'no practice is favoured for managers');
-  assert.equal(newItems(user('problem_manager', { default_new: 'problem' }), meta({}))[0].label, 'Problem');
+  assert.equal(newItems(user('manager'), meta({}))[0].label, 'Incident', 'no practice is favoured for managers');
+  assert.equal(newItems(user('manager', { default_new: 'problem' }), meta({}))[0].label, 'Problem');
   assert.equal(newItems(user('analyst', { default_new: 'change' }), meta({}))[0].label, 'Change');
   assert.equal(newItems(user('analyst', { default_new: 'change' }), meta({ change: false }))[0].label, 'Incident', 'a default whose module is off falls back');
   assert.deepEqual(newItems(user('analyst'), meta({ incident: false, change: false, knowledge: false })).map((i) => i.label), ['Problem', 'Improvement']);
   // On a practice's pages its own record comes first.
-  assert.equal(newItems(user('problem_manager', { default_new: 'problem' }), meta({}), '/incidents/INC000004')[0].label, 'Incident');
+  assert.equal(newItems(user('manager', { default_new: 'problem' }), meta({}), '/incidents/INC000004')[0].label, 'Incident');
   assert.equal(newItems(user('analyst'), meta({}), '/changes')[0].label, 'Change');
   assert.equal(newItems(user('analyst'), meta({}), '/kedb')[0].label, 'Problem');
   // Service requests (#44) are an optional module, off by default.

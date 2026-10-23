@@ -32,7 +32,7 @@ export async function candidateRoutes(app: FastifyInstance) {
     reply.code(result.created ? 201 : 200);
     return result;
   });
-  // The end-of-life table behind the eol_versions rule (#31): read with the candidates, kept by problem managers.
+  // The end-of-life table behind the eol_versions rule (#31): read with the candidates, kept by managers.
   app.get('/api/candidates/eol', async (req) => {
     requireUser(req, 'candidate.read');
     return config.listEol();

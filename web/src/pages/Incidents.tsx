@@ -233,7 +233,7 @@ export function IncidentPage() {
   if (error) return <RecordNotFound refId={ref ?? ''} error={error} onOpened={reload} />;
   if (!i) return null;
   const editable = user.role !== 'viewer' && i.status !== 'closed';
-  const manager = user.role === 'admin' || user.role === 'problem_manager';
+  const manager = user.role === 'admin' || user.role === 'manager';
   const run = async (fn: () => Promise<Incident>) => {
     setActionError(null);
     try {

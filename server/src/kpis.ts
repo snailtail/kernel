@@ -215,6 +215,6 @@ export async function kpis(user: User, { period }: z.infer<typeof kpiSchema>) {
   return {
     period: { unit: period, starts },
     tiles,
-    restricted_records_left_out: ['admin', 'problem_manager'].includes(user.role) ? await hiddenRecordsExist() : false,
+    restricted_records_left_out: ['admin', 'manager'].includes(user.role) ? await hiddenRecordsExist() : false,
   };
 }

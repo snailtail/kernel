@@ -488,7 +488,7 @@ export async function proposeRule(user: User, raw: unknown) {
     await audit(db, { entity_type: 'automation_rule', entity_ref: `#${rows[0].id}`, action: 'propose', changes: ruleFields(rows[0]) });
     return rows[0];
   });
-  return { ...(await getRule(user, saved.id)), note: 'Proposed and disabled. A problem manager reviews it and enables it in Kernel.' };
+  return { ...(await getRule(user, saved.id)), note: 'Proposed and disabled. A manager reviews it and enables it in Kernel.' };
 }
 
 /**

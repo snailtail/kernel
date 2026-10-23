@@ -120,7 +120,7 @@ describe('live updates (#70)', { skip }, () => {
     const seen = () => a.events.filter((e) => e.event === 'presence' && e.data.topic === `problem:${p.id}`).at(-1)?.data.people ?? [];
     assert.ok(await a.waitFor(() => seen().some((x: any) => x.editing)), JSON.stringify(a.events));
     assert.equal(seen().length, 1);
-    // Opting out: the problem manager disappears from others' view on the next subscription.
+    // Opting out: the manager disappears from others' view on the next subscription.
     assert.equal((await pm.put('/api/auth/preferences', { live_presence: false })).status, 200);
     const m2 = await stream(pm);
     m.close();

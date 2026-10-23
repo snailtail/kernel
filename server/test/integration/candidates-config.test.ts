@@ -62,7 +62,7 @@ describe('configuration risk candidates (#31)', { skip }, () => {
     // Near: a row reached within warn_days counts; one further away does not.
     const soon = new Date(Date.now() + 100 * 86_400_000).toISOString().slice(0, 10);
     const later = new Date(Date.now() + 400 * 86_400_000).toISOString().slice(0, 10);
-    assert.equal((await analyst.post('/api/candidates/eol', { product: 'Ubuntu', version: '22.04', eol_date: soon })).status, 403, 'problem managers keep the table');
+    assert.equal((await analyst.post('/api/candidates/eol', { product: 'Ubuntu', version: '22.04', eol_date: soon })).status, 403, 'managers keep the table');
     ok(await pm.post('/api/candidates/eol', { product: 'Ubuntu', version: '22.04', eol_date: soon, note: 'Test row' }), 201);
     assert.equal((await pm.post('/api/candidates/eol', { product: 'ubuntu', version: '22.04', eol_date: soon })).status, 409, 'one row per product and version');
     const far = (await pm.post('/api/candidates/eol', { product: 'Debian', version: '12', eol_date: later })).body;

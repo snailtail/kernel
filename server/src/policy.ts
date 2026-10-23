@@ -30,27 +30,27 @@ const ADMIN: Action[] = ['user.manage', 'webhook.manage', 'audit.read', 'securit
 export const PERMISSIONS: Record<Role, ReadonlySet<Action>> = {
   viewer: new Set([...READ, 'problem.watch']),
   analyst: new Set([...READ, ...WORK]),
-  problem_manager: new Set([...READ, ...WORK, ...MANAGE]),
+  manager: new Set([...READ, ...WORK, ...MANAGE]),
   admin: new Set([...READ, ...WORK, ...MANAGE, ...ADMIN]),
   // Integration accounts report records; they cannot read the rest of Kernel.
   integration: new Set(['meta.read', 'record.ingest', 'ci.ingest', 'event.ingest', 'change.register', 'candidate.report']),
 };
 
 const MESSAGES: Partial<Record<Action, string>> = {
-  'problem.close': 'Only a problem manager can close problems',
-  'problem.reopen_closed': 'Only a problem manager can reopen a closed problem',
-  'problem.flag_major': 'Only a problem manager can change the major problem flag',
-  'problem.accept_risk': 'Only a problem manager can accept or defer the risk of a known error',
-  'problem.mark_duplicate': 'Only a problem manager can mark duplicates (it closes the problem)',
-  'incident.flag_major': 'Only a problem manager can declare or stand down a major incident',
-  'article.publish_public': 'Only a problem manager can publish articles for end users',
-  'status.publish': 'Only a problem manager can publish on the public status page',
-  'view.share': 'Only a problem manager can share a view with everyone',
-  'improvement.approve': 'Only a problem manager can approve or reject improvements',
-  'request.manage': 'Only a problem manager can change the request catalogue',
-  'rule.manage': 'Only a problem manager can write, enable or remove automation rules',
+  'problem.close': 'Only a manager can close problems',
+  'problem.reopen_closed': 'Only a manager can reopen a closed problem',
+  'problem.flag_major': 'Only a manager can change the major problem flag',
+  'problem.accept_risk': 'Only a manager can accept or defer the risk of a known error',
+  'problem.mark_duplicate': 'Only a manager can mark duplicates (it closes the problem)',
+  'incident.flag_major': 'Only a manager can declare or stand down a major incident',
+  'article.publish_public': 'Only a manager can publish articles for end users',
+  'status.publish': 'Only a manager can publish on the public status page',
+  'view.share': 'Only a manager can share a view with everyone',
+  'improvement.approve': 'Only a manager can approve or reject improvements',
+  'request.manage': 'Only a manager can change the request catalogue',
+  'rule.manage': 'Only a manager can write, enable or remove automation rules',
   'team.manage': 'Only an administrator can create, rename or remove teams',
-  'change.approve': 'Only the change authority (problem managers and administrators) can approve changes',
+  'change.approve': 'Only the change authority (managers and administrators) can approve changes',
 };
 
 export function can(role: Role, action: Action): boolean {

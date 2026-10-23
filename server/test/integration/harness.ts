@@ -8,7 +8,7 @@ export const skip = TEST_DATABASE_URL ? false : 'TEST_DATABASE_URL is not set';
 export const PASSWORD = 'correct horse battery';
 export const USERS = {
   admin: 'admin',
-  pm: 'problem_manager',
+  pm: 'manager',
   analyst: 'analyst',
   analyst2: 'analyst',
   viewer: 'viewer',

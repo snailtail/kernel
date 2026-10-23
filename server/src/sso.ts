@@ -7,6 +7,7 @@ import { createRemoteJWKSet, jwtVerify } from 'jose';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
+import { legacyRole } from './workflow.js';
 import type { User } from './auth.js';
 import { createSession, hashPassword } from './auth.js';
 import { createChallenge } from './mfa.js';
@@ -25,7 +26,7 @@ import { decryptSecret, encryptSecret } from './secrets.js';
 /** A second-factor challenge waiting after SSO (cookie, path /api/auth, five minutes). */
 export const MFA_PENDING_COOKIE = 'kernel_mfa_pending';
 
-const ROLES = ['viewer', 'analyst', 'problem_manager', 'admin'] as const;
+const ROLES = ['viewer', 'analyst', 'manager', 'admin'] as const;
 type Role = (typeof ROLES)[number];
 
 export const ssoSchema = z.object({
@@ -35,7 +36,7 @@ export const ssoSchema = z.object({
   client_secret: z.string().max(2000).optional(),
   scopes: z.string().trim().max(300).default('openid profile email'),
   groups_claim: z.string().trim().max(100).default('groups'),
-  role_map: z.array(z.object({ group: z.string().trim().min(1).max(300), role: z.enum(ROLES) })).max(100).default([]),
+  role_map: z.array(z.object({ group: z.string().trim().min(1).max(300), role: z.preprocess(legacyRole, z.enum(ROLES)) })).max(100).default([]),
   team_map: z.array(z.object({ group: z.string().trim().min(1).max(300), team_id: z.number().int() })).max(200).default([]),
   /** Role for people in no mapped group; null refuses them. Never admin. */
   default_role: z.enum(['viewer', 'analyst']).nullable().default(null),
@@ -115,7 +116,7 @@ export function verifiedEmail(claims: Record<string, unknown>, s: Pick<SsoSettin
   return ok ? claims.email.trim().toLowerCase() : '';
 }
 
-const RANK: Record<Role, number> = { viewer: 0, analyst: 1, problem_manager: 2, admin: 3 };
+const RANK: Record<Role, number> = { viewer: 0, analyst: 1, manager: 2, admin: 3 };
 
 /** The role from groups: the highest explicitly mapped role, else the default (never admin), else no access. */
 export function roleFor(groups: string[], s: Pick<SsoSettings, 'role_map' | 'default_role'>): Role | null {

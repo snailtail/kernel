@@ -153,7 +153,7 @@ function SaveView({ list, query, onClose, onSaved }: { list: ListName; query: st
               {share === 'everyone' ? 'Everyone' : `Everyone in ${shareable.find((t) => `team:${t.id}` === share)?.name ?? 'the team'}`} will see these filters, search text included:
             </p>
             <code className="view-query">{describeQuery(query)}</code>
-            <p>A shared view belongs to {share === 'everyone' ? 'everyone: problem managers can change it' : 'the team: its leads can change it'}.</p>
+            <p>A shared view belongs to {share === 'everyone' ? 'everyone: managers can change it' : 'the team: its leads can change it'}.</p>
           </div>
         )}
         {error && <div className="error full" role="alert">{error}</div>}

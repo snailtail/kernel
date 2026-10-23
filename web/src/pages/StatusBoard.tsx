@@ -55,7 +55,7 @@ export function StatusBoardPage() {
       <header className="page-head">
         <div>
           <h1>Service status</h1>
-          <p className="muted">Kernel suggests a status from open incidents, maintenance and changes; you set it and keep people informed.{data.settings.public_enabled ? ' The public page shows only what a problem manager publishes.' : ''}</p>
+          <p className="muted">Kernel suggests a status from open incidents, maintenance and changes; you set it and keep people informed.{data.settings.public_enabled ? ' The public page shows only what a manager publishes.' : ''}</p>
         </div>
         <div className="head-actions">
           {data.settings.public_enabled && <a className="btn" href="/status" target="_blank" rel="noreferrer">Public page</a>}

@@ -22,7 +22,7 @@ if ((await query('SELECT count(*)::int AS n FROM problems')).rows[0].n > 0) {
 const hash = await hashPassword('demo-password');
 const people = [
   ['admin', 'Administrator', 'admin'],
-  ['anna', 'Anna Lindqvist', 'problem_manager'],
+  ['anna', 'Anna Lindqvist', 'manager'],
   ['erik', 'Erik Johansson', 'analyst'],
   ['sara', 'Sara Ahmed', 'analyst'],
   ['jonas', 'Jonas Berg', 'analyst'],
@@ -265,4 +265,4 @@ const story = await seedStory({ admin: users.admin, anna: users.anna, erik: user
 console.log(`Webshop story: major incident ${story.incident}, problem ${story.problem}, change ${story.change}, reviewed ${story.earlier}`);
 
 await pool.end();
-console.log('Demo users: admin, anna (problem manager), erik, sara, jonas (analysts), lena (viewer) – password "demo-password"');
+console.log('Demo users: admin, anna (manager), erik, sara, jonas (analysts), lena (viewer) – password "demo-password"');

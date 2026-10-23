@@ -202,7 +202,7 @@ function NewRequest({ onClose, onDone }: { onClose: () => void; onDone: (ref: st
       {!item ? (
         <div className="catalogue-picker">
           <p className="muted small">What does the person need? Pick from the catalogue.</p>
-          {items?.length === 0 && <p className="placeholder">The catalogue is empty. A problem manager adds items under Administration.</p>}
+          {items?.length === 0 && <p className="placeholder">The catalogue is empty. A manager adds items under Administration.</p>}
           {services.map(([ref, name]) => (
             <section key={ref}>
               <h3>{name}</h3>
