@@ -13,8 +13,6 @@ import { generateSecret, otpauthUrl, verifyCode } from './totp.js';
 import type { Role } from './workflow.js';
 import { sha256Hex } from './core/hash.js';
 
-// Digests of random 256-bit challenge and device ids, never of passwords (those use bcrypt): a fast hash is right here.
-// codeql[js/insufficient-password-hash] -- random 256-bit server-generated challenge id, not a user password; SHA-256 lookup hash like session tokens
 const STEP_UP_MINUTES = Number(process.env.KERNEL_STEPUP_MINUTES ?? 10);
 
 export async function requiredRoles(): Promise<Role[]> {
