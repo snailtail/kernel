@@ -110,7 +110,7 @@ export interface ApprovalLinks { approve: string; reject: string }
  * 'sign_in' when the decision needs a signed-in approver, or null when there is nothing for this person to decide.
  */
 approvalLinks.provide(mintApprovalLink);
-export async function mintApprovalLink(n: { ref: string; approval_id: number | null }, userId: number, channel: 'email' | 'chat', deliveryId: number): Promise<ApprovalLinks | 'sign_in' | null> {
+async function mintApprovalLink(n: { ref: string; approval_id: number | null }, userId: number, channel: 'email' | 'chat', deliveryId: number): Promise<ApprovalLinks | 'sign_in' | null> {
   const target: { approval_id?: number; change_id?: number; request_id?: number } | null = n.approval_id
     ? { approval_id: n.approval_id }
     : n.ref.startsWith('CHG') ? { change_id: (await query('SELECT id FROM changes WHERE ref = $1', [n.ref])).rows[0]?.id }

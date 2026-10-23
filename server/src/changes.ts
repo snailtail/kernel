@@ -46,7 +46,7 @@ const TRANSITIONS: Record<Status, Status[]> = {
 
 const text = z.string().max(20000);
 const instant = z.iso.datetime({ offset: true });
-export const changeFields = {
+const changeFields = {
   title: z.string().trim().min(1).max(300),
   description: text,
   change_type: z.enum(CHANGE_TYPES),
