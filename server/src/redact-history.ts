@@ -11,7 +11,7 @@ import { badRequest, notFound } from './errors.js';
 import { authorize } from './policy.js';
 import { textKindOfRef, typeForRef, type TextPlace } from './records.js';
 import { addEntry } from './activity.js';
-import { redact } from './sensitive.js';
+import { redact } from './scanner.js';
 import { sha256Hex } from './core/hash.js';
 
 // Every place a record's free text can be is its type's textPlaces (records.ts). Codes, statuses, refs and ids are

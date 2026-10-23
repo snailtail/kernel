@@ -17,7 +17,7 @@ import { audit, digestOf, GENESIS, hashOf, minimise, verifyChain, withoutSecrets
 import { asSystem } from './context.js';
 import { withOwner } from './db.js';
 import { activeKey } from './keys.js';
-import { redact } from './sensitive.js';
+import { redact } from './scanner.js';
 
 interface Row {
   id: string; at: Date; actor_user_id: number | null; actor_name: string; actor_type: string; channel: string; token_prefix: string;

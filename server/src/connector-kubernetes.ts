@@ -15,7 +15,7 @@ import { z } from 'zod';
 import type { ConnectorType, RunContext } from './connectors.js';
 import { query } from './db.js';
 import type { NormalisedEvent } from './events.js';
-import { redact } from './sensitive.js';
+import { redact } from './scanner.js';
 
 const PAGE = 500;
 

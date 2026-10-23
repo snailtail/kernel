@@ -15,7 +15,7 @@ import { attachToProblem } from './incidents.js';
 import { linkRecord } from './integrations.js';
 import { authorize } from './policy.js';
 import { createProblemInTx, createProblemSchema, getProblem, loadForUpdate, logProblem, problemFields } from './problems.js';
-import { redact, scan } from './sensitive.js';
+import { redact, scan } from './scanner.js';
 import { capacityWarnings, changeCorrelation, flapping, risingWarnings, selfClearing, TREND_RULES } from './candidate-trends.js';
 import { CONFIG_RULES, eolVersions, repeatedlyMissing, singlePointOfFailure } from './candidate-config.js';
 import { plural } from './core/text.js';
