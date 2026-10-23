@@ -19,7 +19,7 @@ import { contextStore } from './context.js';
 import { query } from './db.js';
 import { HttpError } from './errors.js';
 import { createLogger, logger } from './log.js';
-import { mcpRoutes } from './mcp.js';
+import { mcpRoutes } from './mcp/index.js';
 import { openApiDocument } from './openapi.js';
 import { registerIdempotency } from './idempotency.js';
 import { registerSecurity } from './security.js';
