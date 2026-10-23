@@ -14,6 +14,7 @@ import { serviceReport, serviceReportMarkdown } from './service-report.js';
 import { viewerFor } from './visibility.js';
 import { absoluteUrl } from './core/url.js';
 import { backoffMinutes, processOutbox, SkipDelivery } from './core/outbox.js';
+import type { Role } from './workflow.js';
 
 export const FREQUENCIES = ['monthly', 'quarterly'] as const;
 export const scheduleSchema = z
@@ -24,7 +25,8 @@ export const scheduleSchema = z
   })
   .refine((s) => !!s.service !== (s.organisation_id != null), 'Give a service or an organisation');
 
-const isManager = (user: { role: string }) => ['admin', 'manager'].includes(user.role);
+// Managers schedule any service's or organisation's report; others only their own services' (report.schedule).
+const schedulesAny = (user: { role: string }) => can(user.role as Role, 'report.schedule');
 
 const SELECT = `SELECT s.id, s.frequency, s.created_at, s.user_id, u.display_name AS recipient,
     c.ref AS service_ref, c.name AS service_name, o.id AS organisation_id, o.name AS organisation_name,
@@ -37,7 +39,7 @@ export async function listSchedules(user: User, service?: string) {
   authorize(user, 'report.read');
   const { rows } = await query(
     `${SELECT} WHERE ($1::boolean OR s.user_id = $2) AND ($3::text IS NULL OR c.ref = $3) ORDER BY coalesce(c.name, o.name), s.frequency`,
-    [isManager(user), user.id, service?.toUpperCase() ?? null],
+    [schedulesAny(user), user.id, service?.toUpperCase() ?? null],
   );
   return { schedules: rows };
 }
@@ -49,10 +51,10 @@ export async function createSchedule(user: User, input: z.infer<typeof scheduleS
   if (input.service) {
     const { rows } = await query("SELECT id, owner_id FROM configuration_items WHERE ref = $1 AND class = 'service'", [input.service.toUpperCase()]);
     if (!rows[0]) throw notFound(`Service ${input.service} not found`);
-    if (rows[0].owner_id !== user.id && !isManager(user)) throw forbidden("Only the service's owner or a manager can schedule its report");
+    if (rows[0].owner_id !== user.id && !schedulesAny(user)) throw forbidden("Only the service's owner or a manager can schedule its report");
     serviceId = rows[0].id;
   } else {
-    if (!isManager(user)) throw forbidden("Only a manager can schedule an organisation's report");
+    if (!schedulesAny(user)) throw forbidden("Only a manager can schedule an organisation's report");
     if (!(await query('SELECT 1 FROM organisations WHERE id = $1', [input.organisation_id])).rows[0]) throw notFound('Organisation not found');
   }
   const { rows } = await query(
@@ -67,7 +69,7 @@ export async function createSchedule(user: User, input: z.infer<typeof scheduleS
 /** Your own schedule, or anyone's for a manager. */
 export async function deleteSchedule(user: User, id: number) {
   authorize(user, 'report.read');
-  const { rows } = await query('DELETE FROM report_schedules WHERE id = $1 AND ($2::boolean OR user_id = $3) RETURNING id', [id, isManager(user), user.id]);
+  const { rows } = await query('DELETE FROM report_schedules WHERE id = $1 AND ($2::boolean OR user_id = $3) RETURNING id', [id, schedulesAny(user), user.id]);
   if (!rows[0]) throw notFound();
   await audit(null, { entity_type: 'report_schedule', entity_ref: String(id), action: 'delete', changes: {} });
 }
@@ -114,7 +116,7 @@ export async function processReportDeliveries(limit = 10) {
       );
       const sch = s[0];
       // Who may have it is checked again at sending: an owner who handed the service on no longer gets its report.
-      const allowed = sch && sch.active && sch.email && can(sch.role, 'report.read') && (isManager(sch) || (sch.service_id && sch.owner_id === sch.user_id));
+      const allowed = sch && sch.active && sch.email && can(sch.role, 'report.read') && (schedulesAny(sch) || (sch.service_id && sch.owner_id === sch.user_id));
       if (!allowed) throw new SkipDelivery('The recipient may no longer receive this report');
       await sendScheduled(sch, d);
     },
