@@ -176,7 +176,7 @@ function defaultSummary(kind: string, data: any) {
   return kind;
 }
 
-export async function watch(db: Db, problemId: number, userId: number | null | undefined) {
+async function watch(db: Db, problemId: number, userId: number | null | undefined) {
   if (userId) await db.query('INSERT INTO problem_watchers (problem_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [problemId, userId]);
 }
 
@@ -330,7 +330,7 @@ const same = (a: unknown, b: unknown) => (a ?? null) === (b ?? null);
 /** Text fields an agent writes stay "proposed via MCP" until a person edits or confirms them (#76). */
 export const PROPOSABLE = ['description', 'root_cause', 'workaround', 'resolution', 'major_review', 'ec_risk', 'ec_fix_cost', 'ec_decision_note'];
 
-export async function trackProposals(db: Db, problemId: number, fields: string[]) {
+async function trackProposals(db: Db, problemId: number, fields: string[]) {
   const texts = fields.filter((f) => PROPOSABLE.includes(f));
   if (!texts.length) return;
   if (currentContext().channel === 'mcp') {
@@ -357,7 +357,7 @@ export async function confirmProposals(user: User, ref: string, fields: string[]
 }
 
 /** Rejects an edit whose base values no longer match the record (someone else changed those fields). */
-export async function checkBase(db: Db, problemId: number, current: Record<string, unknown>, input: object, base?: Record<string, unknown>) {
+async function checkBase(db: Db, problemId: number, current: Record<string, unknown>, input: object, base?: Record<string, unknown>) {
   if (!base) return;
   const fields = Object.keys(base).filter((k) => k in input && !same(current[k], base[k]));
   if (!fields.length) return;

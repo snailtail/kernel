@@ -35,16 +35,16 @@ import { requestTaskPayload } from './webhooks.js';
 export const REQUEST_STATUSES = ['submitted', 'awaiting_approval', 'in_fulfilment', 'fulfilled', 'rejected', 'cancelled'] as const;
 type Status = (typeof REQUEST_STATUSES)[number];
 const DONE: Status[] = ['fulfilled', 'rejected', 'cancelled'];
-export const FIELD_TYPES = ['text', 'textarea', 'choice', 'person', 'ci', 'date'] as const;
-export const TASK_KINDS = ['manual', 'change', 'webhook'] as const;
+const FIELD_TYPES = ['text', 'textarea', 'choice', 'person', 'ci', 'date'] as const;
+const TASK_KINDS = ['manual', 'change', 'webhook'] as const;
 /** How long a webhook task's callback token works. */
-export const CALLBACK_DAYS = 7;
-export const REQUEST_LINK_KINDS = ['incident', 'change', 'problem', 'ci', 'document'] as const;
+const CALLBACK_DAYS = 7;
+const REQUEST_LINK_KINDS = ['incident', 'change', 'problem', 'ci', 'document'] as const;
 const FREE_TEXT = new Set(['text', 'textarea']);
 
 // ---- The catalogue ---------------------------------------------------------------------------
 
-export const formFieldSchema = z.object({
+const formFieldSchema = z.object({
   key: z.string().regex(/^[a-z][a-z0-9_]{0,39}$/, 'A key is lower case letters, digits and _, starting with a letter'),
   label: z.string().trim().min(1).max(100),
   type: z.enum(FIELD_TYPES),
@@ -177,7 +177,7 @@ export async function saveRequestItem(user: User, id: number | null, input: z.in
  * Checks answers against the item's form on the server: unknown fields are refused, required ones must be there, and
  * every value has the field's type; a person or CI must exist and be visible to the caller.
  */
-export async function validateAnswers(db: Db, form: FormField[], answers: Record<string, unknown>) {
+async function validateAnswers(db: Db, form: FormField[], answers: Record<string, unknown>) {
   const byKey = new Map(form.map((f) => [f.key, f]));
   const unknown = Object.keys(answers).filter((k) => !byKey.has(k));
   if (unknown.length) throw badRequest(`The form has no field ${unknown.map((k) => `"${k}"`).join(', ')}`);
@@ -866,7 +866,7 @@ export async function runAutomation(ref: string, actor?: User) {
 
 /** A change's outcome completes the request task it carries out; a failed or rolled back change leaves it open. */
 changeConcluded.on(changeOutcome);
-export async function changeOutcome(changeRef: string) {
+async function changeOutcome(changeRef: string) {
   const refs = await asSystem(() => tx(async (db) => {
     const { rows } = await db.query(
       `SELECT t.id AS task_id, t.title AS task_title, t.team_id AS task_team_id, c.ref AS change_ref, c.status AS change_status, c.outcome, r.*
@@ -919,7 +919,7 @@ async function queueTaskWebhook(db: Db, requestId: number, t: { id: number; titl
  * failed attempt stops working. Null when the task is no longer open: nothing is sent.
  */
 requestTaskPayload.provide(withCallback);
-export async function withCallback(payload: any) {
+async function withCallback(payload: any) {
   const token = randomBytes(32).toString('base64url');
   const { rows } = await query(
     `UPDATE request_tasks SET callback_hash = $2, callback_expires_at = now() + $3 * interval '1 day', callback_used_at = NULL

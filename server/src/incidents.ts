@@ -31,7 +31,7 @@ export { logIncident };
 
 export const INCIDENT_STATUSES = ['new', 'in_progress', 'on_hold', 'resolved', 'closed'] as const;
 export const RESOLUTION_CODES = ['fixed', 'workaround', 'problem_fixed', 'no_fault_found', 'duplicate', 'cancelled'] as const;
-export type IncidentStatus = (typeof INCIDENT_STATUSES)[number];
+type IncidentStatus = (typeof INCIDENT_STATUSES)[number];
 
 const TRANSITIONS: Record<IncidentStatus, IncidentStatus[]> = {
   new: ['in_progress', 'on_hold', 'resolved'],
@@ -42,7 +42,7 @@ const TRANSITIONS: Record<IncidentStatus, IncidentStatus[]> = {
 };
 
 const level = z.number().int().min(1).max(3);
-export const incidentFields = {
+const incidentFields = {
   title: z.string().trim().min(1).max(300),
   description: z.string().max(20000),
   impact: level,

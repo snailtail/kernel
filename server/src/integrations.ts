@@ -39,7 +39,7 @@ export async function saveSystem(user: User, id: number | null, input: z.infer<t
 
 /** Fills in link URLs from the system's template when the link has no URL of its own. */
 linkUrls.provide(resolveLinkUrls);
-export async function resolveLinkUrls<T extends { kind: string; reference: string; system: string; url: string }>(links: T[]) {
+async function resolveLinkUrls<T extends { kind: string; reference: string; system: string; url: string }>(links: T[]) {
   if (!links.some((l) => !l.url && l.system)) return links;
   const systems = new Map((await listSystems()).filter((s) => s.active).map((s) => [s.name.toLowerCase(), s.url_templates]));
   return links.map((l) => {
