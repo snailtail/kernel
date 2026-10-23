@@ -1,10 +1,10 @@
 // Change enablement (#29): maximise successful changes by assessing risk, authorising, scheduling without collisions
 // or freezes, and reviewing. Problems raise changes for their permanent fix; incidents on CIs shortly after a change on
 // what they depend on are flagged as possibly change-related.
+import { historyOf, logActivity, touchAndAudit } from './activity.js';
 import { checkAssigneeInTeam, validTeam } from './teams.js';
 import { deploymentSummary, postChangeStatus, pullRequestSummary } from './dev.js';
 import { z } from 'zod';
-import { queueRuleRuns } from './rule-queue.js';
 import { audienceOf, startNarrow } from './audience.js';
 import type { User } from './auth.js';
 import { audit } from './audit.js';
@@ -15,7 +15,7 @@ import { currentContext } from './context.js';
 import { query, tx } from './db.js';
 import { badRequest, conflict, forbidden, notFound } from './errors.js';
 import { authorize, can } from './policy.js';
-import { getProblem, loadForUpdate, logActivity, registerProblemExtra, type Db } from './problems.js';
+import { getProblem, loadForUpdate, logProblem, registerProblemExtra, type Db } from './problems.js';
 import { managers, notify } from './notifications.js';
 import { recordUrl, registerRecordType, type RecordType } from './records.js';
 
@@ -114,14 +114,7 @@ export const changePolicy = policy;
 
 const sourceOf = (): 'user' | 'api' | 'mcp' => ({ mcp: 'mcp' as const, api: 'api' as const })[currentContext().channel as 'mcp' | 'api'] ?? 'user';
 
-export async function logChange(db: Db, changeId: number, userId: number | null, kind: string, body = '', data: object = {}) {
-  await db.query('INSERT INTO change_activity (change_id, user_id, kind, body, data, channel) VALUES ($1, $2, $3, $4, $5, $6)', [
-    changeId, userId, kind, body, JSON.stringify(data), currentContext().channel,
-  ]);
-  const { rows } = await db.query('UPDATE changes SET updated_at = now() WHERE id = $1 RETURNING ref', [changeId]);
-  await audit(db, { entity_type: 'change', entity_ref: rows[0].ref, action: kind, changes: kind === 'comment' ? { body } : (data as Record<string, unknown>) });
-  await queueRuleRuns(db, 'change', rows[0].ref, kind, data);
-}
+export const logChange = (db: Db, changeId: number, userId: number | null, kind: string, body = '', data: object = {}) => logActivity(db, 'change', changeId, userId, kind, body, data);
 
 /** Comparable form of a field value: timestamps as ISO strings, so '…+02:00' and a Date compare equal. */
 const norm = (key: string, v: unknown) => (v === null || v === undefined ? null : key.startsWith('planned_') ? new Date(v as string).toISOString() : JSON.stringify(v));
@@ -229,11 +222,7 @@ export async function getChange(user: User, ref: string) {
       [c.id],
     ),
     query('SELECT v.decision, v.comment, v.created_at, u.id AS user_id, u.display_name AS approver FROM change_votes v JOIN users u ON u.id = v.user_id WHERE v.change_id = $1 ORDER BY v.created_at', [c.id]),
-    query(
-      `SELECT a.id, a.kind, a.body, a.data, a.channel, a.created_at, coalesce(u.display_name, (SELECT 'Rule ''' || r.name || '''' FROM automation_rules r WHERE a.channel = 'rule:' || r.id)) AS user_name
-       FROM change_activity a LEFT JOIN users u ON u.id = a.user_id WHERE a.change_id = $1 ORDER BY a.created_at DESC, a.id DESC`,
-      [c.id],
-    ),
+    historyOf('change', c.id),
     query('SELECT id, kind, reference, system, url, note, created_at FROM change_links WHERE change_id = $1 ORDER BY kind, created_at', [c.id]),
     relatedIncidentsForChange(c),
     policy(),
@@ -253,7 +242,7 @@ export async function getChange(user: User, ref: string) {
     approvals,
     can_vote: c.status === 'authorize' && can(user.role, 'change.approve') && (pol.allow_self_approval || (c.created_by !== user.id && c.assignee_id !== user.id)) && !votes.rows.some((v) => v.user_id === user.id),
     ...(await conflictsFor(c.id, c.planned_start, c.planned_end)),
-    activity: activity.rows,
+    activity,
     links: links.rows,
     related_incidents: incidents,
     pull_requests: await pullRequestSummary(c.ref),
@@ -421,7 +410,7 @@ async function linkToProblem(db: Db, user: User, change: { id: number; ref: stri
     "INSERT INTO problem_links (problem_id, kind, reference, system, note, created_by) VALUES ($1, 'change', $2, 'Kernel', 'Change for the fix', $3) ON CONFLICT DO NOTHING",
     [problem.id, change.ref, user.id],
   );
-  await logActivity(db, problem.id, user.id, 'link', `Change ${change.ref} raised for the fix`, { kind: 'change', reference: change.ref, system: 'Kernel', action: 'add' });
+  await logProblem(db, problem.id, user.id, 'link', `Change ${change.ref} raised for the fix`, { kind: 'change', reference: change.ref, system: 'Kernel', action: 'add' });
 }
 
 export async function updateChangeLean(user: User, ref: string, { base, ...input }: z.infer<typeof updateChangeSchema>): Promise<void> {
@@ -516,7 +505,7 @@ export async function transitionChangeLean(user: User, ref: string, input: z.inf
       await notify(db, { users: await managers(db, [c.created_by, c.assignee_id]), event: 'approval_needed', ref: c.ref, title: c.title, summary: `A ${c.change_type} change waits for authorisation.`, path, dedupe: `approve:${c.ref}:${Date.now()}`, actorId: user.id });
     }
     if (c.problem_id && input.to === 'review') {
-      await logActivity(db, c.problem_id, user.id, 'link', `Change ${c.ref} implemented: ${input.outcome?.replace('_', ' ')}`, { kind: 'change', reference: c.ref, outcome: input.outcome });
+      await logProblem(db, c.problem_id, user.id, 'link', `Change ${c.ref} implemented: ${input.outcome?.replace('_', ' ')}`, { kind: 'change', reference: c.ref, outcome: input.outcome });
     }
   });  await statusOnPullRequests(ref);
   // A standard change for a service request (#44): its outcome completes the request's task.
@@ -843,6 +832,18 @@ const CHANGE_TYPE: RecordType = {
     comments: '/api/changes/:ref/comments',
   },
   mcp: { list: 'list_changes', get: 'get_change', create: 'create_change', update: 'update_change', transition: 'transition_change' },
+  table: 'changes',
+  activity: { table: 'change_activity', fk: 'change_id', after: async (db, e) => void (await touchAndAudit(db, 'change', e, { rules: true })) },
+  module: 'change',
+  people: { assignee: 'assignee_id', team: 'team_id' },
+  textPlaces: [
+    { table: 'changes', key: 'id', columns: ['title', 'description', 'implementation_plan', 'test_plan', 'backout_plan', 'outcome', 'review', 'cancel_reason'] },
+    { table: 'change_activity', key: 'change_id', columns: ['body'], json: ['data'] },
+    { table: 'change_votes', key: 'change_id', columns: ['comment'] },
+    { table: 'change_links', key: 'change_id', columns: ['note', 'url'] },
+  ],
+  liveTopic: 'change',
+  comment: addChangeComment,
 };
 registerRecordType(CHANGE_TYPE);
 

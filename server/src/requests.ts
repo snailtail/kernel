@@ -4,10 +4,10 @@
 // for a person by the user who logs it, may wait for its approver, and is fulfilled when its last task is done. The
 // item's SLA runs from submission to fulfilment and pauses while the request waits for approval. Shared by REST, MCP
 // and the web UI; agents may log and follow requests, but only a person approves.
+import { historyOf, logActivity, touchAndAudit } from './activity.js';
 import { randomBytes } from 'node:crypto';
 import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { queueRuleRuns } from './rule-queue.js';
 import { audienceOf, forRequester, startNarrow } from './audience.js';
 import { USER_COLUMNS, type User } from './auth.js';
 import { audit } from './audit.js';
@@ -24,7 +24,7 @@ import { unsubscribeUrl } from './status-subscriptions.js';
 import { queueReply } from './portal.js';
 import { authorize, can } from './policy.js';
 import type { Db } from './problems.js';
-import { recordUrl, registerRecordType, typeForRef, type RecordType } from './records.js';
+import { recordUrl, registerRecordType, typeForRef, typeOfPrefix, type RecordType } from './records.js';
 import { recomputeSla, slaClock, slaOnTransition } from './sla.js';
 import { checkAssigneeInTeam, teamMembers } from './teams.js';
 import { assertVisibleRef } from './visibility.js';
@@ -311,11 +311,7 @@ export async function getRequest(user: User, ref: string) {
   const r = rows[0];
   if (!r) throw notFound(`Request ${ref.toUpperCase()} not found`);
   const [activity, tasks, links, approvers, sla] = await Promise.all([
-    query(
-      `SELECT a.id, a.kind, a.body, a.data, a.channel, a.created_at, coalesce(u.display_name, (SELECT 'Rule ''' || r.name || '''' FROM automation_rules r WHERE a.channel = 'rule:' || r.id)) AS user_name
-       FROM request_activity a LEFT JOIN users u ON u.id = a.user_id WHERE a.request_id = $1 ORDER BY a.created_at DESC, a.id DESC`,
-      [r.id],
-    ),
+    historyOf('request', r.id),
     query(
       `SELECT t.id, t.position, t.title, t.status, t.note, t.team_id, tm.name AS team, t.assignee_id, a.display_name AS assignee, t.opened_at, t.done_at, d.display_name AS done_by,
               t.kind, ch.ref AS change_ref, ch.status AS change_status, ch.outcome AS change_outcome, w.name AS webhook, t.callback_used_at IS NOT NULL AS called_back
@@ -361,7 +357,7 @@ export async function getRequest(user: User, ref: string) {
     })),
     sla,
     links: links.rows,
-    activity: activity.rows,
+    activity,
     restricted: r.restricted,
     restricted_teams: r.restricted_teams,
     classification: r.classification,
@@ -454,14 +450,7 @@ export async function listRequests(user: User, f: z.infer<typeof listRequestsSch
 
 // ---- Changing --------------------------------------------------------------------------------
 
-export async function logRequest(db: Db, id: number, userId: number | null, kind: string, body = '', data: object = {}) {
-  await db.query('INSERT INTO request_activity (request_id, user_id, kind, body, data, channel) VALUES ($1, $2, $3, $4, $5, $6)', [
-    id, userId, kind, body, JSON.stringify(data), currentContext().channel,
-  ]);
-  const { rows } = await db.query('UPDATE requests SET updated_at = now() WHERE id = $1 RETURNING ref', [id]);
-  await audit(db, { entity_type: 'request', entity_ref: rows[0].ref, action: kind, changes: kind === 'comment' ? { body } : (data as Record<string, unknown>) });
-  await queueRuleRuns(db, 'request', rows[0].ref, kind, data);
-}
+export const logRequest = (db: Db, id: number, userId: number | null, kind: string, body = '', data: object = {}) => logActivity(db, 'request', id, userId, kind, body, data);
 
 async function loadRequest(db: Db, ref: string) {
   const { rows } = await db.query('SELECT * FROM requests WHERE ref = $1 FOR UPDATE', [ref.toUpperCase()]);
@@ -796,8 +785,6 @@ export const requestLinkSchema = z.object({
   note: z.string().trim().max(2000).default(''),
 });
 
-const KIND_OF_PREFIX: Record<string, string> = { PRB: 'problem', CHG: 'change', INC: 'incident' };
-
 export async function addRequestLink(user: User, ref: string, input: z.infer<typeof requestLinkSchema>) {
   authorize(user, 'request.write');
   const kernel = (!input.system || input.system === 'Kernel') && input.kind !== 'document';
@@ -808,7 +795,7 @@ export async function addRequestLink(user: User, ref: string, input: z.infer<typ
     if (input.kind === 'ci') {
       if (!(await query('SELECT 1 FROM configuration_items WHERE ref = $1', [reference])).rows[0]) throw notFound(`${reference} not found`);
     } else {
-      if (KIND_OF_PREFIX[reference.slice(0, 3)] !== input.kind) throw badRequest(`${reference} is not a ${input.kind}`);
+      if (typeOfPrefix(reference) !== input.kind) throw badRequest(`${reference} is not a ${input.kind}`);
       typeForRef(reference);
     }
   }
@@ -1134,6 +1121,24 @@ const REQUEST_TYPE: RecordType = {
     comments: '/api/requests/:ref/comments',
   },
   mcp: { list: 'list_requests', get: 'get_request', create: 'create_request', update: 'update_request', transition: 'transition_request' },
+  table: 'requests',
+  activity: { table: 'request_activity', fk: 'request_id', after: async (db, e) => void (await touchAndAudit(db, 'request', e, { rules: true })) },
+  module: 'request',
+  // A request is worked through its tasks, so their assignees and teams read it.
+  people: {
+    assignee: null, team: null,
+    extra: (a, u) => `EXISTS (SELECT 1 FROM request_tasks t WHERE t.request_id = ${a}.id AND (t.assignee_id = ${u}::int OR EXISTS (SELECT 1 FROM team_members m WHERE m.user_id = ${u}::int AND m.team_id = t.team_id)))`,
+  },
+  // The portal's replies are request_activity comments (from_requester), so they are cleaned with the rest of it.
+  textPlaces: [
+    { table: 'requests', key: 'id', columns: ['title', 'reject_reason', 'cancel_reason'], json: ['answers'] },
+    { table: 'request_activity', key: 'request_id', columns: ['body'], json: ['data'] },
+    { table: 'request_tasks', key: 'request_id', columns: ['title', 'note'] },
+    { table: 'request_links', key: 'request_id', columns: ['note', 'url'] },
+    { table: 'portal_feedback', key: 'request_id', columns: ['comment'] },
+  ],
+  liveTopic: 'request',
+  comment: addRequestComment,
 };
 registerRecordType(REQUEST_TYPE);
 

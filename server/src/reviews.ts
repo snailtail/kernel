@@ -17,7 +17,7 @@ import { getIncident } from './incidents.js';
 import { createArticle } from './knowledge.js';
 import { timeline } from './major-incidents.js';
 import { authorize, can } from './policy.js';
-import { createProblemInTx, loadForUpdate, logActivity, registerProblemExtra, type Db } from './problems.js';
+import { createProblemInTx, loadForUpdate, logProblem, registerProblemExtra, type Db } from './problems.js';
 import { recordUrl, registerRecordType, type RecordType, type SearchHit } from './records.js';
 import { loadCalendar } from './sla.js';
 
@@ -372,7 +372,7 @@ export async function itemToProblem(user: User, ref: string, itemId: number, inp
     );
     // An existing problem more people can read gets the reference, never the factor's words.
     // The history (and every webhook summary made from it) names the review, never the factor's words.
-    await logActivity(db, problem.id, user.id, 'link', `${wide ? 'Linked from' : 'A contributing factor from'} the post-incident review of ${r.ref}`, { kind: 'incident', reference: r.ref, system: 'Kernel', action: 'add', review_item: item.id });
+    await logProblem(db, problem.id, user.id, 'link', `${wide ? 'Linked from' : 'A contributing factor from'} the post-incident review of ${r.ref}`, { kind: 'incident', reference: r.ref, system: 'Kernel', action: 'add', review_item: item.id });
     await logIncident(db, r.incident_id, user.id, 'link', `Contributing factor → problem ${problem.ref}`, { kind: 'problem', reference: problem.ref, action: 'add', review_item: item.id });
     // The incident needs a problem before it closes: the first factor's problem is it, unless it has one.
     if (!r.problem_id) await db.query('UPDATE incidents SET problem_id = $2 WHERE id = $1 AND problem_id IS NULL', [r.incident_id, problem.id]);
@@ -672,5 +672,9 @@ const REVIEW_TYPE: RecordType = {
   mcp: { list: 'list_incident_reviews', get: 'get_review', create: 'create_review', update: 'update_review', transition: 'transition_review' },
   // Before #35 a review was audited under its incident's ref.
   history: { entityType: 'incident_review', refs: (r) => [String(r.ref), String(r.incident_ref)] },
+  // Its notes go in its incident's history; it is as confidential as its incident (confidential.ts).
+  table: 'incident_reviews',
+  module: 'incident',
+  comment: addReviewComment,
 };
 registerRecordType(REVIEW_TYPE);

@@ -1,5 +1,6 @@
 // Problem record service. Shared by the REST API and the MCP server so both
 // enforce the same rules, permissions and audit trail.
+import { historyOf, logActivity } from './activity.js';
 import { assertMayWriteText, forgetExists, onlyTitleMatches, textFilterSql } from './confidential.js';
 import { z } from 'zod';
 import { queueRuleRuns } from './rule-queue.js';
@@ -8,7 +9,7 @@ import type { User } from './auth.js';
 import { afterCommit, query, tx } from './db.js';
 import { audit } from './audit.js';
 import { currentContext } from './context.js';
-import { recordUrl, registerRecordType, type RecordType } from './records.js';
+import { recordUrl, registerRecordType, type ActivityEntry, type RecordType } from './records.js';
 import { authorize } from './policy.js';
 import { logDomainEvent } from './log.js';
 import { recordActivity } from './metrics.js';
@@ -126,15 +127,10 @@ export const SELECT_ACTION = `
 
 
 
-export async function logActivity(db: Db, problemId: number, userId: number, kind: string, body = '', data: object = {}) {
-  const { rows: inserted } = await db.query('INSERT INTO problem_activity (problem_id, user_id, kind, body, data, channel) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id', [
-    problemId,
-    userId,
-    kind,
-    body,
-    JSON.stringify(data),
-    currentContext().channel,
-  ]);
+export const logProblem = (db: Db, problemId: number, userId: number, kind: string, body = '', data: object = {}) => logActivity(db, 'problem', problemId, userId, kind, body, data);
+
+/** After a problem history entry: the audit trail, rules, watchers and assignees, webhooks and domain events. */
+async function afterProblemLog(db: Db, { id: entryId, recordId: problemId, userId, kind, body, data }: ActivityEntry) {
   const { rows } = await db.query(
     `SELECT p.ref, p.status, p.priority, p.is_major, p.detection, p.affected_service, c.name AS category, u.username
      FROM problems p LEFT JOIN categories c ON c.id = p.category_id LEFT JOIN users u ON u.id = $2 WHERE p.id = $1`,
@@ -151,12 +147,12 @@ export async function logActivity(db: Db, problemId: number, userId: number, kin
     await notify(db, {
       users: watchers.map((w) => w.user_id), event: 'watched_update', ref: p.ref, title: t[0]?.title ?? '',
       summary: kind === 'comment' ? `${p.username ?? 'Someone'} added a note` : `Moved to ${(data as any).to?.replace('_', ' ')}`,
-      path: `/problems/${p.ref}`, dedupe: `watch:${inserted[0].id}`, actorId: userId,
+      path: `/problems/${p.ref}`, dedupe: `watch:${entryId}`, actorId: userId,
     });
   }
   if (p && kind === 'update' && (data as any).assignee_id?.to) {
     const { rows: t } = await db.query('SELECT title FROM problems WHERE id = $1', [problemId]);
-    await notify(db, { users: [(data as any).assignee_id.to], event: 'assigned', ref: p.ref, title: t[0]?.title ?? '', summary: 'A problem was assigned to you.', path: `/problems/${p.ref}`, dedupe: `assigned:${p.ref}:${inserted[0].id}`, actorId: userId });
+    await notify(db, { users: [(data as any).assignee_id.to], event: 'assigned', ref: p.ref, title: t[0]?.title ?? '', summary: 'A problem was assigned to you.', path: `/problems/${p.ref}`, dedupe: `assigned:${p.ref}:${entryId}`, actorId: userId });
   }
   const event = eventFor(kind, data);
   const summary = body || defaultSummary(kind, data);
@@ -263,11 +259,7 @@ export async function getProblem(ref: string) {
        FROM problem_links l JOIN users u ON u.id = l.created_by WHERE l.problem_id = $1 ORDER BY l.kind, l.created_at`,
       [problem.id],
     ),
-    query(
-      `SELECT a.id, a.kind, a.body, a.data, a.channel, a.created_at, coalesce(u.display_name, (SELECT 'Rule ''' || r.name || '''' FROM automation_rules r WHERE a.channel = 'rule:' || r.id)) AS user_name
-       FROM problem_activity a LEFT JOIN users u ON u.id = a.user_id WHERE a.problem_id = $1 ORDER BY a.created_at DESC, a.id DESC`,
-      [problem.id],
-    ),
+    historyOf('problem', problem.id),
     query(`${SELECT_ACTION} WHERE a.problem_id = $1 ORDER BY a.status = 'open' DESC, a.due_date NULLS LAST, a.id`, [problem.id]),
     query(
       `SELECT a.id, a.technique, a.title, a.data, a.conclusion, a.created_at, a.updated_at, u.display_name AS updated_by,
@@ -290,7 +282,7 @@ export async function getProblem(ref: string) {
     [problem.id, problem.updated_at],
   );
   const extra = Object.assign({}, ...(await Promise.all(problemExtras.map((fn) => fn(problem)))));
-  const detail = { ...problem, ...extra, links: await resolveLinkUrls(links.rows), activity: activity.rows, actions: actions.rows, analyses: analyses.rows, watchers: watchers.rows, pending_approvals: approvals };
+  const detail = { ...problem, ...extra, links: await resolveLinkUrls(links.rows), activity, actions: actions.rows, analyses: analyses.rows, watchers: watchers.rows, pending_approvals: approvals };
   return { type: 'problem', ...detail, url: problemUrl(detail.ref), next_steps: guidanceFor(detail) };
 }
 
@@ -325,7 +317,7 @@ export async function createProblemInTx(db: Db, user: User, input: z.infer<typeo
   const inherited = narrow && (narrow.restricted || narrow.classification === 'confidential')
     ? { inherited_from: narrow.from, restricted: narrow.restricted, classification: narrow.classification }
     : undefined;
-  await logActivity(db, rows[0].id, user.id, 'created', `Problem record ${rows[0].ref} logged${inherited ? `, ${[narrow!.restricted && 'restricted', narrow!.classification === 'confidential' && 'confidential'].filter(Boolean).join(' and ')} like ${narrow!.from}` : ''}`, inherited ?? {});
+  await logProblem(db, rows[0].id, user.id, 'created', `Problem record ${rows[0].ref} logged${inherited ? `, ${[narrow!.restricted && 'restricted', narrow!.classification === 'confidential' && 'confidential'].filter(Boolean).join(' and ')} like ${narrow!.from}` : ''}`, inherited ?? {});
   if (input.assignee_id) {
     await notify(db, { users: [input.assignee_id], event: 'assigned', ref: rows[0].ref, title: input.title, summary: 'A problem was assigned to you.', path: `/problems/${rows[0].ref}`, dedupe: `assigned:${rows[0].ref}:created`, actorId: user.id });
   }
@@ -358,7 +350,7 @@ export async function confirmProposals(user: User, ref: string, fields: string[]
     const confirm = fields.filter((f) => p.mcp_proposed.includes(f));
     if (!confirm.length) return;
     await db.query('UPDATE problems SET mcp_proposed = ARRAY(SELECT unnest(mcp_proposed) EXCEPT SELECT unnest($2::text[])) WHERE id = $1', [p.id, confirm]);
-    await logActivity(db, p.id, user.id, 'update', `Confirmed ${confirm.join(', ')} proposed via MCP`, { confirmed: confirm });
+    await logProblem(db, p.id, user.id, 'update', `Confirmed ${confirm.join(', ')} proposed via MCP`, { confirmed: confirm });
   });
   return getProblem(ref);
 }
@@ -402,7 +394,7 @@ export async function updateProblemLean(user: User, ref: string, { base, ...inpu
     const data = Object.fromEntries(changed.map(([k, v]) => [k, { from: current[k] ?? null, to: v }]));
     await trackProposals(db, current.id, changed.map(([k]) => k));
     if (input.assignee_id) await watch(db, current.id, input.assignee_id);
-    await logActivity(db, current.id, user.id, 'update', `Updated ${changed.map(([k]) => k).join(', ')}`, data);
+    await logProblem(db, current.id, user.id, 'update', `Updated ${changed.map(([k]) => k).join(', ')}`, data);
   });
 }
 
@@ -452,7 +444,7 @@ export async function transitionProblemLean(user: User, ref: string, input: z.in
         .map((k) => [k, { from: current[k], to: fields[k] }]),
     );
     await trackProposals(db, current.id, Object.keys(texts));
-    await logActivity(db, current.id, user.id, 'status', input.comment ?? '', { from, to: input.to, closure_code, ...texts });
+    await logProblem(db, current.id, user.id, 'status', input.comment ?? '', { from, to: input.to, closure_code, ...texts });
   });
 }
 
@@ -467,7 +459,7 @@ export async function addComment(user: User, ref: string, body: string) {
   if (!body.trim()) throw badRequest('Comment cannot be empty');
   await tx(async (db) => {
     const current = await loadForUpdate(db, ref);
-    await logActivity(db, current.id, user.id, 'comment', body.trim());
+    await logProblem(db, current.id, user.id, 'comment', body.trim());
     await db.query('UPDATE problems SET updated_at = now() WHERE id = $1', [current.id]);
   });
   return getProblem(ref);
@@ -483,7 +475,7 @@ export async function addLink(user: User, ref: string, input: z.infer<typeof lin
       [current.id, input.kind, input.reference, input.system, input.url, input.note, user.id],
     );
     if (!rowCount) throw conflict(`${input.kind} ${input.reference} is already linked`);
-    await logActivity(db, current.id, user.id, 'link', `Linked ${input.kind} ${input.reference}`, { ...input, action: 'add' });
+    await logProblem(db, current.id, user.id, 'link', `Linked ${input.kind} ${input.reference}`, { ...input, action: 'add' });
     await db.query('UPDATE problems SET updated_at = now() WHERE id = $1', [current.id]);
   });
   return getProblem(ref);
@@ -498,7 +490,7 @@ export async function removeLink(user: User, ref: string, linkId: number) {
       current.id,
     ]);
     if (!rows[0]) throw notFound('Link not found');
-    await logActivity(db, current.id, user.id, 'link', `Unlinked ${rows[0].kind} ${rows[0].reference}`, { ...rows[0], action: 'remove' });
+    await logProblem(db, current.id, user.id, 'link', `Unlinked ${rows[0].kind} ${rows[0].reference}`, { ...rows[0], action: 'remove' });
   });
   return getProblem(ref);
 }
@@ -608,7 +600,7 @@ export async function assessProblem(user: User, ref: string, { base, ...input }:
       ? `Recorded decision: ${input.ec_decision}`
       : `Updated error control assessment (${changed.map(([k]) => ASSESSMENT_LABELS[k]).join(', ')})`;
     await trackProposals(db, current.id, changed.map(([k]) => k));
-    await logActivity(db, current.id, user.id, 'assessment', body, Object.fromEntries(changed.map(([k, v]) => [k, { from: current[k] ?? null, to: v }])));
+    await logProblem(db, current.id, user.id, 'assessment', body, Object.fromEntries(changed.map(([k, v]) => [k, { from: current[k] ?? null, to: v }])));
   });
   return getProblem(ref);
 }
@@ -667,8 +659,8 @@ export async function markDuplicate(user: User, ref: string, ofRef: string) {
       `UPDATE problems SET status = 'closed', closure_code = 'duplicate', closed_at = now(), updated_at = now() WHERE id = $1`,
       [dup.id],
     );
-    await logActivity(db, dup.id, user.id, 'status', `Duplicate of ${original.ref}`, { from: dup.status, to: 'closed', closure_code: 'duplicate', duplicate_of: original.ref });
-    await logActivity(db, original.id, user.id, 'link', `Merged duplicate ${dup.ref}${moved ? ` (${moved} incident/event link${moved === 1 ? '' : 's'} moved)` : ''}`, { duplicate: dup.ref });
+    await logProblem(db, dup.id, user.id, 'status', `Duplicate of ${original.ref}`, { from: dup.status, to: 'closed', closure_code: 'duplicate', duplicate_of: original.ref });
+    await logProblem(db, original.id, user.id, 'link', `Merged duplicate ${dup.ref}${moved ? ` (${moved} incident/event link${moved === 1 ? '' : 's'} moved)` : ''}`, { duplicate: dup.ref });
     await db.query('UPDATE problems SET updated_at = now() WHERE id = $1', [original.id]);
   });
   return getProblem(ofRef);
@@ -701,6 +693,18 @@ const PROBLEM_TYPE: RecordType = {
     comments: '/api/problems/:ref/comments',
   },
   mcp: { list: 'search_problems', get: 'get_problem', create: 'create_problem', update: 'update_problem', transition: 'transition_problem' },
+  table: 'problems',
+  activity: { table: 'problem_activity', fk: 'problem_id', after: afterProblemLog },
+  people: { assignee: 'assignee_id', team: 'team_id' },
+  textPlaces: [
+    { table: 'problems', key: 'id', columns: ['title', 'description', 'affected_service', 'root_cause', 'workaround', 'resolution', 'major_review', 'ec_risk', 'ec_fix_cost', 'ec_decision_note'] },
+    { table: 'problem_activity', key: 'problem_id', columns: ['body'], json: ['data'] },
+    { table: 'problem_actions', key: 'problem_id', columns: ['title', 'description'] },
+    { table: 'problem_analyses', key: 'problem_id', columns: ['title', 'conclusion'], json: ['data'] },
+    { table: 'problem_links', key: 'problem_id', columns: ['note', 'url'] },
+  ],
+  liveTopic: 'problem',
+  comment: addComment,
 };
 registerRecordType(PROBLEM_TYPE);
 

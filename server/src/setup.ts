@@ -13,8 +13,9 @@ import { createSource } from './event-hooks.js';
 import { createIncident } from './incidents.js';
 import { MODULE_DEFAULTS, moduleEnabled, MODULES, refreshModules, type Module } from './modules.js';
 import { authorize } from './policy.js';
-import { createProblem, logActivity, transitionProblem } from './problems.js';
+import { createProblem, logProblem, transitionProblem } from './problems.js';
 import { logIncident } from './incident-log.js';
+import { recordType } from './records.js';
 
 export const modulesSchema = z.object(Object.fromEntries(Object.keys(MODULES).map((m) => [m, z.boolean().optional()])) as Record<Module, z.ZodOptional<z.ZodBoolean>>);
 
@@ -88,7 +89,7 @@ export async function completeSetup(user: User, input: z.infer<typeof setupSchem
 // ---- Demo data ---------------------------------------------------------------------------------
 
 async function remember(kind: 'problem' | 'incident' | 'change' | 'ci', ref: string) {
-  const table = { problem: 'problems', incident: 'incidents', change: 'changes', ci: 'configuration_items' }[kind];
+  const { table } = recordType(kind);
   await query(`INSERT INTO demo_records (kind, record_id) SELECT $1, id FROM ${table} WHERE ref = $2 ON CONFLICT DO NOTHING`, [kind, ref]);
 }
 
@@ -166,7 +167,7 @@ export async function removeDemoData(user: User, confirm = false) {
     for (const r of refs) {
       const body = `Unlinked ${r.demo_ref}: demo data removed`;
       const data = { kind: 'demo', reference: r.demo_ref, action: 'remove' };
-      if (r.type === 'problem') await logActivity(db, r.id, user.id, 'link', body, data);
+      if (r.type === 'problem') await logProblem(db, r.id, user.id, 'link', body, data);
       else if (r.type === 'incident') await logIncident(db, r.id, user.id, 'link', body, data);
       else if (r.type === 'change') await logChange(db, r.id, user.id, 'link', body, data);
       else await logCi(db, r.id, user.id, 'relationship', body, data);

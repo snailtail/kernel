@@ -13,6 +13,7 @@ import { audit } from './audit.js';
 import { config } from './config.js';
 import { asSystem, contextStore, currentContext } from './context.js';
 import { query, tx } from './db.js';
+import { recordType } from './records.js';
 import { badRequest, conflict, forbidden, HttpError, notFound, unauthorized } from './errors.js';
 import { insertIncident } from './incidents.js';
 import { logIncident } from './incident-log.js';
@@ -246,13 +247,13 @@ async function own(db: Db, person: PortalPerson, ref: string): Promise<Own> {
   );
   if (!rows[0]) throw notFound('Not found');
   // Lock the row, so a reopen and a staff change cannot interleave.
-  await db.query(`SELECT 1 FROM ${rows[0].kind === 'incident' ? 'incidents' : 'requests'} WHERE id = $1 FOR UPDATE`, [rows[0].id]);
+  await db.query(`SELECT 1 FROM ${recordType(rows[0].kind).table} WHERE id = $1 FOR UPDATE`, [rows[0].id]);
   return rows[0];
 }
 
 /** Tells the people handling it: the assignee, or the team's queue. Titles stay inside Kernel. */
 async function tellHandlers(db: Db, t: Own, summary: string) {
-  const path = `/${t.kind === 'incident' ? 'incidents' : 'requests'}/${t.ref}`;
+  const path = recordType(t.kind).uiPath(t.ref);
   if (t.assignee_id) await notify(db, { users: [t.assignee_id], event: 'watched_update', ref: t.ref, title: t.title, summary, path, dedupe: `portal:${t.ref}:${Date.now()}`, actorId: null });
   else if (t.team_id) await notifyTeamQueue(db, t.team_id, { ref: t.ref, title: t.title, path }, null);
   if (t.kind === 'request') {
@@ -415,14 +416,13 @@ export async function rate(person: PortalPerson, ref: string, input: z.infer<typ
 export async function queueReply(db: Db, kind: 'incident' | 'request', recordId: number) {
   // The portal shows a confidential record, or a restricted problem report, as its ref and status only (forPortal),
   // so a reply would never be read. A restricted request is the requester's own and is shown.
-  const { rows: rec } = await db.query(`SELECT ref, ${kind === 'incident' ? 'restricted OR ' : ''}classification = 'confidential' AS narrow FROM ${kind}s WHERE id = $1`, [recordId]);
+  const { rows: rec } = await db.query(`SELECT ref, ${kind === 'incident' ? 'restricted OR ' : ''}classification = 'confidential' AS narrow FROM ${recordType(kind).table} WHERE id = $1`, [recordId]);
   if (rec[0]?.narrow) throw badRequest(`${rec[0].ref} is restricted or confidential, so the requester sees only its status: contact them directly instead`);
+  const t = recordType(kind);
   const { rows } = await db.query(
-    kind === 'incident'
-      ? `SELECT p.id, (SELECT max(a.id) FROM incident_activity a WHERE a.incident_id = i.id AND a.kind = 'comment') AS activity_id
-         FROM incidents i JOIN people p ON p.id = i.caller_id WHERE i.id = $1 AND p.request_mail AND p.active AND p.erased_at IS NULL AND coalesce(p.email, '') <> ''`
-      : `SELECT p.id, (SELECT max(a.id) FROM request_activity a WHERE a.request_id = r.id AND a.kind = 'comment') AS activity_id
-         FROM requests r JOIN people p ON p.id = r.requester_id WHERE r.id = $1 AND p.request_mail AND p.active AND p.erased_at IS NULL AND coalesce(p.email, '') <> ''`,
+    `SELECT p.id, (SELECT max(a.id) FROM ${t.activity!.table} a WHERE a.${t.activity!.fk} = r.id AND a.kind = 'comment') AS activity_id
+     FROM ${t.table} r JOIN people p ON p.id = r.${kind === 'incident' ? 'caller_id' : 'requester_id'}
+     WHERE r.id = $1 AND p.request_mail AND p.active AND p.erased_at IS NULL AND coalesce(p.email, '') <> ''`,
     [recordId],
   );
   if (!rows[0]) return false;
@@ -450,14 +450,14 @@ async function deliver(m: any) {
     return 'sent';
   }
   if (!p[0].request_mail) return 'skipped';
-  const table = m.incident_id ? 'incidents' : 'requests';
-  const { rows: rec } = await query(`SELECT ref FROM ${table} WHERE id = $1`, [m.incident_id ?? m.request_id]);
+  const record = recordType(m.incident_id ? 'incident' : 'request');
+  const { rows: rec } = await query(`SELECT ref FROM ${record.table} WHERE id = $1`, [m.incident_id ?? m.request_id]);
   if (!rec[0]) return 'skipped';
   const [t] = await forPortal(null, m.person_id, rec[0].ref);
   if (!t) return 'skipped';
   // The reply itself goes along, unless the record is restricted or confidential (then only that there is one).
   const { rows: reply } = t.title && m.activity_id
-    ? await query(`SELECT body FROM ${m.incident_id ? 'incident_activity' : 'request_activity'} WHERE id = $1 AND data->>'for_requester' = 'true'`, [m.activity_id])
+    ? await query(`SELECT body FROM ${record.activity!.table} WHERE id = $1 AND data->>'for_requester' = 'true'`, [m.activity_id])
     : { rows: [] as any[] };
   const what = t.title ? `"${t.title}" (${t.ref})` : t.ref;
   await sendOutsideMail(p[0].email, `Reply on ${t.ref}`, [

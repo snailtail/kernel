@@ -7,7 +7,7 @@ import { loadCi, logCi, registerCiExtra } from './cmdb.js';
 import { query, tx } from './db.js';
 import { conflict, notFound } from './errors.js';
 import { authorize } from './policy.js';
-import { getProblem, loadForUpdate, logActivity, registerProblemExtra } from './problems.js';
+import { getProblem, loadForUpdate, logProblem, registerProblemExtra } from './problems.js';
 
 export const linkCiSchema = z.object({ ci: z.string().trim().min(1).max(30).describe('CI or service ref, e.g. CI000012') });
 
@@ -18,7 +18,7 @@ export async function linkCiToProblem(user: User, problemRef: string, ciRef: str
     const ci = await loadCi(db, ciRef);
     const { rowCount } = await db.query('INSERT INTO problem_cis (problem_id, ci_id, added_by) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [p.id, ci.id, user.id]);
     if (!rowCount) throw conflict(`${ci.ref} is already linked to ${p.ref}`);
-    await logActivity(db, p.id, user.id, 'link', `Affects ${ci.ref} ${ci.name}`, { kind: ci.class, reference: ci.ref, action: 'add' });
+    await logProblem(db, p.id, user.id, 'link', `Affects ${ci.ref} ${ci.name}`, { kind: ci.class, reference: ci.ref, action: 'add' });
     await logCi(db, ci.id, user.id, 'link', `Affected by problem ${p.ref}`, { kind: 'problem', reference: p.ref, action: 'add' });
     await db.query('UPDATE problems SET updated_at = now() WHERE id = $1', [p.id]);
   });
@@ -32,7 +32,7 @@ export async function unlinkCiFromProblem(user: User, problemRef: string, ciRef:
     const ci = await loadCi(db, ciRef);
     const { rowCount } = await db.query('DELETE FROM problem_cis WHERE problem_id = $1 AND ci_id = $2', [p.id, ci.id]);
     if (!rowCount) throw notFound(`${ci.ref} is not linked to ${p.ref}`);
-    await logActivity(db, p.id, user.id, 'link', `No longer affects ${ci.ref} ${ci.name}`, { kind: ci.class, reference: ci.ref, action: 'remove' });
+    await logProblem(db, p.id, user.id, 'link', `No longer affects ${ci.ref} ${ci.name}`, { kind: ci.class, reference: ci.ref, action: 'remove' });
     await logCi(db, ci.id, user.id, 'link', `Unlinked from problem ${p.ref}`, { kind: 'problem', reference: p.ref, action: 'remove' });
     await db.query('UPDATE problems SET updated_at = now() WHERE id = $1', [p.id]);
   });
@@ -49,7 +49,7 @@ export async function linkRecordCis(db: Pick<import('pg').PoolClient, 'query'>, 
     [problem.id, userId, record.system, record.kind, record.reference],
   );
   for (const r of rows) {
-    await logActivity(db, problem.id, userId, 'link', `Affects ${r.ref} (from ${record.kind} ${record.reference})`, { kind: r.class, reference: r.ref, action: 'add' });
+    await logProblem(db, problem.id, userId, 'link', `Affects ${r.ref} (from ${record.kind} ${record.reference})`, { kind: r.class, reference: r.ref, action: 'add' });
   }
 }
 

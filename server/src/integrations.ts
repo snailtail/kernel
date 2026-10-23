@@ -7,7 +7,7 @@ import { audit } from './audit.js';
 import { authorize } from './policy.js';
 import { query, savepoint, tx } from './db.js';
 import { badRequest, conflict, notFound } from './errors.js';
-import { createProblem, createProblemSchema, getProblem, LINK_KINDS, loadForUpdate, logActivity, type Db } from './problems.js';
+import { createProblem, createProblemSchema, getProblem, LINK_KINDS, loadForUpdate, logProblem, type Db } from './problems.js';
 
 // ---- External systems ------------------------------------------------------------------------
 
@@ -72,7 +72,7 @@ export async function linkRecord(db: Db, user: User, problem: { id: number; ref:
     [problem.id, r.kind, r.reference, r.system, r.summary ?? '', user.id],
   );
   if (rowCount) {
-    await logActivity(db, problem.id, user.id, 'link', `Linked ${r.kind} ${r.reference}`, { kind: r.kind, reference: r.reference, system: r.system, action: 'add' });
+    await logProblem(db, problem.id, user.id, 'link', `Linked ${r.kind} ${r.reference}`, { kind: r.kind, reference: r.reference, system: r.system, action: 'add' });
     await db.query('UPDATE problems SET updated_at = now() WHERE id = $1', [problem.id]);
   }
   await db.query('UPDATE external_records SET problem_id = $1 WHERE system = $2 AND kind = $3 AND reference = $4', [problem.id, r.system, r.kind, r.reference]);

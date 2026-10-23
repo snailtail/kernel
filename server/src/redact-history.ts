@@ -10,53 +10,13 @@ import { tx } from './db.js';
 import type { Db } from './problems.js';
 import { badRequest, notFound } from './errors.js';
 import { authorize } from './policy.js';
-import { typeForRef } from './records.js';
+import { textKindOfRef, typeForRef, type TextPlace } from './records.js';
+import { addEntry } from './activity.js';
 import { redact } from './sensitive.js';
 import { sha256Hex } from './core/hash.js';
 
-type Kind = 'problem' | 'incident' | 'change' | 'improvement' | 'request';
-interface Place { table: string; key: string; columns: string[]; json?: string[] }
-
-/** Every place a record's free text can be. Codes, statuses, refs and ids are left alone. */
-const PLACES: Record<Kind, Place[]> = {
-  problem: [
-    { table: 'problems', key: 'id', columns: ['title', 'description', 'affected_service', 'root_cause', 'workaround', 'resolution', 'major_review', 'ec_risk', 'ec_fix_cost', 'ec_decision_note'] },
-    { table: 'problem_activity', key: 'problem_id', columns: ['body'], json: ['data'] },
-    { table: 'problem_actions', key: 'problem_id', columns: ['title', 'description'] },
-    { table: 'problem_analyses', key: 'problem_id', columns: ['title', 'conclusion'], json: ['data'] },
-    { table: 'problem_links', key: 'problem_id', columns: ['note', 'url'] },
-  ],
-  incident: [
-    { table: 'incidents', key: 'id', columns: ['title', 'description', 'reporter', 'hold_reason', 'resolution'] },
-    { table: 'incident_activity', key: 'incident_id', columns: ['body'], json: ['data'] },
-    { table: 'incident_links', key: 'incident_id', columns: ['note', 'url'] },
-    { table: 'portal_feedback', key: 'incident_id', columns: ['comment'] },
-  ],
-  change: [
-    { table: 'changes', key: 'id', columns: ['title', 'description', 'implementation_plan', 'test_plan', 'backout_plan', 'outcome', 'review', 'cancel_reason'] },
-    { table: 'change_activity', key: 'change_id', columns: ['body'], json: ['data'] },
-    { table: 'change_votes', key: 'change_id', columns: ['comment'] },
-    { table: 'change_links', key: 'change_id', columns: ['note', 'url'] },
-  ],
-  improvement: [
-    { table: 'improvements', key: 'id', columns: ['title', 'description', 'benefit', 'reject_reason'] },
-    { table: 'improvement_activity', key: 'improvement_id', columns: ['body'], json: ['data'] },
-    { table: 'improvement_links', key: 'improvement_id', columns: ['note', 'url'] },
-  ],
-  // The portal's replies are request_activity comments (from_requester), so they are cleaned with the rest of it.
-  request: [
-    { table: 'requests', key: 'id', columns: ['title', 'reject_reason', 'cancel_reason'], json: ['answers'] },
-    { table: 'request_activity', key: 'request_id', columns: ['body'], json: ['data'] },
-    { table: 'request_tasks', key: 'request_id', columns: ['title', 'note'] },
-    { table: 'request_links', key: 'request_id', columns: ['note', 'url'] },
-    { table: 'portal_feedback', key: 'request_id', columns: ['comment'] },
-  ],
-};
-const TABLE: Record<Kind, string> = { problem: 'problems', incident: 'incidents', change: 'changes', improvement: 'improvements', request: 'requests' };
-const LOG: Record<Kind, [string, string]> = {
-  problem: ['problem_activity', 'problem_id'], incident: ['incident_activity', 'incident_id'], change: ['change_activity', 'change_id'],
-  improvement: ['improvement_activity', 'improvement_id'], request: ['request_activity', 'request_id'],
-};
+// Every place a record's free text can be is its type's textPlaces (records.ts). Codes, statuses, refs and ids are
+// left alone.
 
 export const redactHistorySchema = z.object({
   /** Remove everything the scanner sees as a secret. */
@@ -104,7 +64,7 @@ function cleanJson(value: unknown, clean: (s: string) => [string, number], count
   return value;
 }
 
-async function cleanPlace(db: Db, place: Place, recordId: number, clean: (s: string) => [string, number]) {
+async function cleanPlace(db: Db, place: TextPlace, recordId: number, clean: (s: string) => [string, number]) {
   const cols = [...place.columns, ...(place.json ?? [])];
   const { rows } = await db.query(`SELECT ctid::text AS row_id, ${cols.join(', ')} FROM ${place.table} WHERE ${place.key} = $1`, [recordId]);
   let total = 0;
@@ -133,19 +93,21 @@ export async function redactHistory(user: User, ref: string, input: z.infer<type
   authorize(user, 'record.redact');
   const reason = input.dry_run ? '' : requireReason(input.reason);
   if (!input.secrets && !input.text) throw badRequest('Choose what to remove: secrets, a text, or both');
-  const type = typeForRef(ref).type as Kind;
-  if (!TABLE[type]) throw badRequest('Only problems, incidents, changes, improvements and requests have a history to clean');
+  typeForRef(ref);
+  const t = textKindOfRef(ref);
+  if (!t) throw badRequest('Only problems, incidents, changes, improvements and requests have a history to clean');
+  const type = t.type;
   if (input.text && input.text.toUpperCase().includes(ref.toUpperCase())) throw badRequest('The text cannot include the record\'s own reference');
   const clean = cleaner(input);
   let preview: { removed: number; places: Record<string, number>; outside: unknown; dry_run: true } | null = null;
   try {
   return await tx(async (db) => {
     // The caller must see the record (row-level security).
-    const { rows } = await db.query(`SELECT id, ref FROM ${TABLE[type]} WHERE ref = $1 FOR UPDATE`, [ref.toUpperCase()]);
+    const { rows } = await db.query(`SELECT id, ref FROM ${t.table} WHERE ref = $1 FOR UPDATE`, [ref.toUpperCase()]);
     const record = rows[0];
     if (!record) throw notFound(`${ref} not found`);
     const places: Record<string, number> = {};
-    for (const place of PLACES[type]) {
+    for (const place of t.textPlaces) {
       const n = await cleanPlace(db, place, record.id, clean);
       if (n) places[place.table] = n;
     }
@@ -203,10 +165,7 @@ export async function redactHistory(user: User, ref: string, input: z.infer<type
       throw new RollBack();
     }
     if (!total) return { removed: 0, places, outside };
-    const [log, col] = LOG[type];
-    await db.query(`INSERT INTO ${log} (${col}, user_id, kind, body, data, channel) VALUES ($1, $2, 'update', $3, $4, 'web')`, [
-      record.id, user.id, `Removed sensitive text from the record and its history: ${reason}`, JSON.stringify({ removed: total, places }),
-    ]);
+    await addEntry(db, type, record.id, { userId: user.id, kind: 'update', body: `Removed sensitive text from the record and its history: ${reason}`, data: { removed: total, places }, channel: 'web' });
     // The text itself never goes into the trail; a keyed digest proves what was removed.
     await audit(db, { entity_type: type, entity_ref: record.ref, action: 'redact_history', changes: { secrets: input.secrets, text: input.text ? digestOf(input.text) : null, removed: total, places }, reason });
     return { removed: total, places, outside };

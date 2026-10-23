@@ -1,5 +1,6 @@
 // Incident management (#28): restore service as quickly as possible, record what is affected, and hand recurring or
 // major incidents to problem management. Shared by REST, MCP and the web UI like every other practice.
+import { historyOf } from './activity.js';
 import { z } from 'zod';
 import { audienceOf, copyText, startNarrow, titleAudience } from './audience.js';
 import type { User } from './auth.js';
@@ -11,9 +12,9 @@ import { badRequest, conflict, notFound } from './errors.js';
 import { authorize, can } from './policy.js';
 import { affectedFrom } from './problem-cis.js';
 import { possibleCausesForIncident } from './changes.js';
-import { createProblemInTx, createProblemSchema, getProblem, problemFields, loadForUpdate, logActivity, registerProblemExtra, type Db } from './problems.js';
+import { createProblemInTx, createProblemSchema, getProblem, problemFields, loadForUpdate, logProblem, registerProblemExtra, type Db } from './problems.js';
 import { recordUrl, registerRecordType, type RecordType } from './records.js';
-import { logIncident } from './incident-log.js';
+import { afterIncidentLog, logIncident } from './incident-log.js';
 import { queueReply } from './portal.js';
 import { recomputeSla, slaClock, slaOnTransition } from './sla.js';
 import { incidentPeople, namePeople, personRefSchema, resolvePerson } from './people.js';
@@ -194,11 +195,7 @@ export async function getIncident(user: User, ref: string) {
        WHERE x.incident_id = $1 ORDER BY c.class DESC, c.criticality, c.name`,
       [i.id],
     ),
-    query(
-      `SELECT a.id, a.kind, a.body, a.data, a.channel, a.key_moment, a.created_at, coalesce(u.display_name, (SELECT 'Rule ''' || r.name || '''' FROM automation_rules r WHERE a.channel = 'rule:' || r.id)) AS user_name
-       FROM incident_activity a LEFT JOIN users u ON u.id = a.user_id WHERE a.incident_id = $1 ORDER BY a.created_at DESC, a.id DESC`,
-      [i.id],
-    ),
+    historyOf('incident', i.id),
     query('SELECT id, kind, reference, system, url, note, created_at FROM incident_links WHERE incident_id = $1 ORDER BY kind, created_at', [i.id]),
     // Known errors on the affected CIs: the workaround may restore service right away.
     query(
@@ -232,7 +229,7 @@ export async function getIncident(user: User, ref: string) {
   const major = await majorDetail(user, i, affected.affected_services);
   const review = await reviewSummary(i.id);
   const pages = await pagesFor(i.id);
-  const detail = { ...i, ...affected, ...major, review, pages, activity: await nameTeams(await namePeople(activity.rows)), links: links.rows, known_errors: knownErrors.rows, alerts: alerts.rows, possible_change_causes: possibleChanges, sla, ...people, asks_affected_users: !!endUsers[0] || people.affected_people.length > 0, articles_used: articlesUsed, suggested_articles: suggested };
+  const detail = { ...i, ...affected, ...major, review, pages, activity: await nameTeams(await namePeople(activity)), links: links.rows, known_errors: knownErrors.rows, alerts: alerts.rows, possible_change_causes: possibleChanges, sla, ...people, asks_affected_users: !!endUsers[0] || people.affected_people.length > 0, articles_used: articlesUsed, suggested_articles: suggested };
   return { type: 'incident', ...detail, url: incidentUrl(i.ref), next_steps: incidentGuidance(detail) };
 }
 
@@ -541,7 +538,7 @@ export async function linkIncidentToProblemLean(user: User, ref: string, problem
     if (inc.problem_id) {
       const { rows: old } = await db.query('SELECT id, ref FROM problems WHERE id = $1', [inc.problem_id]);
       await db.query("DELETE FROM problem_links WHERE problem_id = $1 AND kind = 'incident' AND reference = $2 AND system = 'Kernel'", [inc.problem_id, inc.ref]);
-      if (old[0]) await logActivity(db, old[0].id, user.id, 'link', `Unlinked incident ${inc.ref}`, { kind: 'incident', reference: inc.ref, system: 'Kernel', action: 'remove' });
+      if (old[0]) await logProblem(db, old[0].id, user.id, 'link', `Unlinked incident ${inc.ref}`, { kind: 'incident', reference: inc.ref, system: 'Kernel', action: 'remove' });
     }
     // Both ways need the same permissions (checked above); the problem row, not the input, decides which way it goes.
     const problem: { id: number; ref: string } | null = problemRef ? await loadForUpdate(db, problemRef) : null;
@@ -572,7 +569,7 @@ export async function attachToProblem(db: Db, actorId: number, inc: { id: number
     `INSERT INTO problem_links (problem_id, kind, reference, system, note, created_by) VALUES ($1, 'incident', $2, 'Kernel', $3, $4) ON CONFLICT DO NOTHING`,
     [problem.id, inc.ref, note, actorId],
   );
-  await logActivity(db, problem.id, actorId, 'link', `Linked incident ${inc.ref}`, { kind: 'incident', reference: inc.ref, system: 'Kernel', action: 'add' });
+  await logProblem(db, problem.id, actorId, 'link', `Linked incident ${inc.ref}`, { kind: 'incident', reference: inc.ref, system: 'Kernel', action: 'add' });
   await db.query('INSERT INTO problem_cis (problem_id, ci_id, added_by) SELECT $1, ci_id, $2 FROM incident_cis WHERE incident_id = $3 ON CONFLICT DO NOTHING', [problem.id, actorId, inc.id]);
   await db.query('UPDATE problems SET updated_at = now() WHERE id = $1', [problem.id]);
   await db.query('UPDATE incidents SET problem_id = $2 WHERE id = $1', [inc.id, problem.id]);
@@ -668,6 +665,18 @@ const INCIDENT_TYPE: RecordType = {
     comments: '/api/incidents/:ref/comments',
   },
   mcp: { list: 'list_incidents', get: 'get_incident', create: 'create_incident', update: 'update_incident', transition: 'transition_incident' },
+  table: 'incidents',
+  activity: { table: 'incident_activity', fk: 'incident_id', columns: ['key_moment'], after: afterIncidentLog },
+  module: 'incident',
+  people: { assignee: 'assignee_id', team: 'team_id' },
+  textPlaces: [
+    { table: 'incidents', key: 'id', columns: ['title', 'description', 'reporter', 'hold_reason', 'resolution'] },
+    { table: 'incident_activity', key: 'incident_id', columns: ['body'], json: ['data'] },
+    { table: 'incident_links', key: 'incident_id', columns: ['note', 'url'] },
+    { table: 'portal_feedback', key: 'incident_id', columns: ['comment'] },
+  ],
+  liveTopic: 'incident',
+  comment: (user, ref, body) => addIncidentComment(user, ref, { body, kind: 'comment', to_requester: false }),
 };
 registerRecordType(INCIDENT_TYPE);
 

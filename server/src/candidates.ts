@@ -14,7 +14,7 @@ import { logger } from './log.js';
 import { attachToProblem } from './incidents.js';
 import { linkRecord } from './integrations.js';
 import { authorize } from './policy.js';
-import { createProblemInTx, createProblemSchema, getProblem, loadForUpdate, logActivity, problemFields, type Db } from './problems.js';
+import { createProblemInTx, createProblemSchema, getProblem, loadForUpdate, logProblem, problemFields, type Db } from './problems.js';
 import { redact, scan } from './sensitive.js';
 import { capacityWarnings, changeCorrelation, flapping, risingWarnings, selfClearing, TREND_RULES } from './candidate-trends.js';
 import { CONFIG_RULES, eolVersions, repeatedlyMissing, singlePointOfFailure } from './candidate-config.js';
@@ -776,7 +776,7 @@ async function linkEvidence(db: Db, user: User, problem: { id: number; ref: stri
       `INSERT INTO problem_links (problem_id, kind, reference, system, note, created_by) VALUES ($1, 'event', $2, $3, $4, $5) ON CONFLICT DO NOTHING`,
       [problem.id, reference, a.source, `Alert ${a.id}`, user.id],
     );
-    if (rowCount) await logActivity(db, problem.id, user.id, 'link', `Linked event ${reference}`, { kind: 'event', reference, system: a.source, alert_id: a.id, action: 'add' });
+    if (rowCount) await logProblem(db, problem.id, user.id, 'link', `Linked event ${reference}`, { kind: 'event', reference, system: a.source, alert_id: a.id, action: 'add' });
     if (a.ci_id) await db.query('INSERT INTO problem_cis (problem_id, ci_id, added_by) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [problem.id, a.ci_id, user.id]);
     linked++;
   }
@@ -803,7 +803,7 @@ async function linkEvidence(db: Db, user: User, problem: { id: number; ref: stri
       `INSERT INTO problem_links (problem_id, kind, reference, system, note, created_by) VALUES ($1, 'change', $2, 'Kernel', $3, $4) ON CONFLICT DO NOTHING`,
       [problem.id, ch.ref, note, user.id],
     );
-    if (rowCount) await logActivity(db, problem.id, user.id, 'link', `Linked change ${ch.ref}`, { kind: 'change', reference: ch.ref, system: 'Kernel', action: 'add' });
+    if (rowCount) await logProblem(db, problem.id, user.id, 'link', `Linked change ${ch.ref}`, { kind: 'change', reference: ch.ref, system: 'Kernel', action: 'add' });
     await db.query('INSERT INTO problem_cis (problem_id, ci_id, added_by) SELECT $1, ci_id, $2 FROM change_cis WHERE change_id = $3 ON CONFLICT DO NOTHING', [problem.id, user.id, ch.id]);
     linked++;
   }
@@ -817,7 +817,7 @@ async function linkEvidence(db: Db, user: User, problem: { id: number; ref: stri
 async function settle(db: Db, user: User, key: string | undefined, problem: { id: number; ref: string }) {
   if (!key) return;
   const rule = RULES[ruleOfKey(key)].label;
-  await logActivity(db, problem.id, user.id, 'link', `From problem candidate: ${rule}`, { kind: 'candidate', reference: key, action: 'add' });
+  await logProblem(db, problem.id, user.id, 'link', `From problem candidate: ${rule}`, { kind: 'candidate', reference: key, action: 'add' });
   if (key.startsWith('reported:')) await db.query('UPDATE reported_candidates SET problem_ref = $2 WHERE id = $1', [Number(key.slice(9)) || 0, problem.ref]);
   await db.query('DELETE FROM candidate_decisions WHERE key = $1', [key]);
 }

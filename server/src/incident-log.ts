@@ -1,13 +1,14 @@
 // The incident activity log and audit entry, shared by incidents, event rules and SLA clocks.
+import { logActivity } from './activity.js';
+import type { ActivityEntry } from './records.js';
 import { audit } from './audit.js';
-import { currentContext } from './context.js';
 import type { Db } from './problems.js';
 import { queueRuleRuns } from './rule-queue.js';
 
-export async function logIncident(db: Db, incidentId: number, userId: number | null, kind: string, body = '', data: object = {}) {
-  await db.query('INSERT INTO incident_activity (incident_id, user_id, kind, body, data, channel) VALUES ($1, $2, $3, $4, $5, $6)', [
-    incidentId, userId, kind, body, JSON.stringify(data), currentContext().channel,
-  ]);
+export const logIncident = (db: Db, incidentId: number, userId: number | null, kind: string, body = '', data: object = {}) => logActivity(db, 'incident', incidentId, userId, kind, body, data);
+
+/** After an incident history entry: touch it (and a major incident's update countdown), audit, rules. */
+export async function afterIncidentLog(db: Db, { recordId: incidentId, kind, body, data }: ActivityEntry) {
   // A stakeholder update on a major incident (#108), from wherever it was posted, restarts the update countdown.
   const cadence = kind === 'communication'
     ? `, major_next_update_at = CASE WHEN is_major AND major_update_minutes IS NOT NULL AND status NOT IN ('resolved', 'closed')

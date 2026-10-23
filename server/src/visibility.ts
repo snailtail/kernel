@@ -7,7 +7,8 @@ import { query, tx } from './db.js';
 import { badRequest, notFound } from './errors.js';
 import { managers, notify } from './notifications.js';
 import { authorize } from './policy.js';
-import { typeForRef } from './records.js';
+import { refRegex, textKinds, textKindOfRef, typeForRef } from './records.js';
+import { addEntry } from './activity.js';
 import type { Role } from './workflow.js';
 
 interface VisibilitySettings { team_scoped: Record<string, boolean>; restricted_categories: number[]; aiRestricted: boolean }
@@ -48,9 +49,7 @@ export async function viewerFor(user: { id: number; role: Role }, channel: strin
 
 // ---- Restricting records, break-glass ----------------------------------------------------------------------------
 
-
-const TABLES: Record<string, string> = { problem: 'problems', incident: 'incidents', change: 'changes', improvement: 'improvements', request: 'requests' };
-const LOG: Record<string, [string, string]> = { problem: ['problem_activity', 'problem_id'], incident: ['incident_activity', 'incident_id'], change: ['change_activity', 'change_id'], improvement: ['improvement_activity', 'improvement_id'], request: ['request_activity', 'request_id'] };
+// The kinds that can be restricted are the record types that hold people's text (records.ts: textKinds).
 
 export const visibilitySchema = z.object({
   restricted: z.boolean(),
@@ -61,9 +60,10 @@ export const visibilitySchema = z.object({
 /** Restrict a record to its assignee, creator and the named teams, or open it again. Needs a reason; audited. */
 export async function setVisibility(user: User, ref: string, input: z.infer<typeof visibilitySchema>, reason: string) {
   authorize(user, 'record.restrict');
-  const type = typeForRef(ref).type;
-  const table = TABLES[type];
-  if (!table) throw badRequest('Only problems, incidents, changes, improvements and requests can be restricted');
+  typeForRef(ref);
+  const t = textKindOfRef(ref);
+  if (!t) throw badRequest('Only problems, incidents, changes, improvements and requests can be restricted');
+  const { type, table } = t;
   await tx(async (db) => {
     // The caller must see the record (row-level security), so no one restricts or opens what they cannot see.
     const { rows } = await db.query(`SELECT id, ref, restricted, restricted_teams FROM ${table} WHERE ref = $1 FOR UPDATE`, [ref.toUpperCase()]);
@@ -75,11 +75,10 @@ export async function setVisibility(user: User, ref: string, input: z.infer<type
     }
     const teams = input.restricted ? [...new Set(input.teams)].sort((a, b) => a - b) : [];
     await db.query(`UPDATE ${table} SET restricted = $2, restricted_teams = $3 WHERE id = $1`, [r.id, input.restricted, teams]);
-    const [logTable, col] = LOG[type];
-    await db.query(`INSERT INTO ${logTable} (${col}, user_id, kind, body, data) VALUES ($1, $2, 'update', $3, $4)`, [
-      r.id, user.id, input.restricted ? `Restricted to its assignee, creator${teams.length ? ` and team${teams.length > 1 ? 's' : ''} ${teams.map((t) => `#${t}`).join(', ')}` : ''}` : 'Visible to everyone again',
-      JSON.stringify({ restricted: { from: r.restricted, to: input.restricted }, teams }),
-    ]);
+    await addEntry(db, type, r.id, {
+      userId: user.id, kind: 'update', body: input.restricted ? `Restricted to its assignee, creator${teams.length ? ` and team${teams.length > 1 ? 's' : ''} ${teams.map((n) => `#${n}`).join(', ')}` : ''}` : 'Visible to everyone again',
+      data: { restricted: { from: r.restricted, to: input.restricted }, teams },
+    });
     await audit(db, { entity_type: type, entity_ref: r.ref, action: 'visibility', changes: { restricted: { from: r.restricted, to: input.restricted }, teams: { from: r.restricted_teams, to: teams } }, reason });
   });
   return { ref: ref.toUpperCase(), restricted: input.restricted, teams: input.restricted ? input.teams : [] };
@@ -141,6 +140,6 @@ export async function saveVisibilitySettings(actor: User, value: { team_scoped: 
 /** A Kernel ref the caller may not see answers exactly like one that does not exist (no existence oracle). */
 export async function assertVisibleRef(ref: string) {
   const { rows } = await query('SELECT (SELECT kind FROM kernel_record_lookup($1)) AS kind, kernel_ref_hidden($1) AS hidden', [ref.toUpperCase()]);
-  if (rows[0].hidden || (/^(PRB|INC|CHG|IMP|REQ)\d{6}$/i.test(ref) && !rows[0].kind)) throw notFound(`${ref.toUpperCase()} not found`);
+  if (rows[0].hidden || (refRegex(textKinds()).test(ref) && !rows[0].kind)) throw notFound(`${ref.toUpperCase()} not found`);
   if (/^PIR\d{6}$/i.test(ref) && !(await query('SELECT 1 FROM incident_reviews WHERE ref = $1', [ref.toUpperCase()])).rows[0]) throw notFound(`${ref.toUpperCase()} not found`);
 }
