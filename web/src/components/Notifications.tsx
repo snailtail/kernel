@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, NavLink } from 'react-router';
-import { api } from '../api';
+import { api } from '../api/client';
 import { relativeTime } from '../format';
 import { useApi } from '../hooks';
 import { icons } from './Icons';

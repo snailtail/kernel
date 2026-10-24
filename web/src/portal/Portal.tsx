@@ -2,7 +2,7 @@
 // /api/portal/* with its own session; nothing from Kernel's own UI is loaded here.
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
-import { api, ApiError } from '../api';
+import { api, ApiError } from '../api/client';
 import { Markdown } from '../components/Markdown';
 import { AFFECTED, NEWS_PHASE, RATINGS, SERVICE_STATE, TEXT } from './text';
 

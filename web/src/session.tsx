@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react';
-import type { Meta, Preferences, User } from './api';
+import type { Meta, Preferences, User } from './api/client';
 
 export interface Session {
   user: User;

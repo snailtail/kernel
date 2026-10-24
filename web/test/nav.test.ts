@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import type { Meta, User } from '../src/api.js';
+import type { Meta, User } from '../src/api/client.js';
 import { FOOTER, HOME, NAV, PALETTE_ONLY, SHORTCUTS, START_PAGES, focusPractice, navFor, newItems, startPath } from '../src/nav.js';
 
 const routes = [...readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8').matchAll(/<Route path="([^"]+)"/g)].map((m) => m[1]);

@@ -1,6 +1,6 @@
 // Choosing a start page and the record "+ New" creates first (#171): in Settings, on My work's first visit, and per
 // role in Administration. An empty choice follows the default one level up.
-import type { Home, Meta, NewKind } from '../api';
+import type { Home, Meta, NewKind } from '../api/client';
 import { NEW_ITEMS, START_PAGES } from '../nav';
 
 export interface StartChoice { home?: Home | null; default_new?: NewKind | null }

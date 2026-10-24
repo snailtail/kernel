@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
-import { api } from '../api';
+import { api } from '../api/client';
 import { ROLE_LABEL } from '../format';
-import { useLive } from '../live';
+import { useLive } from '../hooks/useLive';
 import { FOOTER, HOME, isActive, navFor, newItems, visible, type BadgeKey, type NavItem } from '../nav';
 import { useSession } from '../session';
 import { icons } from './Icons';

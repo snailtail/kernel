@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api } from '../api';
+import { api } from '../api/client';
 import { formatDate } from '../format';
 import { AnalyzeLogButton } from './Ai';
 import { Modal } from './Modal';

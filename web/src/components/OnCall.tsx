@@ -1,6 +1,6 @@
 // On-call (#111): who is on call for a team, the team's paging target and rotation, and an incident's pages.
 import { useEffect, useState } from 'react';
-import { api } from '../api';
+import { api } from '../api/client';
 import { formatDate, relativeTime } from '../format';
 import { useSession } from '../session';
 import { FormModal } from './Modal';

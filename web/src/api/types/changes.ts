@@ -1,5 +1,5 @@
 /** /api/changes (+ /:ref). */
-import type { Guidance } from '../../api';
+import type { Guidance } from '../client';
 import type { ChangeStatus } from '../../statuses';
 import type { AffectedCi, AffectedService } from './cmdb';
 export interface ChangeRow { id: number; ref: string; title: string; change_type: string; status: ChangeStatus; risk: string | null; planned_start: string | null; planned_end: string | null; outcome: string | null; source: string; assignee: string | null; problem_ref: string | null; cis: string[] | null }

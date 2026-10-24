@@ -1,5 +1,5 @@
 /** /api/dashboard, /api/my-work and /api/review: the dashboard, a person's work list and the problem review agenda. */
-import type { Action, Activity, Problem, Status } from '../../api';
+import type { Action, Activity, Problem, Status } from '../client';
 
 export interface MyWork {
   problems: { ref: string; title: string; status: Status; priority: number; updated_at: string; url: string }[];

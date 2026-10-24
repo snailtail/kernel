@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { api } from '../api';
+import { api } from '../api/client';
 import { useSession } from '../session';
 import { Modal } from './Modal';
 import { FOOTER, HOME, LIST_KEYS, NAV, newItems, PALETTE_ONLY, SHORTCUTS as GO_KEYS, visible } from '../nav';

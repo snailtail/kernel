@@ -1,6 +1,6 @@
 import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
 import { useEffect, useState } from 'react';
-import { api } from '../api';
+import { api } from '../api/client';
 import { formatDate } from '../format';
 import type { Passkey } from '../api/types/settings';
 

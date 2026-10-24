@@ -1,4 +1,4 @@
-import type { LinkKind, Role } from './api';
+import type { LinkKind, Role } from './api/client';
 
 export const PRIORITY_LABEL: Record<number, string> = {
   1: 'Critical',

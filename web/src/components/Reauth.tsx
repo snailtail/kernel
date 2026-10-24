@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { confirmWithPasskey } from './Passkeys';
-import { api, setReauthHandler } from '../api';
+import { api, setReauthHandler } from '../api/client';
 import { Modal } from './Modal';
 
 /** Asks for the password (and code) when the server requires a recent re-authentication, then lets the request retry. */

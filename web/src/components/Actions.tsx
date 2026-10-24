@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router';
-import { api, type Action } from '../api';
+import { api, type Action } from '../api/client';
 import { daysUntil, formatDay } from '../format';
 import type { Toolkit } from './list/ListToolkit';
 import { FormModal } from './Modal';
