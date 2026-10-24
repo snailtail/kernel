@@ -6,7 +6,7 @@ import { PROBLEM_STATUS } from '../statuses';
 import { Markdown } from './Markdown';
 import type { AuditEntry } from '../api/types/security';
 
-const PATH: Record<string, string> = { PRB: '/problems', INC: '/incidents', CHG: '/changes', KB: '/knowledge', PIR: '/reviews', IMP: '/improvements', REQ: '/requests', CI: '/cis', SVC: '/cis' };
+const PATH: Record<string, string> = { PRB: '/problems', INC: '/incidents', CHG: '/changes', KB: '/knowledge', PIR: '/reviews', IMP: '/improvements', REQ: '/requests', WI: '/work', CI: '/cis', SVC: '/cis' };
 /** The page of a record ref (PRB000001, CI000012…), or null for anything else. */
 export function recordPath(ref: string): string | null {
   const m = /^([A-Z]{2,3})\d{3,}$/.exec(ref);

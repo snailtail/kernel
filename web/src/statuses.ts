@@ -56,6 +56,9 @@ export const REQUEST_STATUS: Record<RequestStatus, string> = {
 export type ImprovementStatus = 'idea' | 'approved' | 'in_progress' | 'done' | 'rejected';
 export const IMPROVEMENT_STATUS: Record<ImprovementStatus, string> = { idea: 'Idea', approved: 'Approved', in_progress: 'In progress', done: 'Done', rejected: 'Rejected' };
 
+export type WorkItemStatus = 'new' | 'ready' | 'in_progress' | 'in_review' | 'done' | 'removed';
+export const WORK_ITEM_STATUS: Record<WorkItemStatus, string> = { new: 'New', ready: 'Ready', in_progress: 'In progress', in_review: 'In review', done: 'Done', removed: 'Removed' };
+
 export type ReviewStatus = 'scheduled' | 'draft' | 'published' | 'waived';
 const REVIEW_STATUS: Record<ReviewStatus, string> = { scheduled: 'Scheduled', draft: 'Draft', published: 'Published', waived: 'Waived' };
 
@@ -70,6 +73,7 @@ export const BADGE_STATUS = {
   change: { prefix: 'chg', labels: CHANGE_STATUS },
   request: { prefix: 'req', labels: REQUEST_STATUS },
   improvement: { prefix: 'imp', labels: IMPROVEMENT_STATUS },
+  work_item: { prefix: 'wi', labels: WORK_ITEM_STATUS },
   review: { prefix: 'review', labels: REVIEW_STATUS },
 };
 export type StatusKind = keyof typeof BADGE_STATUS;

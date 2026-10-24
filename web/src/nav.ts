@@ -6,7 +6,7 @@ import type { Home, Meta, NewKind, User } from './api/client';
 import { canEdit, isManager } from './session';
 
 export type Module = keyof Meta['modules'];
-type IconName = 'home' | 'events' | 'incidents' | 'status' | 'candidates' | 'problems' | 'kedb' | 'changes' | 'actions' | 'improvements' | 'requests' | 'knowledge' | 'review' | 'pir' | 'dashboard' | 'reports' | 'services' | 'cmdb' | 'teams' | 'people' | 'rules' | 'help' | 'admin';
+type IconName = 'home' | 'events' | 'incidents' | 'status' | 'candidates' | 'problems' | 'kedb' | 'changes' | 'actions' | 'improvements' | 'backlog' | 'requests' | 'knowledge' | 'review' | 'pir' | 'dashboard' | 'reports' | 'services' | 'cmdb' | 'teams' | 'people' | 'rules' | 'help' | 'admin';
 export type BadgeKey = 'my_work' | 'events' | 'incidents' | 'kedb' | 'actions' | 'reviews' | 'requests';
 
 export interface NavItem {
@@ -66,6 +66,7 @@ export const NAV: NavGroup[] = [
       { to: '/changes', label: 'Changes', icon: 'changes', hint: 'Implement the fix', module: 'change', key: 'h' },
       { to: '/actions', label: 'Actions', icon: 'actions', hint: 'Follow-ups with an owner and a date', badge: 'actions', key: 'a' },
       { to: '/improvements', label: 'Improvements', icon: 'improvements', hint: 'Continual improvement register: ideas, quick wins and their benefit', key: 'o', match: ['/improvements/'] },
+      { to: '/work', label: 'Backlog', icon: 'backlog', hint: 'Epics, stories, bugs and tasks, ordered per team', module: 'development', key: 'j', match: ['/work/'] },
     ],
   },
   {
@@ -105,7 +106,7 @@ export const PALETTE_ONLY: NavItem[] = [
   { to: '/api-docs', label: 'API documentation', icon: 'admin' },
 ];
 
-export type Practice = 'incident' | 'problem' | 'change' | 'request' | 'improvement';
+export type Practice = 'incident' | 'problem' | 'change' | 'request' | 'improvement' | 'work_item';
 const HOME_PRACTICE: Partial<Record<Home, Practice>> = { incidents: 'incident', problems: 'problem', changes: 'change', requests: 'request', improvements: 'improvement' };
 
 /** The practice this person works in most: their start page's, else the record they create first. */

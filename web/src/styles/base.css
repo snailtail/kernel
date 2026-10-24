@@ -1214,6 +1214,11 @@ ol.timeline.compact li { grid-template-columns: 8rem 1fr; padding: 5px 0; font-s
 .imp-in_progress { color: var(--s-analysis); background: var(--s-analysis-bg); }
 .imp-done { color: var(--s-resolved); background: var(--s-resolved-bg); }
 .imp-rejected { color: var(--s-closed); background: var(--s-closed-bg); }
+.wi-new { color: var(--s-new); background: var(--s-new-bg); }
+.wi-ready { color: var(--s-known); background: var(--s-known-bg); }
+.wi-in_progress, .wi-in_review { color: var(--s-analysis); background: var(--s-analysis-bg); }
+.wi-done { color: var(--s-resolved); background: var(--s-resolved-bg); }
+.wi-removed { color: var(--s-closed); background: var(--s-closed-bg); }
 .tag.quick-win { color: var(--success); background: var(--success-soft); border-color: transparent; margin-left: 6px; }
 .model-hint ol { margin: 6px 0 0; padding-left: 20px; }
 .model-hint li { margin: 2px 0; }

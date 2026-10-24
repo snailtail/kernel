@@ -6,6 +6,8 @@ export interface MyWork {
   incidents: { ref: string; title: string; status: string; priority: number; is_major: boolean; created_at: string; update_overdue?: boolean }[];
   reviews?: { ref: string; incident_ref: string; title: string; status: string; due: string | null; overdue: boolean }[];
   improvements?: { ref: string; title: string; status: string; value: number | null; effort: number | null }[];
+  /** Development work (#165), when the module is on. */
+  work_items?: { ref: string; item_type: string; title: string; status: string; points: number | null }[];
   /** Service requests (#44), when the module is on. */
   request_tasks?: { ref: string; title: string; task_id: number; task: string; resolution_due_at: string | null }[];
   request_approvals?: { ref: string; title: string; created_at: string }[];

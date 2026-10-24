@@ -100,8 +100,8 @@ export function SecurityCard() {
         <div className="mfa-policy">
           <h3>Visibility</h3>
           <p className="muted small">Restricted records are seen only by their assignee, creator and named teams. Team scoping shows analysts and viewers their teams' work, unteamed work and their own.</p>
-          {(['incident', 'problem', 'change'] as const).map((k) => (
-            <label key={k} className="check"><input type="checkbox" checked={!!vis.team_scoped[k]} onChange={() => saveVis({ ...vis, team_scoped: { ...vis.team_scoped, [k]: !vis.team_scoped[k] } }, `${k[0].toUpperCase()}${k.slice(1)}s will ${vis.team_scoped[k] ? 'be visible to everyone again' : 'be scoped to teams'}.`)} /> Scope {k}s to teams</label>
+          {Object.entries({ incident: 'incidents', problem: 'problems', change: 'changes', ...(meta.modules.development ? { work_item: 'work items' } : {}) }).map(([k, noun]) => (
+            <label key={k} className="check"><input type="checkbox" checked={!!vis.team_scoped[k]} onChange={() => saveVis({ ...vis, team_scoped: { ...vis.team_scoped, [k]: !vis.team_scoped[k] } }, `${noun[0].toUpperCase()}${noun.slice(1)} will ${vis.team_scoped[k] ? 'be visible to everyone again' : 'be scoped to teams'}.`)} /> Scope {noun} to teams</label>
           ))}
           <div className="chip-row">
             <span className="muted small">Start restricted:</span>
