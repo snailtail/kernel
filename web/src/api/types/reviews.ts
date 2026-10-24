@@ -1,5 +1,5 @@
 /** /api/incident-reviews (+ /:ref): post-incident reviews. */
-import type { Action } from '../../api';
+import type { Action } from '../client';
 import type { ReviewStatus } from '../../statuses';
 export type Section = 'what_happened' | 'impact_summary' | 'went_well' | 'was_hard' | 'lucky';
 export interface ReviewItem {

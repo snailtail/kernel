@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router';
-import type { Guidance } from '../api';
+import type { Guidance } from '../api/client';
 import { useSession } from '../session';
 import { icons } from './Icons';
 

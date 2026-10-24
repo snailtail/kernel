@@ -1,5 +1,5 @@
 import { Link } from 'react-router';
-import type { Problem } from '../api';
+import type { Problem } from '../api/client';
 import { ageDays, relativeTime } from '../format';
 import { MajorBadge, PriorityBadge, StatusBadge } from './Badges';
 import type { Toolkit } from './list/ListToolkit';

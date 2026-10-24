@@ -1,5 +1,5 @@
 /** /api/admin/*, /api/users, /api/systems, /api/webhooks, /api/templates, /api/connectors: administration, backups and integrations. */
-import type { Role } from '../../api';
+import type { Role } from '../client';
 
 /** /api/admin/backups: whether backups run and the files kept per tier. */
 export interface BackupStatus {

@@ -2,7 +2,7 @@
 // shortcut help all read from here, so they can never disagree. Groups follow the order the practices are applied:
 // respond to what happens, improve by finding and removing causes, learn and share; then the registers the work
 // refers to.
-import type { Home, Meta, NewKind, User } from './api';
+import type { Home, Meta, NewKind, User } from './api/client';
 import { canEdit, isManager } from './session';
 
 export type Module = keyof Meta['modules'];

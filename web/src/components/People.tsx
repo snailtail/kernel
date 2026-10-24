@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
-import { api } from '../api';
+import { api } from '../api/client';
 import type { PersonLite, PersonRef } from '../api/types/people';
 
 /** Find a contact by name or email, or add one inline: "Anna Berg <anna@example.com>", or just an email. */

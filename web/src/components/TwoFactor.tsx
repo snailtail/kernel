@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { api } from '../api';
+import { api } from '../api/client';
 import { formatDate } from '../format';
 import { useApi } from '../hooks';
 import type { TwoFactorStatus } from '../api/types/settings';

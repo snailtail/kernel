@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
-import { api } from '../api';
+import { api } from '../api/client';
 import type { AffectedCi, AffectedService, ImpactHint } from '../api/types/cmdb';
 
 const CRIT = ['', 'Business critical', 'High', 'Medium', 'Low'];

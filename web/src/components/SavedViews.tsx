@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
-import { api } from '../api';
+import { api } from '../api/client';
 import { useApi } from '../hooks';
 import { FormModal } from './Modal';
 import { useTeams } from './Teams';

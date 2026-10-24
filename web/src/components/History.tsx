@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { api, type Activity, type Status } from '../api';
+import { api, type Activity, type Status } from '../api/client';
 import { CLOSURE_LABEL, FIELD_LABEL, formatDate, relativeTime } from '../format';
 import { useSession } from '../session';
 import { PROBLEM_STATUS } from '../statuses';

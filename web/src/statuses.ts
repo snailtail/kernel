@@ -1,4 +1,4 @@
-import type { Status } from './api';
+import type { Status } from './api/client';
 
 /** The status labels of every record kind, in lifecycle order; the server holds the transitions. */
 

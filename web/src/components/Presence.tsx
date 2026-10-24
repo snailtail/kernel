@@ -1,4 +1,4 @@
-import type { PresencePerson } from '../live';
+import type { PresencePerson } from '../hooks/useLive';
 
 const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join('');
 

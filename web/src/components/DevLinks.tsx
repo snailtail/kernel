@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api } from '../api';
+import { api } from '../api/client';
 import { relativeTime } from '../format';
 
 interface DevItem { id: number; platform: Platform; repo: string; item_type: string; key: string; url: string; title: string; state: string; checks: string | null; author: string; environment: string; via: string; updated_at: string }

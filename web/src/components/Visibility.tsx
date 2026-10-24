@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { api } from '../api';
+import { api } from '../api/client';
 import { useTeams } from './Teams';
 import { canEdit, isManager, useSession } from '../session';
 import { askReason } from './Ask';

@@ -1,5 +1,5 @@
 /** /api/improvements (+ /:ref): continual improvement register. */
-import type { Action, Guidance } from '../../api';
+import type { Action, Guidance } from '../client';
 import type { ImprovementStatus } from '../../statuses';
 export interface ImprovementRow {
   ref: string; title: string; status: ImprovementStatus; source: string; source_ref: string | null; value: number | null; effort: number | null; kpi: string | null;

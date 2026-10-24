@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api } from '../api';
+import { api } from '../api/client';
 import { useSession } from '../session';
 import { OnCallLine } from './OnCall';
 import type { Team } from '../api/types/teams';

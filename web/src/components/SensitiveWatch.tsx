@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router';
-import { api } from '../api';
+import { api } from '../api/client';
 
 // Sensitive data (#61): a warning while typing or pasting ("this looks like a password – Kernel will redact it"), and
 // a notice after saving when the server did redact something. The check runs on the server's scanner, debounced, so

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { api } from '../api';
+import { api } from '../api/client';
 import { canEdit, useSession } from '../session';
 import type { ArticleRow, ArticleType } from '../api/types/knowledge';
 

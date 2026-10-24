@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
-import { api } from '../../api';
+import { api } from '../../api/client';
 import { applyUndo, previewUndo, runBulk, storms, type BulkResult, type ItemResult, type OpName, type Operation } from '../../bulk';
 import { CLOSURE_LABEL } from '../../format';
 import { useSession } from '../../session';

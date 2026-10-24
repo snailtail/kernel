@@ -1,5 +1,5 @@
 /** /api/requests (+ /:ref) and /api/request-items: service requests and the request catalogue. */
-import type { Guidance } from '../../api';
+import type { Guidance } from '../client';
 import type { RequestStatus } from '../../statuses';
 export type FieldType = 'text' | 'textarea' | 'choice' | 'person' | 'ci' | 'date';
 export interface Field { key: string; label: string; type: FieldType; required: boolean; choices: string[] }

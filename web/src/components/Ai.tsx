@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState } from 'react';
-import { api } from '../api';
+import { api } from '../api/client';
 import { useSession } from '../session';
 import { askReason } from './Ask';
 import { Markdown } from './Markdown';
