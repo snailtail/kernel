@@ -10,8 +10,8 @@ describe('service status page (#46)', { skip }, () => {
   let admin: Client, pm: Client, analyst: Client;
   let svc: string, vm: string, inc: string;
 
-  let subs: typeof import('../../src/status-subscriptions.js');
-  let notifications: typeof import('../../src/notifications.js');
+  let subs: typeof import('../../src/status/status-subscriptions.js');
+  let notifications: typeof import('../../src/notifications/notifications.js');
   const anon = (path: string, init?: RequestInit) => fetch(`${k.base}${path}`, init);
   const form = (path: string, fields: [string, string][]) =>
     anon(path, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'text/html' }, body: new URLSearchParams(fields).toString() });
@@ -23,8 +23,8 @@ describe('service status page (#46)', { skip }, () => {
     process.env.SMTP_URL = 'capture:';
     process.env.KERNEL_PUBLIC_URL = 'https://kernel.example.com';
     k = await startKernel();
-    subs = await import('../../src/status-subscriptions.js');
-    notifications = await import('../../src/notifications.js');
+    subs = await import('../../src/status/status-subscriptions.js');
+    notifications = await import('../../src/notifications/notifications.js');
     [admin, pm, analyst] = await Promise.all([k.login('admin'), k.login('pm'), k.login('analyst')]);
     // Internal names, hosts and incident texts all carry the marker; none of it may reach the public page.
     svc = (await pm.post('/api/cis', { name: `Webshop ${MARKER}`, ci_type: 'business_service' })).body.ref;

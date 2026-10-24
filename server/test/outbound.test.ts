@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { test } from 'node:test';
-import { blockedReason, checkedLookup, checkUrl, outboundFetch, OutboundBlockedError } from '../src/outbound.js';
+import { blockedReason, checkedLookup, checkUrl, outboundFetch, OutboundBlockedError } from '../src/notifications/outbound.js';
 
 test('blocks loopback, link-local, metadata and private addresses', () => {
   delete process.env.KERNEL_OUTBOUND_ALLOW;
@@ -59,7 +59,7 @@ test('blocks hosts that resolve to blocked addresses, and redirects into them', 
 });
 
 test('a connector may only open private ranges, never loopback, link-local or metadata', async () => {
-  const { validatePrivateAllow } = await import('../src/outbound.js');
+  const { validatePrivateAllow } = await import('../src/notifications/outbound.js');
   assert.equal(validatePrivateAllow(['192.168.1.20', '10.0.0.0/8', 'fd12::/16']), null);
   assert.match(validatePrivateAllow(['127.0.0.1'])!, /not in a private range/);
   assert.match(validatePrivateAllow(['169.254.169.254'])!, /not in a private range/);

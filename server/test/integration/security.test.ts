@@ -74,7 +74,7 @@ describe('HTTP security', { skip }, () => {
   });
 
   test('a generated password must be changed first', async () => {
-    const { pool } = await import('../../src/db.js');
+    const { pool } = await import('../../src/core/db.js');
     await pool.query("UPDATE users SET must_change_password = true WHERE username = 'viewer'");
     const viewer = await k.login('viewer');
     assert.equal((await viewer.get('/api/auth/me')).body.must_change_password, true);

@@ -1,6 +1,6 @@
 # Sensitive data in records
 
-Logs pasted into incidents and problems often contain passwords, keys and tokens, and sometimes personal data. Kernel has one scanner (`server/src/sensitive.ts`) for everything it takes in, and uses it for what it sends to a language model too.
+Logs pasted into incidents and problems often contain passwords, keys and tokens, and sometimes personal data. Kernel has one scanner (`server/src/security/sensitive.ts`) for everything it takes in, and uses it for what it sends to a language model too.
 
 ## What is detected
 

@@ -1,10 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import * as ai from '../ai.js';
-import { requireReason } from '../audit.js';
-import { requireUser } from '../auth.js';
-import { requireStepUp } from '../mfa.js';
-import { reviewWording } from '../reviews.js';
+import * as ai from '../reporting/ai.js';
+import { requireReason } from '../security/audit.js';
+import { requireUser } from '../security/auth.js';
+import { requireStepUp } from '../security/mfa.js';
+import { reviewWording } from '../incidents/post-incident-reviews.js';
 
 type Id = { Params: { id: string } };
 

@@ -69,7 +69,7 @@ function fakeCluster(cert: string, key: string) {
 describe('Kubernetes connector (#24)', { skip }, () => {
   let k: Harness;
   let admin: Client, pm: Client, analyst: Client;
-  let db: typeof import('../../src/db.js');
+  let db: typeof import('../../src/core/db.js');
   let cluster: ReturnType<typeof fakeCluster>;
   let ca = '';
   let port = 0;
@@ -85,7 +85,7 @@ describe('Kubernetes connector (#24)', { skip }, () => {
     process.env.KERNEL_OUTBOUND_ALLOW = '127.0.0.1';
     k = await startKernel();
     [admin, pm, analyst] = await Promise.all([k.login('admin'), k.login('pm'), k.login('analyst')]);
-    db = await import('../../src/db.js');
+    db = await import('../../src/core/db.js');
   });
   after(async () => {
     delete process.env.KERNEL_SECRET_KEY;
@@ -117,7 +117,7 @@ describe('Kubernetes connector (#24)', { skip }, () => {
   });
 
   test('the setup manifest grants list on exactly what is read, events only when synced (#112)', async () => {
-    const { rbacManifest } = await import('../../src/connector-kubernetes.js');
+    const { rbacManifest } = await import('../../src/integrations/connector-kubernetes.js');
     const withEvents = (await admin.get('/api/connectors/types/kubernetes/setup?cluster_name=aks-prod&sync_events=true')).body.text;
     assert.match(withEvents, /read-only access to aks-prod/);
     for (const r of ['nodes', 'namespaces', 'events', 'deployments', 'statefulsets', 'daemonsets', 'cronjobs']) assert.match(withEvents, new RegExp(`"${r}"`));

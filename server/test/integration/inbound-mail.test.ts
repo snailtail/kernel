@@ -26,9 +26,9 @@ const PASS = 'mx.test; dmarc=pass header.from=example.com; spf=pass smtp.mailfro
 describe('inbound email (#48)', { skip }, () => {
   let k: Harness;
   let admin: Client, analyst: Client;
-  let inbound: typeof import('../../src/inbound-mail.js');
-  let n: typeof import('../../src/notifications.js');
-  let db: typeof import('../../src/db.js');
+  let inbound: typeof import('../../src/incidents/inbound-mail.js');
+  let n: typeof import('../../src/notifications/notifications.js');
+  let db: typeof import('../../src/core/db.js');
   let owner: any;
   let mailbox: { id: number; name: string };
   const target = () => inbound.mailboxTargetSchema.parse({ trusted_authserv_id: 'mx.test' });
@@ -41,9 +41,9 @@ describe('inbound email (#48)', { skip }, () => {
     process.env.KERNEL_SECRET_KEY = 'inbound-test-key-0123456789abcdefghijklmn';
     k = await startKernel();
     [admin, analyst] = await Promise.all([k.login('admin'), k.login('analyst')]);
-    inbound = await import('../../src/inbound-mail.js');
-    n = await import('../../src/notifications.js');
-    db = await import('../../src/db.js');
+    inbound = await import('../../src/incidents/inbound-mail.js');
+    n = await import('../../src/notifications/notifications.js');
+    db = await import('../../src/core/db.js');
     for (const u of (await admin.get('/api/users')).body) await db.query('UPDATE users SET email = $2 WHERE id = $1', [u.id, `${u.username}@example.com`]);
     owner = (await db.query("SELECT id, username, display_name, email, role, preferences, false AS must_change_password, true AS mfa_enabled FROM users WHERE username = 'admin'")).rows[0];
     const c = (await admin.post('/api/connectors', {

@@ -48,7 +48,7 @@ describe('audit trail', { skip }, () => {
   });
 
   test('is append-only and tamper-evident', async () => {
-    const { pool } = await import('../../src/db.js');
+    const { pool } = await import('../../src/core/db.js');
     await assert.rejects(pool.query("UPDATE audit_log SET actor_name = 'someone else'"), /append-only|permission denied/);
     await assert.rejects(pool.query('DELETE FROM audit_log'), /append-only|permission denied/);
     assert.equal((await admin.get('/api/audit/verify')).body.ok, true);
@@ -63,9 +63,9 @@ describe('audit trail', { skip }, () => {
   });
 
   test('keyed entries cannot be forged without the secret key', async () => {
-    const { hashOf } = await import('../../src/audit.js');
+    const { hashOf } = await import('../../src/security/audit.js');
     process.env.KERNEL_SECRET_KEY = 'audit-test-key-0123456789abcdefghijklmn';
-    const { pool } = await import('../../src/db.js');
+    const { pool } = await import('../../src/core/db.js');
     // Start a fresh chain for this test (owner rights bypass the trigger, as an attacker with superuser would).
     await ownerQuery('ALTER TABLE audit_log DISABLE TRIGGER audit_log_no_truncate');
     await ownerQuery('TRUNCATE audit_log, audit_context');

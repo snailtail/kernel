@@ -11,8 +11,8 @@ const AWS = 'AKIAIOSFODNN7EXAMPLE';
 describe('re-basing legacy audit entries (ADR 0001)', { skip }, () => {
   let k: Harness;
   let pm: Client;
-  let audit: typeof import('../../src/audit.js');
-  let rebase: typeof import('../../src/rebase-audit.js');
+  let audit: typeof import('../../src/security/audit.js');
+  let rebase: typeof import('../../src/security/rebase-audit.js');
   const leftovers = async () =>
     Number((await ownerQuery('SELECT count(*) AS n FROM audit_log l WHERE l::text ~* $1', [[NAME, EMAIL, IP, AWS].map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')])).rows[0].n);
 
@@ -20,7 +20,7 @@ describe('re-basing legacy audit entries (ADR 0001)', { skip }, () => {
     process.env.KERNEL_SECRET_KEY = KEY;
     k = await startKernel();
     pm = await k.login('pm');
-    [audit, rebase] = await Promise.all([import('../../src/audit.js'), import('../../src/rebase-audit.js')]);
+    [audit, rebase] = await Promise.all([import('../../src/security/audit.js'), import('../../src/security/rebase-audit.js')]);
     // A fresh trail: legacy entries as they were written before the privacy rules, then current ones.
     await ownerQuery('ALTER TABLE audit_log DISABLE TRIGGER audit_log_no_truncate');
     await ownerQuery('TRUNCATE audit_log, audit_context');
@@ -98,7 +98,7 @@ describe('re-basing legacy audit entries (ADR 0001)', { skip }, () => {
   });
 
   test('a chain that does not verify inside the transaction is rolled back', async () => {
-    const { withOwner } = await import('../../src/db.js');
+    const { withOwner } = await import('../../src/core/db.js');
     const before = (await ownerQuery('SELECT id, hash FROM audit_log ORDER BY id DESC LIMIT 1')).rows[0];
     // Something goes wrong between the rewrite and the commit: one rewritten hash is off.
     const err = await withOwner((c) => rebase.rebaseAudit(c, {

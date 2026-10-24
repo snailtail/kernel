@@ -1,17 +1,17 @@
 // MCP: Cross-practice tools: who am I, reference data, search, any record, next steps, my work, history, process overview, lists and bulk changes (docs/api-conventions.md).
 import { z } from 'zod';
-import * as bulk from '../bulk.js';
-import { badRequest } from '../errors.js';
-import * as flow from '../flow.js';
-import * as generic from '../generic.js';
+import * as bulk from '../reporting/bulk.js';
+import { badRequest } from '../core/errors.js';
+import * as flow from '../reporting/flow.js';
+import * as generic from '../records/generic.js';
 import { idempotent } from '../idempotency.js';
-import { listAssignees, listCategories } from '../meta.js';
-import * as notifications from '../notifications.js';
-import * as problems from '../problems.js';
-import * as sla from '../sla.js';
-import { startFor } from '../start-page.js';
-import * as views from '../views.js';
-import { CLOSURE_CODES, EC_DECISIONS, STATUSES, TRANSITIONS, WORKAROUND_EFFECTIVENESS } from '../workflow.js';
+import { listAssignees, listCategories } from '../records/meta.js';
+import * as notifications from '../notifications/notifications.js';
+import * as problems from '../problems/problems.js';
+import * as sla from '../reporting/sla.js';
+import { startFor } from '../people/start-page.js';
+import * as views from '../reporting/views.js';
+import { CLOSURE_CODES, EC_DECISIONS, STATUSES, TRANSITIONS, WORKAROUND_EFFECTIVENESS } from '../problems/workflow.js';
 import { type McpContext } from './registrar.js';
 
 export function registerRecordsTools({ user, tool }: McpContext) {

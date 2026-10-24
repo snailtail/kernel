@@ -3,10 +3,10 @@
 // authorised again before a stored response is replayed, and the request body must match the original.
 import { createHash } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
-import { stableStringify } from './audit.js';
-import { query } from './db.js';
-import { HttpError } from './errors.js';
-import { authorize, type Action } from './policy.js';
+import { stableStringify } from './security/audit.js';
+import { query } from './core/db.js';
+import { HttpError } from './core/errors.js';
+import { authorize, type Action } from './security/policy.js';
 
 declare module 'fastify' {
   interface FastifyRequest {

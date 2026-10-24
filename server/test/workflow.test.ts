@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { checkTransition, priorityOf, type TransitionSubject } from '../src/workflow.js';
+import { checkTransition, priorityOf, type TransitionSubject } from '../src/problems/workflow.js';
 
 const base: TransitionSubject = {
   status: 'analysis',

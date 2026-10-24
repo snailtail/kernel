@@ -1,6 +1,6 @@
 // MCP: Knowledge articles (#47).
 import { z } from 'zod';
-import * as knowledge from '../knowledge.js';
+import * as knowledge from '../reporting/knowledge.js';
 import { type McpContext } from './registrar.js';
 
 export function registerKnowledgeTools({ user, tool }: McpContext) {

@@ -1,7 +1,7 @@
 // MCP: Continual improvement.
 import { z } from 'zod';
 import { idempotent } from '../idempotency.js';
-import * as improvements from '../improvements.js';
+import * as improvements from '../improvements/improvements.js';
 import { resolveAssignee, type McpContext } from './registrar.js';
 
 export function registerImprovementsTools({ user, tool }: McpContext) {

@@ -1,13 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { requireReason } from '../audit.js';
-import { requireUser } from '../auth.js';
-import { requireStepUp } from '../mfa.js';
-import { rateLimit } from '../ratelimit.js';
-import { policySchema, saveSensitivePolicy, sensitivePolicy } from '../sensitive.js';
-import { redactHistory, redactHistorySchema } from '../redact-history.js';
-import { classifySchema, reveal, setClassification } from '../confidential.js';
-import { scan } from '../scanner.js';
+import { requireReason } from '../security/audit.js';
+import { requireUser } from '../security/auth.js';
+import { requireStepUp } from '../security/mfa.js';
+import { rateLimit } from '../core/ratelimit.js';
+import { policySchema, saveSensitivePolicy, sensitivePolicy } from '../security/sensitive.js';
+import { redactHistory, redactHistorySchema } from '../security/redact-history.js';
+import { classifySchema, reveal, setClassification } from '../security/confidential.js';
+import { scan } from '../security/scanner.js';
 
 export async function sensitiveRoutes(app: FastifyInstance) {
   // For the warning while typing or pasting (#61): what the scanner would do with this text. Nothing is stored or

@@ -1,19 +1,19 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { aiDataPolicy, setAiDataPolicy } from '../attachments.js';
-import { refreshVisibility } from '../visibility.js';
-import { requireUser } from '../auth.js';
-import { backupStatus } from '../backups.js';
-import { disable as disableMfa, requiredRoles, requireStepUp, setRequiredRoles } from '../mfa.js';
-import { securityStatus } from '../security.js';
-import * as webhooks from '../webhooks.js';
-import { auditCsv, auditQuerySchema, queryAudit, requireReason, verifyChain } from '../audit.js';
-import { privacySchema, privacySettings, querySecurityEvents, savePrivacySettings, securityQuerySchema, securitySummary } from '../security-events.js';
-import { alertingSchema, alertingStatus, saveAlertingSettings } from '../security-alerts.js';
-import { approvalsRequired, setApprovalsRequired } from '../approvals.js';
-import { createCategory, updateCategory } from '../meta.js';
-import * as users from '../users.js';
-import { legacyRole, ROLES } from '../workflow.js';
+import { aiDataPolicy, setAiDataPolicy } from '../records/attachments.js';
+import { refreshVisibility } from '../security/visibility.js';
+import { requireUser } from '../security/auth.js';
+import { backupStatus } from '../security/backups.js';
+import { disable as disableMfa, requiredRoles, requireStepUp, setRequiredRoles } from '../security/mfa.js';
+import { securityStatus } from '../security/security.js';
+import * as webhooks from '../notifications/webhooks.js';
+import { auditCsv, auditQuerySchema, queryAudit, requireReason, verifyChain } from '../security/audit.js';
+import { privacySchema, privacySettings, querySecurityEvents, savePrivacySettings, securityQuerySchema, securitySummary } from '../security/security-events.js';
+import { alertingSchema, alertingStatus, saveAlertingSettings } from '../events/security-alerts.js';
+import { approvalsRequired, setApprovalsRequired } from '../changes/approvals.js';
+import { createCategory, updateCategory } from '../records/meta.js';
+import * as users from '../people/users.js';
+import { legacyRole, ROLES } from '../problems/workflow.js';
 
 export async function adminRoutes(app: FastifyInstance) {
   app.get('/api/users', async (req) => {

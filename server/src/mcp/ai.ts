@@ -1,6 +1,6 @@
 // MCP: AI tasks (#68): Kernel's configured model, under the same data policy as the web UI.
 import { z } from 'zod';
-import * as aiTasks from '../ai.js';
+import * as aiTasks from '../reporting/ai.js';
 import { type McpContext } from './registrar.js';
 
 export function registerAiTools({ user, tool }: McpContext) {

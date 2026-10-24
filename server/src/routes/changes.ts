@@ -1,8 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { requireUser } from '../auth.js';
-import * as ch from '../changes.js';
-import { forbidden } from '../errors.js';
+import { requireUser } from '../security/auth.js';
+import * as ch from '../changes/changes.js';
+import { forbidden } from '../core/errors.js';
 
 type RefParams = { Params: { ref: string } };
 type Id = { Params: { id: string } };

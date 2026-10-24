@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { MSGRAPH } from '../src/connector-mailbox.js';
-import type { RunContext } from '../src/connectors.js';
-import { newText, senderVerified } from '../src/inbound-mail.js';
+import { MSGRAPH } from '../src/integrations/connector-mailbox.js';
+import type { RunContext } from '../src/integrations/connectors.js';
+import { newText, senderVerified } from '../src/incidents/inbound-mail.js';
 
 const line = (v: string) => ({ key: 'authentication-results', line: `Authentication-Results: ${v}` });
 

@@ -112,7 +112,7 @@ describe('attachments (#51, #74)', { skip }, () => {
     const big = new Uint8Array(5 * 1024 * 1024);
     const login = await fetch(`${k.base}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: big });
     assert.ok([413, 415].includes(login.status), `sign-in refuses raw bodies (${login.status})`);
-    const { query } = await import('../../src/db.js');
+    const { query } = await import('../../src/core/db.js');
     await query(`UPDATE settings SET value = value || '{"max_file_mb": 1}' WHERE key = 'attachments'`);
     const tooBig = await upload(analyst, prb, 'big.log', Buffer.alloc(2 * 1024 * 1024, 'a'));
     assert.equal(tooBig.status, 413);
@@ -129,7 +129,7 @@ describe('attachments (#51, #74)', { skip }, () => {
   });
 
   test('attachments go with their record, and the audit trail holds no file names', async () => {
-    const { query } = await import('../../src/db.js');
+    const { query } = await import('../../src/core/db.js');
     const rows = (await query("SELECT changes FROM audit_log WHERE entity_type = 'attachment'")).rows;
     assert.ok(rows.length > 0 && !JSON.stringify(rows).includes('shot 1.jpg'));
     await query('DELETE FROM incidents WHERE ref = $1', [inc]);

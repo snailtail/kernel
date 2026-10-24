@@ -6,13 +6,13 @@ describe('teams and assignment (#42)', { skip }, () => {
   let k: Harness;
   let admin: Client, pm: Client, analyst: Client, viewer: Client;
   const ids: Record<string, number> = {};
-  let db: typeof import('../../src/db.js');
+  let db: typeof import('../../src/core/db.js');
   let svc: string, vm: string, net: any, dba: any;
 
   before(async () => {
     k = await startKernel();
     [admin, pm, analyst, viewer] = await Promise.all([k.login('admin'), k.login('pm'), k.login('analyst'), k.login('viewer')]);
-    db = await import('../../src/db.js');
+    db = await import('../../src/core/db.js');
     for (const u of (await db.query('SELECT id, username FROM users')).rows) ids[u.username] = u.id;
     svc = (await pm.post('/api/cis', { name: 'Core network', ci_type: 'technical_service' })).body.ref;
     vm = (await pm.post('/api/cis', { name: 'core-sw01', ci_type: 'network_device' })).body.ref;
@@ -96,7 +96,7 @@ describe('teams and assignment (#42)', { skip }, () => {
 
   test('SLA warnings go to the team lead when no one is assigned; reports count by team', async () => {
     const i = (await analyst.post('/api/incidents', { title: 'Core down', impact: 1, urgency: 1, team_id: net.id })).body;
-    const sla = await import('../../src/sla.js');
+    const sla = await import('../../src/reporting/sla.js');
     const { rows } = await db.query('SELECT sla_id FROM incidents WHERE ref = $1', [i.ref]);
     assert.ok(rows[0].sla_id, 'the default SLA applies');
     // Two days later, with no one assigned: the resolution target is breached.

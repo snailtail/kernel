@@ -9,13 +9,13 @@ describe('saved list views (#110)', { skip }, () => {
   let k: Harness;
   let admin: Client, pm: Client, analyst: Client, analyst2: Client, viewer: Client;
   const ids: Record<string, number> = {};
-  let db: typeof import('../../src/db.js');
+  let db: typeof import('../../src/core/db.js');
   let team: any;
 
   before(async () => {
     k = await startKernel();
     [admin, pm, analyst, analyst2, viewer] = await Promise.all([k.login('admin'), k.login('pm'), k.login('analyst'), k.login('analyst2'), k.login('viewer')]);
-    db = await import('../../src/db.js');
+    db = await import('../../src/core/db.js');
     for (const u of (await db.query('SELECT id, username FROM users')).rows) ids[u.username] = u.id;
     team = (await admin.post('/api/teams', { name: 'Service desk' })).body;
     await admin.put(`/api/teams/${team.id}/members`, { members: [{ user_id: ids.analyst, role: 'lead' }, { user_id: ids.analyst2 }] });

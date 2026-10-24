@@ -26,7 +26,7 @@ function fakeGitLab(cert: string, key: string) {
 describe('dev platforms: deployments, standard changes and status on pull requests (part 2 of #32)', { skip }, () => {
   let k: Harness;
   let pm: Client, analyst: Client;
-  let db: typeof import('../../src/db.js');
+  let db: typeof import('../../src/core/db.js');
   let gh: any, gl: any, app: string, svc: string, template: any, chg: string;
   let api: ReturnType<typeof fakeGitLab>;
   let ca = '';
@@ -61,7 +61,7 @@ describe('dev platforms: deployments, standard changes and status on pull reques
     process.env.KERNEL_OUTBOUND_ALLOW = '127.0.0.1';
     k = await startKernel();
     [pm, analyst] = await Promise.all([k.login('pm'), k.login('analyst')]);
-    db = await import('../../src/db.js');
+    db = await import('../../src/core/db.js');
     app = (await pm.post('/api/cis', { name: 'shop-web', ci_type: 'application', criticality: 4 })).body.ref;
     svc = (await pm.post('/api/cis', { name: 'shop-api', ci_type: 'application', criticality: 4 })).body.ref;
     template = (await pm.post('/api/change-templates', { name: 'Deploy the shop', max_risk: 'high', ci_types: ['application'], implementation_plan: 'Run the pipeline', backout_plan: 'Redeploy the previous version' })).body;

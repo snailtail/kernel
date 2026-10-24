@@ -8,12 +8,12 @@ describe('service reports (#54)', { skip }, () => {
   let k: Harness;
   let pm: Client, analyst: Client, analyst2: Client, viewer: Client;
   let svc: string, vm: string;
-  let db: typeof import('../../src/db.js');
+  let db: typeof import('../../src/core/db.js');
 
   before(async () => {
     k = await startKernel();
     [pm, analyst, analyst2, viewer] = await Promise.all([k.login('pm'), k.login('analyst'), k.login('analyst2'), k.login('viewer')]);
-    db = await import('../../src/db.js');
+    db = await import('../../src/core/db.js');
     svc = (await pm.post('/api/cis', { name: 'Payroll', ci_type: 'business_service' })).body.ref;
     vm = (await pm.post('/api/cis', { name: 'payroll-db', ci_type: 'database' })).body.ref;
     await pm.post(`/api/cis/${vm}/relationships`, { type: 'member_of', target: svc });
@@ -21,11 +21,11 @@ describe('service reports (#54)', { skip }, () => {
   after(() => k?.close());
 
   test('overlapping outages are counted once', async () => {
-    const { coveredMinutes } = await import('../../src/service-report.js');
+    const { coveredMinutes } = await import('../../src/reporting/service-report.js');
     const m = 60_000;
     assert.equal(coveredMinutes([[0, 60 * m], [30 * m, 90 * m], [120 * m, 150 * m]]), 120);
     assert.equal(coveredMinutes([]), 0);
-    const { subtractIntervals } = await import('../../src/service-report.js');
+    const { subtractIntervals } = await import('../../src/reporting/service-report.js');
     assert.deepEqual(subtractIntervals([[0, 100]], [[20, 30], [90, 120]]), [[0, 20], [30, 90]]);
   });
 
@@ -147,7 +147,7 @@ describe('service reports (#54)', { skip }, () => {
 
     // get_dashboard (like the web page, through GET /api/dashboard) needs problem.read: that keeps parity only while
     // every role that may read a practice also reads problems and reports. Guard that assumption.
-    const { PERMISSIONS } = await import('../../src/policy.js');
+    const { PERMISSIONS } = await import('../../src/security/policy.js');
     for (const [role, actions] of Object.entries(PERMISSIONS)) {
       if (['incident.read', 'change.read'].some((a) => actions.has(a as any))) assert.ok(actions.has('problem.read') && actions.has('report.read'), role);
       // The improvement register (#52): read by everyone who reads problems, written by those who comment on them.
@@ -171,8 +171,8 @@ describe('service reports (#54)', { skip }, () => {
   });
 
   test('scheduled reports: the owner or a manager, once per period, by email without restricted records', async () => {
-    const n = await import('../../src/notifications.js');
-    const rs = await import('../../src/report-schedules.js');
+    const n = await import('../../src/notifications/notifications.js');
+    const rs = await import('../../src/reporting/report-schedules.js');
     process.env.SMTP_URL = 'capture:';
     try {
       await ownerQuery("UPDATE users SET email = username || '@example.com'");

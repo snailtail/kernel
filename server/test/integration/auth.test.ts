@@ -49,7 +49,7 @@ describe('authentication hardening', { skip }, () => {
 
   test('idle sessions expire', async () => {
     const v = await k.login('viewer');
-    const { pool } = await import('../../src/db.js');
+    const { pool } = await import('../../src/core/db.js');
     await pool.query("UPDATE sessions SET last_seen_at = now() - interval '13 hours' WHERE user_id = (SELECT id FROM users WHERE username = 'viewer')");
     assert.equal((await v.get('/api/auth/me')).status, 401);
   });

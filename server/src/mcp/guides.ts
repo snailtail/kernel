@@ -1,10 +1,10 @@
 // MCP: Guided flows (#76): prompts per method and flow, and the method guides and problems as resources.
 import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { GUIDES, guideMarkdown } from '../methods.js';
-import { moduleEnabled } from '../modules.js';
-import { can } from '../policy.js';
-import { problemContext } from '../problem-context.js';
+import { GUIDES, guideMarkdown } from '../problems/methods.js';
+import { moduleEnabled } from '../core/modules.js';
+import { can } from '../security/policy.js';
+import { problemContext } from '../problems/problem-context.js';
 import { type McpContext } from './registrar.js';
 
 export function registerGuidesTools({ server, user }: McpContext) {

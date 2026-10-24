@@ -1,11 +1,11 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { checkApprovalLink, useApprovalLink } from '../approval-links.js';
-import { requireUser } from '../auth.js';
-import { forbidden, HttpError } from '../errors.js';
-import * as n from '../notifications.js';
-import { securityEvent } from '../security-events.js';
-import { checkSameOrigin } from '../security.js';
+import { checkApprovalLink, useApprovalLink } from '../changes/approval-links.js';
+import { requireUser } from '../security/auth.js';
+import { forbidden, HttpError } from '../core/errors.js';
+import * as n from '../notifications/notifications.js';
+import { securityEvent } from '../security/security-events.js';
+import { checkSameOrigin } from '../security/security.js';
 import { esc } from '../core/text.js';
 
 export async function notificationRoutes(app: FastifyInstance) {

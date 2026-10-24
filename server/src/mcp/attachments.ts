@@ -1,6 +1,6 @@
 // MCP: Attachments (#51).
 import { z } from 'zod';
-import * as attachments from '../attachments.js';
+import * as attachments from '../records/attachments.js';
 import { type McpContext } from './registrar.js';
 
 export function registerAttachmentsTools({ user, tool }: McpContext) {

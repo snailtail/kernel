@@ -25,7 +25,7 @@ function fakeGitLab(cert: string, key: string) {
 describe('dev platforms: GitLab and Azure DevOps (part 1 of #32)', { skip }, () => {
   let k: Harness;
   let pm: Client, analyst: Client;
-  let db: typeof import('../../src/db.js');
+  let db: typeof import('../../src/core/db.js');
   let chg: string, prb: string;
   let gl: any, ado: any;
   let api: ReturnType<typeof fakeGitLab>;
@@ -62,7 +62,7 @@ describe('dev platforms: GitLab and Azure DevOps (part 1 of #32)', { skip }, () 
     process.env.KERNEL_OUTBOUND_ALLOW = '127.0.0.1'; // the fake GitLab runs on loopback
     k = await startKernel();
     [pm, analyst] = await Promise.all([k.login('pm'), k.login('analyst')]);
-    db = await import('../../src/db.js');
+    db = await import('../../src/core/db.js');
     chg = (await analyst.post('/api/changes', { title: 'Raise the connection pool' })).body.ref;
     prb = (await analyst.post('/api/problems', { title: 'Checkout times out' })).body.ref;
   });

@@ -17,7 +17,7 @@ records (ADR 0002).
   telemetry is not enabled.
 - **Off by default.** Nothing is sent until an administrator adds a provider (step-up, write-only encrypted key) and
   routes a task to one of its models. Every change is audited with a reason.
-- **One gate**: `prepareForModel()` in `server/src/ai.ts`. The model client accepts only its branded output, so no
+- **One gate**: `prepareForModel()` in `server/src/reporting/ai.ts`. The model client accepts only its branded output, so no
   call can skip it.
   - Each provider declares where it runs (`on_prem` or `cloud`) and the data classes it may receive: `internal`,
     `personal`, `restricted`.

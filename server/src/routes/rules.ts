@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
-import { requireUser } from '../auth.js';
-import * as rules from '../rules.js';
+import { requireUser } from '../security/auth.js';
+import * as rules from '../automation/rules.js';
 
 type Id = { Params: { id: string } };
 

@@ -43,7 +43,7 @@ describe('on-call and paging (#111)', { skip }, () => {
   let ca = '', base = '';
   let network = 0, dba = 0, rota = 0, inboundToken = '', targetId = 0, router = '';
   const dir = mkdtempSync(join(tmpdir(), 'oncall-'));
-  const deliver = async () => (await import('../../src/oncall.js')).deliverPages();
+  const deliver = async () => (await import('../../src/people/oncall.js')).deliverPages();
   const userId = async (u: string) => (await ownerQuery('SELECT id FROM users WHERE username = $1', [u])).rows[0].id as number;
 
   before(async () => {

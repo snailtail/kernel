@@ -1,6 +1,6 @@
 // MCP: Dev platforms (#32): links to GitHub, GitLab and Azure DevOps items.
 import { z } from 'zod';
-import * as dev from '../dev.js';
+import * as dev from '../integrations/dev.js';
 import { type McpContext } from './registrar.js';
 
 export function registerDevTools({ user, tool }: McpContext) {

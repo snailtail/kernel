@@ -11,7 +11,7 @@ const ok = (r: { status: number; body: unknown }) => assert.ok(r.status >= 200 &
 describe('service request management (#44)', { skip }, () => {
   let k: Harness;
   let admin: Client, pm: Client, analyst: Client, analyst2: Client, viewer: Client;
-  let n: typeof import('../../src/notifications.js');
+  let n: typeof import('../../src/notifications/notifications.js');
   const ids: Record<string, number> = {};
   const people: Record<string, number> = {};
   let service = '';
@@ -47,7 +47,7 @@ describe('service request management (#44)', { skip }, () => {
     receiverUrl = `http://127.0.0.1:${(receiver.address() as AddressInfo).port}/hook`;
     k = await startKernel();
     [admin, pm, analyst, analyst2, viewer] = await Promise.all([k.login('admin'), k.login('pm'), k.login('analyst'), k.login('analyst2'), k.login('viewer')]);
-    n = await import('../../src/notifications.js');
+    n = await import('../../src/notifications/notifications.js');
     for (const u of (await admin.get('/api/users')).body) {
       ids[u.username] = u.id;
       await ownerQuery('UPDATE users SET email = $2 WHERE id = $1', [u.id, `${u.username}@example.com`]);
@@ -359,7 +359,7 @@ describe('service request management (#44)', { skip }, () => {
     })).body;
     const r = (await analyst.post('/api/requests', { item_id: item.id, requester: { id: people.bo }, answers: { size: 'L', why: 'Sales' } })).body;
     ok(await analyst.post(`/api/requests/${r.ref}/comments`, { body: 'Internal: VIP, be quick' }));
-    await (await import('../../src/webhooks.js')).processDeliveries();
+    await (await import('../../src/notifications/webhooks.js')).processDeliveries();
     const sent = received.find((x) => x.body.event === 'request.task' && x.body.request.ref === r.ref);
     assert.ok(sent, 'delivered');
     assert.ok(sent.headers['webhook-signature'], 'signed');
@@ -386,7 +386,7 @@ describe('service request management (#44)', { skip }, () => {
     const r = (await analyst.post('/api/requests', { item_id: accessItem, requester: { id: person }, answers: { system: vm, level: 'read', why: 'Secret project Falcon' } })).body;
     ok(await analyst.post(`/api/requests/${r.ref}/comments`, { body: 'Internal note: double-check her badge' }));
     ok(await pm.post(`/api/requests/${r.ref}/approval`, { decision: 'reject', comment: 'Internal: budget freeze' }));
-    const { processRequestMail } = await import('../../src/requests.js');
+    const { processRequestMail } = await import('../../src/requests/requests.js');
     await processRequestMail();
     const mails = n.capturedMail.filter((m) => m.to === 'cecilia@example.org');
     assert.deepEqual(mails.map((m) => m.subject), [`Your request ${r.ref}: we have received it`, `Your request ${r.ref}: not approved`]);

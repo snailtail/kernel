@@ -1,10 +1,10 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { Transform } from 'node:stream';
 import { z } from 'zod';
-import * as att from '../attachments.js';
-import { requireUser } from '../auth.js';
-import { HttpError } from '../errors.js';
-import { rateLimit } from '../ratelimit.js';
+import * as att from '../records/attachments.js';
+import { requireUser } from '../security/auth.js';
+import { HttpError } from '../core/errors.js';
+import { rateLimit } from '../core/ratelimit.js';
 
 type Id = { Params: { id: string } };
 

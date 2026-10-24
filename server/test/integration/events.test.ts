@@ -9,8 +9,8 @@ import { Client, skip, startKernel, type Harness } from './harness.js';
 describe('event management (#30)', { skip }, () => {
   let k: Harness;
   let admin: Client, pm: Client, analyst: Client, viewer: Client;
-  let events: typeof import('../../src/events.js');
-  let db: typeof import('../../src/db.js');
+  let events: typeof import('../../src/events/events.js');
+  let db: typeof import('../../src/core/db.js');
   const hook = (id: number, token: string, body: unknown, headers: Record<string, string> = {}) =>
     new Client(k.base).request('POST', `/api/event-hooks/${id}`, body, { Authorization: `Bearer ${token}`, ...headers });
   const source = async (name: string, kind: string, extra: object = {}) => {
@@ -25,8 +25,8 @@ describe('event management (#30)', { skip }, () => {
     process.env.KERNEL_SECRET_KEY = 'events-test-key-0123456789abcdefghijklm';
     k = await startKernel();
     [admin, pm, analyst, viewer] = await Promise.all([k.login('admin'), k.login('pm'), k.login('analyst'), k.login('viewer')]);
-    events = await import('../../src/events.js');
-    db = await import('../../src/db.js');
+    events = await import('../../src/events/events.js');
+    db = await import('../../src/core/db.js');
   });
   after(async () => {
     delete process.env.KERNEL_SECRET_KEY;

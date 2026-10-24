@@ -42,7 +42,7 @@ priorities or service-level details. A **confidential** record, or a **restricte
 reference and status only; a restricted request is the requester's own and shows in full.
 
 Of the history they see only the **replies written for them** and their own messages. Everything the portal shows is
-built in one place, `forPortal` in `server/src/audience.ts`.
+built in one place, `forPortal` in `server/src/security/audience.ts`.
 
 ## Replying to the requester
 

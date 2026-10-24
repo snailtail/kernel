@@ -1,8 +1,8 @@
 // MCP: The dashboard and the period report: every practice's KPIs, each section while its module is on.
 import { z } from 'zod';
-import * as kpiMod from '../kpis.js';
-import * as problems from '../problems.js';
-import * as reports from '../reports.js';
+import * as kpiMod from '../reporting/kpis.js';
+import * as problems from '../problems/problems.js';
+import * as reports from '../reporting/reports.js';
 import { type McpContext } from './registrar.js';
 
 export function registerReportsTools({ user, tool }: McpContext) {

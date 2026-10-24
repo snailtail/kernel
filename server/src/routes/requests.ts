@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
-import { requireUser } from '../auth.js';
-import { forbidden } from '../errors.js';
-import * as rq from '../requests.js';
+import { requireUser } from '../security/auth.js';
+import { forbidden } from '../core/errors.js';
+import * as rq from '../requests/requests.js';
 
 type RefParams = { Params: { ref: string } };
 type TaskParams = { Params: { ref: string; id: string } };

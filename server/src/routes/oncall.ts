@@ -1,8 +1,8 @@
 import type { FastifyInstance } from 'fastify';
-import { requireUser } from '../auth.js';
-import { requireStepUp } from '../mfa.js';
-import * as oncall from '../oncall.js';
-import { rateLimit } from '../ratelimit.js';
+import { requireUser } from '../security/auth.js';
+import { requireStepUp } from '../security/mfa.js';
+import * as oncall from '../people/oncall.js';
+import { rateLimit } from '../core/ratelimit.js';
 
 type Team = { Params: { id: string } };
 

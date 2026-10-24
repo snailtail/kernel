@@ -1,8 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { requireUser } from '../auth.js';
-import { requireStepUp } from '../mfa.js';
-import * as dev from '../dev.js';
+import { requireUser } from '../security/auth.js';
+import { requireStepUp } from '../security/mfa.js';
+import * as dev from '../integrations/dev.js';
 
 type Ref = { Params: { ref: string } };
 type Id = { Params: { id: string } };

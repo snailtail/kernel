@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { addBusinessMinutes, businessMinutes, swedishHolidays, zonedToUtc, type Calendar } from '../src/business-time.js';
+import { addBusinessMinutes, businessMinutes, swedishHolidays, zonedToUtc, type Calendar } from '../src/reporting/business-time.js';
 
 const TZ = 'Europe/Stockholm';
 const office = (holidays: string[] = []): Calendar => ({

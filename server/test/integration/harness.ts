@@ -96,8 +96,8 @@ export async function startKernel(): Promise<Harness> {
   process.env.KERNEL_APP_DB_USER ??= 'kernel_app_test';
   process.env.KERNEL_APP_DB_PASSWORD ??= 'app role password for tests only';
   await ownerQuery('DROP SCHEMA IF EXISTS reporting CASCADE; DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
-  const { pool, migrate } = await import('../../src/db.js');
-  const { hashPassword } = await import('../../src/auth.js');
+  const { pool, migrate } = await import('../../src/core/db.js');
+  const { hashPassword } = await import('../../src/security/auth.js');
   const { buildApp } = await import('../../src/app.js');
 
   await migrate(() => {});

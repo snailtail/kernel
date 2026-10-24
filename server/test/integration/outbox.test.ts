@@ -4,7 +4,7 @@ import { ownerQuery, skip, startKernel, type Harness } from './harness.js';
 
 describe('the shared outbox (#173)', { skip }, () => {
   let k: Harness;
-  let db: typeof import('../../src/db.js');
+  let db: typeof import('../../src/core/db.js');
   let outbox: typeof import('../../src/core/outbox.js');
   const sentTo: string[] = [];
   let failing = new Set<string>();
@@ -24,7 +24,7 @@ describe('the shared outbox (#173)', { skip }, () => {
 
   before(async () => {
     k = await startKernel();
-    db = await import('../../src/db.js');
+    db = await import('../../src/core/db.js');
     outbox = await import('../../src/core/outbox.js');
     // A table of its own, made by the owner as migrations are, for the app role to work on.
     await ownerQuery(`CREATE TABLE outbox_probe (id bigserial PRIMARY KEY, target text NOT NULL, status text NOT NULL DEFAULT 'pending',

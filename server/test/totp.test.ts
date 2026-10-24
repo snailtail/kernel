@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { base32Decode, base32Encode, codeAt, verifyCode } from '../src/totp.js';
+import { base32Decode, base32Encode, codeAt, verifyCode } from '../src/security/totp.js';
 
 test('matches the RFC 6238 SHA-1 test vectors', () => {
   // Secret "12345678901234567890" (ASCII); RFC 6238 appendix B, truncated to 6 digits.

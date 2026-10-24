@@ -1,9 +1,9 @@
 // MCP: The audit trail and security events (administrators).
 import { z } from 'zod';
-import { auditQuerySchema, queryAudit } from '../audit.js';
-import * as events from '../events.js';
-import { alertingStatus } from '../security-alerts.js';
-import { querySecurityEvents, SECURITY_CATEGORIES, SECURITY_OUTCOMES, securityQuerySchema } from '../security-events.js';
+import { auditQuerySchema, queryAudit } from '../security/audit.js';
+import * as events from '../events/events.js';
+import { alertingStatus } from '../events/security-alerts.js';
+import { querySecurityEvents, SECURITY_CATEGORIES, SECURITY_OUTCOMES, securityQuerySchema } from '../security/security-events.js';
 import { type McpContext } from './registrar.js';
 
 export function registerSecurityTools({ tool }: McpContext) {

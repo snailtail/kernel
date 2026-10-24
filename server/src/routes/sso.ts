@@ -1,9 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { requireReason } from '../audit.js';
-import { requireUser } from '../auth.js';
-import { requireStepUp } from '../mfa.js';
-import * as sso from '../sso.js';
+import { requireReason } from '../security/audit.js';
+import { requireUser } from '../security/auth.js';
+import { requireStepUp } from '../security/mfa.js';
+import * as sso from '../security/sso.js';
 
 export async function ssoRoutes(app: FastifyInstance) {
   app.get('/api/auth/options', async () => sso.loginOptions());

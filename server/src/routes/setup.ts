@@ -1,9 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { requireUser } from '../auth.js';
-import { requireStepUp } from '../mfa.js';
-import * as setup from '../setup.js';
-import * as startPage from '../start-page.js';
+import { requireUser } from '../security/auth.js';
+import { requireStepUp } from '../security/mfa.js';
+import * as setup from '../security/setup.js';
+import * as startPage from '../people/start-page.js';
 
 export async function setupRoutes(app: FastifyInstance) {
   app.get('/api/admin/modules', async (req) => {

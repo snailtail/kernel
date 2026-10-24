@@ -37,7 +37,7 @@ Anything written before key ids existed belongs to `k0`.
 3. Re-encrypt the stored secrets under the new key:
 
    ```sh
-   docker compose exec app node server/dist/rotate-keys.js
+   docker compose exec app node server/dist/security/rotate-keys.js
    ```
 
    The command is safe to run while Kernel serves requests. Each value is replaced in its own statement, and only if nobody changed it in the meantime. You can run it again at any time.

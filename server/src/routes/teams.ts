@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
-import { requireUser } from '../auth.js';
-import * as teams from '../teams.js';
+import { requireUser } from '../security/auth.js';
+import * as teams from '../people/teams.js';
 
 type Id = { Params: { id: string } };
 

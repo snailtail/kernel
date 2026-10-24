@@ -1,7 +1,7 @@
 // MCP: Service requests.
 import { z } from 'zod';
 import { idempotent } from '../idempotency.js';
-import * as requests from '../requests.js';
+import * as requests from '../requests/requests.js';
 import { portalMark, type McpContext } from './registrar.js';
 
 export function registerRequestsTools({ user, tool }: McpContext) {

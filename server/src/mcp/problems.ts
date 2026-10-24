@@ -1,14 +1,14 @@
 // MCP: Problem records, the known error database and analyses.
 import { z } from 'zod';
-import * as analyses from '../analyses.js';
-import { badRequest } from '../errors.js';
-import { problemMarkdown } from '../export.js';
+import * as analyses from '../problems/analyses.js';
+import { badRequest } from '../core/errors.js';
+import { problemMarkdown } from '../reporting/export.js';
 import { idempotent } from '../idempotency.js';
-import { categoryIdByName } from '../meta.js';
-import { problemContext } from '../problem-context.js';
-import * as problems from '../problems.js';
-import * as review from '../review.js';
-import { CLOSURE_CODES, EC_DECISIONS, STATUSES, WORKAROUND_EFFECTIVENESS } from '../workflow.js';
+import { categoryIdByName } from '../records/meta.js';
+import { problemContext } from '../problems/problem-context.js';
+import * as problems from '../problems/problems.js';
+import * as review from '../problems/review-board.js';
+import { CLOSURE_CODES, EC_DECISIONS, STATUSES, WORKAROUND_EFFECTIVENESS } from '../problems/workflow.js';
 import { resolveAssignee, type McpContext } from './registrar.js';
 
 async function resolveCategory(name?: string | null) {

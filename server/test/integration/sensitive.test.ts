@@ -190,7 +190,7 @@ describe('sensitive data in records (#61)', { skip }, () => {
   });
 
   test('the routes that are not scanned are a deliberate list', async () => {
-    const { UNSCANNED } = await import('../../src/sensitive.js');
+    const { UNSCANNED } = await import('../../src/security/sensitive.js');
     const writes = k.routes.filter((r) => ['post', 'put', 'patch'].includes(r.method) && r.url.startsWith('/api/'));
     const skipped = [...new Set(writes.filter((r) => UNSCANNED.some((re) => re.test(r.url))).map((r) => r.url.replace(/\/:.*$/, '').split('/').slice(0, 4).join('/')))].sort();
     assert.deepEqual(skipped, [

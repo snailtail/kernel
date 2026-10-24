@@ -308,12 +308,12 @@ describe('copying text between records (#117)', { skip }, () => {
     // Where records are created. A new call site fails this test: decide whether it copies text from another record
     // (then use copyText / startNarrow from audience.ts and add a row above), and update the counts.
     const expected: Record<string, number> = {
-      'actions.ts': 1, 'candidates.ts': 1, 'changes.ts': 1, 'events.ts': 1, 'knowledge.ts': 1, 'mcp/changes.ts': 1, 'mcp/knowledge.ts': 1, 'mcp/problems.ts': 1, 'problems.ts': 1, 'requests.ts': 1, 'reviews.ts': 3, 'routes/changes.ts': 1, 'routes/knowledge.ts': 1, 'routes/problems.ts': 1, 'setup.ts': 2,
+      'problems/actions.ts': 1, 'problems/candidates.ts': 1, 'changes/changes.ts': 1, 'events/events.ts': 1, 'reporting/knowledge.ts': 1, 'mcp/changes.ts': 1, 'mcp/knowledge.ts': 1, 'mcp/problems.ts': 1, 'problems/problems.ts': 1, 'requests/requests.ts': 1, 'incidents/post-incident-reviews.ts': 3, 'routes/changes.ts': 1, 'routes/knowledge.ts': 1, 'routes/problems.ts': 1, 'security/setup.ts': 2,
       // An incident from an email (#48): its text comes from outside Kernel, not from another record.
-      'inbound-mail.ts': 1,
+      'incidents/inbound-mail.ts': 1,
       // Two, plus a problem reported in the portal (#45, insertPortalIncident): the person's own words, not text from
       // another record.
-      'incidents.ts': 3,
+      'incidents/incidents.ts': 3,
     };
     const dir = new URL('../../src/', import.meta.url);
     const found: Record<string, number> = {};
@@ -324,8 +324,8 @@ describe('copying text between records (#117)', { skip }, () => {
     }
     assert.deepEqual(found, expected);
     // The files that copy between records use the shared rule.
-    for (const f of ['candidates.ts', 'changes.ts', 'incidents.ts', 'knowledge.ts', 'major-incidents.ts', 'requests.ts', 'reviews.ts']) {
-      assert.match(readFileSync(new URL(f, dir), 'utf8'), /from '\.\/audience\.js'/, `${f} copies between records without audience.ts`);
+    for (const f of ['problems/candidates.ts', 'changes/changes.ts', 'incidents/incidents.ts', 'reporting/knowledge.ts', 'incidents/major-incidents.ts', 'requests/requests.ts', 'incidents/post-incident-reviews.ts']) {
+      assert.match(readFileSync(new URL(f, dir), 'utf8'), /from '\.\.\/security\/audience\.js'/, `${f} copies between records without audience.ts`);
     }
   });
 });

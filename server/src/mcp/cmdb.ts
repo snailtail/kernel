@@ -1,11 +1,11 @@
 // MCP: The CMDB: CIs, relationships, impact, groups, retirement and links to problems.
 import { z } from 'zod';
-import * as retire from '../ci-retire.js';
-import * as graph from '../cmdb-graph.js';
-import * as cmdb from '../cmdb.js';
-import * as connectors from '../connectors.js';
-import * as generic from '../generic.js';
-import * as problemCis from '../problem-cis.js';
+import * as retire from '../cmdb/ci-retire.js';
+import * as graph from '../cmdb/cmdb-graph.js';
+import * as cmdb from '../cmdb/cmdb.js';
+import * as connectors from '../integrations/connectors.js';
+import * as generic from '../records/generic.js';
+import * as problemCis from '../problems/problem-cis.js';
 import { type McpContext } from './registrar.js';
 
 export function registerCmdbTools({ user, tool, HUMAN_CONFIRMATION, requireConfirmation }: McpContext) {

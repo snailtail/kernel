@@ -9,8 +9,8 @@ const ok = (r: { status: number; body: unknown }) => assert.ok(r.status >= 200 &
 describe('self-service portal (#45)', { skip }, () => {
   let k: Harness;
   let admin: Client, pm: Client, analyst: Client;
-  let n: typeof import('../../src/notifications.js');
-  let portal: typeof import('../../src/portal.js');
+  let n: typeof import('../../src/notifications/notifications.js');
+  let portal: typeof import('../../src/requests/portal.js');
   const ids: Record<string, number> = {};
   const people: Record<string, number> = {};
   const services: Record<string, string> = {};
@@ -34,8 +34,8 @@ describe('self-service portal (#45)', { skip }, () => {
     process.env.KERNEL_SECRET_KEY = 'portal-test-key-0123456789abcdefghijklmno';
     k = await startKernel();
     [admin, pm, analyst] = await Promise.all([k.login('admin'), k.login('pm'), k.login('analyst')]);
-    n = await import('../../src/notifications.js');
-    portal = await import('../../src/portal.js');
+    n = await import('../../src/notifications/notifications.js');
+    portal = await import('../../src/requests/portal.js');
     for (const u of (await admin.get('/api/users')).body) ids[u.username] = u.id;
     services.mail = (await pm.post('/api/cis', { name: 'Mail', ci_type: 'business_service' })).body.ref;
     services.payroll = (await pm.post('/api/cis', { name: 'Payroll', ci_type: 'business_service' })).body.ref;

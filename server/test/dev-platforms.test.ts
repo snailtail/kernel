@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { describe, test } from 'node:test';
 import type { FastifyRequest } from 'fastify';
-import { azureDevOps } from '../src/dev-azure.js';
-import { github } from '../src/dev-github.js';
-import { gitlab } from '../src/dev-gitlab.js';
-import { ciState, iso, isRollback, refsIn, sameSecret, type Adapter } from '../src/dev-platform.js';
+import { azureDevOps } from '../src/integrations/dev-azure.js';
+import { github } from '../src/integrations/dev-github.js';
+import { gitlab } from '../src/integrations/dev-gitlab.js';
+import { ciState, iso, isRollback, refsIn, sameSecret, type Adapter } from '../src/integrations/dev-platform.js';
 
 const parse = (adapter: Adapter, url: string, bases: string[] = []) => adapter.parseUrl(new URL(url), bases);
 const req = (headers: Record<string, string>) => ({ headers }) as unknown as FastifyRequest;
@@ -89,7 +89,7 @@ describe('dev platform adapters (#32)', () => {
 
 describe('the change status on a pull request (#32)', () => {
   test('authorised within its window, outside it, not yet, rejected, implemented', async () => {
-    const { changeStatus } = await import('../src/dev.js');
+    const { changeStatus } = await import('../src/integrations/dev.js');
     const now = new Date('2026-10-18T22:30:00Z');
     const c = (status: string, extra: object = {}) => ({ ref: 'CHG000017', status, change_type: 'normal', planned_start: new Date('2026-10-18T22:00:00Z'), planned_end: new Date('2026-10-18T23:00:00Z'), ...extra });
     assert.deepEqual(changeStatus(c('scheduled'), now), { state: 'success', description: 'CHG000017 authorised, window 2026-10-18 22:00–23:00 UTC' });

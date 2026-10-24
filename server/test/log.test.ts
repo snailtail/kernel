@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { Writable } from 'node:stream';
 import { test } from 'node:test';
-import { createLogger } from '../src/log.js';
+import { createLogger } from '../src/core/log.js';
 
 function capture(format: string, dataset?: string) {
   const lines: any[] = [];

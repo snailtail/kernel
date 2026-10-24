@@ -17,8 +17,8 @@ describe('audit entries are appended at commit (#57)', { skip }, () => {
   const rows = async (ref: string) => (await ownerQuery('SELECT id FROM audit_log WHERE entity_ref = $1', [ref])).rows.length;
 
   test('a rolled-back transaction leaves no entry, and neither does a rolled-back savepoint', async () => {
-    const { tx, savepoint } = await import('../../src/db.js');
-    const { audit } = await import('../../src/audit.js');
+    const { tx, savepoint } = await import('../../src/core/db.js');
+    const { audit } = await import('../../src/security/audit.js');
     await assert.rejects(tx(async (db) => {
       await audit(db, { entity_type: 'setting', entity_ref: 'rolled-back', action: 'update', changes: {} });
       throw new Error('later failure');
@@ -37,8 +37,8 @@ describe('audit entries are appended at commit (#57)', { skip }, () => {
   });
 
   test('a failing append rolls the change back with it', async () => {
-    const { tx } = await import('../../src/db.js');
-    const { audit } = await import('../../src/audit.js');
+    const { tx } = await import('../../src/core/db.js');
+    const { audit } = await import('../../src/security/audit.js');
     await assert.rejects(tx(async (db) => {
       await db.query("INSERT INTO settings (key, value) VALUES ('audit_commit_test', '1')");
       // A BigInt cannot be serialised, so the append (at commit) fails.
@@ -49,8 +49,8 @@ describe('audit entries are appended at commit (#57)', { skip }, () => {
   });
 
   test('long transactions run side by side and the chain stays valid', async () => {
-    const { tx } = await import('../../src/db.js');
-    const { audit } = await import('../../src/audit.js');
+    const { tx } = await import('../../src/core/db.js');
+    const { audit } = await import('../../src/security/audit.js');
     const long = (n: number) => tx(async (db) => {
       await audit(db, { entity_type: 'setting', entity_ref: `parallel-${n}`, action: 'update', changes: {} });
       await db.query('SELECT pg_sleep(0.5)');

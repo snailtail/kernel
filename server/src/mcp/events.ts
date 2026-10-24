@@ -1,6 +1,6 @@
 // MCP: Events and alerts (#30).
 import { z } from 'zod';
-import * as events from '../events.js';
+import * as events from '../events/events.js';
 import { type McpContext } from './registrar.js';
 
 export function registerEventsTools({ user, tool }: McpContext) {

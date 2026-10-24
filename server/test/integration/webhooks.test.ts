@@ -42,7 +42,7 @@ describe('webhooks and watching', { skip }, () => {
     await k?.close();
   });
 
-  const deliver = async () => (await import('../../src/webhooks.js')).processDeliveries();
+  const deliver = async () => (await import('../../src/notifications/webhooks.js')).processDeliveries();
 
   test('admins manage webhooks; secrets are shown once and encrypted at rest', async () => {
     assert.equal((await pm.post('/api/webhooks', { name: 'x', url: receiverUrl })).status, 403);
@@ -55,14 +55,14 @@ describe('webhooks and watching', { skip }, () => {
     secret = created.body.secret;
     hookId = created.body.id;
     assert.equal((await admin.get('/api/webhooks')).body.webhooks[0].secret, undefined, 'never listed');
-    const { pool } = await import('../../src/db.js');
+    const { pool } = await import('../../src/core/db.js');
     const stored = (await pool.query('SELECT secret FROM webhooks WHERE id = $1', [hookId])).rows[0].secret;
     assert.match(stored, /^v2:k0:/);
     assert.ok(!stored.includes(secret.slice(6, 20)));
   });
 
   test('ping sends only its own delivery', async () => {
-    const { pool } = await import('../../src/db.js');
+    const { pool } = await import('../../src/core/db.js');
     await pool.query(`INSERT INTO webhook_deliveries (webhook_id, event, payload, next_attempt_at) VALUES ($1, 'problem.updated', '{}', now() + interval '1 hour')`, [hookId]);
     const queuedNow = await pool.query(`INSERT INTO webhook_deliveries (webhook_id, event, payload) VALUES ($1, 'problem.updated', '{}') RETURNING id`, [hookId]);
     const ping = await admin.post(`/api/webhooks/${hookId}/ping`);
@@ -75,7 +75,7 @@ describe('webhooks and watching', { skip }, () => {
 
   test('deleting a webhook takes its reason from the body, never from the query string', async () => {
     const hook = (await admin.post('/api/webhooks', { name: 'Short-lived', url: 'https://hooks.example.com/gone', events: [] })).body;
-    const { pool } = await import('../../src/db.js');
+    const { pool } = await import('../../src/core/db.js');
     const audited = async () => (await ownerQuery("SELECT reason FROM audit_log WHERE entity_type = 'webhook' AND entity_ref = $1 AND action = 'delete'", [String(hook.id)])).rows;
     // The old DELETE shape, with the reason in the query string, is gone: nothing stored.
     const old = await admin.del(`/api/webhooks/${hook.id}?reason=${encodeURIComponent('Query reason about Bob')}`);
@@ -125,7 +125,7 @@ describe('webhooks and watching', { skip }, () => {
   });
 
   test('slack and Teams Workflows formats', async () => {
-    const { formatBody } = await import('../../src/webhooks.js');
+    const { formatBody } = await import('../../src/notifications/webhooks.js');
     const payload = { event: 'problem.created', summary: 'Logged', actor: { display_name: 'Ann' }, problem: { ref: 'PRB1', title: 'T', url: 'https://k.example/problems/PRB1' } };
     assert.deepEqual(formatBody('slack', { ...payload, problem: { ...payload.problem, url: null } }), { text: '*PRB1: T*\nAnn: Logged' });
     const teams: any = formatBody('teams_workflow', payload);

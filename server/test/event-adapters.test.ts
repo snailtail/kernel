@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { adapt } from '../src/event-hooks.js';
-import { redactUrl } from '../src/log.js';
-import { ruleMatches } from '../src/events.js';
+import { adapt } from '../src/events/event-hooks.js';
+import { redactUrl } from '../src/core/log.js';
+import { ruleMatches } from '../src/events/events.js';
 import { fixture } from './fixtures/events/load.js';
 
 test('Alertmanager: one event per alert, labels mapped, resolved clears', () => {

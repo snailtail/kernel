@@ -16,7 +16,7 @@ describe('Idempotency-Key (#77)', { skip }, () => {
   after(() => k?.close());
 
   const rows = async () => {
-    const { pool } = await import('../../src/db.js');
+    const { pool } = await import('../../src/core/db.js');
     return (await pool.query('SELECT route, body::text AS body FROM idempotency_keys')).rows;
   };
 
@@ -49,7 +49,7 @@ describe('Idempotency-Key (#77)', { skip }, () => {
   });
 
   test('abandoned in-flight keys can be taken over', async () => {
-    const { pool } = await import('../../src/db.js');
+    const { pool } = await import('../../src/core/db.js');
     const me = (await analyst.get('/api/auth/me')).body;
     const res1 = await analyst.request('POST', '/api/problems', { title: 'Crashed' }, { 'Idempotency-Key': 'crash-1' });
     // Simulate a crash after claiming: make the key in-flight and old.

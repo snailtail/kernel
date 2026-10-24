@@ -54,7 +54,7 @@ only when a manager **publishes** it. Kernel never sends anything outside on its
 
 Only the published text: the service's **public name**, the phase, the published status and the message, with the
 page title and time. They never get the internal service name, CIs, the incident's ref or title, or who wrote the
-update. All of this is built in one place (`forOutside` in `server/src/audience.ts`). A major incident's status
+update. All of this is built in one place (`forOutside` in `server/src/security/audience.ts`). A major incident's status
 proposal also names services by their public names, so a draft that is published unchanged reveals nothing internal.
 
 ### Double opt-in for people outside
