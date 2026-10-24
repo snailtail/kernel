@@ -19,5 +19,10 @@
   },
   "devDependencies": {
     "knip": "6.41.0"
+  },
+  "overrides": {
+    "mailparser": {
+      "nodemailer": "10.1.4"
+    }
   }
 }
