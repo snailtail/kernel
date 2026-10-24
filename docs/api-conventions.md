@@ -64,6 +64,14 @@ team's Definition of Ready and Done (`/api/teams/:id/work-definitions`) is shown
 the transition's `checked` lists what holds and the rest is logged as skipped, never refused. A child starts as narrow
 as its parent. Links to ITSM records come with #167.
 
+A sprint (#166) is a team's, not a record kind: it has an id, no ref. `POST /api/sprints/:id/items` (`plan_sprint`)
+takes `add` and `remove` lists of refs; an item is in one planned or active sprint at a time, and one added after the
+start counts as unplanned. `POST /api/sprints/:id/complete` (`complete_sprint`) takes `unfinished`, a map from ref to
+`backlog` or `next_sprint` (the backlog for the ones left out). A completed sprint keeps each item's points and outcome,
+so its burndown, velocity and unplanned share do not move when items are reopened or re-estimated later. Sprints follow
+the team when work items are team-scoped. `GET /api/meta` carries `work_items.parent_types` and `.transitions`, so
+clients keep no copy of the hierarchy.
+
 ## REST
 
 | Purpose | Route |

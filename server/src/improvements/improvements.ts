@@ -18,7 +18,7 @@ import { recordType, recordUrl, refRegex, registerRecordType, typeForRef, typeOf
 import { assertVisibleRef } from '../security/visibility.js';
 
 export const IMPROVEMENT_STATUSES = ['idea', 'approved', 'in_progress', 'done', 'rejected'] as const;
-export const IMPROVEMENT_SOURCES = ['review', 'problem', 'service_review', 'idea'] as const;
+export const IMPROVEMENT_SOURCES = ['review', 'problem', 'service_review', 'idea', 'retrospective'] as const;
 /** The dashboard tiles an improvement can watch. */
 export const TILES_FOR_IMPROVEMENTS = TILES;
 const IMPROVEMENT_LINK_KINDS = ['change', 'problem', 'action', 'incident', 'review', 'document'] as const;

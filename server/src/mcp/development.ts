@@ -1,6 +1,7 @@
-// MCP: Development work (#165): epics, stories, bugs and tasks in a backlog per team.
+// MCP: Development work (#165, #166): epics, stories, bugs and tasks in a backlog per team, and sprints.
 import { z } from 'zod';
 import { idempotent } from '../idempotency.js';
+import * as sp from '../development/sprints.js';
 import * as wi from '../development/work-items.js';
 import { resolveAssignee, type McpContext } from './registrar.js';
 
@@ -76,5 +77,56 @@ export function registerDevelopmentTools({ user, tool }: McpContext) {
     { ref: z.string(), before: z.string().optional(), after: z.string().optional(), position: z.enum(['top', 'bottom']).optional() },
     false,
     async ({ ref, ...args }) => itemForAgent(await wi.moveWorkItem(user, ref, wi.moveWorkItemSchema.parse(args))),
+  );
+
+  const sprintSummary = (s: any) => ({
+    sprint_id: s.id, team_id: s.team_id, team: s.team, status: s.status, starts_on: s.starts_on, ends_on: s.ends_on, capacity: s.capacity,
+    points: s.points, items: s.items, over_capacity: s.over_capacity, name_untrusted: s.name,
+  });
+  const sprintForAgent = (s: any) => ({
+    notice,
+    ...sprintSummary(s),
+    work_items: s.work_items.map((w: any) => ({ ref: w.ref, item_type: w.item_type, status: w.status, points: w.points, assignee: w.assignee, unplanned: w.unplanned, outcome: w.outcome })),
+    burndown: s.burndown, velocity: s.velocity, next_steps: s.next_steps,
+    untrusted_content: {
+      name: s.name, goal: s.goal, review_notes: s.review_notes,
+      item_titles: Object.fromEntries(s.work_items.map((w: any) => [w.ref, w.title])),
+      retrospective: s.retrospective.map((r: any) => ({ kind: r.kind, note: r.body, by: r.created_by_name, improvement: r.improvement })),
+    },
+  });
+  tool(
+    'list_sprints',
+    "A team's sprints: the active one first, then planned and completed, with committed, completed and unplanned points against capacity.",
+    { team: z.number().int().optional().describe('Team id, from list_reference_data'), status: z.enum([...sp.SPRINT_STATUSES, 'open', 'all']).optional(), limit: z.number().int().min(1).max(200).optional() },
+    true,
+    async (args) => (await sp.listSprints(user, sp.listSprintsSchema.parse({ ...args, limit: args.limit ?? 20 }))).map(sprintSummary),
+  );
+  tool('get_sprint', `Get a sprint: its items, points against capacity, the burndown (points left per day against the ideal line), the velocity of the team's last six sprints, the unplanned share and the retrospective. ${notice}`, { sprint_id: z.number().int() }, true, async ({ sprint_id }) =>
+    sprintForAgent(await sp.getSprint(user, sprint_id)),
+  );
+  tool(
+    'plan_sprint',
+    "Sprint planning. Without sprint_id it plans a new sprint (team_id, name, starts_on and ends_on needed); with one it changes it. add and remove take items from the team's backlog in or out (added after the start they count as unplanned). start: true starts it; a team has one active sprint at a time. Show the person the points against capacity before starting.",
+    {
+      sprint_id: z.number().int().optional(), team_id: z.number().int().optional(), name: z.string().optional(), goal: z.string().optional(),
+      starts_on: z.string().optional().describe('YYYY-MM-DD'), ends_on: z.string().optional().describe('YYYY-MM-DD'), capacity: z.number().int().nullable().optional().describe('Story points'),
+      add: z.array(z.string()).optional().describe('WI… refs'), remove: z.array(z.string()).optional().describe('WI… refs'), start: z.boolean().optional(),
+    },
+    false,
+    async ({ sprint_id, team_id, add, remove, start, ...fields }) => {
+      let id = sprint_id;
+      if (id === undefined) id = (await sp.createSprint(user, sp.createSprintSchema.parse({ team_id, ...fields }))).id as number;
+      else if (Object.values(fields).some((v) => v !== undefined)) await sp.updateSprint(user, id, sp.updateSprintSchema.parse(fields));
+      if (add?.length || remove?.length) await sp.planSprint(user, id, sp.sprintItemsSchema.parse({ add, remove }));
+      if (start) await sp.startSprint(user, id);
+      return sprintForAgent(await sp.getSprint(user, id));
+    },
+  );
+  tool(
+    'complete_sprint',
+    'Complete the active sprint. Done items stay in it; each unfinished item goes back to the backlog (the default) or on to the next planned sprint. Ask the person where the unfinished items should go.',
+    { sprint_id: z.number().int(), unfinished: z.record(z.string(), z.enum(['backlog', 'next_sprint'])).optional().describe('WI… → backlog or next_sprint'), next_sprint_id: z.number().int().optional() },
+    false,
+    async ({ sprint_id, ...args }) => sprintForAgent(await sp.completeSprint(user, sprint_id, sp.completeSprintSchema.parse(args))),
   );
 }

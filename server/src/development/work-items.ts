@@ -20,10 +20,11 @@ export const WORK_ITEM_TYPES = ['epic', 'story', 'bug', 'task'] as const;
 export const WORK_ITEM_STATUSES = ['new', 'ready', 'in_progress', 'in_review', 'done', 'removed'] as const;
 const WORK_ITEM_LINK_KINDS = ['work_item', 'document'] as const;
 type Type = (typeof WORK_ITEM_TYPES)[number];
-type Status = (typeof WORK_ITEM_STATUSES)[number];
+export type WorkItemStatus = (typeof WORK_ITEM_STATUSES)[number];
+type Status = WorkItemStatus;
 
 /** Where an item can go from each status. Kanban teams may skip ready and review. */
-const TRANSITIONS: Record<Status, Status[]> = {
+export const WORK_ITEM_TRANSITIONS: Record<Status, Status[]> = {
   new: ['ready', 'in_progress', 'removed'],
   ready: ['new', 'in_progress', 'removed'],
   in_progress: ['ready', 'in_review', 'done', 'removed'],
@@ -36,7 +37,7 @@ const TRANSITIONS: Record<Status, Status[]> = {
  * The parents each type can have (none is always allowed): epic → story or bug → task. Each level is below the one
  * before, so the hierarchy has at most three levels and cannot have a cycle.
  */
-const PARENT_TYPES: Record<Type, Type[]> = { epic: [], story: ['epic'], bug: ['epic'], task: ['story', 'bug'] };
+export const WORK_ITEM_PARENT_TYPES: Record<Type, Type[]> = { epic: [], story: ['epic'], bug: ['epic'], task: ['story', 'bug'] };
 const BUG_FIELDS = ['found_in', 'steps_to_reproduce', 'expected_result', 'actual_result'] as const;
 
 const criterion = z.object({ criterion: z.string().trim().min(1).max(500), done: z.boolean().default(false) });
@@ -87,6 +88,8 @@ export const listWorkItemsSchema = z.object({
   label: z.string().trim().max(50).optional(),
   /** The items under this epic (WI…), at any level. */
   epic: z.string().trim().max(30).optional(),
+  /** In this sprint, or none: not in a planned or active sprint (what is left to plan). */
+  sprint: z.union([z.literal('none'), z.coerce.number().int()]).optional(),
   q: z.string().trim().max(200).optional(),
   sort: z.enum(['rank', 'updated', 'created']).default('rank'),
   bulk: z.uuid().optional(),
@@ -100,7 +103,11 @@ export const workItemLinkSchema = z.object({
   note: z.string().trim().max(2000).default(''),
 });
 const definition = z.array(z.string().trim().min(1).max(200)).max(15);
-export const workDefinitionsSchema = z.object({ ready: definition, done: definition, reason: z.string().trim().max(1000).optional() });
+/** The board's columns (#166), in order: every status but removed. */
+export const BOARD_COLUMNS = ['new', 'ready', 'in_progress', 'in_review', 'done'] as const satisfies readonly Status[];
+/** WIP limits per board column: a warning on the board when a column holds more, never a block. */
+const wipLimits = z.partialRecord(z.enum(BOARD_COLUMNS), z.number().int().min(1).max(99));
+export const workDefinitionsSchema = z.object({ ready: definition, done: definition, wip_limits: wipLimits.optional(), reason: z.string().trim().max(1000).optional() });
 
 const logWorkItem = (db: Db, id: number, userId: number | null, kind: string, body = '', data: object = {}) => logActivity(db, 'work_item', id, userId, kind, body, data);
 const words = (s: string) => s.replace('_', ' ');
@@ -135,8 +142,8 @@ async function parentFor(db: Db, type: Type, parentRef: string | null | undefine
   const p = rows[0];
   if (!p) throw badRequest(`Work item ${parentRef.toUpperCase()} not found`);
   if (p.id === selfId) throw badRequest('An item cannot be its own parent');
-  if (!PARENT_TYPES[type].includes(p.type)) {
-    throw badRequest(type === 'epic' ? 'An epic is at the top: it has no parent' : `A ${type} goes under ${PARENT_TYPES[type].map((t) => `a ${t}`).join(' or ')}, not under a ${p.type}`);
+  if (!WORK_ITEM_PARENT_TYPES[type].includes(p.type)) {
+    throw badRequest(type === 'epic' ? 'An epic is at the top: it has no parent' : `A ${type} goes under ${WORK_ITEM_PARENT_TYPES[type].map((t) => `a ${t}`).join(' or ')}, not under a ${p.type}`);
   }
   return p.id as number;
 }
@@ -144,7 +151,7 @@ async function parentFor(db: Db, type: Type, parentRef: string | null | undefine
 /** Changing an item's type must leave its children where the hierarchy allows them. */
 async function checkChildren(db: Db, id: number, type: Type) {
   const { rows } = await db.query('SELECT ref, type FROM work_items WHERE parent_id = $1', [id]);
-  const wrong = rows.find((c) => !PARENT_TYPES[c.type as Type].includes(type));
+  const wrong = rows.find((c) => !WORK_ITEM_PARENT_TYPES[c.type as Type].includes(type));
   if (wrong) throw badRequest(`${wrong.ref} is a ${wrong.type} and cannot sit under a ${type}: move it first`);
 }
 
@@ -157,7 +164,7 @@ async function checkChildren(db: Db, id: number, type: Type) {
 // after the caller's own access was checked.
 
 const GAP = 1024;
-const seeingAll = <T>(fn: () => Promise<T>) => contextStore.run({ ...currentContext(), viewer: 'system' }, fn);
+export const seeingAll = <T>(fn: () => Promise<T>) => contextStore.run({ ...currentContext(), viewer: 'system' }, fn);
 const lockBacklog = (db: Db, teamId: number | null) => db.query("SELECT pg_advisory_xact_lock(hashtext('kernel.backlog'), $1)", [teamId ?? 0]);
 const inBacklog = 'coalesce(team_id, 0) = coalesce($1::int, 0)';
 
@@ -200,19 +207,44 @@ async function rankFor(db: Db, id: number, teamId: number | null, place: z.infer
   return rankFor(db, id, teamId, place);
 }
 
+// ---- Sprints (#166) ---------------------------------------------------------------------------
+
+/**
+ * Ends an item's stay in a planned or active sprint: it goes back to the backlog, and the stay keeps the points it
+ * had. A completed sprint keeps its items as they were. True when the item left a sprint.
+ */
+export async function leaveSprint(db: Db, workItemId: number, sprintId: number | null) {
+  if (!sprintId) return false;
+  const { rowCount } = await db.query(
+    `UPDATE sprint_items si SET removed_at = now(), points = w.points FROM work_items w, sprints s
+     WHERE w.id = si.work_item_id AND s.id = si.sprint_id AND s.status <> 'completed' AND si.work_item_id = $1 AND si.sprint_id = $2 AND si.removed_at IS NULL`,
+    [workItemId, sprintId],
+  );
+  if (!rowCount) return false;
+  await db.query('UPDATE work_items SET sprint_id = NULL WHERE id = $1', [workItemId]);
+  return true;
+}
+
 // ---- Reading ---------------------------------------------------------------------------------
 
 const SELECT = `
   SELECT w.*, t.name AS team, a.display_name AS assignee, c.display_name AS created_by_name,
-         p.ref AS parent_ref, p.type AS parent_type, p.title AS parent_title, p.status AS parent_status
+         p.ref AS parent_ref, p.type AS parent_type, p.title AS parent_title, p.status AS parent_status,
+         s.name AS sprint, s.status AS sprint_status
   FROM work_items w LEFT JOIN teams t ON t.id = w.team_id LEFT JOIN users a ON a.id = w.assignee_id
-  LEFT JOIN users c ON c.id = w.created_by LEFT JOIN work_items p ON p.id = w.parent_id`;
+  LEFT JOIN users c ON c.id = w.created_by LEFT JOIN work_items p ON p.id = w.parent_id LEFT JOIN sprints s ON s.id = w.sprint_id`;
 
 /** An epic's progress: done and total points, and items, of what is under it (not removed), as the viewer sees it. */
 const PROGRESS = (w: string) => `
   (SELECT json_build_object('points_done', coalesce(sum(d.points) FILTER (WHERE d.status = 'done'), 0), 'points', coalesce(sum(d.points), 0),
                             'items_done', count(*) FILTER (WHERE d.status = 'done'), 'items', count(*))
    FROM work_items d WHERE d.status <> 'removed' AND (d.parent_id = ${w}.id OR d.parent_id IN (SELECT s.id FROM work_items s WHERE s.parent_id = ${w}.id)))`;
+
+/** A team's WIP limits per board column. */
+export async function wipLimitsOf(teamId: number): Promise<Partial<Record<Status, number>>> {
+  const { rows } = await query('SELECT wip_limits FROM work_definitions WHERE team_id = $1', [teamId]);
+  return rows[0]?.wip_limits ?? {};
+}
 
 async function definitionsOf(teamId: number | null) {
   if (!teamId) return { ready: [] as string[], done: [] as string[] };
@@ -233,18 +265,19 @@ export async function getWorkItem(user: User, ref: string) {
     definitionsOf(w.team_id),
   ]);
   // `type` is the record kind everywhere (records.ts); the item's own type is item_type.
-  const { search: _s, type: itemType, parent_id: _p, parent_ref, parent_type, parent_title, parent_status, ...rest } = w;
+  const { search: _s, type: itemType, parent_id: _p, parent_ref, parent_type, parent_title, parent_status, sprint, sprint_status, ...rest } = w;
   const detail = {
     type: 'work_item',
     ...rest,
     item_type: itemType as Type,
     parent: parent_ref ? { ref: parent_ref, type: parent_type, title: parent_title, status: parent_status } : null,
+    sprint: w.sprint_id ? { id: w.sprint_id, name: sprint, status: sprint_status } : null,
     children: children.rows,
     progress: progress?.rows[0].progress ?? null,
     definitions,
     links,
     activity,
-    transitions: TRANSITIONS[w.status as Status],
+    transitions: WORK_ITEM_TRANSITIONS[w.status as Status],
     url: workItemUrl(w.ref),
   };
   return { ...detail, next_steps: workItemGuidance(detail) };
@@ -297,6 +330,8 @@ export async function listWorkItems(user: User, f: z.infer<typeof listWorkItemsS
   else if (f.assignee !== undefined) add('w.assignee_id = ?', f.assignee === 'me' ? user.id : f.assignee);
   if (f.label) add('? = ANY(w.labels)', f.label);
   if (f.epic) add('(p.ref = ? OR EXISTS (SELECT 1 FROM work_items g WHERE g.id = p.parent_id AND g.ref = ?))', f.epic.toUpperCase());
+  if (f.sprint === 'none') where.push("(w.sprint_id IS NULL OR EXISTS (SELECT 1 FROM sprints s WHERE s.id = w.sprint_id AND s.status = 'completed'))");
+  else if (f.sprint !== undefined) add('w.sprint_id = ?', f.sprint);
   if (f.bulk) add('w.ref IN (SELECT unnest(refs) FROM bulk_requests WHERE id = ?)', f.bulk);
   if (f.q) {
     const terms = f.q.split(/\s+/).map((t) => t.replace(/[^\p{L}\p{N}_.-]/gu, '')).filter(Boolean);
@@ -305,7 +340,7 @@ export async function listWorkItems(user: User, f: z.infer<typeof listWorkItemsS
   params.push(f.limit);
   const order = { rank: 'coalesce(w.team_id, 0), w.rank', updated: 'w.updated_at DESC', created: 'w.created_at DESC' }[f.sort];
   const { rows } = await query(
-    `SELECT w.id, w.ref, w.type AS item_type, w.title, w.status, w.points, w.labels, w.rank, w.team_id, t.name AS team, w.assignee_id, a.display_name AS assignee,
+    `SELECT w.id, w.ref, w.type AS item_type, w.title, w.status, w.points, w.labels, w.rank, w.team_id, t.name AS team, w.assignee_id, a.display_name AS assignee, w.sprint_id,
             p.ref AS parent_ref, p.title AS parent_title, w.created_at, w.updated_at, w.done_at,
             CASE WHEN w.type = 'epic' THEN ${PROGRESS('w')} END AS progress
      FROM work_items w LEFT JOIN teams t ON t.id = w.team_id LEFT JOIN users a ON a.id = w.assignee_id LEFT JOIN work_items p ON p.id = w.parent_id
@@ -380,6 +415,8 @@ export async function updateWorkItemLean(user: User, ref: string, input: z.infer
     // Another team's backlog: the item goes to its bottom.
     const teamChange = changed.find(([k]) => k === 'team_id');
     if (teamChange) {
+      // A sprint is one team's: the item leaves it for the other backlog.
+      if (await leaveSprint(db, w.id, w.sprint_id)) await logWorkItem(db, w.id, user.id, 'sprint', 'Left its sprint for another team\'s backlog', { action: 'remove', sprint_id: w.sprint_id });
       await lockBacklog(db, teamChange[1] as number | null);
       changed.push(['rank', await bottomRank(db, teamChange[1] as number | null)]);
     }
@@ -401,7 +438,7 @@ export async function transitionWorkItemLean(user: User, ref: string, input: z.i
     const w = await loadWorkItem(db, ref);
     const from = w.status as Status;
     if (from === input.to) return;
-    if (!TRANSITIONS[from].includes(input.to)) throw conflict(`A work item cannot go from ${words(from)} to ${words(input.to)}`);
+    if (!WORK_ITEM_TRANSITIONS[from].includes(input.to)) throw conflict(`A work item cannot go from ${words(from)} to ${words(input.to)}`);
     if (input.to === 'removed' && !input.reason) throw badRequest('Give a reason for removing it from the backlog, so it is not lost');
     // The team's definition for this step: guidance, so moving on without it is allowed and logged.
     const definition = input.to === 'ready' || input.to === 'done' ? (await definitionsOf(w.team_id))[input.to] : [];
@@ -413,6 +450,7 @@ export async function transitionWorkItemLean(user: User, ref: string, input: z.i
        WHERE id = $1`,
       [w.id, input.to, input.reason ?? ''],
     );
+    if (input.to === 'removed' && (await leaveSprint(db, w.id, w.sprint_id))) await logWorkItem(db, w.id, user.id, 'sprint', 'Left its sprint when it was removed', { action: 'remove', sprint_id: w.sprint_id });
     const label = { new: 'Back to new', ready: 'Ready', in_progress: 'Started', in_review: 'In review', done: 'Done', removed: 'Removed' }[input.to];
     const name = input.to === 'ready' ? 'Definition of Ready' : 'Definition of Done';
     const body = input.to === 'removed' ? `${label}: ${input.reason}` : skipped.length ? `${label}, without the ${name}: ${skipped.join('; ')}` : label;
@@ -494,22 +532,23 @@ export async function getWorkDefinitions(user: User, teamId: number) {
   authorize(user, 'work.read');
   const { rows } = await query('SELECT id, name FROM teams WHERE id = $1', [teamId]);
   if (!rows[0]) throw notFound('Team not found');
-  return { team_id: teamId, team: rows[0].name, ...(await definitionsOf(teamId)), may_edit: can(user.role, 'work.manage') };
+  return { team_id: teamId, team: rows[0].name, ...(await definitionsOf(teamId)), wip_limits: await wipLimitsOf(teamId), may_edit: can(user.role, 'work.manage') };
 }
 
 export async function saveWorkDefinitions(user: User, teamId: number, input: z.infer<typeof workDefinitionsSchema>) {
   authorize(user, 'work.manage');
   await tx(async (db) => {
     await validTeam(db, teamId);
-    const before = await db.query('SELECT ready, done FROM work_definitions WHERE team_id = $1', [teamId]);
+    const before = await db.query('SELECT ready, done, wip_limits FROM work_definitions WHERE team_id = $1', [teamId]);
+    const limits = input.wip_limits ?? before.rows[0]?.wip_limits ?? {};
     await db.query(
-      `INSERT INTO work_definitions (team_id, ready, done, updated_by, updated_at) VALUES ($1, $2, $3, $4, now())
-       ON CONFLICT (team_id) DO UPDATE SET ready = $2, done = $3, updated_by = $4, updated_at = now()`,
-      [teamId, input.ready, input.done, user.id],
+      `INSERT INTO work_definitions (team_id, ready, done, wip_limits, updated_by, updated_at) VALUES ($1, $2, $3, $4, $5, now())
+       ON CONFLICT (team_id) DO UPDATE SET ready = $2, done = $3, wip_limits = $4, updated_by = $5, updated_at = now()`,
+      [teamId, input.ready, input.done, JSON.stringify(limits), user.id],
     );
     await audit(db, {
       entity_type: 'team', entity_ref: (await db.query('SELECT name FROM teams WHERE id = $1', [teamId])).rows[0].name, action: 'work_definitions',
-      changes: { ready: { from: before.rows[0]?.ready ?? [], to: input.ready }, done: { from: before.rows[0]?.done ?? [], to: input.done } }, reason: input.reason,
+      changes: { ready: { from: before.rows[0]?.ready ?? [], to: input.ready }, done: { from: before.rows[0]?.done ?? [], to: input.done }, wip_limits: { from: before.rows[0]?.wip_limits ?? {}, to: limits } }, reason: input.reason,
     });
   });
   return getWorkDefinitions(user, teamId);
@@ -566,6 +605,6 @@ const WORK_ITEM_TYPE: RecordType = {
 };
 registerRecordType(WORK_ITEM_TYPE);
 
-function workItemUrl(ref: string) {
+export function workItemUrl(ref: string) {
   return recordUrl(WORK_ITEM_TYPE, ref);
 }

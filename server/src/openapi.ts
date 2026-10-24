@@ -16,6 +16,7 @@ import * as oc from './people/oncall.js';
 import * as events from './events/events.js';
 import * as ch from './changes/changes.js';
 import * as imp from './improvements/improvements.js';
+import * as sp from './development/sprints.js';
 import * as wi from './development/work-items.js';
 import * as rq from './requests/requests.js';
 import * as portal from './requests/portal.js';
@@ -368,7 +369,18 @@ export const OPERATIONS: Op[] = [
   { method: 'post', path: '/api/work-items/:ref/links', tag: 'Work items', summary: 'Link a related work item or a document', body: wi.workItemLinkSchema },
   { method: 'delete', path: '/api/work-items/:ref/links/:id', tag: 'Work items', summary: 'Remove a link' },
   { method: 'get', path: '/api/teams/:id/work-definitions', tag: 'Work items', summary: "A team's Definition of Ready and Definition of Done" },
-  { method: 'put', path: '/api/teams/:id/work-definitions', tag: 'Work items', summary: "Change a team's Definition of Ready and Definition of Done (managers); kept in the audit trail", body: wi.workDefinitionsSchema },
+  { method: 'put', path: '/api/teams/:id/work-definitions', tag: 'Work items', summary: "Change a team's Definition of Ready and Definition of Done and its WIP limits per board column (managers); kept in the audit trail", body: wi.workDefinitionsSchema },
+  { method: 'get', path: '/api/teams/:id/board', tag: 'Work items', summary: "The team's board: the active sprint's items, or a Kanban team's open items, in status columns with WIP limits", query: sp.boardSchema },
+  { method: 'get', path: '/api/sprints', tag: 'Work items', summary: 'Sprints per team: planned, active (one per team) and completed, with their points', query: sp.listSprintsSchema },
+  { method: 'post', path: '/api/sprints', tag: 'Work items', summary: 'Plan a sprint for a team: name, goal, dates and capacity in points', body: sp.createSprintSchema },
+  { method: 'get', path: '/api/sprints/:id', tag: 'Work items', summary: 'A sprint with its items, points against capacity, the burndown, the velocity of the last six sprints, the unplanned share and the retrospective' },
+  { method: 'patch', path: '/api/sprints/:id', tag: 'Work items', summary: 'Change the name, goal, dates, capacity or the sprint review notes', body: sp.updateSprintSchema },
+  { method: 'post', path: '/api/sprints/:id/items', tag: 'Work items', summary: "Sprint planning: add items from the team's backlog or take them out; added after the start, they are unplanned", body: sp.sprintItemsSchema },
+  { method: 'post', path: '/api/sprints/:id/start', tag: 'Work items', summary: 'Start the sprint: one active sprint per team; its points are what the team committed to' },
+  { method: 'post', path: '/api/sprints/:id/complete', tag: 'Work items', summary: 'Complete the sprint: each unfinished item goes back to the backlog (the default) or on to the next planned sprint, logged on the item', body: sp.completeSprintSchema },
+  { method: 'post', path: '/api/sprints/:id/retro', tag: 'Work items', summary: 'Add to the retrospective: what went well, what was hard, what to change', body: sp.retroItemSchema },
+  { method: 'delete', path: '/api/sprints/:id/retro/:itemId', tag: 'Work items', summary: 'Remove a retrospective item (its writer or a manager)' },
+  { method: 'post', path: '/api/sprints/:id/retro/:itemId/improvement', tag: 'Work items', summary: 'Turn something to change into an improvement (source retrospective)', body: sp.retroImprovementSchema },
   { method: 'get', path: '/api/improvements', tag: 'Improvements', summary: 'The continual improvement register (open by default); quick_wins=true for value 4–5 and effort 1–2', query: imp.listImprovementsSchema },
   { method: 'get', path: '/api/improvements/model', tag: 'Improvements', summary: 'The continual improvement model in four lines, for guided mode' },
   { method: 'post', path: '/api/improvements', tag: 'Improvements', summary: 'Suggest an improvement; from a review, problem or service review it starts as narrow as its source. Supports Idempotency-Key', body: imp.createImprovementSchema },

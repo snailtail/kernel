@@ -200,7 +200,12 @@ done and total points. Each team keeps a Definition of Ready and Done, shown whe
 allowed and logged. Restricted and confidential items work as for problems, and a child starts as narrow as its
 parent. API: `/api/work-items` (+ `/:ref/transition`, `/move`, `/links`, `/comments`), `/api/teams/:id/work-definitions`;
 MCP: `list_work_items`, `get_work_item`, `create_work_item`, `update_work_item`, `transition_work_item`,
-`reorder_backlog`.
+`reorder_backlog`. **Sprints** (#166) per team, one active at a time: planning pulls items from the backlog with the
+points against capacity, completing sends each unfinished item back to the backlog or on to the next sprint, and the
+sprint shows a burndown, the velocity of the last six sprints and the share of unplanned work. Kanban teams use the
+same board without sprints, with WIP limits per column as a warning. A retrospective's "to change" becomes an
+improvement with one click. API: `/api/sprints` (+ `/:id/items`, `/start`, `/complete`, `/retro`),
+`/api/teams/:id/board`; MCP: `list_sprints`, `get_sprint`, `plan_sprint`, `complete_sprint`.
 Viewers stay strictly read-only (auditors, stakeholders): end users report incidents through the service desk or,
 later, the self-service portal (#45), not with a viewer account.
 
