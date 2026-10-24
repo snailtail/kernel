@@ -84,6 +84,21 @@ export function MyWorkPage() {
         </section>
       ),
     ],
+    ['work_items', 'work_item',
+      !!data.work_items?.length && (
+        <section className="card">
+          <h2>My work items <span className="count">{data.work_items.length}</span></h2>
+          <ul className="work-list">
+            {data.work_items.map((w) => (
+              <li key={w.ref}>
+                <div><Link to={`/work/${w.ref}`} className="mono">{w.ref}</Link> <Link to={`/work/${w.ref}`} className="work-title">{w.title}</Link></div>
+                <span className="work-meta"><span className="muted small">{w.item_type} · {w.status.replace('_', ' ')}</span></span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ),
+    ],
     ['improvements', 'improvement',
       !!data.improvements?.length && (
         <section className="card">
@@ -211,7 +226,7 @@ export function MyWorkPage() {
     ],
   ];
   const ordered = [...sections.filter(([, p]) => p === focus), ...sections.filter(([, p]) => p !== focus)];
-  const nothing = !data.request_tasks?.length && !data.request_approvals?.length && !data.request_queue?.length && !data.reviews?.length && !data.improvements?.length && !data.major_updates?.length && !data.problems.length && !data.incidents.length && !data.team_queue?.length && !data.change_votes.length && !data.changes.length && !data.actions.length && !data.decisions.length && !data.approvals.length;
+  const nothing = !data.request_tasks?.length && !data.request_approvals?.length && !data.request_queue?.length && !data.reviews?.length && !data.improvements?.length && !data.work_items?.length && !data.major_updates?.length && !data.problems.length && !data.incidents.length && !data.team_queue?.length && !data.change_votes.length && !data.changes.length && !data.actions.length && !data.decisions.length && !data.approvals.length;
   return (
     <>
       <header className="page-head">

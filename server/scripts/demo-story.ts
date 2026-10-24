@@ -20,6 +20,7 @@ import * as people from '../src/people/people.js';
 import * as portal from '../src/requests/portal.js';
 import * as problems from '../src/problems/problems.js';
 import * as improvements from '../src/improvements/improvements.js';
+import * as workItems from '../src/development/work-items.js';
 import * as requests from '../src/requests/requests.js';
 import * as rules from '../src/automation/rules.js';
 import { contextStore, currentContext } from '../src/core/context.js';
@@ -416,6 +417,27 @@ export async function seedStory(p: People) {
   });
   await incidents.createIncident(sara, { title: 'Order history page is blank', description: 'Johan cannot see his orders in the shop admin.', impact: 3, urgency: 3, caller: { email: 'johan.ek@example.com' } });
   await rules.processRuleRuns();
+
+  // ---- Development work (#165): an optional module, on in the demo; the Web platform team's backlog ----
+  await setup.setModules(admin, { development: true }, 'Demo story');
+  await workItems.saveWorkDefinitions(anna, web!.id, { ready: ['Has acceptance criteria', 'Estimated by the team'], done: ['Code reviewed', 'Tested', 'Deployed to production'], reason: 'Agreed at the retrospective' });
+  const epic = (await workItems.createWorkItem(erik, { type: 'epic', title: 'Faster checkout', description: 'Checkout takes 6 steps and 40 % of carts are abandoned there.', team_id: web!.id })).ref;
+  const backlog: [Parameters<typeof workItems.createWorkItem>[1], string?][] = [
+    [{ type: 'story', title: 'As a customer I can pay without creating an account', parent: epic, points: 8, labels: ['checkout'], acceptance_criteria: [{ criterion: 'Guest checkout on desktop and mobile', done: true }, { criterion: 'Order confirmation by email', done: false }] }, 'in_progress'],
+    [{ type: 'bug', title: 'Card form loses the expiry date on back', parent: epic, points: 2, labels: ['checkout', 'payments'], steps_to_reproduce: '1. Enter a card\n2. Go back to the cart\n3. Return to payment', expected_result: 'The form keeps what was entered', actual_result: 'The expiry date is empty', found_in: 'shop-web 4.12, Safari 18' }, 'ready'],
+    [{ type: 'story', title: 'Remember the delivery address', parent: epic, points: 3, labels: ['checkout'] }, 'done'],
+    [{ type: 'story', title: 'Show delivery times on the product page', points: 5, labels: ['product'] }],
+    [{ type: 'task', title: 'Upgrade the search client library', labels: ['tech-debt'] }],
+    [{ type: 'story', title: 'Search suggestions while typing', labels: ['search'] }],
+  ];
+  for (const [input, to] of backlog) {
+    const ref = (await workItems.createWorkItem(erik, { team_id: web!.id, ...input })).ref;
+    for (const step of to ? (['ready', 'in_progress', 'in_review', 'done'] as const).slice(0, ['ready', 'in_progress', 'in_review', 'done'].indexOf(to) + 1) : []) {
+      await workItems.transitionWorkItem(step === 'ready' ? erik : sara, ref, { to: step, checked: step === 'ready' ? ['Has acceptance criteria', 'Estimated by the team'] : ['Code reviewed', 'Tested', 'Deployed to production'] });
+    }
+  }
+  const guest = (await query("SELECT ref FROM work_items WHERE title LIKE 'As a customer I can pay%'")).rows[0].ref as string;
+  await workItems.createWorkItem(sara, { type: 'task', title: 'Add the guest flag to the order API', parent: guest, team_id: web!.id });
 
   // The pages the story queued (the worker is not running while seeding).
   await oncall.deliverPages();
