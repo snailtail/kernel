@@ -4,7 +4,7 @@ import { formatDate, relativeTime } from '../format';
 import { useApi } from '../hooks';
 import { CopyBlock } from './CopyBlock';
 import { Modal } from './Modal';
-import { useTeams } from '../pages/Teams';
+import { useTeams } from './Teams';
 
 interface Run { id?: number; trigger?: string; status: string; counts: Record<string, any>; errors?: { source_id?: string; error: string }[]; message: string; started_at: string; finished_at: string | null }
 interface Connector {

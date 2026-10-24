@@ -1,9 +1,11 @@
 import { useState, type FormEvent } from 'react';
+import { RequestCatalogueCard } from '../components/RequestCatalogue';
 import { SsoAdminSection } from '../components/SsoAdmin';
 import { AiAdminSection } from '../components/Ai';
-import { StatusPageAdmin } from './StatusBoard';
 import { DevSourcesSection } from '../components/DevLinks';
 import { api, type Role } from '../api';
+import type { BackupStatus } from '../api/types/admin';
+import { StatusPageAdmin } from '../components/StatusPageAdmin';
 import { formatDate, relativeTime, ROLE_LABEL } from '../format';
 import { useApi } from '../hooks';
 import { isManager, useSession } from '../session';
@@ -11,7 +13,6 @@ import { Modal } from '../components/Modal';
 import { askReason } from '../components/Ask';
 import { ConnectorsCard } from '../components/Connectors';
 import { Link } from 'react-router';
-import { RequestCatalogueCard } from './Requests';
 import { StartPageSelects, type StartChoice } from '../components/StartPage';
 
 interface AdminUser {
@@ -234,14 +235,6 @@ function CategoriesCard() {
       </ul>
     </section>
   );
-}
-
-export interface BackupStatus {
-  configured: boolean;
-  last_success?: string | null;
-  last_failure?: string | null;
-  healthy?: boolean;
-  files?: { tier: string; name: string; size: number; created_at: string }[];
 }
 
 const formatSize = (bytes: number) =>

@@ -184,7 +184,7 @@ export function MyWorkPage() {
               {data.problems.map((p) => (
                 <li key={p.ref}>
                   <div><Link to={`/problems/${p.ref}`} className="mono">{p.ref}</Link> <Link to={`/problems/${p.ref}`} className="work-title">{p.title}</Link></div>
-                  <span className="work-meta"><PriorityBadge priority={p.priority} /><StatusBadge status={p.status} /></span>
+                  <span className="work-meta"><PriorityBadge priority={p.priority} /><StatusBadge kind="problem" status={p.status} /></span>
                 </li>
               ))}
             </ul>

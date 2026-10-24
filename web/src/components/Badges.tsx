@@ -1,8 +1,15 @@
-import type { Status } from '../api';
-import { PRIORITY_LABEL, STATUS_LABEL } from '../format';
+import { PRIORITY_LABEL } from '../format';
+import { BADGE_STATUS, type StatusKind, type StatusOf } from '../statuses';
 
-export function StatusBadge({ status }: { status: Status }) {
-  return <span className={`badge status-${status}`}>{STATUS_LABEL[status]}</span>;
+/** The status of any record kind, coloured by kind: <StatusBadge kind="incident" status="on_hold" />. */
+export function StatusBadge<K extends StatusKind>({ kind, status }: { kind: K; status: StatusOf<K> }) {
+  const { prefix, labels } = BADGE_STATUS[kind];
+  return <span className={`badge ${prefix}-${String(status)}`}>{(labels as Record<string, string>)[status as string]}</span>;
+}
+
+const PERSONAL_DATA_HINT = 'The text holds personal data (personal identity numbers or email addresses). It is kept, and counts for retention and AI handling.';
+export function PersonalDataBadge() {
+  return <span className="badge" title={PERSONAL_DATA_HINT}>Personal data</span>;
 }
 
 export function PriorityBadge({ priority }: { priority: number }) {

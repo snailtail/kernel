@@ -5,6 +5,8 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { api, type Action, type Guidance } from '../api';
 import { ActionsCard } from '../components/Actions';
 import { askReason, askText } from '../components/Ask';
+import { StatusBadge } from '../components/Badges';
+import { CommentBox } from '../components/CommentBox';
 import { GuidePanel, isGuided } from '../components/Guide';
 import { HistoryPanel } from '../components/History';
 import { formatKpi, periodLabel, Trend } from '../components/Kpis';
@@ -12,29 +14,28 @@ import { useColumns, useListToolkit, type ColumnKey } from '../components/ListTo
 import { Markdown } from '../components/Markdown';
 import { Modal } from '../components/Modal';
 import { Presence } from '../components/Presence';
-import { richPaste } from '../components/RichPaste';
 import { SavedViews } from '../components/SavedViews';
+import { TransitionButtons } from '../components/TransitionButtons';
 import { RecordNotFound, VisibilityPanel } from '../components/Visibility';
 import { formatDate, relativeTime } from '../format';
 import { useApi, useSearchText } from '../hooks';
 import { useLive } from '../live';
 import { canEdit, useSession } from '../session';
+import { IMPROVEMENT_STATUS, type ImprovementStatus } from '../statuses';
 
-type Status = 'idea' | 'approved' | 'in_progress' | 'done' | 'rejected';
-export const IMPROVEMENT_STATUS: Record<Status, string> = { idea: 'Idea', approved: 'Approved', in_progress: 'In progress', done: 'Done', rejected: 'Rejected' };
-const STATUSES = Object.keys(IMPROVEMENT_STATUS) as Status[];
+const STATUSES = Object.keys(IMPROVEMENT_STATUS) as ImprovementStatus[];
 const SOURCE: Record<string, string> = { review: 'Post-incident review', problem: 'Problem', service_review: 'Service review', idea: 'Idea' };
 /** The dashboard tiles an improvement can watch (kpis.ts TILES). */
 const KPI_LABEL: Record<string, string> = {
   mttr: 'Mean time to resolve', sla: 'Resolved within SLA', change_success: 'Change success rate', recurring: 'Recurring incidents',
   problems_resolved: 'Problems resolved', major_open: 'Open major incidents',
 };
-const TRANSITION_LABEL: Record<Status, string> = { idea: 'Back to idea', approved: 'Approve', in_progress: 'Start', done: 'Mark done', rejected: 'Reject' };
+const TRANSITION_LABEL: Record<ImprovementStatus, string> = { idea: 'Back to idea', approved: 'Approve', in_progress: 'Start', done: 'Mark done', rejected: 'Reject' };
 /** A move back is not a decision: "Back to approved" pauses work, "Reopen" picks done work up again. */
-const transitionLabel = (from: Status, to: Status) => (from === 'in_progress' && to === 'approved' ? 'Back to approved' : from === 'done' && to === 'in_progress' ? 'Reopen' : TRANSITION_LABEL[to]);
+const transitionLabel = (from: ImprovementStatus, to: ImprovementStatus) => (from === 'in_progress' && to === 'approved' ? 'Back to approved' : from === 'done' && to === 'in_progress' ? 'Reopen' : TRANSITION_LABEL[to]);
 
 interface Row {
-  ref: string; title: string; status: Status; source: string; source_ref: string | null; value: number | null; effort: number | null; kpi: string | null;
+  ref: string; title: string; status: ImprovementStatus; source: string; source_ref: string | null; value: number | null; effort: number | null; kpi: string | null;
   owner_id: number | null; owner: string | null; service_ref: string | null; service_name: string | null; created_at: string; updated_at: string; links: number;
 }
 interface LinkRow { id: number; kind: string; reference: string; system: string; url: string; note: string; title: string | null; status: string | null; action_problem_ref: string | null; action_path?: string }
@@ -45,15 +46,12 @@ interface Detail extends Omit<Row, 'links'> {
   links: LinkRow[];
   actions: Action[];
   kpi_tile: { id: string; label: string; value: number | null; unit: 'minutes' | 'percent' | 'count'; trend: (number | null)[]; trend_label: string; lower_is_better: boolean; starts: string[]; link: string } | null;
-  transitions: Status[];
+  transitions: ImprovementStatus[];
   may_decide: boolean;
   activity: { id: number; kind: string; body: string; data: any; channel: string; created_at: string; user_name: string | null }[];
   next_steps: Guidance;
 }
 
-export function ImprovementStatusBadge({ status }: { status: Status }) {
-  return <span className={`badge imp-${status}`}>{IMPROVEMENT_STATUS[status]}</span>;
-}
 const rating = (m: { value: number | null; effort: number | null }) => (m.value && m.effort ? `V${m.value} · E${m.effort}` : '–');
 /** The matrix quadrants, the same split as the server's quick_wins filter: value 4–5 is high, effort 1–2 is low. */
 const quadrantOf = (m: { value: number | null; effort: number | null }) =>
@@ -73,7 +71,7 @@ function ModelHint() {
 }
 
 /** Moving a card or a row: done asks for the benefit, rejecting for a reason (the same rules as the API). */
-async function transitionBody(to: Status, current?: string | null) {
+async function transitionBody(to: ImprovementStatus, current?: string | null) {
   if (to === 'done') {
     const benefit = current?.trim() ? current : await askText('Mark done', 'What did it bring?', { confirmLabel: 'Mark done', message: 'Write down the benefit, in numbers if you have them: it is what the register is for.' });
     return benefit ? { to, benefit } : null;
@@ -170,7 +168,7 @@ function ImprovementList({ rows, loading, filter, onChanged }: { rows: Row[] | n
                     {tk.selectAll && <td className="check-col">{tk.select(m, n)}</td>}
                     <td className="mono nowrap"><Link to={`/improvements/${m.ref}`}>{m.ref}</Link></td>
                     <td className="title-cell"><Link to={`/improvements/${m.ref}`}>{m.title}</Link>{quadrantOf(m) === 'quick' && <span className="tag quick-win">quick win</span>}</td>
-                    <td data-col="status"><ImprovementStatusBadge status={m.status} /></td>
+                    <td data-col="status"><StatusBadge kind="improvement" status={m.status} /></td>
                     <td className="nowrap" data-col="priority">{rating(m)}</td>
                     <td className="hide-sm" data-col="assignee">{m.owner ?? <span className="muted">–</span>}</td>
                     <td className="hide-sm small" data-col="service">{m.service_name ?? '–'}</td>
@@ -190,8 +188,8 @@ function ImprovementList({ rows, loading, filter, onChanged }: { rows: Row[] | n
 /** Kanban by status. Dragging a card is a status change with the API's rules; each card also has a menu to move it. */
 function Board({ rows, editable, onChanged }: { rows: Row[]; editable: boolean; onChanged: () => void }) {
   const [error, setError] = useState<string | null>(null);
-  const [over, setOver] = useState<Status | null>(null);
-  const move = async (ref: string, to: Status) => {
+  const [over, setOver] = useState<ImprovementStatus | null>(null);
+  const move = async (ref: string, to: ImprovementStatus) => {
     const row = rows.find((r) => r.ref === ref);
     if (!row || row.status === to) return;
     const body = await transitionBody(to);
@@ -204,7 +202,7 @@ function Board({ rows, editable, onChanged }: { rows: Row[]; editable: boolean; 
     }
     onChanged();
   };
-  const drop = (to: Status) => (e: DragEvent) => { e.preventDefault(); setOver(null); const ref = e.dataTransfer.getData('text/plain'); if (ref) move(ref, to); };
+  const drop = (to: ImprovementStatus) => (e: DragEvent) => { e.preventDefault(); setOver(null); const ref = e.dataTransfer.getData('text/plain'); if (ref) move(ref, to); };
   return (
     <>
       {error && <div className="error">{error}</div>}
@@ -226,7 +224,7 @@ function Board({ rows, editable, onChanged }: { rows: Row[]; editable: boolean; 
                   <div className="kanban-meta">
                     <span className="muted small">{m.owner ?? 'No owner'}{m.service_name ? ` · ${m.service_name}` : ''}</span>
                     {editable && (
-                      <select className="kanban-move" value="" aria-label={`Move ${m.ref}`} onChange={(e) => e.target.value && move(m.ref, e.target.value as Status)}>
+                      <select className="kanban-move" value="" aria-label={`Move ${m.ref}`} onChange={(e) => e.target.value && move(m.ref, e.target.value as ImprovementStatus)}>
                         <option value="">Move…</option>
                         {STATUSES.filter((t) => t !== s).map((t) => <option key={t} value={t}>{IMPROVEMENT_STATUS[t]}</option>)}
                       </select>
@@ -438,7 +436,6 @@ export function ImprovementPage() {
   const others = useLive([m && `improvement:${m.id}`], refresh, { presence: true });
   const [actionError, setActionError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
-  const [note, setNote] = useState('');
   if (error) return <RecordNotFound refId={ref ?? ''} error={error} onOpened={reload} />;
   if (!m) return null;
   const path = `/api/improvements/${m.ref}`;
@@ -453,7 +450,7 @@ export function ImprovementPage() {
       return false;
     }
   };
-  const go = async (to: Status) => {
+  const go = async (to: ImprovementStatus) => {
     const body = await transitionBody(to, m.benefit);
     if (body) await run(() => api.post(`${path}/transition`, body));
   };
@@ -465,18 +462,20 @@ export function ImprovementPage() {
         <div className="crumbs"><Link to="/improvements">Improvements</Link> / <span className="mono">{m.ref}</span> <Presence people={others} /></div>
         <h1>{m.title}</h1>
         <div className="badges">
-          <ImprovementStatusBadge status={m.status} />
+          <StatusBadge kind="improvement" status={m.status} />
           {quadrantOf(m) === 'quick' && <span className="tag quick-win">quick win</span>}
           <span className="tag">{SOURCE[m.source]}{m.source_ref && <> {sourcePath ? <Link to={sourcePath} className="mono">{m.source_ref}</Link> : <span className="mono">{m.source_ref}</span>}</>}</span>
           <span className="muted small">Suggested by {m.created_by_name ?? 'someone'} {relativeTime(m.created_at)}</span>
         </div>
         {editable && (
-          <div className="transitions">
-            {m.transitions.map((to) => (
-              <button key={to} className={`btn${to === m.transitions[0] && to !== 'rejected' && to !== 'idea' ? ' primary' : ''}${to === 'rejected' ? ' danger' : ''}`} onClick={() => go(to)}>{transitionLabel(m.status, to)}</button>
-            ))}
-            <button className="btn" onClick={() => setEditing(true)}>Edit</button>
-          </div>
+          <TransitionButtons buttons={[
+            ...m.transitions.map((to) => ({
+              label: transitionLabel(m.status, to),
+              tone: to === 'rejected' ? 'danger' as const : to === m.transitions[0] && to !== 'idea' ? 'primary' as const : undefined,
+              onClick: () => go(to),
+            })),
+            { label: 'Edit', onClick: () => setEditing(true) },
+          ]} />
         )}
         {m.status === 'idea' && !m.may_decide && <p className="muted small">A manager approves or rejects it.</p>}
         {actionError && <div className="error">{actionError}</div>}
@@ -494,17 +493,14 @@ export function ImprovementPage() {
           <section className="card">
             <h2>Notes &amp; history</h2>
             {editable && (
-              <form className="comment-form" onSubmit={async (e) => { e.preventDefault(); if (await run(() => api.post(`${path}/comments`, { body: note }))) setNote(''); }}>
-                <textarea rows={2} placeholder="Add a note" value={note} onChange={(e) => setNote(e.target.value)} {...richPaste(m.ref, setNote, setActionError)} />
-                <div className="actions"><button className="btn primary" disabled={!note.trim()}>Add note</button></div>
-              </form>
+              <CommentBox recordRef={m.ref} placeholder="Add a note" onError={setActionError} onSubmit={(body) => run(() => api.post(`${path}/comments`, { body }))} />
             )}
             <ul className="activity">
               {m.activity.map((a) => (
                 <li key={a.id}>
                   <div className="activity-head">
                     <strong>{a.user_name ?? 'System'}</strong>{' '}
-                    {a.kind === 'comment' ? 'added a note' : a.kind === 'status' ? `moved it from ${IMPROVEMENT_STATUS[a.data.status?.from as Status] ?? '?'} to ${IMPROVEMENT_STATUS[a.data.status?.to as Status] ?? '?'}` : a.body}
+                    {a.kind === 'comment' ? 'added a note' : a.kind === 'status' ? `moved it from ${IMPROVEMENT_STATUS[a.data.status?.from as ImprovementStatus] ?? '?'} to ${IMPROVEMENT_STATUS[a.data.status?.to as ImprovementStatus] ?? '?'}` : a.body}
                     {(a.channel === 'mcp' || a.channel === 'api') && <span className="tag channel">via {a.channel.toUpperCase()}</span>}
                     <time title={formatDate(a.created_at)}>{relativeTime(a.created_at)}</time>
                   </div>

@@ -1,8 +1,9 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { api, type Guidance } from '../api';
+import { CommentBox } from '../components/CommentBox';
 import { GuidePanel } from '../components/Guide';
-import { richPaste } from '../components/RichPaste';
+import { TransitionButtons } from '../components/TransitionButtons';
 import { RecordNotFound, VisibilityPanel } from '../components/Visibility';
 import { DevLinksPanel } from '../components/DevLinks';
 import { PagesCard } from '../components/OnCall';
@@ -10,15 +11,16 @@ import { SummaryButton } from '../components/Ai';
 import { useColumns, useListToolkit, type ColumnKey } from '../components/ListToolkit';
 import { SavedViews } from '../components/SavedViews';
 import { InboundReview } from '../components/InboundReview';
-import { TeamAndAssignee, useTeams } from './Teams';
-import { ArticleSuggestions, IncidentKnowledgePanel, type ArticleRow } from './Knowledge';
+import { INCIDENT_RESOLUTION, INCIDENT_STATUS, type IncidentStatus } from '../statuses';
+import { TeamAndAssignee, useTeams } from '../components/Teams';
+import { ArticleSuggestions, IncidentKnowledgePanel, type ArticleRow } from '../components/Knowledge';
 import { AttachmentsPanel } from '../components/Attachments';
 import { IncidentPeoplePanel, PersonPicker, type PersonLite, type PersonRef } from '../components/People';
 import { AffectedCisPanel, type AffectedCi, type AffectedService, type ImpactHint } from '../components/AffectedCis';
-import { MajorBadge, PriorityBadge } from '../components/Badges';
+import { MajorBadge, PersonalDataBadge, PriorityBadge, StatusBadge } from '../components/Badges';
 import { Markdown } from '../components/Markdown';
 import { CommunicationLogCard, DeclareMajorModal, IncidentTimeline, KeyMomentToggle, MajorHeader, RelatedIncidentsPanel, ReviewCard, StatusProposalCard, type MajorInfo, type RelatedRow, type ReviewSummary, type StatusProposal } from '../components/MajorIncident';
-import { Modal } from '../components/Modal';
+import { FormModal, Modal } from '../components/Modal';
 import { duration, formatDate, relativeTime } from '../format';
 import { useLive } from '../live';
 import { Presence } from '../components/Presence';
@@ -28,7 +30,6 @@ import { Term } from '../components/Glossary';
 import { SeverityBadge, SlaBadge } from '../components/Badges';
 import { HistoryPanel } from '../components/History';
 
-type IncidentStatus = 'new' | 'in_progress' | 'on_hold' | 'resolved' | 'closed';
 interface IncidentRow {
   id: number; ref: string; title: string; status: IncidentStatus; priority: number; is_major: boolean; assignee: string | null;
   assignment_group: string; source: string; created_at: string; resolved_at: string | null; problem_ref: string | null; cis: string[] | null;
@@ -54,15 +55,8 @@ interface Incident extends IncidentRow {
 
 interface SlaClock { target_minutes: number | null; due_at: string | null; elapsed_minutes: number; remaining_minutes: number | null; state: string; met_at?: string | null }
 
-const INCIDENT_STATUS: Record<IncidentStatus, string> = { new: 'New', in_progress: 'In progress', on_hold: 'On hold', resolved: 'Resolved', closed: 'Closed' };
-const RESOLUTION: Record<string, string> = {
-  fixed: 'Fixed', workaround: 'Workaround applied', problem_fixed: 'Fixed by problem resolution', no_fault_found: 'No fault found', duplicate: 'Duplicate', cancelled: 'Cancelled',
-};
 const LEVEL = ['', 'High', 'Medium', 'Low'];
 
-function IncidentStatusBadge({ status }: { status: IncidentStatus }) {
-  return <span className={`badge inc-${status}`}>{INCIDENT_STATUS[status]}</span>;
-}
 
 const INCIDENT_COLUMNS: { key: ColumnKey; label: string }[] = [
   { key: 'status', label: 'Status' }, { key: 'priority', label: 'Priority' }, { key: 'sla', label: 'SLA' }, { key: 'cis', label: 'CIs' },
@@ -129,7 +123,7 @@ export function IncidentsPage() {
                       {i.parent_ref && <div className="muted small">part of <Link to={`/incidents/${i.parent_ref}`} className="mono">{i.parent_ref}</Link></div>}
                       {!!i.child_count && <div className="muted small">{i.child_count} related</div>}
                     </td>
-                    <td data-col="status"><IncidentStatusBadge status={i.status} /></td>
+                    <td data-col="status"><StatusBadge kind="incident" status={i.status} /></td>
                     <td data-col="priority"><PriorityBadge priority={i.priority} /></td>
                     <td className="nowrap" data-col="sla"><SlaBadge state={i.sla_state} />{i.resolution_due_at && ['on_track', 'at_risk'].includes(i.sla_state ?? '') && <div className="muted small">due {relativeTime(i.resolution_due_at)}</div>}</td>
                     <td className="hide-sm small" data-col="cis">{i.cis?.join(', ') ?? '–'}</td>
@@ -221,7 +215,6 @@ export function IncidentPage() {
   const navigate = useNavigate();
   const { data: i, setData, error, reload, refresh } = useApi<Incident>(`/api/incidents/${ref}`);
   const others = useLive([i && `incident:${i.id}`], refresh, { presence: true });
-  const [note, setNote] = useState('');
   const [noteKind, setNoteKind] = useState<'comment' | 'communication'>('comment');
   // A note is internal unless the person chooses to reply to the caller (#45): replies show in the portal and go by mail.
   const [toCaller, setToCaller] = useState(false);
@@ -247,6 +240,7 @@ export function IncidentPage() {
   const path = `/api/incidents/${i.ref}`;
   const go = (body: object) => run(() => api.post(`${path}/transition`, body));
   const save = (fields: object) => run(() => api.patch(path, { ...fields, base: Object.fromEntries(Object.keys(fields).map((k) => [k, (i as any)[k]])) }));
+  const unresolved = ['new', 'in_progress', 'on_hold'].includes(i.status);
   const hold = async () => {
     const reason = window.prompt('Why is it on hold? (e.g. waiting for the customer or a supplier)');
     if (reason?.trim()) await go({ to: 'on_hold', hold_reason: reason.trim() });
@@ -258,23 +252,23 @@ export function IncidentPage() {
         <div className="crumbs"><Link to="/incidents">Incidents</Link> / <span className="mono">{i.ref}</span> <Presence people={others} /></div>
         <h1>{i.title}</h1>
         <div className="badges">
-          {(i as any).contains_personal_data && <span className="badge" title="The text holds personal data (personal identity numbers or email addresses). It is kept, and counts for retention and AI handling.">Personal data</span>}
-          <IncidentStatusBadge status={i.status} />
+          {(i as any).contains_personal_data && <PersonalDataBadge />}
+          <StatusBadge kind="incident" status={i.status} />
           <PriorityBadge priority={i.priority} />
           {i.is_major && <MajorBadge />}
           <span className="muted small">Opened {relativeTime(i.created_at)}{i.source !== 'user' ? ` via ${i.source}` : ''}{i.reopen_count ? ` · reopened ${i.reopen_count}×` : ''}</span>
         </div>
         {editable && (
-          <div className="transitions">
-            {i.status === 'new' && <button className="btn primary" onClick={() => go({ to: 'in_progress' })}>Start work</button>}
-            {i.status === 'on_hold' && <button className="btn primary" onClick={() => go({ to: 'in_progress' })}>Resume</button>}
-            {['new', 'in_progress'].includes(i.status) && <button className="btn" onClick={hold}>Put on hold</button>}
-            {['new', 'in_progress', 'on_hold'].includes(i.status) && <button className="btn primary" onClick={() => setResolving(true)}>Resolve</button>}
-            {i.status === 'resolved' && <button className="btn primary" onClick={() => go({ to: 'closed' })}>Close</button>}
-            {i.status === 'resolved' && <button className="btn" onClick={() => go({ to: 'in_progress', comment: 'Reopened: the issue came back' })}>Reopen</button>}
-            {manager && !i.is_major && !i.parent && ['new', 'in_progress', 'on_hold'].includes(i.status) && <button className="btn" onClick={() => setDeclaring(true)}>Declare major incident</button>}
-            {manager && i.is_major && ['new', 'in_progress', 'on_hold'].includes(i.status) && <button className="btn" onClick={() => window.confirm('Not a major incident after all? The update countdown stops; resolve it instead when service is restored.') && save({ is_major: false })}>Not a major incident</button>}
-          </div>
+          <TransitionButtons buttons={[
+            { label: 'Start work', tone: 'primary', show: i.status === 'new', onClick: () => go({ to: 'in_progress' }) },
+            { label: 'Resume', tone: 'primary', show: i.status === 'on_hold', onClick: () => go({ to: 'in_progress' }) },
+            { label: 'Put on hold', show: ['new', 'in_progress'].includes(i.status), onClick: hold },
+            { label: 'Resolve', tone: 'primary', show: unresolved, onClick: () => setResolving(true) },
+            { label: 'Close', tone: 'primary', show: i.status === 'resolved', onClick: () => go({ to: 'closed' }) },
+            { label: 'Reopen', show: i.status === 'resolved', onClick: () => go({ to: 'in_progress', comment: 'Reopened: the issue came back' }) },
+            { label: 'Declare major incident', show: manager && !i.is_major && !i.parent && unresolved, onClick: () => setDeclaring(true) },
+            { label: 'Not a major incident', show: manager && i.is_major && unresolved, onClick: () => window.confirm('Not a major incident after all? The update countdown stops; resolve it instead when service is restored.') && save({ is_major: false }) },
+          ]} />
         )}
         {actionError && <div className="error">{actionError}</div>}
       </header>
@@ -321,7 +315,7 @@ export function IncidentPage() {
           </section>
           {(i.status === 'resolved' || i.status === 'closed') && (
             <section className="card">
-              <h2>Resolution <span className="tag">{RESOLUTION[i.resolution_code ?? ''] ?? i.resolution_code}</span></h2>
+              <h2>Resolution <span className="tag">{INCIDENT_RESOLUTION[i.resolution_code ?? ''] ?? i.resolution_code}</span></h2>
               <Markdown text={i.resolution || '–'} />
             </section>
           )}
@@ -334,23 +328,15 @@ export function IncidentPage() {
             </div>
             {view === 'timeline' ? <IncidentTimeline incidentRef={i.ref} version={i.activity.length + i.activity.filter((a) => a.key_moment).length} /> : <>
             {editable && (
-              <form className="comment-form" onSubmit={async (e) => { e.preventDefault(); if (await run(() => api.post(`${path}/comments`, { body: note, kind: noteKind, to_requester: noteKind === 'comment' && toCaller }))) { setNote(''); setToCaller(false); } }}>
-                {i.caller && noteKind === 'comment' && (
-                  <div className="note-audience" role="radiogroup" aria-label="Who reads this">
-                    <label className="check"><input type="radio" name="note-audience" checked={!toCaller} onChange={() => setToCaller(false)} /> Internal note</label>
-                    <label className="check"><input type="radio" name="note-audience" checked={toCaller} onChange={() => setToCaller(true)} /> Reply to {i.caller.name}</label>
-                  </div>
+              <CommentBox recordRef={i.ref} submitLabel="Add" onError={setActionError}
+                placeholder={noteKind === 'communication' ? 'Stakeholder update: what is affected, what we are doing, next update at…' : toCaller ? `Reply to ${i.caller?.name}: they see it in the portal and by email` : 'Add a work note – paste screenshots and logs here'}
+                audience={i.caller && noteKind === 'comment' ? { name: i.caller.name, reply: toCaller, onReply: setToCaller } : undefined}
+                extra={i.is_major && (
+                  <select value={noteKind} onChange={(e) => setNoteKind(e.target.value as 'comment')} aria-label="Kind of note">
+                    <option value="comment">Work note</option><option value="communication">Communication update</option>
+                  </select>
                 )}
-                <textarea rows={2} placeholder={noteKind === 'communication' ? 'Stakeholder update: what is affected, what we are doing, next update at…' : toCaller ? `Reply to ${i.caller?.name}: they see it in the portal and by email` : 'Add a work note – paste screenshots and logs here'} value={note} onChange={(e) => setNote(e.target.value)} {...richPaste(i.ref, setNote, setActionError)} />
-                <div className="actions">
-                  {i.is_major && (
-                    <select value={noteKind} onChange={(e) => setNoteKind(e.target.value as 'comment')} aria-label="Kind of note">
-                      <option value="comment">Work note</option><option value="communication">Communication update</option>
-                    </select>
-                  )}
-                  <button className="btn primary" disabled={!note.trim()}>Add</button>
-                </div>
-              </form>
+                onSubmit={async (body) => { const ok = await run(() => api.post(`${path}/comments`, { body, kind: noteKind, to_requester: noteKind === 'comment' && toCaller })); if (ok) setToCaller(false); return ok; }} />
             )}
             <ul className="activity">
               {i.activity.map((a) => (
@@ -466,31 +452,25 @@ export function IncidentPage() {
 function ResolveModal({ incident: i, onClose, onDone }: { incident: Incident; onClose: () => void; onDone: (i: Incident) => void }) {
   const [code, setCode] = useState(i.known_errors.length ? 'workaround' : 'fixed');
   const [resolution, setResolution] = useState(i.known_errors[0]?.workaround && code === 'workaround' ? `Applied the workaround from ${i.known_errors[0].ref}.` : '');
-  const [error, setError] = useState<string | null>(null);
   const { meta, user } = useSession();
   const [pirOwner, setPirOwner] = useState(String(i.major?.lead_id ?? user.id));
   const [pirDue, setPirDue] = useState(new Date(Date.now() + 5 * 86400_000).toISOString().slice(0, 10));
   const open = i.children.filter((c) => c.resolve_with_parent && !['resolved', 'closed'].includes(c.status));
   return (
-    <Modal title={`Resolve ${i.ref}`} onClose={onClose}>
-      <form className="form" onSubmit={async (e) => {
-        e.preventDefault();
-        const review = i.is_major ? { pir_owner_id: pirOwner ? Number(pirOwner) : null, pir_due: pirDue || null } : {};
-        try { onDone(await api.post<Incident>(`/api/incidents/${i.ref}/transition`, { to: 'resolved', resolution_code: code, resolution, ...review })); } catch (err) { setError((err as Error).message); }
-      }}>
-        <label className="full">Resolution code<select value={code} onChange={(e) => setCode(e.target.value)}>{Object.entries(RESOLUTION).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
-        <label className="full">How was service restored?<textarea rows={4} required={!['duplicate', 'cancelled'].includes(code)} value={resolution} onChange={(e) => setResolution(e.target.value)} /></label>
-        {open.length > 0 && <p className="hint-box full">{open.length} related incident{open.length === 1 ? '' : 's'} ({open.map((c) => c.ref).join(', ')}) will be resolved with this resolution.</p>}
-        {i.is_major && (
-          <>
-            <p className="muted small full">Standing down: who runs the post-incident review, and by when? It starts from the timeline and the impact.</p>
-            <label>Review owner<select value={pirOwner} onChange={(e) => setPirOwner(e.target.value)}><option value="">Decide later</option>{meta.assignees.filter((a) => a.role !== 'viewer').map((a) => <option key={a.id} value={a.id}>{a.display_name}</option>)}</select></label>
-            <label>Review by<input type="date" value={pirDue} onChange={(e) => setPirDue(e.target.value)} /></label>
-          </>
-        )}
-        {error && <div className="error full">{error}</div>}
-        <div className="actions full"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary">Resolve</button></div>
-      </form>
-    </Modal>
+    <FormModal title={`Resolve ${i.ref}`} submitLabel="Resolve" onClose={onClose} onSubmit={async () => {
+      const review = i.is_major ? { pir_owner_id: pirOwner ? Number(pirOwner) : null, pir_due: pirDue || null } : {};
+      onDone(await api.post<Incident>(`/api/incidents/${i.ref}/transition`, { to: 'resolved', resolution_code: code, resolution, ...review }));
+    }}>
+      <label className="full">Resolution code<select value={code} onChange={(e) => setCode(e.target.value)}>{Object.entries(INCIDENT_RESOLUTION).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
+      <label className="full">How was service restored?<textarea rows={4} required={!['duplicate', 'cancelled'].includes(code)} value={resolution} onChange={(e) => setResolution(e.target.value)} /></label>
+      {open.length > 0 && <p className="hint-box full">{open.length} related incident{open.length === 1 ? '' : 's'} ({open.map((c) => c.ref).join(', ')}) will be resolved with this resolution.</p>}
+      {i.is_major && (
+        <>
+          <p className="muted small full">Standing down: who runs the post-incident review, and by when? It starts from the timeline and the impact.</p>
+          <label>Review owner<select value={pirOwner} onChange={(e) => setPirOwner(e.target.value)}><option value="">Decide later</option>{meta.assignees.filter((a) => a.role !== 'viewer').map((a) => <option key={a.id} value={a.id}>{a.display_name}</option>)}</select></label>
+          <label>Review by<input type="date" value={pirDue} onChange={(e) => setPirDue(e.target.value)} /></label>
+        </>
+      )}
+    </FormModal>
   );
 }

@@ -2,10 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type
 import { Link, useLocation, useNavigate } from 'react-router';
 import { api } from '../api';
 import { applyUndo, previewUndo, runBulk, storms, type BulkResult, type ItemResult, type OpName, type Operation, type Practice } from '../bulk';
-import { CLOSURE_LABEL, STATUS_LABEL } from '../format';
+import { CLOSURE_LABEL } from '../format';
 import { LIST_KEYS } from '../nav';
-import { useTeams } from '../pages/Teams';
+import { useTeams } from './Teams';
 import { canEdit, useSession } from '../session';
+import { ACTION_STATUS, ARTICLE_STATUS, CHANGE_STATUS, CI_STATUS, IMPROVEMENT_STATUS, INCIDENT_RESOLUTION, INCIDENT_STATUS, PROBLEM_STATUS } from '../statuses';
 import { Modal } from './Modal';
 import type { ListName } from './SavedViews';
 
@@ -25,22 +26,19 @@ interface BulkSpec {
   teams?: boolean;
 }
 
-const INCIDENT_STATUS = { new: 'New', in_progress: 'In progress', on_hold: 'On hold', resolved: 'Resolved', closed: 'Closed' };
-const CHANGE_STATUS = { draft: 'Draft', assess: 'Assess', authorize: 'Authorise', scheduled: 'Scheduled', implementing: 'Implementing', review: 'Review', closed: 'Closed', rejected: 'Rejected', cancelled: 'Cancelled' };
-const RESOLUTION = { fixed: 'Fixed', workaround: 'Workaround applied', problem_fixed: 'Fixed by problem resolution', no_fault_found: 'No fault found', duplicate: 'Duplicate', cancelled: 'Cancelled' };
 
 /** What each list can do in bulk; the server checks the same per operation and role. */
 const BULK: Record<string, BulkSpec> = {
   incidents: { practice: 'incidents', noun: ['incident', 'incidents'], ops: ['assign', 'status', 'priority', 'link_problem', 'set_parent'], statuses: INCIDENT_STATUS, owner: 'assignee', teams: true },
-  problems: { practice: 'problems', noun: ['problem', 'problems'], ops: ['assign', 'status', 'priority'], statuses: STATUS_LABEL, owner: 'assignee', teams: true },
-  known_errors: { practice: 'problems', noun: ['known error', 'known errors'], ops: ['assign', 'status', 'priority'], statuses: STATUS_LABEL, owner: 'assignee', teams: true },
+  problems: { practice: 'problems', noun: ['problem', 'problems'], ops: ['assign', 'status', 'priority'], statuses: PROBLEM_STATUS, owner: 'assignee', teams: true },
+  known_errors: { practice: 'problems', noun: ['known error', 'known errors'], ops: ['assign', 'status', 'priority'], statuses: PROBLEM_STATUS, owner: 'assignee', teams: true },
   changes: { practice: 'changes', noun: ['change', 'changes'], ops: ['assign', 'status'], statuses: CHANGE_STATUS, owner: 'assignee', teams: true },
   alerts: { practice: 'alerts', noun: ['alert', 'alerts'], ops: ['acknowledge', 'close'] },
-  actions: { practice: 'actions', noun: ['action', 'actions'], ops: ['assign', 'status'], statuses: { open: 'Open', done: 'Done', cancelled: 'Cancelled' }, owner: 'owner' },
-  knowledge: { practice: 'articles', noun: ['article', 'articles'], ops: ['assign', 'status'], statuses: { draft: 'Draft', published: 'Published', retired: 'Retired' }, owner: 'owner' },
-  improvements: { practice: 'improvements', noun: ['improvement', 'improvements'], ops: ['assign', 'status'], statuses: { idea: 'Idea', approved: 'Approved', in_progress: 'In progress', done: 'Done', rejected: 'Rejected' }, owner: 'owner' },
+  actions: { practice: 'actions', noun: ['action', 'actions'], ops: ['assign', 'status'], statuses: ACTION_STATUS, owner: 'owner' },
+  knowledge: { practice: 'articles', noun: ['article', 'articles'], ops: ['assign', 'status'], statuses: ARTICLE_STATUS, owner: 'owner' },
+  improvements: { practice: 'improvements', noun: ['improvement', 'improvements'], ops: ['assign', 'status'], statuses: IMPROVEMENT_STATUS, owner: 'owner' },
   requests: { practice: 'requests', noun: ['request', 'requests'], ops: ['status'], statuses: { cancelled: 'Cancelled' } },
-  cis: { practice: 'cis', noun: ['CI', 'CIs'], ops: ['tags', 'status'], statuses: { planned: 'Planned', active: 'Active', maintenance: 'Maintenance', retired: 'Retired', missing: 'Missing' } },
+  cis: { practice: 'cis', noun: ['CI', 'CIs'], ops: ['tags', 'status'], statuses: CI_STATUS },
 };
 
 const OP_LABEL: Record<OpName, string> = {
@@ -435,7 +433,7 @@ function BulkDialog({ spec, op, ids, filter, onClose, onApplied }: {
                 <>
                   <label>Resolution code
                     <select value={form.resolution_code ?? ''} onChange={set('resolution_code')}>
-                      <option value="">Choose…</option>{Object.entries(RESOLUTION).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                      <option value="">Choose…</option>{Object.entries(INCIDENT_RESOLUTION).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                     </select>
                   </label>
                   <label className="full">How service was restored<textarea rows={2} value={form.resolution ?? ''} onChange={set('resolution')} /></label>

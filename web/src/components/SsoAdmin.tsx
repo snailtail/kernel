@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { askReason } from './Ask';
-import { useTeams } from '../pages/Teams';
+import { useTeams } from './Teams';
 
 interface Sso { enabled: boolean; issuer: string; client_id: string; has_secret: boolean; scopes: string; groups_claim: string; role_map: { group: string; role: string }[]; team_map: { group: string; team_id: number }[]; default_role: string | null; local_login: 'all' | 'admins'; label: string; trust_idp_mfa: boolean; mfa_acr_values: string[]; trust_email_claim?: boolean; redirect_uri: string }
 

@@ -70,7 +70,7 @@ export function ReviewPage() {
                   <Link to={`/problems/${p.ref}`} className="review-title">{p.title}</Link>
                   <span className="review-meta">
                     <PriorityBadge priority={p.priority} />
-                    <StatusBadge status={p.status} />
+                    <StatusBadge kind="problem" status={p.status} />
                     {p.is_major && <MajorBadge />}
                     {s.id === 'review_due' && p.ec_review_date && <span className="due overdue">review {formatDay(p.ec_review_date)}</span>}
                     {s.id === 'stale' && <span className="muted small">updated {relativeTime(p.updated_at)}</span>}

@@ -1,37 +1,4 @@
-import type { LinkKind, Role, Status } from './api';
-
-export const STATUS_LABEL: Record<Status, string> = {
-  new: 'New',
-  analysis: 'Under Analysis',
-  known_error: 'Known Error',
-  resolved: 'Resolved',
-  closed: 'Closed',
-};
-
-// ITIL 4 problem management phases
-export const STATUS_PHASE: Record<Status, string> = {
-  new: 'Problem identification',
-  analysis: 'Problem control',
-  known_error: 'Error control',
-  resolved: 'Permanent fix in place',
-  closed: 'Record closed',
-};
-
-/** The natural next step from each status; other transitions are shown as secondary. */
-export const NEXT_STATUS: Partial<Record<Status, Status>> = {
-  new: 'analysis',
-  analysis: 'known_error',
-  known_error: 'resolved',
-  resolved: 'closed',
-};
-
-export const TRANSITION_LABEL: Record<Status, string> = {
-  new: 'New',
-  analysis: 'Start analysis',
-  known_error: 'Raise known error',
-  resolved: 'Resolve',
-  closed: 'Close',
-};
+import type { LinkKind, Role } from './api';
 
 export const PRIORITY_LABEL: Record<number, string> = {
   1: 'Critical',

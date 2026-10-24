@@ -1,29 +1,29 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
-import { api, asConflict, type Activity, type Conflict, type LinkKind, type ProblemDetail, type Status } from '../api';
-import { MajorBadge, PriorityBadge, StatusBadge } from '../components/Badges';
+import { api, asConflict, type Conflict, type LinkKind, type ProblemDetail, type Status } from '../api';
+import { MajorBadge, PersonalDataBadge, PriorityBadge, StatusBadge } from '../components/Badges';
 import { ActionsCard } from '../components/Actions';
 import { ApprovalDetails } from '../components/ApprovalDetails';
 import { AffectedCisPanel } from '../components/AffectedCis';
 import { AnalysesSection } from '../components/Analyses';
+import { CommentBox } from '../components/CommentBox';
 import { GuidePanel } from '../components/Guide';
 import { SimilarProblems } from '../components/Similar';
 import { Markdown } from '../components/Markdown';
 import { richPaste } from '../components/RichPaste';
+import { TransitionButtons } from '../components/TransitionButtons';
 import { RecordNotFound, VisibilityPanel } from '../components/Visibility';
 import { DevLinksPanel } from '../components/DevLinks';
 import { SummaryButton } from '../components/Ai';
 import { AttachmentsPanel } from '../components/Attachments';
-import { Modal } from '../components/Modal';
-import {
-  CLOSURE_LABEL, DECISION_LABEL, EFFECTIVENESS_LABEL, FIELD_LABEL, formatDate, formatDay, LEVEL_LABEL, LINK_LABEL, PRIORITY_LABEL, relativeTime, RISK_LABEL,
-  NEXT_STATUS, STATUS_LABEL, STATUS_PHASE, TRANSITION_LABEL,
-} from '../format';
+import { FormModal, Modal } from '../components/Modal';
+import { CLOSURE_LABEL, DECISION_LABEL, EFFECTIVENESS_LABEL, formatDate, formatDay, LEVEL_LABEL, LINK_LABEL, PRIORITY_LABEL, relativeTime, RISK_LABEL } from '../format';
 import { useLive } from '../live';
 import { Presence } from '../components/Presence';
 import { useApi } from '../hooks';
 import { canEdit, isManager, useSession } from '../session';
-import { HistoryPanel } from '../components/History';
+import { ActivityLine, HistoryPanel } from '../components/History';
+import { NEXT_STATUS, PROBLEM_STATUS, STATUS_PHASE, TRANSITION_LABEL } from '../statuses';
 
 const LIFECYCLE: Status[] = ['new', 'analysis', 'known_error', 'resolved', 'closed'];
 
@@ -83,8 +83,8 @@ export function ProblemPage() {
         </div>
         <EditableTitle value={p.title} editable={editable} onSave={(title) => save({ title }, { title: p.title })} />
         <div className="badges">
-          {(p as any).contains_personal_data && <span className="badge" title="The text holds personal data (personal identity numbers or email addresses). It is kept, and counts for retention and AI handling.">Personal data</span>}
-          <StatusBadge status={p.status} />
+          {(p as any).contains_personal_data && <PersonalDataBadge />}
+          <StatusBadge kind="problem" status={p.status} />
           <PriorityBadge priority={p.priority} />
           {p.is_major && <MajorBadge />}
           <span className="muted">
@@ -94,19 +94,17 @@ export function ProblemPage() {
         <ol className="lifecycle">
           {LIFECYCLE.map((s) => (
             <li key={s} className={s === p.status ? 'current' : LIFECYCLE.indexOf(s) < LIFECYCLE.indexOf(p.status) ? 'done' : ''}>
-              <span className="step-name">{STATUS_LABEL[s]}</span>
+              <span className="step-name">{PROBLEM_STATUS[s]}</span>
               <span className="step-phase">{STATUS_PHASE[s]}</span>
             </li>
           ))}
         </ol>
         {allowed.length > 0 && (
-          <div className="transitions">
-            {allowed.map((to) => (
-              <button key={to} className={`btn ${NEXT_STATUS[p.status] === to ? 'primary' : ''}`} onClick={() => setTransition(to)}>
-                {LIFECYCLE.indexOf(to) < LIFECYCLE.indexOf(p.status) ? 'Reopen analysis' : TRANSITION_LABEL[to]}
-              </button>
-            ))}
-          </div>
+          <TransitionButtons buttons={allowed.map((to) => ({
+            label: LIFECYCLE.indexOf(to) < LIFECYCLE.indexOf(p.status) ? 'Reopen analysis' : TRANSITION_LABEL[to],
+            tone: NEXT_STATUS[p.status] === to ? 'primary' : undefined,
+            onClick: () => setTransition(to),
+          }))} />
         )}
         {actionError && <div className="error">{actionError}</div>}
         {!!p.from_reviews?.length && (
@@ -534,22 +532,16 @@ function ActionsSection({ problem: p, onChange }: { problem: ProblemDetail; onCh
 
 function ActivitySection({ problem: p, onChange }: { problem: ProblemDetail; onChange: (p: ProblemDetail) => void }) {
   const { user } = useSession();
-  const [body, setBody] = useState('');
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<'all' | 'comments'>('all');
 
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    setBusy(true);
+  const submit = async (body: string) => {
     setError(null);
     try {
       onChange(await api.post<ProblemDetail>(`/api/problems/${p.ref}/comments`, { body }));
-      setBody('');
     } catch (err) {
       setError((err as Error).message);
-    } finally {
-      setBusy(false);
+      return false;
     }
   };
 
@@ -565,94 +557,12 @@ function ActivitySection({ problem: p, onChange }: { problem: ProblemDetail; onC
         </div>
       </div>
       {canEdit(user) && (
-        <form onSubmit={submit} className="comment-form">
-          <textarea rows={3} placeholder="Add a work note: findings, analysis steps, decisions… Paste screenshots and logs here." value={body} onChange={(e) => setBody(e.target.value)} {...richPaste(p.ref, setBody, setError)} />
-          {error && <div className="error">{error}</div>}
-          <div className="actions">
-            <button className="btn primary" disabled={busy || !body.trim()}>Add note</button>
-          </div>
-        </form>
+        <CommentBox recordRef={p.ref} rows={3} placeholder="Add a work note: findings, analysis steps, decisions… Paste screenshots and logs here." error={error} onError={setError} onSubmit={submit} />
       )}
       <ul className="activity">
         {items.map((a) => <li key={a.id}><ActivityLine activity={a} /></li>)}
       </ul>
     </section>
-  );
-}
-
-const isChange = (v: unknown): v is { from: unknown; to: unknown } => !!v && typeof v === 'object' && 'from' in v && 'to' in v;
-const isLong = (v: unknown) => typeof v === 'string' && (v.length > 60 || v.includes('\n'));
-
-/** Before/after for the fields changed by an activity entry: short values inline, long texts behind a toggle. */
-function Changes({ data, skip = [] }: { data: Record<string, unknown>; skip?: string[] }) {
-  const { meta } = useSession();
-  const [open, setOpen] = useState(false);
-  const fmt = (k: string, v: unknown) => {
-    if (v === null || v === undefined || v === '') return '–';
-    if (k === 'assignee_id') return meta.assignees.find((u) => u.id === v)?.display_name ?? `#${v}`;
-    if (k === 'category_id') return meta.categories.find((c) => c.id === v)?.name ?? `#${v}`;
-    if (typeof v === 'boolean') return v ? 'yes' : 'no';
-    return String(v);
-  };
-  const entries = Object.entries(data).filter(([k, v]) => !skip.includes(k) && isChange(v)) as [string, { from: unknown; to: unknown }][];
-  const short = entries.filter(([, v]) => !isLong(v.from) && !isLong(v.to));
-  const long = entries.filter(([, v]) => isLong(v.from) || isLong(v.to));
-  if (!entries.length) return null;
-  return (
-    <div className="changes">
-      {short.map(([k, v]) => (
-        <span key={k} className="change-chip">{FIELD_LABEL[k] ?? k}: <s>{fmt(k, v.from)}</s> → <strong>{fmt(k, v.to)}</strong></span>
-      ))}
-      {long.length > 0 && <button className="btn-link small" onClick={() => setOpen(!open)}>{open ? 'Hide change' : 'Show change'}</button>}
-      {open && long.map(([k, v]) => (
-        <div key={k} className="text-change">
-          <div className="muted small">{FIELD_LABEL[k] ?? k}</div>
-          <div className="before"><span className="muted small">Before</span>{v.from ? <Markdown text={String(v.from)} /> : <p className="muted">(empty)</p>}</div>
-          <div className="after"><span className="muted small">After</span>{v.to ? <Markdown text={String(v.to)} /> : <p className="muted">(empty)</p>}</div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-export function ActivityLine({ activity: a }: { activity: Activity }) {
-  let text: ReactNode;
-  switch (a.kind) {
-    case 'created':
-      text = 'logged the problem';
-      break;
-    case 'comment':
-      text = 'added a note';
-      break;
-    case 'status':
-      text = (
-        <>
-          moved it from <strong>{STATUS_LABEL[a.data.from as Status]}</strong> to <strong>{STATUS_LABEL[a.data.to as Status]}</strong>
-          {a.data.closure_code && <> ({CLOSURE_LABEL[a.data.closure_code]})</>}
-        </>
-      );
-      break;
-    case 'update':
-      text = `updated ${Object.keys(a.data).map((k) => FIELD_LABEL[k] ?? k).join(', ')}`;
-      break;
-    case 'link':
-    case 'action':
-    case 'analysis':
-    case 'assessment':
-      text = a.body.charAt(0).toLowerCase() + a.body.slice(1);
-      break;
-  }
-  return (
-    <div className={`activity-item kind-${a.kind}`}>
-      <div className="activity-head">
-        <strong>{a.user_name ?? 'System'}</strong> {text}
-        {(a.channel === 'mcp' || a.channel === 'api') && <span className="tag channel" title={a.channel === 'mcp' ? 'Through MCP (an AI agent or MCP client)' : 'Through the REST API'}>via {a.channel.toUpperCase()}</span>}
-        {(a.channel === 'email_link' || a.channel === 'chat_link') && <span className="tag channel" title="Decided from the approval link in a notification">via {a.channel === 'email_link' ? 'email' : 'chat'} link</span>}
-        <time title={formatDate(a.created_at)}>{relativeTime(a.created_at)}</time>
-      </div>
-      {(a.kind === 'comment' || (a.kind === 'status' && a.body)) && <Markdown text={a.body} className="activity-body" />}
-      {(a.kind === 'update' || a.kind === 'status' || a.kind === 'assessment') && a.data && <Changes data={a.data} skip={['from', 'to']} />}
-    </div>
   );
 }
 
@@ -668,15 +578,10 @@ function TransitionModal({ problem: p, to, onClose, onDone }: { problem: Problem
   });
   const [acknowledge, setAcknowledge] = useState(false);
   const openActions = p.actions.filter((a) => a.status === 'open').length;
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
   const set = (k: keyof typeof form) => (e: { target: { value: string } }) => setForm({ ...form, [k]: e.target.value });
   const reopen = LIFECYCLE.indexOf(to) < LIFECYCLE.indexOf(p.status);
 
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    setBusy(true);
-    setError(null);
+  const submit = async () => {
     const body: Record<string, unknown> = { to, comment: form.comment || undefined };
     if (to === 'known_error') Object.assign(body, { root_cause: form.root_cause, workaround: form.workaround });
     if (to === 'resolved') Object.assign(body, { resolution: form.resolution });
@@ -684,66 +589,54 @@ function TransitionModal({ problem: p, to, onClose, onDone }: { problem: Problem
       Object.assign(body, { closure_code: form.closure_code || undefined, acknowledge_open_actions: acknowledge || undefined });
       if (p.is_major) body.major_review = form.major_review;
     }
-    try {
-      onDone(await api.post<ProblemDetail>(`/api/problems/${p.ref}/transition`, body));
-    } catch (err) {
-      setError((err as Error).message);
-      setBusy(false);
-    }
+    onDone(await api.post<ProblemDetail>(`/api/problems/${p.ref}/transition`, body));
   };
 
   const title = reopen ? 'Reopen analysis' : TRANSITION_LABEL[to];
   return (
-    <Modal title={`${title} – ${p.ref}`} onClose={onClose}>
-      <form className="form" onSubmit={submit}>
-        {to === 'known_error' && (
-          <>
-            <p className="hint full">Error control: the problem has been analysed. Document the root cause and any workaround so it is available in the known error database.</p>
-            <label className="full">Root cause <span className="req">required</span><textarea required rows={5} value={form.root_cause} onChange={set('root_cause')} /></label>
-            <label className="full">Workaround<textarea rows={4} value={form.workaround} onChange={set('workaround')} /></label>
-          </>
-        )}
-        {to === 'resolved' && (
-          <label className="full">Resolution <span className="req">required</span>
-            <textarea required rows={5} value={form.resolution} onChange={set('resolution')} placeholder="The permanent solution. Link the implementing change under Linked records." />
-          </label>
-        )}
-        {to === 'closed' && (
-          <>
-            <label className="full">Closure code <span className="req">required</span>
-              <select required value={form.closure_code} onChange={set('closure_code')}>
-                <option value="">Choose…</option>
-                {meta.closure_codes.map((c) => <option key={c} value={c}>{CLOSURE_LABEL[c]}</option>)}
-              </select>
-            </label>
-            {form.closure_code === 'no_fix' && p.ec_decision !== 'accept' && (
-              <p className="warn-box full">Closing without a fix requires an accepted risk. Record the decision under Error control first.</p>
-            )}
-            {p.is_major && form.closure_code !== 'duplicate' && form.closure_code !== 'cancelled' && (
-              <label className="full">Major problem review <span className="req">required</span>
-                <textarea required rows={6} value={form.major_review} onChange={set('major_review')}
-                  placeholder="What went well, what could be improved, how to prevent recurrence, follow-up actions" />
-              </label>
-            )}
-            {openActions > 0 && (
-              <label className="check full warn-box">
-                <input type="checkbox" required checked={acknowledge} onChange={(e) => setAcknowledge(e.target.checked)} />
-                {openActions} follow-up action{openActions > 1 ? 's are' : ' is'} still open. Close the problem anyway.
-              </label>
-            )}
-          </>
-        )}
-        <label className="full">
-          {reopen ? 'Reason for reopening' : 'Comment'}
-          <textarea rows={3} value={form.comment} onChange={set('comment')} required={reopen} />
+    <FormModal title={`${title} – ${p.ref}`} submitLabel={title} onClose={onClose} onSubmit={submit}>
+      {to === 'known_error' && (
+        <>
+          <p className="hint full">Error control: the problem has been analysed. Document the root cause and any workaround so it is available in the known error database.</p>
+          <label className="full">Root cause <span className="req">required</span><textarea required rows={5} value={form.root_cause} onChange={set('root_cause')} /></label>
+          <label className="full">Workaround<textarea rows={4} value={form.workaround} onChange={set('workaround')} /></label>
+        </>
+      )}
+      {to === 'resolved' && (
+        <label className="full">Resolution <span className="req">required</span>
+          <textarea required rows={5} value={form.resolution} onChange={set('resolution')} placeholder="The permanent solution. Link the implementing change under Linked records." />
         </label>
-        {error && <div className="error full">{error}</div>}
-        <div className="actions full">
-          <button type="button" className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn primary" disabled={busy}>{title}</button>
-        </div>
-      </form>
-    </Modal>
+      )}
+      {to === 'closed' && (
+        <>
+          <label className="full">Closure code <span className="req">required</span>
+            <select required value={form.closure_code} onChange={set('closure_code')}>
+              <option value="">Choose…</option>
+              {meta.closure_codes.map((c) => <option key={c} value={c}>{CLOSURE_LABEL[c]}</option>)}
+            </select>
+          </label>
+          {form.closure_code === 'no_fix' && p.ec_decision !== 'accept' && (
+            <p className="warn-box full">Closing without a fix requires an accepted risk. Record the decision under Error control first.</p>
+          )}
+          {p.is_major && form.closure_code !== 'duplicate' && form.closure_code !== 'cancelled' && (
+            <label className="full">Major problem review <span className="req">required</span>
+              <textarea required rows={6} value={form.major_review} onChange={set('major_review')}
+                placeholder="What went well, what could be improved, how to prevent recurrence, follow-up actions" />
+            </label>
+          )}
+          {openActions > 0 && (
+            <label className="check full warn-box">
+              <input type="checkbox" required checked={acknowledge} onChange={(e) => setAcknowledge(e.target.checked)} />
+              {openActions} follow-up action{openActions > 1 ? 's are' : ' is'} still open. Close the problem anyway.
+            </label>
+          )}
+        </>
+      )}
+      <label className="full">
+        {reopen ? 'Reason for reopening' : 'Comment'}
+        <textarea rows={3} value={form.comment} onChange={set('comment')} required={reopen} />
+      </label>
+    </FormModal>
   );
 }
 

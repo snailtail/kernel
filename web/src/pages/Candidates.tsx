@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { api, type ProblemDetail } from '../api';
-import { Modal } from '../components/Modal';
+import { FormModal, Modal } from '../components/Modal';
 import { formatDate, LEVEL_LABEL, relativeTime } from '../format';
 import { useApi } from '../hooks';
 import { canEdit, isManager, useSession } from '../session';
@@ -347,38 +347,25 @@ const SNOOZE: [label: string, days: number][] = [['1 day', 1], ['1 week', 7], ['
 function DecisionModal({ candidate: c, onClose, onDone }: { candidate: Candidate; onClose: () => void; onDone: () => void }) {
   const [snooze, setSnooze] = useState(0);
   const [reason, setReason] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    try {
-      await api.post('/api/candidates/dismiss', { key: c.key, reason, ...(snooze ? { until: new Date(Date.now() + snooze * 86_400_000).toISOString() } : {}) });
-      onDone();
-    } catch (err) {
-      setError((err as Error).message);
-    }
+  const submit = async () => {
+    await api.post('/api/candidates/dismiss', { key: c.key, reason, ...(snooze ? { until: new Date(Date.now() + snooze * 86_400_000).toISOString() } : {}) });
+    onDone();
   };
   return (
-    <Modal title="Dismiss or snooze" onClose={onClose}>
-      <form className="form" onSubmit={submit}>
-        <fieldset className="full radio-row">
-          <label className="check"><input type="radio" checked={!snooze} onChange={() => setSnooze(0)} /> Dismiss</label>
-          {SNOOZE.map(([label, d]) => <label key={d} className="check"><input type="radio" checked={snooze === d} onChange={() => setSnooze(d)} /> Snooze {label}</label>)}
-        </fieldset>
-        <p className="hint full">
-          {snooze
-            ? 'The candidate is hidden until then, whatever arrives meanwhile.'
-            : TREND_JOINS[c.rule]
-              ? `Dismissed until a new ${TREND_JOINS[c.rule]} joins; use Snooze to look again later.`
-              : `Dismissing covers the ${c.count} records it has now. It comes back only if new records are enough for the rule on their own.`}
-        </p>
-        <label className="full">Reason<textarea required rows={3} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Why is this not a problem (yet)?" /></label>
-        {error && <div className="error full">{error}</div>}
-        <div className="actions full">
-          <button type="button" className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn primary">{snooze ? 'Snooze' : 'Dismiss'}</button>
-        </div>
-      </form>
-    </Modal>
+    <FormModal title="Dismiss or snooze" submitLabel={snooze ? 'Snooze' : 'Dismiss'} onClose={onClose} onSubmit={submit}>
+      <fieldset className="full radio-row">
+        <label className="check"><input type="radio" checked={!snooze} onChange={() => setSnooze(0)} /> Dismiss</label>
+        {SNOOZE.map(([label, d]) => <label key={d} className="check"><input type="radio" checked={snooze === d} onChange={() => setSnooze(d)} /> Snooze {label}</label>)}
+      </fieldset>
+      <p className="hint full">
+        {snooze
+          ? 'The candidate is hidden until then, whatever arrives meanwhile.'
+          : TREND_JOINS[c.rule]
+            ? `Dismissed until a new ${TREND_JOINS[c.rule]} joins; use Snooze to look again later.`
+            : `Dismissing covers the ${c.count} records it has now. It comes back only if new records are enough for the rule on their own.`}
+      </p>
+      <label className="full">Reason<textarea required rows={3} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Why is this not a problem (yet)?" /></label>
+    </FormModal>
   );
 }
 

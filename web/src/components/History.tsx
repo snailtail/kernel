@@ -1,6 +1,9 @@
-import { useEffect, useState } from 'react';
-import { api } from '../api';
-import { FIELD_LABEL, formatDate, relativeTime } from '../format';
+import { useEffect, useState, type ReactNode } from 'react';
+import { api, type Activity, type Status } from '../api';
+import { CLOSURE_LABEL, FIELD_LABEL, formatDate, relativeTime } from '../format';
+import { useSession } from '../session';
+import { PROBLEM_STATUS } from '../statuses';
+import { Markdown } from './Markdown';
 
 /** One entry of the audit trail, as /api/audit and /api/records/:ref/history return it. */
 export interface AuditEntry {
@@ -147,5 +150,81 @@ export function HistoryPanel({ recordRef, version }: { recordRef: string; versio
         {entries && entries.length > 15 && !all && <button className="btn-link" onClick={() => setAll(true)}>Show all {entries.length}</button>}
       </details>
     </section>
+  );
+}
+
+const isLong = (v: unknown) => typeof v === 'string' && (v.length > 60 || v.includes('\n'));
+
+/** Before/after for the fields changed by an activity entry: short values inline, long texts behind a toggle. */
+function ActivityChanges({ data, skip = [] }: { data: Record<string, unknown>; skip?: string[] }) {
+  const { meta } = useSession();
+  const [open, setOpen] = useState(false);
+  const fmt = (k: string, v: unknown) => {
+    if (v === null || v === undefined || v === '') return '–';
+    if (k === 'assignee_id') return meta.assignees.find((u) => u.id === v)?.display_name ?? `#${v}`;
+    if (k === 'category_id') return meta.categories.find((c) => c.id === v)?.name ?? `#${v}`;
+    if (typeof v === 'boolean') return v ? 'yes' : 'no';
+    return String(v);
+  };
+  const entries = Object.entries(data).filter(([k, v]) => !skip.includes(k) && isChange(v)) as [string, { from: unknown; to: unknown }][];
+  const short = entries.filter(([, v]) => !isLong(v.from) && !isLong(v.to));
+  const long = entries.filter(([, v]) => isLong(v.from) || isLong(v.to));
+  if (!entries.length) return null;
+  return (
+    <div className="changes">
+      {short.map(([k, v]) => (
+        <span key={k} className="change-chip">{FIELD_LABEL[k] ?? k}: <s>{fmt(k, v.from)}</s> → <strong>{fmt(k, v.to)}</strong></span>
+      ))}
+      {long.length > 0 && <button className="btn-link small" onClick={() => setOpen(!open)}>{open ? 'Hide change' : 'Show change'}</button>}
+      {open && long.map(([k, v]) => (
+        <div key={k} className="text-change">
+          <div className="muted small">{FIELD_LABEL[k] ?? k}</div>
+          <div className="before"><span className="muted small">Before</span>{v.from ? <Markdown text={String(v.from)} /> : <p className="muted">(empty)</p>}</div>
+          <div className="after"><span className="muted small">After</span>{v.to ? <Markdown text={String(v.to)} /> : <p className="muted">(empty)</p>}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** One entry of a problem's work notes and history (the activity the problem record carries). */
+export function ActivityLine({ activity: a }: { activity: Activity }) {
+  let text: ReactNode;
+  switch (a.kind) {
+    case 'created':
+      text = 'logged the problem';
+      break;
+    case 'comment':
+      text = 'added a note';
+      break;
+    case 'status':
+      text = (
+        <>
+          moved it from <strong>{PROBLEM_STATUS[a.data.from as Status]}</strong> to <strong>{PROBLEM_STATUS[a.data.to as Status]}</strong>
+          {a.data.closure_code && <> ({CLOSURE_LABEL[a.data.closure_code]})</>}
+        </>
+      );
+      break;
+    case 'update':
+      text = `updated ${Object.keys(a.data).map((k) => FIELD_LABEL[k] ?? k).join(', ')}`;
+      break;
+    case 'link':
+    case 'action':
+    case 'analysis':
+    case 'assessment':
+      text = a.body.charAt(0).toLowerCase() + a.body.slice(1);
+      break;
+  }
+  return (
+    <div className={`activity-item kind-${a.kind}`}>
+      <div className="activity-head">
+        <strong>{a.user_name ?? 'System'}</strong> {text}
+        {(a.channel === 'mcp' || a.channel === 'api') && <span className="tag channel" title={a.channel === 'mcp' ? 'Through MCP (an AI agent or MCP client)' : 'Through the REST API'}>via {a.channel.toUpperCase()}</span>}
+        {(a.channel === 'email_link' || a.channel === 'chat_link') && <span className="tag channel" title="Decided from the approval link in a notification">via {a.channel === 'email_link' ? 'email' : 'chat'} link</span>}
+        <time title={formatDate(a.created_at)}>{relativeTime(a.created_at)}</time>
+      </div>
+      {(a.kind === 'comment' || (a.kind === 'status' && a.body)) && <Markdown text={a.body} className="activity-body" />}
+      {(a.kind === 'update' || a.kind === 'status' || a.kind === 'assessment') && a.data && <ActivityChanges data={a.data} skip={['from', 'to']} />}
+    </div>
   );
 }
