@@ -7,7 +7,7 @@ import { useTeams } from './Teams';
 import { isManager, useSession } from '../session';
 import { columnStore } from './list/columns';
 
-export type ListName = 'problems' | 'actions' | 'incidents' | 'changes' | 'alerts' | 'known_errors' | 'knowledge' | 'cis' | 'candidates' | 'improvements' | 'requests';
+export type ListName = 'problems' | 'actions' | 'incidents' | 'changes' | 'alerts' | 'known_errors' | 'knowledge' | 'cis' | 'candidates' | 'improvements' | 'requests' | 'work_items';
 
 export interface ListView {
   key: string;

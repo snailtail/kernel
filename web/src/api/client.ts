@@ -176,7 +176,7 @@ export interface ProblemDetail extends Problem {
 }
 
 export interface Meta {
-  modules: { problem?: boolean; incident: boolean; change: boolean; event: boolean; cmdb: boolean; sla: boolean; knowledge: boolean; request: boolean; portal?: boolean };
+  modules: { problem?: boolean; incident: boolean; change: boolean; event: boolean; cmdb: boolean; sla: boolean; knowledge: boolean; request: boolean; portal?: boolean; development?: boolean };
   hidden_records?: boolean;
   setup_completed: boolean;
   statuses: Status[];
