@@ -353,8 +353,8 @@ export async function createWorkItem(user: User, input: z.infer<typeof createWor
 
 export async function updateWorkItemLean(user: User, ref: string, input: z.infer<typeof updateWorkItemSchema>): Promise<void> {
   authorize(user, 'work.write');
-  // No blind overwrites of masked text (#61, #156).
-  await assertMayWriteText(user, ref, input);
+  // No blind overwrites of masked text (#61, #156); acceptance criteria are masked one by one.
+  await assertMayWriteText(user, ref, { ...input, criterion: input.acceptance_criteria });
   await visibleId(ref);
   if (input.parent) await visibleId(input.parent);
   await seeingAll(() => tx(async (db) => {

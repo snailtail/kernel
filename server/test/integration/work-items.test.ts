@@ -227,6 +227,8 @@ describe('development work items (#165)', { skip }, () => {
     assert.equal(masked.steps_to_reproduce, null, 'a bug report is masked');
     assert.equal(ok(await analyst.get(`/api/work-items/${bug.ref}`)).steps_to_reproduce, 'Open the debug page', 'its team reads it');
     assert.ok(!(await viewer.get('/api/work-items?q=debug')).body.some((w: any) => w.ref === bug.ref), 'no match on masked text');
+    assert.equal((await pm.patch(`/api/work-items/${bug.ref}`, { acceptance_criteria: [{ criterion: 'Overwritten' }] })).status, 403, 'no blind overwrite of masked criteria');
+    assert.equal((await pm.patch(`/api/work-items/${bug.ref}`, { points: 3 })).status, 200, 'other fields stay editable');
   });
 
   test('links, comments and the generic record operations', async () => {
