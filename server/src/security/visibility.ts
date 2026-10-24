@@ -32,6 +32,9 @@ export async function refreshVisibility() {
 
 const visibilitySettings = async () => (Date.now() - loadedAt > 30_000 ? refreshVisibility() : state);
 
+/** Whether a practice's records are team-scoped now (records.ts kinds: 'incident', 'work_item'…). */
+export const teamScoped = async (kind: string) => (await visibilitySettings()).team_scoped[kind] === true;
+
 /**
  * The viewer string for a signed-in user: id, role, team ids (read per request, so removing someone from a team
  * takes effect on their next request), the practices that are team-scoped, and "noai" for agents when restricted

@@ -247,6 +247,8 @@ describe('sprints, the board, burndown and retrospectives (#166)', { skip }, () 
     assert.match(imp, /^IMP\d{6}$/);
     const m = ok(await analyst.get(`/api/improvements/${imp}`));
     assert.equal(m.source, 'retrospective');
+    assert.equal(m.restricted, false, 'without team scoping it starts broad');
+    assert.equal((await analyst2.get(`/api/improvements/${imp}`)).status, 200);
     assert.equal(m.title, 'Automate the staging reset');
     assert.match(m.description, new RegExp(`retrospective of ${s.name} \\(Platform\\)`));
     assert.ok(ok(await analyst.get('/api/improvements?source=retrospective')).some((x: any) => x.ref === imp));
@@ -267,6 +269,15 @@ describe('sprints, the board, burndown and retrospectives (#166)', { skip }, () 
       assert.equal((await analyst2.post(`/api/sprints/${s.id}/complete`, {})).status, 404);
       assert.equal((await analyst.get(`/api/sprints/${s.id}`)).status, 200, 'the team sees it');
       assert.equal((await pm.get(`/api/sprints/${s.id}`)).status, 200, 'managers are not team-scoped');
+      // The retrospective is the team's now, so an improvement from it starts restricted to the team (#158).
+      const r = ok(await analyst.post(`/api/sprints/${s.id}/retro`, { kind: 'to_change', body: 'Team-only lesson about the vault' }));
+      const item = r.retrospective.find((x: any) => x.body === 'Team-only lesson about the vault');
+      const imp = ok(await analyst.post(`/api/sprints/${s.id}/retro/${item.id}/improvement`, {})).retrospective.find((x: any) => x.id === item.id).improvement;
+      const m = ok(await analyst.get(`/api/improvements/${imp}`));
+      assert.equal(m.restricted, true);
+      assert.deepEqual(m.restricted_teams, [team.id]);
+      assert.equal((await analyst2.get(`/api/improvements/${imp}`)).status, 404, 'outside the team it is not there');
+      assert.ok(!JSON.stringify(ok(await analyst2.get('/api/improvements?status=all'))).includes('vault'));
     } finally {
       ok(await admin.put('/api/admin/visibility', { team_scoped: { incident: false, problem: false, change: false, work_item: false }, restricted_categories: [], reason: 'Back to shared' }));
     }
