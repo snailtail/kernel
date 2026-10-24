@@ -11,7 +11,9 @@ import { audit } from '../security/audit.js';
 import { type Db, query, tx } from '../core/db.js';
 import { badRequest, conflict, forbidden, notFound } from '../core/errors.js';
 import { createImprovementInTx } from '../improvements/improvements.js';
+import { BROADEST, startNarrow } from '../security/audience.js';
 import { authorize, can } from '../security/policy.js';
+import { teamScoped } from '../security/visibility.js';
 import { validTeam } from '../people/teams.js';
 import { logActivity } from '../records/activity.js';
 import { BOARD_COLUMNS, leaveSprint, seeingAll, WORK_ITEM_TRANSITIONS, wipLimitsOf, workItemUrl, type WorkItemStatus } from './work-items.js';
@@ -412,7 +414,11 @@ export async function removeRetroItem(user: User, id: number, itemId: number) {
   return getSprint(user, id);
 }
 
-/** A "to change" item → an improvement (#52, source retrospective), with one click; same model as a review's follow-up. */
+/**
+ * A "to change" item → an improvement (#52, source retrospective), with one click; same model as a review's follow-up.
+ * When work items are team-scoped the retrospective is the team's, so the improvement starts restricted to the team
+ * (#158); the person can widen it through the ordinary visibility step. Otherwise it starts broad.
+ */
 export async function retroItemToImprovement(user: User, id: number, itemId: number, input: z.infer<typeof retroImprovementSchema>) {
   authorize(user, 'work.write');
   authorize(user, 'improvement.write');
@@ -423,11 +429,12 @@ export async function retroItemToImprovement(user: User, id: number, itemId: num
     if (!item) throw notFound('Retrospective item not found');
     if (item.kind !== 'to_change') throw badRequest('Only something to change becomes an improvement');
     if (item.improvement_id) throw conflict('It already became an improvement');
+    const audience = (await teamScoped('work_item')) ? { ...BROADEST, restricted: true, restricted_teams: [s.team_id as number] } : BROADEST;
     const m = await createImprovementInTx(db, user, {
       title: (input.title ?? item.body.split('\n')[0]).slice(0, 300),
       description: `From the retrospective of ${s.name} (${s.team}):\n\n${item.body}`,
       source: 'retrospective', owner_id: input.owner_id,
-    });
+    }, startNarrow(audience));
     await db.query('UPDATE sprint_retro_items SET improvement_id = $2 WHERE id = $1', [itemId, m.id]);
     await audit(db, { entity_type: 'sprint', entity_ref: String(id), action: 'retro_improvement', changes: { item_id: itemId, improvement: m.ref } });
   });
