@@ -2,11 +2,12 @@ import { Link, useSearchParams } from 'react-router';
 import type { Problem } from '../api';
 import { useColumns, useListToolkit } from '../components/ListToolkit';
 import { PROBLEM_COLUMNS, ProblemTable } from '../components/ProblemTable';
-import { PRIORITY_LABEL, STATUS_LABEL } from '../format';
+import { PRIORITY_LABEL } from '../format';
 import { useLive } from '../live';
 import { useApi, useSearchText } from '../hooks';
 import { canEdit, useSession } from '../session';
 import { SavedViews } from '../components/SavedViews';
+import { PROBLEM_STATUS } from '../statuses';
 
 export function ProblemsPage() {
   const { user, meta } = useSession();
@@ -44,7 +45,7 @@ export function ProblemsPage() {
         <input className="search" placeholder="Search ref, title, root cause, workaround…" value={q} onChange={(e) => setQ(e.target.value)} />
         <select value={params.get('status') ?? 'open'} onChange={(e) => setParam('status', e.target.value === 'open' ? '' : e.target.value)}>
           <option value="open">All open</option>
-          {meta.statuses.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
+          {meta.statuses.map((s) => <option key={s} value={s}>{PROBLEM_STATUS[s]}</option>)}
           <option value="all">All</option>
         </select>
         <select value={params.get('priority') ?? ''} onChange={(e) => setParam('priority', e.target.value)}>

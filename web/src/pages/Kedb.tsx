@@ -50,7 +50,7 @@ export function KedbPage() {
               <h3><Link to={`/problems/${p.ref}`}>{p.title}</Link></h3>
               <span className="spacer" />
               <PriorityBadge priority={p.priority} />
-              <StatusBadge status={p.status} />
+              <StatusBadge kind="problem" status={p.status} />
             </header>
             <div className="kedb-meta muted">
               {p.affected_service && <span>Service: {p.affected_service}</span>}

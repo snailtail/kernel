@@ -1,9 +1,11 @@
 // Service requests (#44), an optional module: the list, the page of one request (its answers, approval and tasks in
-// order), the "new request" flow with the item's form generated from the catalogue, and the catalogue admin card.
+// order) and the "new request" flow with the item's form generated from the catalogue.
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { api, type Guidance } from '../api';
 import { askReason, askText } from '../components/Ask';
+import { StatusBadge } from '../components/Badges';
+import { CommentBox } from '../components/CommentBox';
 import { GuidePanel } from '../components/Guide';
 import { HistoryPanel } from '../components/History';
 import { useColumns, useListToolkit, type ColumnKey } from '../components/ListToolkit';
@@ -11,38 +13,25 @@ import { Markdown } from '../components/Markdown';
 import { Modal } from '../components/Modal';
 import { PersonPicker, type PersonRef } from '../components/People';
 import { Presence } from '../components/Presence';
+import { type Field, type FieldType, type Item, type TaskKind } from '../components/RequestCatalogue';
 import { SavedViews } from '../components/SavedViews';
+import { TransitionButtons } from '../components/TransitionButtons';
 import { RecordNotFound, VisibilityPanel } from '../components/Visibility';
 import { formatDate, relativeTime } from '../format';
 import { useApi, useSearchText } from '../hooks';
 import { useLive } from '../live';
-import { canEdit, isManager, useSession } from '../session';
-import { useTeams } from './Teams';
+import { canEdit, useSession } from '../session';
+import { REQUEST_STATUS, type RequestStatus } from '../statuses';
 
-type Status = 'submitted' | 'awaiting_approval' | 'in_fulfilment' | 'fulfilled' | 'rejected' | 'cancelled';
-export const REQUEST_STATUS: Record<Status, string> = {
-  submitted: 'Submitted', awaiting_approval: 'Awaiting approval', in_fulfilment: 'In fulfilment', fulfilled: 'Fulfilled', rejected: 'Rejected', cancelled: 'Cancelled',
-};
-const STATUSES = Object.keys(REQUEST_STATUS) as Status[];
-type FieldType = 'text' | 'textarea' | 'choice' | 'person' | 'ci' | 'date';
-const FIELD_TYPE: Record<FieldType, string> = { text: 'Short text', textarea: 'Long text', choice: 'Choice', person: 'Person', ci: 'CI', date: 'Date' };
-interface Field { key: string; label: string; type: FieldType; required: boolean; choices: string[] }
-type TaskKind = 'manual' | 'change' | 'webhook';
-interface TaskSpec { title: string; team_id: number | null; kind?: TaskKind; webhook_id?: number | null }
-const TASK_KIND: Record<TaskKind, string> = { manual: 'By a person', change: 'Standard change', webhook: 'Webhook' };
-interface Item {
-  id: number; name: string; description: string; form: Field[]; approval: string; approval_label: string; fulfilment_tasks: TaskSpec[];
-  standard_change_template_id: number | null; logger_may_approve: boolean;
-  sla_id: number | null; sla: string | null; active: boolean; service: { ref: string; name: string };
-}
+const STATUSES = Object.keys(REQUEST_STATUS) as RequestStatus[];
 interface Row {
-  ref: string; title: string; status: Status; priority: number; item: string; service_ref: string; service_name: string; requester: string;
+  ref: string; title: string; status: RequestStatus; priority: number; item: string; service_ref: string; service_name: string; requester: string;
   created_at: string; updated_at: string; resolution_due_at: string | null; at_risk: boolean; open_task: string | null; open_task_team: string | null; open_task_assignee: string | null;
 }
 interface Task { kind: TaskKind; change_ref: string | null; webhook: string | null; by_change: boolean; id: number; position: number; title: string; status: 'pending' | 'open' | 'done' | 'cancelled'; note: string | null; team_id: number | null; team: string | null; assignee_id: number | null; assignee: string | null; done_at: string | null; done_by: string | null; may_complete: boolean }
 interface Clock { state: string; due_at: string | null; remaining_minutes: number | null; target_minutes: number | null }
 interface Detail {
-  id: number; ref: string; title: string; status: Status; priority: number; item: { id: number; name: string }; service: { ref: string; name: string };
+  id: number; ref: string; title: string; status: RequestStatus; priority: number; item: { id: number; name: string }; service: { ref: string; name: string };
   requester: { id: number; name: string; email?: string | null }; on_behalf_of: string | null;
   answers: { key: string; label: string; type: FieldType; value?: string | number | null; answer_text?: string | null; display?: string | null }[];
   approval: { kind: string; approvers: string[]; decided_by: string | null; decided_at: string | null; reject_reason: string | null; may_decide: boolean };
@@ -54,9 +43,6 @@ interface Detail {
   created_at: string; resolved_at: string | null; transitions: string[]; next_steps: Guidance;
 }
 
-export function RequestStatusBadge({ status }: { status: Status }) {
-  return <span className={`badge req-${status}`}>{REQUEST_STATUS[status]}</span>;
-}
 
 const COLUMNS: { key: ColumnKey; label: string }[] = [
   { key: 'status', label: 'Status' }, { key: 'assignee', label: 'Open task' }, { key: 'service', label: 'Item' }, { key: 'updated', label: 'Updated' },
@@ -116,7 +102,7 @@ export function RequestsPage() {
                     {tk.selectAll && <td className="check-col">{tk.select(r, n)}</td>}
                     <td className="mono nowrap"><Link to={`/requests/${r.ref}`}>{r.ref}</Link></td>
                     <td className="title-cell"><Link to={`/requests/${r.ref}`}>{r.title}</Link>{r.at_risk && <span className="badge overdue">SLA</span>}<div className="muted small">for {r.requester}</div></td>
-                    <td data-col="status"><RequestStatusBadge status={r.status} /></td>
+                    <td data-col="status"><StatusBadge kind="request" status={r.status} /></td>
                     <td className="hide-sm small" data-col="assignee">{r.open_task ? <>{r.open_task}<div className="muted">{r.open_task_assignee ?? r.open_task_team ?? 'Anyone'}</div></> : '–'}</td>
                     <td className="hide-sm small" data-col="service">{r.item}<div className="muted">{r.service_name}</div></td>
                     <td className="hide-sm small nowrap" data-col="updated">{relativeTime(r.updated_at)}</td>
@@ -296,7 +282,6 @@ export function RequestPage() {
   const { data: r, setData, error, reload, refresh } = useApi<Detail>(`/api/requests/${ref}`);
   const others = useLive([r && `request:${r.id}`], refresh, { presence: true });
   const [actionError, setActionError] = useState<string | null>(null);
-  const [note, setNote] = useState('');
   // A note is internal unless the person chooses to reply to the requester (#45): replies show in the portal and go by mail.
   const [toRequester, setToRequester] = useState(false);
   if (error) return <RecordNotFound refId={ref ?? ''} error={error} onOpened={reload} />;
@@ -331,14 +316,15 @@ export function RequestPage() {
         <div className="crumbs"><Link to="/requests">Service requests</Link> / <span className="mono">{r.ref}</span> <Presence people={others} /></div>
         <h1>{r.title}</h1>
         <div className="badges">
-          <RequestStatusBadge status={r.status} />
+          <StatusBadge kind="request" status={r.status} />
           <span className="tag">{r.item.name}</span>
           <span className="muted small">For {r.requester.name}{r.on_behalf_of ? `, logged by ${r.on_behalf_of}` : ''} {relativeTime(r.created_at)}</span>
         </div>
-        <div className="transitions">
-          {r.approval.may_decide && <><button className="btn primary" onClick={() => decide('approve')}>Approve</button><button className="btn danger" onClick={() => decide('reject')}>Reject</button></>}
-          {editable && r.transitions.includes('cancelled') && <button className="btn" onClick={cancel}>Cancel request</button>}
-        </div>
+        <TransitionButtons buttons={[
+          { label: 'Approve', tone: 'primary', show: r.approval.may_decide, onClick: () => decide('approve') },
+          { label: 'Reject', tone: 'danger', show: r.approval.may_decide, onClick: () => decide('reject') },
+          { label: 'Cancel request', show: editable && r.transitions.includes('cancelled'), onClick: cancel },
+        ]} />
         {r.status === 'awaiting_approval' && !r.approval.may_decide && <p className="muted small">Waiting for {r.approval.approvers.join(' or ')} to approve.</p>}
         {actionError && <div className="error">{actionError}</div>}
       </header>
@@ -374,14 +360,9 @@ export function RequestPage() {
           <section className="card">
             <h2>Notes &amp; history</h2>
             {editable && (
-              <form className="comment-form" onSubmit={async (e) => { e.preventDefault(); if (await run(() => api.post(`${path}/comments`, { body: note, to_requester: toRequester }))) { setNote(''); setToRequester(false); } }}>
-                <div className="note-audience" role="radiogroup" aria-label="Who reads this">
-                  <label className="check"><input type="radio" name="note-audience" checked={!toRequester} onChange={() => setToRequester(false)} /> Internal note</label>
-                  <label className="check"><input type="radio" name="note-audience" checked={toRequester} onChange={() => setToRequester(true)} /> Reply to {r.requester.name}</label>
-                </div>
-                <textarea rows={2} placeholder={toRequester ? `Reply to ${r.requester.name}: they see it in the portal and by email` : 'Add a note'} value={note} onChange={(e) => setNote(e.target.value)} />
-                <div className="actions"><button className="btn primary" disabled={!note.trim()}>{toRequester ? 'Send reply' : 'Add note'}</button></div>
-              </form>
+              <CommentBox recordRef={r.ref} paste={false} placeholder={toRequester ? `Reply to ${r.requester.name}: they see it in the portal and by email` : 'Add a note'}
+                submitLabel={toRequester ? 'Send reply' : 'Add note'} audience={{ name: r.requester.name, reply: toRequester, onReply: setToRequester }} onError={setActionError}
+                onSubmit={async (body) => { const ok = await run(() => api.post(`${path}/comments`, { body, to_requester: toRequester })); if (ok) setToRequester(false); return ok; }} />
             )}
             <ul className="activity">
               {r.activity.map((a) => (
@@ -416,149 +397,5 @@ export function RequestPage() {
         </aside>
       </div>
     </>
-  );
-}
-
-// ---- The catalogue (Administration) --------------------------------------------------------
-
-/** Managers keep the catalogue: per service, a short form, who approves, and the tasks in order. */
-export function RequestCatalogueCard() {
-  const { user } = useSession();
-  const { data, reload } = useApi<Item[]>(isManager(user) ? '/api/request-items?inactive=true' : null);
-  const [editing, setEditing] = useState<Item | 'new' | null>(null);
-  if (!data) return null;
-  return (
-    <section className="card">
-      <div className="section-head"><h2>Request catalogue</h2><button className="btn-link" onClick={() => setEditing('new')}>+ Item</button></div>
-      <p className="muted small">What people can ask for, per service: a form of at most 10 fields, who approves, and the tasks that fulfil it, in order.</p>
-      {data.length === 0 ? <p className="placeholder">No items yet. Start with the three most common requests, such as a new account or access to a system.</p> : (
-        <table className="table compact">
-          <thead><tr><th>Item</th><th className="hide-sm">Service</th><th className="hide-sm">Approval</th><th>Tasks</th><th /></tr></thead>
-          <tbody>
-            {data.map((i) => (
-              <tr key={i.id} className={i.active ? '' : 'muted'}>
-                <td>{i.name}{!i.active && <span className="tag">inactive</span>}</td>
-                <td className="hide-sm">{i.service.name}</td>
-                <td className="hide-sm small">{i.approval_label}</td>
-                <td>{i.fulfilment_tasks.length}</td>
-                <td><button className="btn-link small" onClick={() => setEditing(i)}>Edit</button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-      {editing && <ItemModal item={editing === 'new' ? null : editing} onClose={() => setEditing(null)} onDone={() => { setEditing(null); reload(); }} />}
-    </section>
-  );
-}
-
-const keyOf = (label: string) => label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').replace(/^(\d)/, 'f$1').slice(0, 40) || 'field';
-
-function ItemModal({ item, onClose, onDone }: { item: Item | null; onClose: () => void; onDone: () => void }) {
-  const teams = useTeams();
-  const { data: slas } = useApi<{ id: number; name: string }[]>('/api/slas');
-  const [form, setForm] = useState({
-    service: item?.service.ref ?? '', name: item?.name ?? '', description: item?.description ?? '', approval: item?.approval ?? 'none',
-    sla_id: item?.sla_id ? String(item.sla_id) : '', active: item?.active ?? true, logger_may_approve: item?.logger_may_approve ?? false,
-    standard_change_template_id: item?.standard_change_template_id ? String(item.standard_change_template_id) : '',
-  });
-  const { data: options } = useApi<{ templates: { id: number; name: string }[]; webhooks: { id: number; name: string }[] }>('/api/request-items/options');
-  const [fields, setFields] = useState<Field[]>(item?.form ?? []);
-  const [tasks, setTasks] = useState<TaskSpec[]>(item?.fulfilment_tasks ?? [{ title: '', team_id: null, kind: 'manual' }]);
-  const [error, setError] = useState<string | null>(null);
-  const approvalKind = form.approval.startsWith('team:') ? 'team' : form.approval;
-  const setField = (n: number, patch: Partial<Field>) => setFields(fields.map((f, i) => (i === n ? { ...f, ...patch } : f)));
-  const setTask = (n: number, patch: Partial<TaskSpec>) => setTasks(tasks.map((t, i) => (i === n ? { ...t, ...patch } : t)));
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    const body = {
-      ...form, sla_id: form.sla_id ? Number(form.sla_id) : null, standard_change_template_id: form.standard_change_template_id ? Number(form.standard_change_template_id) : null,
-      form: fields.map((f) => ({ ...f, key: f.key || keyOf(f.label), choices: f.type === 'choice' ? f.choices : [] })),
-      fulfilment_tasks: tasks.filter((t) => t.title.trim()),
-      ...(tasks.some((t) => t.kind === 'change') ? {} : { standard_change_template_id: null }),
-    };
-    try {
-      if (item) await api.put(`/api/request-items/${item.id}`, body);
-      else await api.post('/api/request-items', body);
-      onDone();
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  };
-  return (
-    <Modal title={item ? `Edit ${item.name}` : 'New catalogue item'} onClose={onClose}>
-      <form className="form" onSubmit={submit}>
-        <label>Name<input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Access to a system" /></label>
-        <label>Service <span className="muted small">(ref)</span><input required value={form.service} onChange={(e) => setForm({ ...form, service: e.target.value })} placeholder="SVC…" /></label>
-        <label className="full">Description<textarea rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
-        <label>Approval
-          <select value={approvalKind} onChange={(e) => setForm({ ...form, approval: e.target.value === 'team' ? `team:${teams[0]?.id ?? 0}` : e.target.value })}>
-            <option value="none">No approval</option><option value="requester_manager">The requester's manager</option><option value="service_owner">The service owner</option><option value="team">A team</option>
-          </select>
-        </label>
-        {approvalKind === 'team' ? (
-          <label>Approving team
-            <select value={form.approval.slice(5)} onChange={(e) => setForm({ ...form, approval: `team:${e.target.value}` })}>{teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
-          </label>
-        ) : (
-          <label>SLA
-            <select value={form.sla_id} onChange={(e) => setForm({ ...form, sla_id: e.target.value })}><option value="">The service's SLA</option>{slas?.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
-          </label>
-        )}
-        {approvalKind === 'team' && (
-          <label className="full">SLA
-            <select value={form.sla_id} onChange={(e) => setForm({ ...form, sla_id: e.target.value })}><option value="">The service's SLA</option>{slas?.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
-          </label>
-        )}
-
-        <fieldset className="full builder">
-          <legend>Form <span className="muted small">({fields.length} of 10 fields)</span></legend>
-          {fields.map((f, n) => (
-            <div key={n} className="builder-row">
-              <input aria-label="Field label" required placeholder="Label" value={f.label} onChange={(e) => setField(n, { label: e.target.value, ...(item?.form.some((x) => x.key === f.key) ? {} : { key: keyOf(e.target.value) }) })} />
-              <select aria-label="Field type" value={f.type} onChange={(e) => setField(n, { type: e.target.value as FieldType })}>{Object.entries(FIELD_TYPE).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
-              <label className="check"><input type="checkbox" checked={f.required} onChange={(e) => setField(n, { required: e.target.checked })} /> Required</label>
-              <button type="button" className="btn-link small" aria-label={`Remove ${f.label || 'field'}`} onClick={() => setFields(fields.filter((_, i) => i !== n))}>Remove</button>
-              {f.type === 'choice' && <input className="builder-choices" aria-label="Choices" placeholder="Choices, separated by commas" value={f.choices.join(', ')} onChange={(e) => setField(n, { choices: e.target.value.split(',').map((c) => c.trim()).filter(Boolean) })} />}
-            </div>
-          ))}
-          {fields.length < 10 && <button type="button" className="btn small" onClick={() => setFields([...fields, { key: '', label: '', type: 'text', required: false, choices: [] }])}>+ Field</button>}
-        </fieldset>
-
-        <fieldset className="full builder">
-          <legend>Fulfilment tasks, in order</legend>
-          {tasks.map((t, n) => (
-            <div key={n} className="builder-row">
-              <span className="muted">{n + 1}.</span>
-              <input aria-label="Task" required={n === 0} placeholder="What to do" value={t.title} onChange={(e) => setTask(n, { title: e.target.value })} />
-              <select aria-label="Team" value={t.team_id ?? ''} onChange={(e) => setTask(n, { team_id: e.target.value ? Number(e.target.value) : null })}>
-                <option value="">Anyone</option>{teams.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
-              </select>
-              <select aria-label="How it is done" value={t.kind ?? 'manual'} onChange={(e) => setTask(n, { kind: e.target.value as TaskKind, webhook_id: e.target.value === 'webhook' ? options?.webhooks[0]?.id ?? null : null })}>
-                {(Object.keys(TASK_KIND) as TaskKind[]).filter((k) => k === 'manual' || (k === 'change' ? !!options?.templates.length : !!options?.webhooks.length)).map((k) => <option key={k} value={k}>{TASK_KIND[k]}</option>)}
-              </select>
-              {t.kind === 'webhook' && (
-                <select aria-label="Webhook" value={t.webhook_id ?? ''} onChange={(e) => setTask(n, { webhook_id: Number(e.target.value) })}>{options?.webhooks.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select>
-              )}
-              {tasks.length > 1 && <button type="button" className="btn-link small" aria-label={`Remove task ${n + 1}`} onClick={() => setTasks(tasks.filter((_, i) => i !== n))}>Remove</button>}
-            </div>
-          ))}
-          {tasks.length < 20 && <button type="button" className="btn small" onClick={() => setTasks([...tasks, { title: '', team_id: null, kind: 'manual' }])}>+ Task</button>}
-          {tasks.some((t) => t.kind === 'change') && (
-            <label>Standard change template
-              <select required value={form.standard_change_template_id} onChange={(e) => setForm({ ...form, standard_change_template_id: e.target.value })}>
-                <option value="">Choose…</option>{options?.templates.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
-              </select>
-            </label>
-          )}
-          <p className="muted small">A standard change task is completed by the change's outcome; a webhook task by the webhook calling back.</p>
-        </fieldset>
-        {form.approval !== 'none' && <label className="check full"><input type="checkbox" checked={form.logger_may_approve} onChange={(e) => setForm({ ...form, logger_may_approve: e.target.checked })} /> The person who logs a request may also approve it (the history shows it)</label>}
-        {item && <label className="check full"><input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> In the catalogue (untick to retire it; existing requests keep it)</label>}
-        {error && <div className="error full">{error}</div>}
-        <div className="actions full"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary">Save</button></div>
-      </form>
-    </Modal>
   );
 }

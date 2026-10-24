@@ -38,7 +38,7 @@ export function ProblemTable({ problems, empty = 'No problems found.', compact, 
                 {p.is_major && <MajorBadge />}
               </td>
               <td data-col="priority"><PriorityBadge priority={p.priority} /></td>
-              <td data-col="status"><StatusBadge status={p.status} /></td>
+              <td data-col="status"><StatusBadge kind="problem" status={p.status} /></td>
               {!compact && <td className="muted hide-sm" data-col="service">{p.affected_service || '–'}</td>}
               {!compact && <td className={`hide-sm ${p.assignee ? '' : 'muted'}`} data-col="assignee">{p.assignee ?? 'Unassigned'}</td>}
               <td className="muted nowrap hide-sm" data-col="age">{ageDays(p.created_at)} d</td>

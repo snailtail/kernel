@@ -43,7 +43,7 @@ export function SimilarProblems({ text, exclude, title = 'Similar problems', dup
           <li key={s.ref}>
             <div className="similar-head">
               <Link to={`/problems/${s.ref}`} className="mono">{s.ref}</Link>
-              <StatusBadge status={s.status} />
+              <StatusBadge kind="problem" status={s.status} />
             </div>
             <Link to={`/problems/${s.ref}`} className="similar-title">{s.title}</Link>
             {s.status === 'known_error' && s.workaround && <div className="similar-workaround"><strong>Workaround:</strong> {s.workaround}</div>}

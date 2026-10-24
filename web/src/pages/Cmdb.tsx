@@ -2,8 +2,8 @@ import { Fragment, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { api, type User } from '../api';
 import { GroupsPage, ImpactSection, RelationshipsSection, type Relationship } from '../components/CmdbGraph';
+import { CommentBox } from '../components/CommentBox';
 import { Markdown } from '../components/Markdown';
-import { richPaste } from '../components/RichPaste';
 import { AttachmentsPanel } from '../components/Attachments';
 import { SeverityBadge } from '../components/Badges';
 import { Modal } from '../components/Modal';
@@ -131,7 +131,6 @@ export function CiPage() {
   const others = useLive([ci && `ci:${ci.id}`], refresh, { presence: true });
   const { data: types } = useApi<CiType[]>('/api/ci-types');
   const [editing, setEditing] = useState(false);
-  const [note, setNote] = useState('');
   const [actionError, setActionError] = useState<string | null>(null);
   if (error) return <div className="error">{error}</div>;
   if (!ci) return null;
@@ -239,10 +238,7 @@ export function CiPage() {
           <section className="card">
             <h2>Notes &amp; history</h2>
             {annotate && (
-              <form className="comment-form" onSubmit={(e) => { e.preventDefault(); run(() => api.post(`/api/cis/${ci.ref}/comments`, { body: note })).then(() => setNote('')); }}>
-                <textarea rows={2} placeholder="Add a note about this CI" value={note} onChange={(e) => setNote(e.target.value)} {...richPaste(ci.ref, setNote, setActionError)} />
-                <div className="actions"><button className="btn primary" disabled={!note.trim()}>Add note</button></div>
-              </form>
+              <CommentBox recordRef={ci.ref} placeholder="Add a note about this CI" onError={setActionError} onSubmit={(body) => run(() => api.post(`/api/cis/${ci.ref}/comments`, { body }))} />
             )}
             <ul className="activity">
               {ci.activity.map((a) => (

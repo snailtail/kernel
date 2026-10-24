@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'react-router';
 import { api } from '../api';
 import { useApi } from '../hooks';
-import { useTeams } from '../pages/Teams';
+import { useTeams } from './Teams';
 import { isManager, useSession } from '../session';
 import { columnStore } from './ListToolkit';
 import { Modal } from './Modal';

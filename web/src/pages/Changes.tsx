@@ -2,14 +2,16 @@ import { useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { api, type Guidance } from '../api';
 import { AffectedCisPanel, type AffectedCi, type AffectedService } from '../components/AffectedCis';
+import { PersonalDataBadge, StatusBadge } from '../components/Badges';
+import { CommentBox } from '../components/CommentBox';
 import { GuidePanel } from '../components/Guide';
 import { Markdown } from '../components/Markdown';
-import { richPaste } from '../components/RichPaste';
+import { TransitionButtons } from '../components/TransitionButtons';
 import { RecordNotFound, VisibilityPanel } from '../components/Visibility';
 import { DevLinksPanel } from '../components/DevLinks';
 import { SummaryButton } from '../components/Ai';
 import { AttachmentsPanel } from '../components/Attachments';
-import { Modal } from '../components/Modal';
+import { FormModal, Modal } from '../components/Modal';
 import { useColumns, useListToolkit, type ColumnKey } from '../components/ListToolkit';
 import { SavedViews } from '../components/SavedViews';
 import { Term } from '../components/Glossary';
@@ -19,13 +21,10 @@ import { Presence } from '../components/Presence';
 import { useApi, useOpenOnNew } from '../hooks';
 import { useSession } from '../session';
 import { HistoryPanel } from '../components/History';
+import { CHANGE_STATUS, type ChangeStatus } from '../statuses';
 
-type Status = 'draft' | 'assess' | 'authorize' | 'scheduled' | 'implementing' | 'review' | 'closed' | 'rejected' | 'cancelled';
-export const CHANGE_STATUS: Record<Status, string> = {
-  draft: 'Draft', assess: 'Assess', authorize: 'Authorise', scheduled: 'Scheduled', implementing: 'Implementing', review: 'Review', closed: 'Closed', rejected: 'Rejected', cancelled: 'Cancelled',
-};
 const OUTCOME: Record<string, string> = { successful: 'Successful', failed: 'Failed', rolled_back: 'Rolled back' };
-interface Row { id: number; ref: string; title: string; change_type: string; status: Status; risk: string | null; planned_start: string | null; planned_end: string | null; outcome: string | null; source: string; assignee: string | null; problem_ref: string | null; cis: string[] | null }
+interface Row { id: number; ref: string; title: string; change_type: string; status: ChangeStatus; risk: string | null; planned_start: string | null; planned_end: string | null; outcome: string | null; source: string; assignee: string | null; problem_ref: string | null; cis: string[] | null }
 interface Change extends Row {
   description: string; template: string | null; template_id: number | null; implementation_plan: string; test_plan: string; backout_plan: string; review: string;
   risk: string; risk_assessed: string; risk_reason: string; risk_overridden: boolean; actual_start: string | null; actual_end: string | null; assignee_id: number | null;
@@ -39,9 +38,6 @@ interface Change extends Row {
   next_steps: Guidance;
 }
 
-export function ChangeStatusBadge({ status }: { status: Status }) {
-  return <span className={`badge chg-${status}`}>{CHANGE_STATUS[status]}</span>;
-}
 const fmtWindow = (s: string | null, e: string | null) => (s ? `${formatDate(s)}${e ? ` – ${formatDate(e)}` : ''}` : 'Not planned');
 
 export function ChangesPage() {
@@ -111,7 +107,7 @@ function ChangeList({ params, set }: { params: URLSearchParams; set: (k: string,
                     <td className="mono nowrap"><Link to={`/changes/${c.ref}`}>{c.ref}</Link></td>
                     <td className="title-cell"><Link to={`/changes/${c.ref}`}>{c.title}</Link>{c.source === 'pipeline' && <span className="tag">pipeline</span>}</td>
                     <td data-col="type"><span className={`tag type-${c.change_type}`}>{c.change_type}</span></td>
-                    <td data-col="status"><ChangeStatusBadge status={c.status} />{c.outcome && <div className="muted small">{OUTCOME[c.outcome]}</div>}</td>
+                    <td data-col="status"><StatusBadge kind="change" status={c.status} />{c.outcome && <div className="muted small">{OUTCOME[c.outcome]}</div>}</td>
                     <td className="hide-sm" data-col="risk">{c.risk ?? <span className="muted">assessed</span>}</td>
                     <td className="hide-sm small nowrap" data-col="window">{fmtWindow(c.planned_start, c.planned_end)}</td>
                     <td className="hide-sm small" data-col="cis">{c.cis?.join(', ') ?? '–'}</td>
@@ -153,7 +149,7 @@ function Schedule() {
                     <div className="muted small">{new Date(c.planned_start!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}–{new Date(c.planned_end!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · {c.cis?.join(', ') ?? 'no CIs'}</div>
                     {colliding.has(c.ref) && <div className="small attention">Collides with {data.collisions.filter((x) => x.change === c.ref).map((x) => `${x.with} on ${x.ci_name}`).join(', ')}</div>}
                   </div>
-                  <ChangeStatusBadge status={c.status} />
+                  <StatusBadge kind="change" status={c.status} />
                 </li>
               ))}
             </ul>
@@ -293,7 +289,6 @@ export function ChangePage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [finishing, setFinishing] = useState<null | 'review' | 'closed'>(null);
-  const [note, setNote] = useState('');
   if (error) return <RecordNotFound refId={ref ?? ''} error={error} onOpened={reload} />;
   if (!c) return null;
   const path = `/api/changes/${c.ref}`;
@@ -326,26 +321,32 @@ export function ChangePage() {
         <div className="crumbs"><Link to="/changes">Changes</Link> / <span className="mono">{c.ref}</span> <Presence people={others} /></div>
         <h1>{c.title}</h1>
         <div className="badges">
-          {(c as any).contains_personal_data && <span className="badge" title="The text holds personal data (personal identity numbers or email addresses). It is kept, and counts for retention and AI handling.">Personal data</span>}
-          <ChangeStatusBadge status={c.status} />
+          {(c as any).contains_personal_data && <PersonalDataBadge />}
+          <StatusBadge kind="change" status={c.status} />
           <span className={`tag type-${c.change_type}`}>{c.change_type}{c.template && `: ${c.template}`}</span>
           <span className={`badge risk-${c.risk}`} title={c.risk_reason}>{c.risk} risk{c.risk_overridden && ` (assessed ${c.risk_assessed})`}</span>
           {c.outcome && <span className={`badge outcome-${c.outcome}`}>{OUTCOME[c.outcome]}</span>}
           <span className="muted small">Requested by {c.requested_by ?? c.source} {relativeTime(c.created_at)}</span>
         </div>
         {editable && (
-          <div className="transitions">
-            {c.status === 'draft' && c.change_type !== 'standard' && <button className="btn primary" onClick={() => go({ to: 'assess' })}>Submit for assessment</button>}
-            {c.status === 'draft' && c.change_type === 'standard' && <button className="btn primary" onClick={() => go({ to: 'scheduled' })}>Schedule</button>}
-            {c.status === 'assess' && <button className="btn primary" onClick={() => go({ to: 'authorize' })}>Submit for authorisation</button>}
-            {c.status === 'authorize' && c.change_type === 'emergency' && c.approvals.approved >= c.approvals.required && <button className="btn primary" onClick={() => go({ to: 'implementing' })}>Start implementing</button>}
-            {c.status === 'scheduled' && <button className="btn primary" onClick={() => go({ to: 'implementing' })}>Start implementing</button>}
-            {c.status === 'implementing' && <button className="btn primary" onClick={() => setFinishing('review')}>Record outcome</button>}
-            {c.status === 'review' && <button className="btn primary" onClick={() => setFinishing('closed')}>Close</button>}
-            {c.status === 'rejected' && <button className="btn" onClick={() => go({ to: 'draft' })}>Rework</button>}
-            {draftish && <button className="btn" onClick={() => setEditing(true)}>Edit</button>}
-            {['draft', 'assess', 'authorize', 'scheduled'].includes(c.status) && <button className="btn" onClick={() => { const r = window.prompt('Why is the change cancelled?'); if (r?.trim()) go({ to: 'cancelled', cancel_reason: r.trim() }); }}>Cancel change</button>}
-          </div>
+          <TransitionButtons buttons={[
+            { label: 'Submit for assessment', tone: 'primary', show: c.status === 'draft' && c.change_type !== 'standard', onClick: () => go({ to: 'assess' }) },
+            { label: 'Schedule', tone: 'primary', show: c.status === 'draft' && c.change_type === 'standard', onClick: () => go({ to: 'scheduled' }) },
+            { label: 'Submit for authorisation', tone: 'primary', show: c.status === 'assess', onClick: () => go({ to: 'authorize' }) },
+            {
+              label: 'Start implementing', tone: 'primary',
+              show: c.status === 'scheduled' || (c.status === 'authorize' && c.change_type === 'emergency' && c.approvals.approved >= c.approvals.required),
+              onClick: () => go({ to: 'implementing' }),
+            },
+            { label: 'Record outcome', tone: 'primary', show: c.status === 'implementing', onClick: () => setFinishing('review') },
+            { label: 'Close', tone: 'primary', show: c.status === 'review', onClick: () => setFinishing('closed') },
+            { label: 'Rework', show: c.status === 'rejected', onClick: () => go({ to: 'draft' }) },
+            { label: 'Edit', show: draftish, onClick: () => setEditing(true) },
+            {
+              label: 'Cancel change', show: ['draft', 'assess', 'authorize', 'scheduled'].includes(c.status),
+              onClick: () => { const r = window.prompt('Why is the change cancelled?'); if (r?.trim()) go({ to: 'cancelled', cancel_reason: r.trim() }); },
+            },
+          ]} />
         )}
         {actionError && <div className="error">{actionError}</div>}
       </header>
@@ -382,17 +383,14 @@ export function ChangePage() {
           <section className="card">
             <h2>Notes &amp; history</h2>
             {editable && (
-              <form className="comment-form" onSubmit={async (e) => { e.preventDefault(); if (await run(() => api.post(`${path}/comments`, { body: note }))) setNote(''); }}>
-                <textarea rows={2} placeholder="Add a note – paste screenshots and logs here" value={note} onChange={(e) => setNote(e.target.value)} {...richPaste(c.ref, setNote, setActionError)} />
-                <div className="actions"><button className="btn primary" disabled={!note.trim()}>Add note</button></div>
-              </form>
+              <CommentBox recordRef={c.ref} placeholder="Add a note – paste screenshots and logs here" onError={setActionError} onSubmit={(body) => run(() => api.post(`${path}/comments`, { body }))} />
             )}
             <ul className="activity">
               {c.activity.map((a) => (
                 <li key={a.id}>
                   <div className="activity-head">
                     <strong>{a.user_name ?? 'System'}</strong>{' '}
-                    {a.kind === 'comment' ? 'added a note' : a.kind === 'status' ? `moved it from ${CHANGE_STATUS[a.data.from as Status]} to ${CHANGE_STATUS[a.data.to as Status]}` : a.kind === 'vote' ? (a.data.decision === 'approve' ? 'approved' : 'rejected') : a.body}
+                    {a.kind === 'comment' ? 'added a note' : a.kind === 'status' ? `moved it from ${CHANGE_STATUS[a.data.from as ChangeStatus]} to ${CHANGE_STATUS[a.data.to as ChangeStatus]}` : a.kind === 'vote' ? (a.data.decision === 'approve' ? 'approved' : 'rejected') : a.body}
                     {(a.channel === 'mcp' || a.channel === 'api') && <span className="tag channel">via {a.channel.toUpperCase()}</span>}
                     {(a.channel === 'email_link' || a.channel === 'chat_link') && <span className="tag channel" title="Decided from the approval link in a notification">via {a.channel === 'email_link' ? 'email' : 'chat'} link</span>}
                     <time title={formatDate(a.created_at)}>{relativeTime(a.created_at)}</time>
@@ -479,27 +477,20 @@ function FinishChange({ change: c, to, onClose, onDone }: { change: Change; to: 
   const suggestion = c.next_steps.steps.find((s) => s.id === 'implement')?.suggestion;
   const [outcome, setOutcome] = useState(c.outcome ?? suggestion?.outcome ?? 'successful');
   const [review, setReview] = useState(c.review);
-  const [error, setError] = useState<string | null>(null);
   const needsReview = to === 'closed' && (c.outcome !== 'successful' || c.change_type === 'emergency');
   return (
-    <Modal title={to === 'review' ? 'Record the outcome' : 'Close the change'} onClose={onClose}>
-      <form className="form" onSubmit={async (e) => {
-        e.preventDefault();
-        try { onDone(await api.post<Change>(`/api/changes/${c.ref}/transition`, to === 'review' ? { to, outcome } : { to, review })); } catch (err) { setError((err as Error).message); }
-      }}>
-        {to === 'review' ? (
-          <>
-            <label className="full">Outcome<select value={outcome} onChange={(e) => setOutcome(e.target.value)}>{Object.entries(OUTCOME).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
-            {suggestion?.outcome && <p className="hint full small">Suggested from the linked work: {suggestion.reason}.</p>}
-          </>
-        ) : (
-          <label className="full">Post-implementation review {needsReview ? <span className="muted small">(required)</span> : <span className="muted small">(optional)</span>}
-            <textarea rows={5} required={needsReview} placeholder="What happened, what went well, what to improve" value={review} onChange={(e) => setReview(e.target.value)} />
-          </label>
-        )}
-        {error && <div className="error full">{error}</div>}
-        <div className="actions full"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary">{to === 'review' ? 'Record' : 'Close'}</button></div>
-      </form>
-    </Modal>
+    <FormModal title={to === 'review' ? 'Record the outcome' : 'Close the change'} submitLabel={to === 'review' ? 'Record' : 'Close'} onClose={onClose}
+      onSubmit={async () => onDone(await api.post<Change>(`/api/changes/${c.ref}/transition`, to === 'review' ? { to, outcome } : { to, review }))}>
+      {to === 'review' ? (
+        <>
+          <label className="full">Outcome<select value={outcome} onChange={(e) => setOutcome(e.target.value)}>{Object.entries(OUTCOME).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
+          {suggestion?.outcome && <p className="hint full small">Suggested from the linked work: {suggestion.reason}.</p>}
+        </>
+      ) : (
+        <label className="full">Post-implementation review {needsReview ? <span className="muted small">(required)</span> : <span className="muted small">(optional)</span>}
+          <textarea rows={5} required={needsReview} placeholder="What happened, what went well, what to improve" value={review} onChange={(e) => setReview(e.target.value)} />
+        </label>
+      )}
+    </FormModal>
   );
 }

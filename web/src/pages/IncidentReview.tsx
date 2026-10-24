@@ -5,11 +5,14 @@ import { Link, useParams } from 'react-router';
 import { api, type Action } from '../api';
 import { ActionsCard } from '../components/Actions';
 import { useAiStatus } from '../components/Ai';
+import { StatusBadge } from '../components/Badges';
+import { CommentBox } from '../components/CommentBox';
 import { Markdown } from '../components/Markdown';
 import { formatDate } from '../format';
 import { useApi } from '../hooks';
 import { useSession } from '../session';
 import { HistoryPanel } from '../components/History';
+import { type ReviewStatus } from '../statuses';
 
 type Section = 'what_happened' | 'impact_summary' | 'went_well' | 'was_hard' | 'lucky';
 interface Item {
@@ -19,7 +22,7 @@ interface Item {
   improvement_ref: string | null; improvement_title: string | null; improvement_status: string | null;
 }
 interface Review {
-  ref: string; incident_ref: string; incident_title: string; is_major: boolean; status: 'scheduled' | 'draft' | 'published' | 'waived'; owner_id: number | null; owner: string | null;
+  ref: string; incident_ref: string; incident_title: string; is_major: boolean; status: ReviewStatus; owner_id: number | null; owner: string | null;
   due: string | null; due_in_days: number | null; overdue: boolean; attendees: string; waived_reason: string; published_at: string | null; published_by: string | null;
   items: Item[]; actions: Action[]; comments: { id: number; body: string; created_at: string; created_by: string | null }[]; may_finish: boolean; confidential_masked?: boolean;
   context: { timeline: { at: string; label: string; body: string; key_moment: boolean }[]; impact: string; problem_ref: string | null };
@@ -33,7 +36,6 @@ const KINDS: [Item['kind'], string, string][] = [
   ['follow_up', 'Follow-up', 'Concrete actions with an owner and a date. Each becomes an action on this review (or on a problem), or an improvement for a change to how things work.'],
   ['gap', 'Detection and response gaps', 'What made it slow to notice or to respond: alerting, runbooks, access, people.'],
 ];
-const STATUS_LABEL: Record<Review['status'], string> = { scheduled: 'Scheduled', draft: 'Draft', published: 'Published', waived: 'Waived' };
 
 export function IncidentReviewPage() {
   const { ref } = useParams();
@@ -45,7 +47,6 @@ export function IncidentReviewPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [hint, setHint] = useState<{ text: string; model: string } | null>(null);
   const [busy, setBusy] = useState(false);
-  const [note, setNote] = useState('');
   if (error) return <p className="error">{error}</p>;
   if (!r) return null;
   const path = `/api/incidents/${r.incident_ref}/review`;
@@ -65,7 +66,7 @@ export function IncidentReviewPage() {
         <div className="crumbs"><Link to="/incidents">Incidents</Link> / <Link to={`/incidents/${r.incident_ref}`} className="mono">{r.incident_ref}</Link> / Review <span className="mono">{r.ref}</span></div>
         <h1>Post-incident review: {r.incident_title}</h1>
         <div className="badges">
-          <span className={`badge review-${r.status}`}>{STATUS_LABEL[r.status]}</span>
+          <StatusBadge kind="review" status={r.status} />
           {r.overdue && <span className="badge overdue">Overdue</span>}
           <span className="muted small">
             {r.owner ? `Owner ${r.owner}` : 'No owner'}
@@ -170,10 +171,8 @@ export function IncidentReviewPage() {
               </ul>
             )}
             {user.role !== 'viewer' && (
-              <form className="no-print" onSubmit={(e) => { e.preventDefault(); if (note.trim()) void run(() => api.post(`/api/reviews/${r.ref}/comments`, { body: note.trim() })).then((ok) => ok && setNote('')); }}>
-                <textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="A note for the people on the review" aria-label="Note" />
-                <button className="btn small" disabled={!note.trim()}>Add note</button>
-              </form>
+              <CommentBox compact recordRef={r.ref} paste={false} placeholder="A note for the people on the review"
+                onSubmit={(body) => run(() => api.post(`/api/reviews/${r.ref}/comments`, { body: body.trim() }))} />
             )}
           </section>
           <HistoryPanel recordRef={r.ref} version={r} />

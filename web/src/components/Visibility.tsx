@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api } from '../api';
-import { useTeams } from '../pages/Teams';
+import { useTeams } from './Teams';
 import { canEdit, isManager, useSession } from '../session';
 import { askReason } from './Ask';
 import { Modal } from './Modal';

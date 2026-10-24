@@ -4,7 +4,7 @@ import { api } from '../api';
 import { formatDate, relativeTime } from '../format';
 import { useSession } from '../session';
 import { Modal } from './Modal';
-import type { Team } from '../pages/Teams';
+import type { Team } from './Teams';
 
 interface OnCall { team_id: number; team: string; source: string; people: { name: string; until: string | null }[]; unavailable?: string }
 let cache: { at: number; list: OnCall[] } | null = null;

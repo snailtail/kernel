@@ -1,16 +1,17 @@
+import { ActivityLine } from '../components/History';
 import { HealthTips } from '../components/ProcessMap';
 import { HiddenRecordsNote } from '../components/Visibility';
 import { Link } from 'react-router';
 import type { Action, Activity, Problem, Status } from '../api';
+import type { BackupStatus } from '../api/types/admin';
 import { ActionList } from '../components/Actions';
 import { KpiSection } from '../components/Kpis';
 import { ProblemTable } from '../components/ProblemTable';
-import { PRIORITY_LABEL, relativeTime, STATUS_LABEL, STATUS_PHASE } from '../format';
+import { PRIORITY_LABEL, relativeTime } from '../format';
 import { useApi } from '../hooks';
 import { isManager, useSession } from '../session';
-import type { BackupStatus } from './Admin';
+import { PROBLEM_STATUS, STATUS_PHASE } from '../statuses';
 import { isGuided } from '../components/Guide';
-import { ActivityLine } from './Problem';
 
 interface Dashboard {
   by_status: Partial<Record<Status, number>>;
@@ -76,7 +77,7 @@ export function DashboardPage() {
         </Link>
         {(['new', 'analysis', 'known_error'] as Status[]).map((s) => (
           <Link to={`/problems?status=${s}`} key={s} className={`stat stat-${s}`}>
-            <span className="stat-label">{STATUS_LABEL[s]}</span>
+            <span className="stat-label">{PROBLEM_STATUS[s]}</span>
             <span className="stat-value">{data.by_status[s] ?? 0}</span>
             <span className="stat-sub">{STATUS_PHASE[s]}</span>
           </Link>

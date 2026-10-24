@@ -4,7 +4,7 @@ import { Link, useSearchParams } from 'react-router';
 import { useApi } from '../hooks';
 import { useLive } from '../live';
 import { useSession } from '../session';
-import { useTeams } from './Teams';
+import { useTeams } from '../components/Teams';
 import { formatDate, relativeTime } from '../format';
 
 interface Row {

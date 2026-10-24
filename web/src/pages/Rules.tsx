@@ -7,7 +7,7 @@ import { Modal } from '../components/Modal';
 import { formatDate, relativeTime } from '../format';
 import { useApi } from '../hooks';
 import { canEdit, useSession } from '../session';
-import { useTeams } from './Teams';
+import { useTeams } from '../components/Teams';
 
 type Kind = 'incident' | 'problem' | 'change' | 'request';
 type Trigger = { type: 'created' } | { type: 'field_changed'; field: string } | { type: 'status_changed'; to?: string } | { type: 'in_status_for'; status: string; hours: number } | { type: 'due_in'; hours: number };
