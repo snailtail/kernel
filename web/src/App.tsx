@@ -3,7 +3,8 @@ import { Sidebar } from './components/Sidebar';
 import { CommandPalette, ShortcutHelp, useShortcuts } from './components/CommandPalette';
 import { MyWorkPage } from './features/work/MyWork';
 import { NotificationsPage } from './components/Notifications';
-import { IncidentPage, IncidentsPage } from './features/incidents/Incidents';
+import { IncidentsPage } from './features/incidents/Incidents';
+import { IncidentPage } from './features/incidents/IncidentPage';
 import { Navigate, Route, Routes } from 'react-router';
 import { api, type Meta, type Preferences, type User } from './api/client';
 import { ActionsPage } from './features/problems/Actions';
@@ -22,13 +23,13 @@ import { SensitiveWatch } from './components/SensitiveWatch';
 
 // Pages people open less often load on demand, so the start page stays small.
 const ChangesPage = lazy(() => import('./features/changes/Changes').then((m) => ({ default: m.ChangesPage })));
-const ChangePage = lazy(() => import('./features/changes/Changes').then((m) => ({ default: m.ChangePage })));
+const ChangePage = lazy(() => import('./features/changes/ChangePage').then((m) => ({ default: m.ChangePage })));
 const ServiceLevelsPage = lazy(() => import('./features/services/ServiceLevels').then((m) => ({ default: m.ServiceLevelsPage })));
 const SetupPage = lazy(() => import('./features/admin/Setup').then((m) => ({ default: m.SetupPage })));
 const EventsPage = lazy(() => import('./features/events/Events').then((m) => ({ default: m.EventsPage })));
 const CiGroupsPage = lazy(() => import('./features/cmdb/Cmdb').then((m) => ({ default: m.CiGroupsPage })));
-const CiPage = lazy(() => import('./features/cmdb/Cmdb').then((m) => ({ default: m.CiPage })));
-const CiRetirePage = lazy(() => import('./features/cmdb/Cmdb').then((m) => ({ default: m.CiRetirePage })));
+const CiPage = lazy(() => import('./features/cmdb/CiPage').then((m) => ({ default: m.CiPage })));
+const CiRetirePage = lazy(() => import('./features/cmdb/CiRetirePage').then((m) => ({ default: m.CiRetirePage })));
 const CmdbListPage = lazy(() => import('./features/cmdb/Cmdb').then((m) => ({ default: m.CmdbListPage })));
 const AdminPage = lazy(() => import('./features/admin/Admin').then((m) => ({ default: m.AdminPage })));
 const ApiDocsPage = lazy(() => import('./features/help/ApiDocs').then((m) => ({ default: m.ApiDocsPage })));
@@ -37,9 +38,9 @@ const KnowledgePage = lazy(() => import('./features/knowledge/Knowledge').then((
 const IncidentReviewsPage = lazy(() => import('./features/incidents/IncidentReviews').then((m) => ({ default: m.IncidentReviewsPage })));
 const IncidentReviewPage = lazy(() => import('./features/incidents/IncidentReview').then((m) => ({ default: m.IncidentReviewPage })));
 const ImprovementsPage = lazy(() => import('./features/improvements/Improvements').then((m) => ({ default: m.ImprovementsPage })));
-const ImprovementPage = lazy(() => import('./features/improvements/Improvements').then((m) => ({ default: m.ImprovementPage })));
+const ImprovementPage = lazy(() => import('./features/improvements/ImprovementPage').then((m) => ({ default: m.ImprovementPage })));
 const RequestsPage = lazy(() => import('./features/requests/Requests').then((m) => ({ default: m.RequestsPage })));
-const RequestPage = lazy(() => import('./features/requests/Requests').then((m) => ({ default: m.RequestPage })));
+const RequestPage = lazy(() => import('./features/requests/RequestPage').then((m) => ({ default: m.RequestPage })));
 const ArticlePage = lazy(() => import('./features/knowledge/Knowledge').then((m) => ({ default: m.ArticlePage })));
 const ServiceReportPage = lazy(() => import('./features/services/ServiceReport').then((m) => ({ default: m.ServiceReportPage })));
 const StatusBoardPage = lazy(() => import('./features/services/StatusBoard').then((m) => ({ default: m.StatusBoardPage })));
