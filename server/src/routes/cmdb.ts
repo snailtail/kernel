@@ -1,10 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { requireUser } from '../auth.js';
-import * as cmdb from '../cmdb.js';
-import * as graph from '../cmdb-graph.js';
-import * as retire from '../ci-retire.js';
-import * as problemCis from '../problem-cis.js';
+import { requireUser } from '../security/auth.js';
+import * as cmdb from '../cmdb/cmdb.js';
+import * as graph from '../cmdb/cmdb-graph.js';
+import * as retire from '../cmdb/ci-retire.js';
+import * as problemCis from '../problems/problem-cis.js';
 
 type RefParams = { Params: { ref: string } };
 

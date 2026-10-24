@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
-import { requireUser } from '../auth.js';
-import * as integrations from '../integrations.js';
+import { requireUser } from '../security/auth.js';
+import * as integrations from '../integrations/integrations.js';
 
 export async function integrationRoutes(app: FastifyInstance) {
   app.get('/api/systems', async (req) => {

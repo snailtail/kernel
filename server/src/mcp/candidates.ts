@@ -1,8 +1,8 @@
 // MCP: Problem detection (candidates) and records reported from other systems.
 import { z } from 'zod';
-import * as config from '../candidate-config.js';
-import * as candidates from '../candidates.js';
-import * as integrations from '../integrations.js';
+import * as config from '../problems/candidate-config.js';
+import * as candidates from '../problems/candidates.js';
+import * as integrations from '../integrations/integrations.js';
 import { compactProblem } from './problems.js';
 import { optionalEditable } from './problems.js';
 import { toInput } from './problems.js';

@@ -20,7 +20,7 @@ describe('record kinds (#172)', { skip }, () => {
   });
 
   test('every kind names a table, an activity log and a comment hook that exist', async () => {
-    const { recordTypes } = await import('../../src/records.js');
+    const { recordTypes } = await import('../../src/records/records.js');
     for (const t of recordTypes()) {
       assert.ok(has(t.table, 'id') && has(t.table, 'ref'), `${t.type}: ${t.table} has no id and ref`);
       if (t.activity) {
@@ -33,7 +33,7 @@ describe('record kinds (#172)', { skip }, () => {
   });
 
   test('a kind whose table can be confidential is masked, restricted, redacted and marked for personal data', async () => {
-    const { recordTypes, textKinds } = await import('../../src/records.js');
+    const { recordTypes, textKinds } = await import('../../src/records/records.js');
     const text = new Set(textKinds().map((t) => t.type));
     for (const t of recordTypes()) {
       // A review is masked through its incident (confidential.ts), so only kinds with a table of their own count.
@@ -45,8 +45,8 @@ describe('record kinds (#172)', { skip }, () => {
   });
 
   test('the masking SQL is valid for every kind that can be confidential', async () => {
-    const { textKinds } = await import('../../src/records.js');
-    const { textFilterSql } = await import('../../src/confidential.js');
+    const { textKinds } = await import('../../src/records/records.js');
+    const { textFilterSql } = await import('../../src/security/confidential.js');
     for (const t of textKinds()) {
       const params: unknown[] = [];
       const where = textFilterSql('a', t.type, 'word', params);
@@ -55,8 +55,8 @@ describe('record kinds (#172)', { skip }, () => {
   });
 
   test('redaction reaches every masked field and every place the kind names', async () => {
-    const { textKinds } = await import('../../src/records.js');
-    const { MASKED_FIELDS } = await import('../../src/confidential.js');
+    const { textKinds } = await import('../../src/records/records.js');
+    const { MASKED_FIELDS } = await import('../../src/security/confidential.js');
     for (const t of textKinds()) {
       for (const p of t.textPlaces) {
         for (const c of [p.key, ...p.columns, ...(p.json ?? [])]) assert.ok(has(p.table, c), `${t.type}: ${p.table}.${c} is missing`);
@@ -70,7 +70,7 @@ describe('record kinds (#172)', { skip }, () => {
   });
 
   test('restricting checks the kind in the database too (row-level security and record lookup)', async () => {
-    const { textKinds } = await import('../../src/records.js');
+    const { textKinds } = await import('../../src/records/records.js');
     const { rows: policies } = await ownerQuery("SELECT DISTINCT tablename FROM pg_policies WHERE schemaname = 'public'");
     const { rows: lookup } = await ownerQuery("SELECT prosrc FROM pg_proc WHERE proname = 'kernel_record_lookup'");
     for (const t of textKinds()) {
@@ -80,7 +80,7 @@ describe('record kinds (#172)', { skip }, () => {
   });
 
   test('every live trigger on a record table is a registered topic, and every topic has its trigger', async () => {
-    const { recordTypes } = await import('../../src/records.js');
+    const { recordTypes } = await import('../../src/records/records.js');
     const { rows } = await ownerQuery(
       `SELECT c.relname AS table, pg_get_triggerdef(g.oid) AS def FROM pg_trigger g JOIN pg_class c ON c.oid = g.tgrelid
        WHERE NOT g.tgisinternal AND pg_get_triggerdef(g.oid) LIKE '%kernel_live_notify(%'`,
@@ -95,8 +95,8 @@ describe('record kinds (#172)', { skip }, () => {
     }
   });
   test('every kind an action can hang off is in the CHECK, the visibility policy and has a drop trigger (#184)', async () => {
-    const { ACTION_PARENTS } = await import('../../src/actions.js');
-    const { recordType } = await import('../../src/records.js');
+    const { ACTION_PARENTS } = await import('../../src/problems/actions.js');
+    const { recordType } = await import('../../src/records/records.js');
     const check = (await ownerQuery("SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conrelid = 'actions'::regclass AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%parent_kind%'")).rows[0].def as string;
     const policy = (await ownerQuery("SELECT qual FROM pg_policies WHERE tablename = 'actions' AND policyname = 'actions_visible'")).rows[0].qual as string;
     const drops = (await ownerQuery(

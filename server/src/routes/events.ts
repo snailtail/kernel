@@ -1,9 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { requireUser } from '../auth.js';
-import { requireStepUp } from '../mfa.js';
-import * as hooks from '../event-hooks.js';
-import * as events from '../events.js';
+import { requireUser } from '../security/auth.js';
+import { requireStepUp } from '../security/mfa.js';
+import * as hooks from '../events/event-hooks.js';
+import * as events from '../events/events.js';
 
 type Id = { Params: { id: string } };
 

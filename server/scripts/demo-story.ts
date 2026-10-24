@@ -2,32 +2,32 @@
 // a little background volume so reports and trends have shapes. Everything goes through the service layer, like the
 // API, so audit, SLA clocks, live updates and the hash chain are real; then timestamps are moved relative to now, so
 // the demo always looks current (an update is due in 10 minutes, an action is two days overdue).
-import type { User } from '../src/auth.js';
-import { query } from '../src/db.js';
-import * as actions from '../src/actions.js';
-import * as analyses from '../src/analyses.js';
-import * as candidates from '../src/candidates.js';
-import * as changes from '../src/changes.js';
-import * as cmdb from '../src/cmdb.js';
-import * as connectors from '../src/connectors.js';
-import * as graph from '../src/cmdb-graph.js';
-import * as events from '../src/events.js';
-import * as incidents from '../src/incidents.js';
-import * as knowledge from '../src/knowledge.js';
-import * as major from '../src/major-incidents.js';
-import * as oncall from '../src/oncall.js';
-import * as people from '../src/people.js';
-import * as portal from '../src/portal.js';
-import * as problems from '../src/problems.js';
-import * as improvements from '../src/improvements.js';
-import * as requests from '../src/requests.js';
-import * as rules from '../src/rules.js';
-import { contextStore, currentContext } from '../src/context.js';
-import * as reviews from '../src/reviews.js';
-import * as setup from '../src/setup.js';
-import * as sla from '../src/sla.js';
-import * as status from '../src/status.js';
-import * as teams from '../src/teams.js';
+import type { User } from '../src/security/auth.js';
+import { query } from '../src/core/db.js';
+import * as actions from '../src/problems/actions.js';
+import * as analyses from '../src/problems/analyses.js';
+import * as candidates from '../src/problems/candidates.js';
+import * as changes from '../src/changes/changes.js';
+import * as cmdb from '../src/cmdb/cmdb.js';
+import * as connectors from '../src/integrations/connectors.js';
+import * as graph from '../src/cmdb/cmdb-graph.js';
+import * as events from '../src/events/events.js';
+import * as incidents from '../src/incidents/incidents.js';
+import * as knowledge from '../src/reporting/knowledge.js';
+import * as major from '../src/incidents/major-incidents.js';
+import * as oncall from '../src/people/oncall.js';
+import * as people from '../src/people/people.js';
+import * as portal from '../src/requests/portal.js';
+import * as problems from '../src/problems/problems.js';
+import * as improvements from '../src/improvements/improvements.js';
+import * as requests from '../src/requests/requests.js';
+import * as rules from '../src/automation/rules.js';
+import { contextStore, currentContext } from '../src/core/context.js';
+import * as reviews from '../src/incidents/post-incident-reviews.js';
+import * as setup from '../src/security/setup.js';
+import * as sla from '../src/reporting/sla.js';
+import * as status from '../src/status/status.js';
+import * as teams from '../src/people/teams.js';
 
 type People = Record<'admin' | 'anna' | 'erik' | 'sara' | 'jonas', User>;
 const TABLE: Record<string, [table: string, log?: [string, string]]> = {

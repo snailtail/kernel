@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { requireUser } from '../auth.js';
-import * as kb from '../knowledge.js';
+import { requireUser } from '../security/auth.js';
+import * as kb from '../reporting/knowledge.js';
 
 type Ref = { Params: { ref: string } };
 

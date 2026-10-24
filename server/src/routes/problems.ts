@@ -1,19 +1,19 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import * as flow from '../flow.js';
-import { requireUser } from '../auth.js';
-import { notFound } from '../errors.js';
-import * as actions from '../actions.js';
-import * as analyses from '../analyses.js';
-import * as approvals from '../approvals.js';
-import * as generic from '../generic.js';
-import { GUIDES, guideById, guideMarkdown } from '../methods.js';
-import { problemContext } from '../problem-context.js';
-import * as problems from '../problems.js';
-import * as reports from '../reports.js';
-import { problemMarkdown } from '../export.js';
-import { securityEvent } from '../security-events.js';
-import * as review from '../review.js';
+import * as flow from '../reporting/flow.js';
+import { requireUser } from '../security/auth.js';
+import { notFound } from '../core/errors.js';
+import * as actions from '../problems/actions.js';
+import * as analyses from '../problems/analyses.js';
+import * as approvals from '../changes/approvals.js';
+import * as generic from '../records/generic.js';
+import { GUIDES, guideById, guideMarkdown } from '../problems/methods.js';
+import { problemContext } from '../problems/problem-context.js';
+import * as problems from '../problems/problems.js';
+import * as reports from '../reporting/reports.js';
+import { problemMarkdown } from '../reporting/export.js';
+import { securityEvent } from '../security/security-events.js';
+import * as review from '../problems/review-board.js';
 
 type RefParams = { Params: { ref: string } };
 

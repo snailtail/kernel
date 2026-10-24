@@ -57,7 +57,7 @@ const ok = (r: { status: number; body: unknown }) => assert.ok(r.status >= 200 &
 describe('live updates (#70)', { skip }, () => {
   let k: Harness;
   let analyst: Client, analyst2: Client, viewer: Client, pm: Client, admin: Client;
-  let live: typeof import('../../src/live.js');
+  let live: typeof import('../../src/reporting/live.js');
   const open: Stream[] = [];
   const stream = async (c: Client) => {
     const s = await Stream.open(k.base, { Cookie: c.cookie! });
@@ -69,7 +69,7 @@ describe('live updates (#70)', { skip }, () => {
   before(async () => {
     k = await startKernel();
     [analyst, analyst2, viewer, pm, admin] = await Promise.all([k.login('analyst'), k.login('analyst2'), k.login('viewer'), k.login('pm'), k.login('admin')]);
-    live = await import('../../src/live.js');
+    live = await import('../../src/reporting/live.js');
   });
   after(async () => {
     for (const s of open) s.close();

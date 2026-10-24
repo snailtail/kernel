@@ -6,15 +6,15 @@ import { skip, startKernel, type Harness, type Client } from './harness.js';
 describe('personal data and the audit trail (ADR 0001)', { skip }, () => {
   let k: Harness;
   let admin: Client, analyst: Client;
-  let db: typeof import('../../src/db.js');
-  let audit: typeof import('../../src/audit.js');
+  let db: typeof import('../../src/core/db.js');
+  let audit: typeof import('../../src/security/audit.js');
 
   before(async () => {
     process.env.KERNEL_SECRET_KEY = 'privacy-test-key-0123456789abcdefghijklm';
     k = await startKernel();
     [admin, analyst] = await Promise.all([k.login('admin'), k.login('analyst')]);
-    db = await import('../../src/db.js');
-    audit = await import('../../src/audit.js');
+    db = await import('../../src/core/db.js');
+    audit = await import('../../src/security/audit.js');
   });
   after(async () => {
     delete process.env.KERNEL_SECRET_KEY;

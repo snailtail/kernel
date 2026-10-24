@@ -2,7 +2,7 @@
 // reports, webhooks): due rows are claimed with a lease in one statement, sent without holding a connection, and
 // each row is then marked sent, skipped, retried with backoff or failed. Safe with several replicas: FOR UPDATE
 // SKIP LOCKED keeps two claims apart, and a lease that runs out (a crashed replica) lets the row be claimed again.
-import { query } from '../db.js';
+import { query } from './db.js';
 
 /** Thrown by send: the row is marked skipped with this reason, and not tried again. */
 export class SkipDelivery extends Error {}

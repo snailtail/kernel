@@ -97,7 +97,7 @@ describe('single sign-on (#41)', { skip }, () => {
   });
 
   test('an SSO account with TOTP gets the challenge in an httpOnly cookie, never in the URL', async () => {
-    const { query } = await import('../../src/db.js');
+    const { query } = await import('../../src/core/db.js');
     const first = await signIn({ sub: 'u-700', email: 'tot@example.com', name: 'Tot P', groups: ['kernel-pm'] });
     assert.equal(first.res.status, 302);
     await query("UPDATE users SET mfa_enabled_at = now(), mfa_secret = 'x' WHERE sso_subject = 'u-700'");
@@ -133,7 +133,7 @@ describe('single sign-on (#41)', { skip }, () => {
   });
 
   test('administrator only when a group is explicitly mapped to it; default roles are never admin', async () => {
-    const { roleFor } = await import('../../src/sso.js');
+    const { roleFor } = await import('../../src/security/sso.js');
     assert.equal(roleFor(['kernel-admins', 'kernel-pm'], { role_map: [{ group: 'kernel-pm', role: 'manager' }, { group: 'kernel-admins', role: 'admin' }], default_role: null }), 'admin');
     assert.equal(roleFor(['other'], { role_map: [{ group: 'kernel-admins', role: 'admin' }], default_role: 'viewer' }), 'viewer');
     assert.equal((await admin.put('/api/admin/sso', { enabled: true, issuer, client_id: 'kernel', default_role: 'admin', reason: 'x' })).status, 400);
@@ -157,7 +157,7 @@ describe('single sign-on (#41)', { skip }, () => {
   });
 
   test('the provider\'s MFA is not trusted by default, and only with evidence in the ID token', async () => {
-    const { query } = await import('../../src/db.js');
+    const { query } = await import('../../src/core/db.js');
     assert.equal((await query("SELECT value->>'trust_idp_mfa' AS t FROM settings WHERE key = 'sso'")).rows[0].t, 'false');
     await admin.put('/api/admin/mfa-policy', { required_roles: ['manager'], reason: 'Managers need two factors' });
     await admin.put('/api/admin/sso', { enabled: true, issuer, client_id: 'kernel', role_map: [{ group: 'kernel-pm', role: 'manager' }], trust_idp_mfa: true, reason: 'Trust Entra MFA with evidence' });
@@ -197,7 +197,7 @@ describe('single sign-on (#41)', { skip }, () => {
   });
 
   test('Cloudflare Access is only a first factor: TOTP accounts get the challenge, local admins are not opened', async () => {
-    const { query } = await import('../../src/db.js');
+    const { query } = await import('../../src/core/db.js');
     const access = async (email: string) => {
       const token = await new SignJWT({ email }).setProtectedHeader({ alg: 'RS256', kid: 'k1' }).setIssuer('https://acme.cloudflareaccess.com').setAudience('a'.repeat(64)).setExpirationTime('5m').sign(accessKey);
       return fetch(`${k.base}/api/auth/access`, { method: 'POST', headers: { 'X-Kernel-Request': '1', 'Cf-Access-Jwt-Assertion': token } }).then(async (r) => ({ status: r.status, body: await r.json() as any, cookies: r.headers.getSetCookie() }));
@@ -217,7 +217,7 @@ describe('single sign-on (#41)', { skip }, () => {
   });
 
   test('only a verified email identifies a person: the portal and linking accounts to people (#45)', async () => {
-    const { query } = await import('../../src/db.js');
+    const { query } = await import('../../src/core/db.js');
     const sso = (trust: boolean) => admin.put('/api/admin/sso', {
       enabled: true, issuer, client_id: 'kernel', role_map: [{ group: 'kernel-pm', role: 'manager' }], default_role: null, trust_email_claim: trust, reason: 'Testing email trust',
     });
@@ -266,7 +266,7 @@ describe('single sign-on (#41)', { skip }, () => {
 
 describe('test-only hooks', () => {
   test('KERNEL_TEST_CF_CERTS_URL refuses to start outside tests', async () => {
-    const { checkConfiguration } = await import('../../src/security.js');
+    const { checkConfiguration } = await import('../../src/security/security.js');
     const [env, url] = [process.env.NODE_ENV, process.env.KERNEL_TEST_CF_CERTS_URL];
     process.env.NODE_ENV = 'production';
     process.env.KERNEL_TEST_CF_CERTS_URL = 'http://127.0.0.1/certs';

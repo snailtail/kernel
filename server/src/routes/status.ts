@@ -1,9 +1,9 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { requireReason } from '../audit.js';
-import { requireUser } from '../auth.js';
-import * as status from '../status.js';
-import * as subs from '../status-subscriptions.js';
+import { requireReason } from '../security/audit.js';
+import { requireUser } from '../security/auth.js';
+import * as status from '../status/status.js';
+import * as subs from '../status/status-subscriptions.js';
 import { sha256Hex } from '../core/hash.js';
 import { esc } from '../core/text.js';
 

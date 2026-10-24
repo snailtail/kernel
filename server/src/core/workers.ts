@@ -1,6 +1,6 @@
 // Background jobs on an interval. index.ts holds the one list of them; the jobs themselves are safe with several
 // replicas, this only keeps one replica from running the same job twice at once.
-import { logger } from '../log.js';
+import { logger } from './log.js';
 
 /**
  * Runs fn every ms milliseconds without keeping the process alive. A run that outlasts the interval makes the

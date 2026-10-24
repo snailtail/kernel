@@ -1,8 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { requireUser } from '../auth.js';
-import * as candidates from '../candidates.js';
-import * as config from '../candidate-config.js';
+import { requireUser } from '../security/auth.js';
+import * as candidates from '../problems/candidates.js';
+import * as config from '../problems/candidate-config.js';
 
 export async function candidateRoutes(app: FastifyInstance) {
   app.get('/api/candidates', async (req) => {

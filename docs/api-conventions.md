@@ -6,14 +6,17 @@ conventions, so people, scripts and AI agents can work with all of it in one pre
 
 ## One service layer, three surfaces
 
-Business rules live in `server/src/<practice>.ts`. The web UI, the REST API and the MCP server all call that layer;
-nothing exists only in a route, an MCP tool or the UI. Permissions come from `server/src/policy.ts` (deny by default)
-and every change writes the audit trail (`server/src/audit.ts`) in the same transaction.
+Business rules live in `server/src/<domain>/<practice>.ts` (for example `server/src/problems/problems.ts`); the routes
+are in `server/src/routes/` and the MCP tools in `server/src/mcp/`. `server/src/core/` is the infrastructure (database,
+configuration, request context, errors, logging, modules) and imports nothing outside itself. The web UI, the REST API
+and the MCP server all call the service layer; nothing exists only in a route, an MCP tool or the UI. Permissions come
+from `server/src/security/policy.ts` (deny by default) and every change writes the audit trail
+(`server/src/security/audit.ts`) in the same transaction.
 
 ## Records
 
 - Every record has a **ref** with a type prefix (`PRB000012`), a **type** (`problem`) and a **url** to the web UI.
-- A new record type registers itself with `registerRecordType()` (`server/src/records.ts`): prefix, read permission,
+- A new record type registers itself with `registerRecordType()` (`server/src/records/records.ts`): prefix, read permission,
   UI path, `get`, `search`, its REST routes and MCP tools, and where it lives: `table`, `activity` (its log, with an
   `after` hook for audit, rules and notices), `module`, `liveTopic`, `comment`, and – for kinds that hold people's
   text – `people` and `textPlaces`. Confidential masking, restriction, redaction, personal-data marking, live updates,
@@ -70,7 +73,7 @@ Cross-practice, for any ref: `GET /api/search?q=`, `GET /api/records/:ref`, `GET
 
 Lists (#110): saved views at `GET/POST /api/views`, `PATCH/DELETE /api/views/:id` and `PUT /api/views/default`. Bulk
 actions at `POST /api/<list>/bulk` with `{ ids | filter, operation, dry_run }`, or `{ items }` (as returned in `undo`).
-A bulk operation calls the same service function as a single edit for each record (`server/src/bulk.ts`), so a new
+A bulk operation calls the same service function as a single edit for each record (`server/src/reporting/bulk.ts`), so a new
 practice adds its operations there instead of writing to its tables. The answer has an outcome per record
 (`changed`, `would_change`, `unchanged`, `skipped`, `failed` with the reason). At most 500 records are allowed per request;
 clients send large selections in chunks so each request stays well within proxy timeouts (the web UI uses 50).
@@ -117,7 +120,7 @@ clients send large selections in chunks so each request stays well within proxy 
 - Tools are renamed only by adding the new name next to the old one; an old name is never removed.
 - Tool descriptions briefly explain the ITIL purpose so agents follow the process. Tools a role or token scope may
   not use are not listed. Every tool maps to a policy action (`TOOL_ACTIONS` in `server/src/mcp/registrar.ts`).
-- Every practice also ships **guided flows**: a method guide (`server/src/methods.ts`, UI + MCP resource
+- Every practice also ships **guided flows**: a method guide (`server/src/problems/methods.ts`, UI + MCP resource
   `kernel://guides/<id>`), an MCP prompt per flow, a server-side check (like `check_analysis`) and `next_steps`.
   Content written through MCP is marked as proposed until a person confirms it; decisions through MCP take a
   `human_confirmation` argument and are flagged `destructiveHint`.
@@ -132,7 +135,7 @@ status and url, never long texts.
 
 Text never moves from a narrower audience into a broader one (#117): not from a restricted record into an
 unrestricted one, and not from a confidential record into a normal one. Articles, actions and status updates count as
-read by everyone. `server/src/audience.ts` holds the one rule:
+read by everyone. `server/src/security/audience.ts` holds the one rule:
 
 - `audienceOf(db, ref)` → `{ restricted, restricted_teams, classification }` of a problem, incident or change.
 - `mayCopyText(from, to, kind)` decides; a title (`kind: 'title'`) only stops at restriction, because confidential
@@ -150,14 +153,14 @@ as positive control, and counts where records are created: a new path fails it u
 
 ## Problem candidates
 
-Candidates (`server/src/candidates.ts`, #31) are computed on read by rules, as the viewer, so row-level security decides
+Candidates (`server/src/problems/candidates.ts`, #31) are computed on read by rules, as the viewer, so row-level security decides
 which records count. Each has a stable `key` (rule + subject, e.g. `common_upstream:ci:CI000012`), a `rule`, a readable
 `reason` and `evidence` (records with keys such as `i:INC000123`, CIs with their role). Only rule settings
 (`candidate_rules`), decisions (`candidate_decisions`: a dismissal covers the evidence it was made on, a snooze a time)
 and reported candidates (`reported_candidates`, idempotent on source + external key) are stored. Act on a candidate by
 key: the server prefills the problem from the evidence under the copy rules above and links every record. A new rule
 is a function returning candidates with a `finish(records)` that gives the reason or null, plus a row in `RULES`.
-Rules marked `proactive` (trends in events and changes, `server/src/candidate-trends.ts`, and reported findings) show
+Rules marked `proactive` (trends in events and changes, `server/src/problems/candidate-trends.ts`, and reported findings) show
 under "Before it hurts" and carry `evidence.series`: one value per day, oldest first, with `split` where two windows
 are compared. For these, a dismissal holds until a new alert or change joins the trend; snooze for a time-boxed pause.
 `detection` on the prefilled problem is reactive when incidents in the evidence already happened, proactive otherwise.
@@ -168,13 +171,13 @@ are compared. For these, a dismissal holds until a new alert or change joins the
    actions, and audit entries with `entity_type` = the type (or set `history.entityType` in the registration).
 2. REST routes and MCP tools following the tables above; `registerRecordType()` with all of them, a `pattern` for the
    ref, and `get` returning the envelope with `next_steps`.
-3. Log its history with `logActivity(db, type, …)` (`server/src/activity.ts`) and read it with `historyOf`. Teach
-   `linkRecords` in `server/src/generic.ts` about its links.
+3. Log its history with `logActivity(db, type, …)` (`server/src/records/activity.ts`) and read it with `historyOf`. Teach
+   `linkRecords` in `server/src/records/generic.ts` about its links.
 4. OpenAPI entries (the coverage test checks all routes). Add a way to make one to `MAKE` in
    `test/integration/parity.test.ts`: the test then checks its routes, tools, envelope (REST and MCP), search by ref,
    comments and history, and fails for a registered type without an entry.
 5. If the practice can be switched off, its policy actions belong to a module (`moduleOfAction` in
-   `server/src/modules.ts`), so its routes answer 404 and its tools are not listed while it is off.
+   `server/src/core/modules.ts`), so its routes answer 404 and its tools are not listed while it is off.
 6. Guidance (`next_steps`), MCP prompt(s), webhook events, UI with the shared record layout.
 7. Authorisation matrix rows for the new routes.
 8. Every path that copies text from another record goes through `audience.ts` and gets a row in `copy-text.test.ts`.

@@ -1,6 +1,6 @@
 // MCP: Follow-up actions on any record (#184): problems, incidents, changes, requests, improvements and reviews.
 import { z } from 'zod';
-import * as actions from '../actions.js';
+import * as actions from '../problems/actions.js';
 import { idempotent } from '../idempotency.js';
 import { resolveAssignee, type McpContext } from './registrar.js';
 

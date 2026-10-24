@@ -5,7 +5,7 @@ built, and the answers go in the issue.
 
 ## The checklist
 
-1. **Can it be off?** Does it belong to a module (`server/src/modules.ts`)? A switched-off module must disappear
+1. **Can it be off?** Does it belong to a module (`server/src/core/modules.ts`)? A switched-off module must disappear
    everywhere: REST (404), MCP tools and prompts, search, OpenAPI, reports, menus and the command palette – checked
    in one place (the policy layer), not with scattered ifs. Switching off never deletes data.
 2. **What is the minimal form?** Ask for as little as possible: the fields a newcomer needs (usually title,

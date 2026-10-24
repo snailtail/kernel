@@ -1,9 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { requireReason } from '../audit.js';
-import { requireUser } from '../auth.js';
-import { requireStepUp } from '../mfa.js';
-import * as vis from '../visibility.js';
+import { requireReason } from '../security/audit.js';
+import { requireUser } from '../security/auth.js';
+import { requireStepUp } from '../security/mfa.js';
+import * as vis from '../security/visibility.js';
 
 type Ref = { Params: { ref: string } };
 

@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import * as portal from '../portal.js';
-import { startSso } from '../sso.js';
+import * as portal from '../requests/portal.js';
+import { startSso } from '../security/sso.js';
 
 type RefParams = { Params: { ref: string } };
 

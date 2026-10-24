@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { redact, redactForModel, scan, validPersonnummer } from '../src/scanner.js';
+import { redact, redactForModel, scan, validPersonnummer } from '../src/security/scanner.js';
 
 const types = (t: string) => scan(t).map((f) => f.type);
 

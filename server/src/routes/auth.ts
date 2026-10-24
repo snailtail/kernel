@@ -1,17 +1,17 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import * as passkeys from '../passkeys.js';
-import { MFA_PENDING_COOKIE, ssoSettings } from '../sso.js';
+import * as passkeys from '../security/passkeys.js';
+import { MFA_PENDING_COOKIE, ssoSettings } from '../security/sso.js';
 import { z } from 'zod';
-import { startFor } from '../start-page.js';
-import * as tokens from '../api-tokens.js';
-import * as users from '../users.js';
-import { createSession, currentSessionHash, destroySession, guardLogin, listSessions, loginFailed, loginSucceeded, requireUser, revokeOtherSessions, revokeSession, verifyLogin } from '../auth.js';
-import { audit } from '../audit.js';
-import { config } from '../config.js';
-import * as mfa from '../mfa.js';
-import { mfaRequiredFor } from '../mfapolicy.js';
-import { rateLimit } from '../ratelimit.js';
-import { forbidden, HttpError } from '../errors.js';
+import { startFor } from '../people/start-page.js';
+import * as tokens from '../people/api-tokens.js';
+import * as users from '../people/users.js';
+import { createSession, currentSessionHash, destroySession, guardLogin, listSessions, loginFailed, loginSucceeded, requireUser, revokeOtherSessions, revokeSession, verifyLogin } from '../security/auth.js';
+import { audit } from '../security/audit.js';
+import { config } from '../core/config.js';
+import * as mfa from '../security/mfa.js';
+import { mfaRequiredFor } from '../security/mfapolicy.js';
+import { rateLimit } from '../core/ratelimit.js';
+import { forbidden, HttpError } from '../core/errors.js';
 
 export async function authRoutes(app: FastifyInstance) {
   app.post('/api/auth/login', async (req, reply) => {

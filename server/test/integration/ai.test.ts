@@ -69,7 +69,7 @@ describe('AI providers and the data gate (#68)', { skip }, () => {
     assert.match(sent, /<<<DATA [0-9a-f]{16} problem/);
     assert.ok(!sent.includes('hunter2secret'), 'secrets are redacted before they leave Kernel');
     assert.match(sent, /\[REDACTED:password\]/);
-    const { query } = await import('../../src/db.js');
+    const { query } = await import('../../src/core/db.js');
     const audit = (await query("SELECT changes FROM audit_log WHERE entity_type = 'ai_call' ORDER BY id DESC LIMIT 1")).rows[0].changes;
     assert.deepEqual([audit.model, audit.refs], ['llama3', [p.ref]]);
     assert.ok(!JSON.stringify(audit).includes('Orders time out') && !JSON.stringify(audit).includes(reply), 'no prompts or outputs in the audit trail');

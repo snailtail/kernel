@@ -2,7 +2,7 @@
 
 This is a one-time, irreversible rewrite of audit entries written before ADR 0001. Those entries may hold names, IP addresses, user agents, free text, and short secrets kept verbatim. The rewrite applies the rules that new entries follow and recomputes the hash chain with the active key. See [ADR 0001](adr/0001-personal-data-and-the-audit-trail.md).
 
-The tool is `server/src/rebase-audit.ts`. It runs as the database owner, never through the API.
+The tool is `server/src/security/rebase-audit.ts`. It runs as the database owner, never through the API.
 
 ## 1. Back up and verify, outside the rotation
 
@@ -24,8 +24,8 @@ Restore the dump into a scratch database, and run the dry run and then the real 
 docker compose exec -T db psql -U kernel -d postgres -c 'DROP DATABASE IF EXISTS kernel_rebase_check' -c 'CREATE DATABASE kernel_rebase_check'
 docker compose exec -T db pg_restore -U kernel -d kernel_rebase_check --no-owner < backups/manual/kernel-pre-audit-rebase-$stamp.dump
 copy="postgres://kernel:$POSTGRES_PASSWORD@db:5432/kernel_rebase_check"
-docker compose run --rm -e DATABASE_URL="$copy" app node server/dist/rebase-audit.js
-docker compose run --rm -e DATABASE_URL="$copy" app node server/dist/rebase-audit.js --execute
+docker compose run --rm -e DATABASE_URL="$copy" app node server/dist/security/rebase-audit.js
+docker compose run --rm -e DATABASE_URL="$copy" app node server/dist/security/rebase-audit.js --execute
 ```
 
 - **Dry run:** prints how many entries change per field, with entry ids and no values.
@@ -40,8 +40,8 @@ docker compose exec -T db psql -U kernel -d postgres -c 'DROP DATABASE kernel_re
 ## 3. The real run
 
 ```sh
-docker compose exec app node server/dist/rebase-audit.js            # dry run: the same counts as on the copy
-docker compose exec app node server/dist/rebase-audit.js --execute
+docker compose exec app node server/dist/security/rebase-audit.js            # dry run: the same counts as on the copy
+docker compose exec app node server/dist/security/rebase-audit.js --execute
 ```
 
 The rewrite runs in one transaction under the same lock as every append, so no entry is written meanwhile. It runs in this order:

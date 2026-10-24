@@ -35,7 +35,7 @@ describe('visibility and restricted records (#53)', { skip }, () => {
   let k: Harness;
   let admin: Client, pm: Client, analyst: Client, analyst2: Client, viewer: Client;
   const ids: Record<string, number> = {};
-  let db: typeof import('../../src/db.js');
+  let db: typeof import('../../src/core/db.js');
   let sec: any;
   const restricted: Record<'problem' | 'incident' | 'change', string> = {} as any;
   let open: string;
@@ -45,7 +45,7 @@ describe('visibility and restricted records (#53)', { skip }, () => {
     process.env.KERNEL_SECRET_KEY = 'visibility-test-key-0123456789abcdefghij';
     k = await startKernel();
     [admin, pm, analyst, analyst2, viewer] = await Promise.all([k.login('admin'), k.login('pm'), k.login('analyst'), k.login('analyst2'), k.login('viewer')]);
-    db = await import('../../src/db.js');
+    db = await import('../../src/core/db.js');
     for (const u of (await db.query('SELECT id, username FROM users')).rows) ids[u.username] = u.id;
     sec = (await admin.post('/api/teams', { name: 'Security' })).body;
     ok(await admin.put(`/api/teams/${sec.id}/members`, { members: [{ user_id: ids.analyst, role: 'lead' }] }));
@@ -242,7 +242,7 @@ describe('visibility and restricted records (#53)', { skip }, () => {
   test('every database call goes through the viewer-aware helpers', async () => {
     const { readdir, readFile } = await import('node:fs/promises');
     const dir = new URL('../../src/', import.meta.url);
-    const files = (await readdir(dir, { recursive: true })).filter((f) => f.endsWith('.ts') && f !== 'db.ts');
+    const files = (await readdir(dir, { recursive: true })).filter((f) => f.endsWith('.ts') && f !== 'core/db.ts');
     for (const f of files) {
       const src = await readFile(new URL(f, dir), 'utf8');
       assert.ok(!/rawPool|new pg\.(Pool|Client)\(|pool\.connect\(/.test(src), `${f} must use query()/tx() from db.ts`);

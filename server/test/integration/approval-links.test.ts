@@ -5,8 +5,8 @@ import { Client, skip, startKernel, type Harness } from './harness.js';
 describe('approve or reject from email and chat (#48)', { skip }, () => {
   let k: Harness;
   let admin: Client, pm: Client, analyst: Client;
-  let n: typeof import('../../src/notifications.js');
-  let db: typeof import('../../src/db.js');
+  let n: typeof import('../../src/notifications/notifications.js');
+  let db: typeof import('../../src/core/db.js');
   const ids: Record<string, number> = {};
   let ci = '';
 
@@ -53,8 +53,8 @@ describe('approve or reject from email and chat (#48)', { skip }, () => {
     process.env.SMTP_URL = 'capture:';
     k = await startKernel();
     [admin, pm, analyst] = await Promise.all([k.login('admin'), k.login('pm'), k.login('analyst')]);
-    n = await import('../../src/notifications.js');
-    db = await import('../../src/db.js');
+    n = await import('../../src/notifications/notifications.js');
+    db = await import('../../src/core/db.js');
     for (const u of (await admin.get('/api/users')).body) {
       ids[u.username] = u.id;
       await db.query('UPDATE users SET email = $2 WHERE id = $1', [u.id, `${u.username}@example.com`]);
@@ -170,7 +170,7 @@ describe('approve or reject from email and chat (#48)', { skip }, () => {
     const refused = await open(link);
     await db.query('UPDATE users SET active = true WHERE id = $1', [ids.admin]);
     assert.match(refused.text, /nothing left for you to decide/);
-    const { formatBody } = await import('../../src/webhooks.js');
+    const { formatBody } = await import('../../src/notifications/webhooks.js');
     const actions = [{ title: 'Approve', url: 'https://k/a' }, { title: 'Reject', url: 'https://k/r' }];
     const slack = formatBody('slack', { summary: 'Waits', problem: { ref, title: 'T', url: 'https://k/c' }, actions });
     assert.match(slack.text, /<https:\/\/k\/a\|Approve> · <https:\/\/k\/r\|Reject>/);
@@ -179,7 +179,7 @@ describe('approve or reject from email and chat (#48)', { skip }, () => {
   });
 
   test('an MCP request is decided through the link like in the web UI', async () => {
-    const approvals = await import('../../src/approvals.js');
+    const approvals = await import('../../src/changes/approvals.js');
     const p = (await analyst.post('/api/problems', { title: 'Stale duplicate' })).body;
     const { rows: u } = await db.query("SELECT id, username, display_name, email, role, preferences, false AS must_change_password, false AS mfa_enabled FROM users WHERE username = 'pm'");
     const req = await approvals.requestApproval(u[0], p.ref, 'close', { to: 'closed', closure_code: 'cancelled' }, 'Close the stale duplicate', 'yes close it');

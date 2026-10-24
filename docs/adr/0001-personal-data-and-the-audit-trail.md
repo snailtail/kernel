@@ -57,7 +57,7 @@ Entries written before migration 114 still contain names, IPs and texts. Rewriti
 **not** done automatically; the administrator decides whether and when to run it. Until then the security status
 shows how many such entries remain, and the erase dialog says that they may still name the user.
 
-**Decision (2026-10-14):** the administrator decided to re-base. The tool is `server/src/rebase-audit.ts`, and the procedure is in [docs/audit-rebase.md](../audit-rebase.md). The re-base rewrites every legacy entry with the rules new entries follow:
+**Decision (2026-10-14):** the administrator decided to re-base. The tool is `server/src/security/rebase-audit.ts`, and the procedure is in [docs/audit-rebase.md](../audit-rebase.md). The re-base rewrites every legacy entry with the rules new entries follow:
 
 - no actor name;
 - the user's id in place of a username;

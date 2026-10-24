@@ -265,7 +265,7 @@ with the record's ref), and is visible to whoever can see that record.
 
 ### Roles
 
-Permissions are defined in one place (`server/src/policy.ts`, deny by default) and enforced the same way for the web
+Permissions are defined in one place (`server/src/security/policy.ts`, deny by default) and enforced the same way for the web
 UI, REST and MCP; MCP lists only the tools a role and token may use. An authorisation test matrix covers every role
 against every endpoint, plus mass assignment and IDOR cases.
 
@@ -473,7 +473,7 @@ TEST_DATABASE_URL=postgres://kernel:kernel@localhost:5432/kernel_test npm test  
 ```
 
 Layout: `server/` (Fastify, TypeScript, PostgreSQL, MCP SDK) and `web/` (React, Vite). Business rules live in
-`server/src/workflow.ts` and `server/src/problems.ts`, which both the REST API and the MCP server use.
+`server/src/problems/workflow.ts` and `server/src/problems/problems.ts`, which both the REST API and the MCP server use.
 `npm run demo:reset` gives a fresh, current demo: it drops and recreates the database in `DATABASE_URL` (only a name
 ending in `_demo`; anything else is refused), migrates it and seeds it. `npm run seed:demo -w server` seeds an
 **empty** database without dropping it. The demo is one connected story across every practice, the *Webshop*: its

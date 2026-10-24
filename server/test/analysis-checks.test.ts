@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { checkAnalysis } from '../src/analysis-checks.js';
+import { checkAnalysis } from '../src/problems/analysis-checks.js';
 
 test('5 Whys needs evidence or assumptions, a stop decision and a conclusion', () => {
   const weak = checkAnalysis('five_whys', { problem_statement: 'Orders time out', whys: [{ why: 'Why?', because: 'DB slow' }] }, '');

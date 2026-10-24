@@ -30,7 +30,7 @@ describe('API and MCP parity', { skip }, () => {
   });
 
   test('every record type has REST routes, MCP tools and OpenAPI entries', async () => {
-    const { recordTypes } = await import('../../src/records.js');
+    const { recordTypes } = await import('../../src/records/records.js');
     const types = recordTypes();
     assert.ok(types.length >= 1);
     const tools = (await mcp.listTools()).tools.map((t) => t.name);
@@ -81,7 +81,7 @@ describe('API and MCP parity', { skip }, () => {
   };
 
   test('every type returns the same envelope, history and comments over REST and MCP', async () => {
-    const { recordTypes } = await import('../../src/records.js');
+    const { recordTypes } = await import('../../src/records/records.js');
     for (const t of recordTypes()) {
       assert.ok(MAKE[t.type], `${t.type}: add a way to make one to this test`);
       const ref = await MAKE[t.type]();

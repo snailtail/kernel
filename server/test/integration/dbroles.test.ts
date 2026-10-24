@@ -9,7 +9,7 @@ describe('least-privilege database role and audit anchors', { skip }, () => {
 
   before(async () => {
     k = await startKernel();
-    const { ensureAppRole } = await import('../../src/db.js');
+    const { ensureAppRole } = await import('../../src/core/db.js');
     const owner = new pg.Client({ connectionString: TEST_DATABASE_URL });
     await owner.connect();
     await ensureAppRole(owner, 'kernel_test_app', 'test-app-password-123');
@@ -46,8 +46,8 @@ describe('least-privilege database role and audit anchors', { skip }, () => {
   });
 
   test('audit anchors are only emitted for committed changes', async () => {
-    const { audit, setAnchorSink } = await import('../../src/audit.js');
-    const { tx } = await import('../../src/db.js');
+    const { audit, setAnchorSink } = await import('../../src/security/audit.js');
+    const { tx } = await import('../../src/core/db.js');
     const anchors: number[] = [];
     setAnchorSink((a) => anchors.push(a.id));
     try {

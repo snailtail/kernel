@@ -4,8 +4,8 @@
 import type { FastifyInstance } from 'fastify';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import type { User } from '../auth.js';
-import { HttpError } from '../errors.js';
+import type { User } from '../security/auth.js';
+import { HttpError } from '../core/errors.js';
 import { createContext } from './registrar.js';
 import { registerActionsTools } from './actions.js';
 import { registerAiTools } from './ai.js';

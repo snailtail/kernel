@@ -4,7 +4,7 @@ Kernel's CMDB is fed by sources: pull connectors that Kernel runs on a schedule 
 [Kubernetes](kubernetes.md)), and anything that pushes with `POST /api/cmdb/ci-batch` or the MCP tool `sync_ci_batch`.
 Both go through the same sync, so they share reconciliation, missing detection and the lifecycle below. A connector
 only fetches and maps; scheduling, credentials, reconciliation and the run log belong to the framework
-(`server/src/connectors.ts`).
+(`server/src/integrations/connectors.ts`).
 
 Support mailboxes (IMAP, Microsoft 365) are connectors too: they create incidents instead of CIs, and use the same
 credentials, schedule, lease and run log. See [inbound email](../inbound-email.md).

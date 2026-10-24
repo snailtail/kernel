@@ -47,14 +47,14 @@ class Authenticator {
 describe('passkeys and token rotation (#75)', { skip }, () => {
   let k: Harness;
   let pm: Client, admin: Client;
-  let db: typeof import('../../src/db.js');
+  let db: typeof import('../../src/core/db.js');
   const device = new Authenticator();
 
   before(async () => {
     process.env.KERNEL_PUBLIC_URL = ORIGIN;
     k = await startKernel();
     [pm, admin] = await Promise.all([k.login('pm'), k.login('admin')]);
-    db = await import('../../src/db.js');
+    db = await import('../../src/core/db.js');
   });
   after(async () => {
     delete process.env.KERNEL_PUBLIC_URL;

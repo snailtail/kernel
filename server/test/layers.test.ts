@@ -15,23 +15,23 @@ const rel = (f: string) => f.slice(SRC.length);
 test('routes and MCP tools are thin: they call services, never the database', () => {
   const offenders = files(SRC)
     .filter((f) => rel(f).startsWith('routes/') || rel(f).startsWith('mcp/'))
-    .filter((f) => imports(f).includes('../db.js'))
+    .filter((f) => imports(f).includes('../core/db.js'))
     .map(rel);
   assert.deepEqual(offenders, [], 'move the SQL into the domain service and call that');
 });
 
 test('core/ does not import the domains', () => {
-  // Infrastructure that #176 moves into core/; until then core/ may import it from the top level.
-  const infrastructure = ['../config.js', '../context.js', '../db.js', '../errors.js', '../log.js'];
+  // Type-only imports are erased, so they load nothing (context.ts names the Notice type from notifications).
+  const runtimeImports = (f: string) => [...code(f).matchAll(/^import (?!type )[^;]*? from '([^']+)';/gm)].map((m) => m[1]);
   const offenders = files(join(SRC, 'core'))
-    .flatMap((f) => imports(f).filter((m) => m.startsWith('../') && !infrastructure.includes(m)).map((m) => `${rel(f)} imports ${m}`));
+    .flatMap((f) => runtimeImports(f).filter((m) => m.startsWith('../')).map((m) => `${rel(f)} imports ${m}`));
   assert.deepEqual(offenders, [], 'a domain fills a hook in core/hooks.ts instead');
 });
 
 test('no import cycle is hidden behind a dynamic import', () => {
   // Telemetry loads OpenTelemetry only when it is switched on.
   const offenders = files(SRC)
-    .filter((f) => rel(f) !== 'telemetry.ts' && /\bawait import\(/.test(code(f)))
+    .filter((f) => rel(f) !== 'core/telemetry.ts' && /\bawait import\(/.test(code(f)))
     .map(rel);
   assert.deepEqual(offenders, [], 'let the higher layer fill a hook (core/hooks.ts) or use the record registry');
 });

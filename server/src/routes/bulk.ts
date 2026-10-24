@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
-import { requireUser } from '../auth.js';
-import * as bulk from '../bulk.js';
+import { requireUser } from '../security/auth.js';
+import * as bulk from '../reporting/bulk.js';
 
 export async function bulkRoutes(app: FastifyInstance) {
   // One endpoint per practice list (#110): POST /api/incidents/bulk, /api/problems/bulk, …

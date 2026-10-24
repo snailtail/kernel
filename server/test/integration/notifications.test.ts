@@ -5,9 +5,9 @@ import { Client, skip, startKernel, type Harness } from './harness.js';
 describe('notifications (#48)', { skip }, () => {
   let k: Harness;
   let admin: Client, pm: Client, analyst: Client;
-  let n: typeof import('../../src/notifications.js');
-  let sla: typeof import('../../src/sla.js');
-  let db: typeof import('../../src/db.js');
+  let n: typeof import('../../src/notifications/notifications.js');
+  let sla: typeof import('../../src/reporting/sla.js');
+  let db: typeof import('../../src/core/db.js');
   const ids: Record<string, number> = {};
   const mailTo = (who: string) => n.capturedMail.filter((m) => m.to === `${who}@example.com`);
   const deliver = async () => {
@@ -19,9 +19,9 @@ describe('notifications (#48)', { skip }, () => {
     process.env.SMTP_URL = 'capture:';
     k = await startKernel();
     [admin, pm, analyst] = await Promise.all([k.login('admin'), k.login('pm'), k.login('analyst')]);
-    n = await import('../../src/notifications.js');
-    sla = await import('../../src/sla.js');
-    db = await import('../../src/db.js');
+    n = await import('../../src/notifications/notifications.js');
+    sla = await import('../../src/reporting/sla.js');
+    db = await import('../../src/core/db.js');
     for (const u of (await admin.get('/api/users')).body) {
       ids[u.username] = u.id;
       await db.query('UPDATE users SET email = $2 WHERE id = $1', [u.id, `${u.username}@example.com`]);
@@ -96,7 +96,7 @@ describe('notifications (#48)', { skip }, () => {
     await deliver();
     assert.equal(mailTo('pm').length, instant, 'no instant mail with the digest on');
     // 08:00 tomorrow in Stockholm, whatever the time of day the test runs.
-    const { localDate, zonedToUtc } = await import('../../src/business-time.js');
+    const { localDate, zonedToUtc } = await import('../../src/reporting/business-time.js');
     const t = localDate('Europe/Stockholm', Date.now() + 86400_000);
     const tomorrow8 = zonedToUtc('Europe/Stockholm', t.y, t.m, t.d, 8 * 60);
     assert.equal(await n.queueDigests(tomorrow8), 1);

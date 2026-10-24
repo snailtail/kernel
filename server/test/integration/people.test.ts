@@ -86,7 +86,7 @@ describe('people, organisations and affected users (#39)', { skip }, () => {
     assert.equal(shown.caller.name, `Erased person #${anna.id}`);
     assert.equal(shown.caller.email, null);
     assert.ok(shown.activity.some((a: any) => a.body === `Caller: Erased person #${anna.id} (#${anna.id})`), 'histories show the current name');
-    const { query } = await import('../../src/db.js');
+    const { query } = await import('../../src/core/db.js');
     const histories = JSON.stringify((await query('SELECT * FROM incident_activity')).rows) + JSON.stringify((await query('SELECT * FROM audit_log')).rows);
     assert.ok(!histories.includes('Anna') && !histories.includes('anna@example.com'));
     assert.equal((await admin.get('/api/audit/verify')).body.ok, true);

@@ -5,7 +5,7 @@ import { Client, ownerQuery, skip, startKernel, type Harness } from './harness.j
 describe('security alerting (#64, part 2)', { skip }, () => {
   let k: Harness;
   let admin: Client, analyst: Client, analyst2: Client;
-  let sec: typeof import('../../src/security-events.js');
+  let sec: typeof import('../../src/security/security-events.js');
   let run: () => Promise<any[]>;
 
   const origin = (ip: string) => ({ userId: null, actorType: 'anonymous', channel: 'web', tokenPrefix: '', ip, country: '', userAgent: 'test', requestId: '' });
@@ -22,8 +22,8 @@ describe('security alerting (#64, part 2)', { skip }, () => {
   before(async () => {
     k = await startKernel();
     [admin, analyst, analyst2] = await Promise.all([k.login('admin'), k.login('analyst'), k.login('analyst2')]);
-    sec = await import('../../src/security-events.js');
-    ({ runSecurityAlerting: run } = await import('../../src/security-alerts.js'));
+    sec = await import('../../src/security/security-events.js');
+    ({ runSecurityAlerting: run } = await import('../../src/events/security-alerts.js'));
   });
   after(() => k?.close());
 

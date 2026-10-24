@@ -10,16 +10,16 @@ const K1 = 'rotated-key-0123456789abcdefghijklmnopqrstuvw';
 describe('key rotation (#63)', { skip }, () => {
   let k: Harness;
   let admin: Client, pm: Client;
-  let secrets: typeof import('../../src/secrets.js');
-  let rot: typeof import('../../src/rotate-keys.js');
-  let audit: typeof import('../../src/audit.js');
-  let db: typeof import('../../src/db.js');
+  let secrets: typeof import('../../src/security/secrets.js');
+  let rot: typeof import('../../src/security/rotate-keys.js');
+  let audit: typeof import('../../src/security/audit.js');
+  let db: typeof import('../../src/core/db.js');
 
   before(async () => {
     process.env.KERNEL_SECRET_KEY = K0;
     k = await startKernel();
     [admin, pm] = await Promise.all([k.login('admin'), k.login('pm')]);
-    [secrets, rot, audit, db] = await Promise.all([import('../../src/secrets.js'), import('../../src/rotate-keys.js'), import('../../src/audit.js'), import('../../src/db.js')]);
+    [secrets, rot, audit, db] = await Promise.all([import('../../src/security/secrets.js'), import('../../src/security/rotate-keys.js'), import('../../src/security/audit.js'), import('../../src/core/db.js')]);
   });
   after(async () => {
     for (const v of ['KERNEL_SECRET_KEY', 'KERNEL_SECRET_KEYS', 'KERNEL_SECRET_KEY_ID']) delete process.env[v];
@@ -57,7 +57,7 @@ describe('key rotation (#63)', { skip }, () => {
   test('rotating: new data uses the new key, rotate-keys re-encrypts, and the audit trail verifies across keys', async () => {
     await admin.post('/api/webhooks', { name: 'Before rotation', url: 'https://hooks.example.com/a', events: [] });
     await pm.post('/api/problems', { title: 'Made with k0' });
-    const { unsubscribeUrl, checkUnsubscribe } = await import('../../src/notifications.js');
+    const { unsubscribeUrl, checkUnsubscribe } = await import('../../src/notifications/notifications.js');
     const oldLink = new URL(unsubscribeUrl(1, 'assigned'), 'http://kernel.test');
 
     process.env.KERNEL_SECRET_KEYS = `k1:${K1}`;
@@ -101,7 +101,7 @@ describe('key rotation (#63)', { skip }, () => {
   });
 
   test('a malformed keyring stops Kernel at start', async () => {
-    const { checkConfiguration } = await import('../../src/security.js');
+    const { checkConfiguration } = await import('../../src/security/security.js');
     const saved = process.env.KERNEL_SECRET_KEYS;
     process.env.KERNEL_SECRET_KEYS = 'bad-pair-without-colon';
     assert.throws(() => checkConfiguration(() => {}), /id:secret/);
@@ -112,9 +112,9 @@ describe('key rotation (#63)', { skip }, () => {
 
   test('every place that encrypts a secret has its column in the rotation list', async () => {
     const dir = new URL('../../src/', import.meta.url);
-    const files = (await readdir(dir)).filter((f) => f.endsWith('.ts') && !['secrets.ts', 'rotate-keys.ts'].includes(f));
+    const files = (await readdir(dir, { recursive: true })).filter((f) => f.endsWith('.ts') && !['security/secrets.ts', 'security/rotate-keys.ts'].includes(f));
     const tables = rot.SECRET_COLUMNS.map(([t]) => t);
-    const expected: Record<string, string> = { 'webhooks.ts': 'webhooks', 'event-hooks.ts': 'event_sources', 'connectors.ts': 'connectors', 'dev.ts': 'dev_sources', 'ai.ts': 'ai_providers', 'notifications.ts': 'notification_settings', 'mfa.ts': 'users', 'sso.ts': 'settings', 'oncall.ts': 'paging_targets' };
+    const expected: Record<string, string> = { 'notifications/webhooks.ts': 'webhooks', 'events/event-hooks.ts': 'event_sources', 'integrations/connectors.ts': 'connectors', 'integrations/dev.ts': 'dev_sources', 'reporting/ai.ts': 'ai_providers', 'notifications/notifications.ts': 'notification_settings', 'security/mfa.ts': 'users', 'security/sso.ts': 'settings', 'people/oncall.ts': 'paging_targets' };
     for (const f of files) {
       if (!(await readFile(new URL(f, dir), 'utf8')).includes('encryptSecret(')) continue;
       assert.ok(expected[f], `${f} encrypts a secret: add its column to SECRET_COLUMNS (and to this test)`);

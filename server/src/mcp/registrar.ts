@@ -2,15 +2,15 @@
 // each call, and the human confirmation that decisions need. Each domain's tools are in mcp/<domain>.ts.
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { approvalsRequired, requestApproval, type ApprovalKind } from '../approvals.js';
-import { audit } from '../audit.js';
-import type { User } from '../auth.js';
-import { maskForViewer } from '../confidential.js';
-import { badRequest } from '../errors.js';
-import { traceTool } from '../metrics.js';
-import { can, type Action } from '../policy.js';
-import { securityEvent } from '../security-events.js';
-import { activeUserId } from '../users.js';
+import { approvalsRequired, requestApproval, type ApprovalKind } from '../changes/approvals.js';
+import { audit } from '../security/audit.js';
+import type { User } from '../security/auth.js';
+import { maskForViewer } from '../security/confidential.js';
+import { badRequest } from '../core/errors.js';
+import { traceTool } from '../core/metrics.js';
+import { can, type Action } from '../security/policy.js';
+import { securityEvent } from '../security/security-events.js';
+import { activeUserId } from '../people/users.js';
 
 /** Tool results are JSON text, unless a tool returns MCP content itself (an image for a multimodal model). */
 const json = (value: unknown) =>

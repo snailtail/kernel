@@ -7,8 +7,8 @@ import { Client, skip, startKernel, type Harness } from './harness.js';
 describe('automation rules (#49)', { skip }, () => {
   let k: Harness;
   let admin: Client, pm: Client, analyst: Client, analyst2: Client, viewer: Client;
-  let db: typeof import('../../src/db.js');
-  let rules: typeof import('../../src/rules.js');
+  let db: typeof import('../../src/core/db.js');
+  let rules: typeof import('../../src/automation/rules.js');
   const ids: Record<string, number> = {};
   let payroll: string, payrollDb: string, hr: any, ops: any, cat: number;
 
@@ -34,8 +34,8 @@ describe('automation rules (#49)', { skip }, () => {
     process.env.KERNEL_SECRET_KEY = 'test-secret-key-0123456789abcdefghijklmnop';
     k = await startKernel();
     [admin, pm, analyst, analyst2, viewer] = await Promise.all([k.login('admin'), k.login('pm'), k.login('analyst'), k.login('analyst2'), k.login('viewer')]);
-    db = await import('../../src/db.js');
-    rules = await import('../../src/rules.js');
+    db = await import('../../src/core/db.js');
+    rules = await import('../../src/automation/rules.js');
     for (const u of (await db.query('SELECT id, username FROM users')).rows) ids[u.username] = u.id;
     payroll = ok(await pm.post('/api/cis', { name: 'Payroll', ci_type: 'business_service' }), 201).ref;
     payrollDb = ok(await pm.post('/api/cis', { name: 'payroll-db01', ci_type: 'database' }), 201).ref;
@@ -110,7 +110,7 @@ describe('automation rules (#49)', { skip }, () => {
   });
 
   test('a rule can do no more than an analyst, and a failing action never fails the save', async () => {
-    const { PERMISSIONS } = await import('../../src/policy.js');
+    const { PERMISSIONS } = await import('../../src/security/policy.js');
     assert.equal(rules.RULE_ROLE, 'analyst');
     for (const manage of ['problem.close', 'incident.flag_major', 'rule.manage', 'record.restrict', 'record.redact', 'change.approve'] as const) {
       if (manage === 'record.restrict') continue; // analysts restrict their own records; rules have no action for it

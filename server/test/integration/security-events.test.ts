@@ -29,7 +29,7 @@ describe('security events (#64)', { skip }, () => {
   before(async () => {
     k = await startKernel();
     [admin, analyst] = await Promise.all([k.login('admin'), k.login('analyst')]);
-    ({ flushSecurityEvents: flush } = await import('../../src/security-events.js'));
+    ({ flushSecurityEvents: flush } = await import('../../src/security/security-events.js'));
   });
   after(() => k?.close());
 
@@ -135,7 +135,7 @@ describe('security events (#64)', { skip }, () => {
     assert.ok(warnings.length > 0 && warnings.every((e) => ['minor', 'major', 'critical'].includes(e.severity)));
     assert.ok((await events('user=analyst')).every((e) => e.username === 'analyst'));
 
-    const { pool } = await import('../../src/db.js');
+    const { pool } = await import('../../src/core/db.js');
     await assert.rejects(pool.query("UPDATE security_events SET outcome = 'success'"), /permission denied/);
   });
 });

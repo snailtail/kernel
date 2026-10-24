@@ -1,9 +1,9 @@
 // MCP: Services: the catalogue, service reports, service status and following a service.
 import { z } from 'zod';
-import * as serviceReports from '../service-report.js';
-import * as sla from '../sla.js';
-import * as statusSubs from '../status-subscriptions.js';
-import * as statusMod from '../status.js';
+import * as serviceReports from '../reporting/service-report.js';
+import * as sla from '../reporting/sla.js';
+import * as statusSubs from '../status/status-subscriptions.js';
+import * as statusMod from '../status/status.js';
 import { type McpContext } from './registrar.js';
 
 export function registerServicesTools({ user, tool }: McpContext) {

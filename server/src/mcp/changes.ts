@@ -1,6 +1,6 @@
 // MCP: Change enablement (#29).
 import { z } from 'zod';
-import * as changes from '../changes.js';
+import * as changes from '../changes/changes.js';
 import { idempotent } from '../idempotency.js';
 import { type McpContext } from './registrar.js';
 

@@ -8,7 +8,7 @@ import { skip, startKernel, type Client, type Harness } from './harness.js';
 describe('dev platform links (#32)', { skip }, () => {
   let k: Harness;
   let admin: Client, pm: Client, analyst: Client, viewer: Client;
-  let db: typeof import('../../src/db.js');
+  let db: typeof import('../../src/core/db.js');
   let source: any, chg: string, prb: string, secret: string;
 
   const deliver = (event: string, body: object, opts: { secret?: string; delivery?: string; sign?: boolean } = {}) => {
@@ -31,7 +31,7 @@ describe('dev platform links (#32)', { skip }, () => {
     process.env.KERNEL_DEV_STATUS_FETCH = 'false';
     k = await startKernel();
     [admin, pm, analyst, viewer] = await Promise.all([k.login('admin'), k.login('pm'), k.login('analyst'), k.login('viewer')]);
-    db = await import('../../src/db.js');
+    db = await import('../../src/core/db.js');
     chg = (await analyst.post('/api/changes', { title: 'Raise the connection pool' })).body.ref;
     prb = (await analyst.post('/api/problems', { title: 'Checkout times out' })).body.ref;
   });

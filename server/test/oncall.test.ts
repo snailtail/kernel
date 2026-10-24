@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { parseInbound, rotationOnCall } from '../src/oncall.js';
+import { parseInbound, rotationOnCall } from '../src/people/oncall.js';
 
 const rot = { members: [1, 2, 3], handover_dow: 1, handover_minute: 540, timezone: 'Europe/Stockholm', starts_on: '2026-10-07' };
 const at = (s: string) => new Date(s).getTime();

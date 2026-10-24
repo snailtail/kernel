@@ -1,6 +1,6 @@
 // MCP: Post-incident reviews (#109).
 import { z } from 'zod';
-import * as reviews from '../reviews.js';
+import * as reviews from '../incidents/post-incident-reviews.js';
 import { resolveAssignee, type McpContext } from './registrar.js';
 
 export function registerReviewsTools({ user, tool }: McpContext) {

@@ -1,10 +1,10 @@
 import type { FastifyInstance } from 'fastify';
-import { requireUser } from '../auth.js';
-import * as inc from '../incidents.js';
-import * as inbound from '../inbound-mail.js';
-import * as major from '../major-incidents.js';
-import * as reviews from '../reviews.js';
-import * as generic from '../generic.js';
+import { requireUser } from '../security/auth.js';
+import * as inc from '../incidents/incidents.js';
+import * as inbound from '../incidents/inbound-mail.js';
+import * as major from '../incidents/major-incidents.js';
+import * as reviews from '../incidents/post-incident-reviews.js';
+import * as generic from '../records/generic.js';
 import { z } from 'zod';
 
 type RefParams = { Params: { ref: string } };

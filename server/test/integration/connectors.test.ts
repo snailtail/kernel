@@ -44,7 +44,7 @@ describe('connector framework and push contract (#18)', { skip }, () => {
   let admin: Client, pm: Client, analyst: Client;
   const op5 = mockOp5();
   let port = 0;
-  let db: typeof import('../../src/db.js');
+  let db: typeof import('../../src/core/db.js');
 
   before(async () => {
     process.env.KERNEL_SECRET_KEY = 'connector-test-key-0123456789abcdefghijk';
@@ -52,7 +52,7 @@ describe('connector framework and push contract (#18)', { skip }, () => {
     port = await op5.listen();
     k = await startKernel();
     [admin, pm, analyst] = await Promise.all([k.login('admin'), k.login('pm'), k.login('analyst')]);
-    db = await import('../../src/db.js');
+    db = await import('../../src/core/db.js');
   });
   after(async () => {
     delete process.env.KERNEL_SECRET_KEY;
@@ -231,7 +231,7 @@ describe('connector framework and push contract (#18)', { skip }, () => {
   test('the scheduler runs every due connector in one tick, a few at a time, never one twice, past a hanging one', async () => {
     const fleet = mockFleet();
     const fleetPort = await fleet.listen();
-    const { runDueConnectors } = await import('../../src/connectors.js');
+    const { runDueConnectors } = await import('../../src/integrations/connectors.js');
     await db.query('UPDATE connectors SET enabled = false');
     const ids: number[] = [];
     for (let n = 0; n < 8; n++) {
@@ -270,7 +270,7 @@ describe('connector framework and push contract (#18)', { skip }, () => {
   test('a scheduled run claims only a connector that is still due; a stopped fetch keeps the lease until it settles', async () => {
     const fleet = mockFleet();
     const fleetPort = await fleet.listen();
-    const connectors = await import('../../src/connectors.js');
+    const connectors = await import('../../src/integrations/connectors.js');
     await db.query('UPDATE connectors SET enabled = false');
     const c = (await admin.post('/api/connectors', { type: 'op5', name: 'Due once', source_system: 'Due once', private_allow: [],
       config: { base_url: `http://127.0.0.1:${fleetPort}/due`, insecure_http: true }, secret: { username: 'kernel', password: 'pw' } })).body;

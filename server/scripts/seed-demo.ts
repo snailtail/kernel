@@ -6,11 +6,11 @@
 //   npm run demo:reset -w server     (drops and recreates a *_demo database first)
 //
 // Refuses to run if the database already contains problems. Demo users get the password "demo-password".
-import { hashPassword, type User } from '../src/auth.js';
-import { migrate, pool, query } from '../src/db.js';
-import * as actions from '../src/actions.js';
-import * as analyses from '../src/analyses.js';
-import * as problems from '../src/problems.js';
+import { hashPassword, type User } from '../src/security/auth.js';
+import { migrate, pool, query } from '../src/core/db.js';
+import * as actions from '../src/problems/actions.js';
+import * as analyses from '../src/problems/analyses.js';
+import * as problems from '../src/problems/problems.js';
 import { seedStory } from './demo-story.js';
 
 await migrate(console.log);

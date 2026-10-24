@@ -1,9 +1,9 @@
 // MCP: People (#39), teams and on-call (#42).
 import { z } from 'zod';
-import * as incidents from '../incidents.js';
-import * as oncall from '../oncall.js';
-import * as people from '../people.js';
-import * as teams from '../teams.js';
+import * as incidents from '../incidents/incidents.js';
+import * as oncall from '../people/oncall.js';
+import * as people from '../people/people.js';
+import * as teams from '../people/teams.js';
 import { incidentForAgent } from './incidents.js';
 import { type McpContext } from './registrar.js';
 

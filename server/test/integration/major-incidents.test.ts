@@ -76,7 +76,7 @@ describe('major incidents (#108)', { skip }, () => {
     const work = (await analyst.get('/api/my-work')).body;
     assert.deepEqual(work.major_updates.map((m: any) => [m.ref, m.role, m.update_overdue]), [[major, 'communications lead', true]]);
     assert.deepEqual((await analyst2.get('/api/my-work')).body.major_updates, [], 'positive control: not on everyone\'s list');
-    const { checkOverdueUpdates } = await import('../../src/major-incidents.js');
+    const { checkOverdueUpdates } = await import('../../src/incidents/major-incidents.js');
     await checkOverdueUpdates();
     await checkOverdueUpdates();
     const due = (await ownerQuery("SELECT u.username FROM notifications n JOIN users u ON u.id = n.user_id WHERE n.event = 'major_update_due' AND n.ref = $1", [major])).rows;
@@ -117,7 +117,7 @@ describe('major incidents (#108)', { skip }, () => {
     const text = await md.text();
     assert.match(text, /^# Timeline: INC\d+ Webshop down/);
     // A note with a backslash and a pipe stays inside its cell.
-    const { timelineMarkdown } = await import('../../src/major-incidents.js');
+    const { timelineMarkdown } = await import('../../src/incidents/major-incidents.js');
     const row = timelineMarkdown({ ref: 'INC1', title: 't', is_major: true, declared_at: null, entries: [{ activity_id: 1, at: new Date(0), kind: 'comment', key_moment: false, by: 'x', label: 'Note', body: 'a\\|b' }] } as any).trim().split('\n').at(-1)!;
     // A pipe separates cells when an even number of backslashes precede it (\\| is an escaped backslash, then a pipe).
     const separators = [...row].filter((ch, i) => ch === '|' && (row.slice(0, i).match(/\\*$/)![0].length % 2 === 0)).length;
@@ -177,7 +177,7 @@ describe('major incidents (#108)', { skip }, () => {
 
     // (2) No lead, comms lead or assignee: the managers hear about an overdue update.
     await ownerQuery("UPDATE incidents SET major_lead_id = NULL, major_comms_id = NULL, assignee_id = NULL, major_next_update_at = now() - interval '1 minute' WHERE ref = $1", [other]);
-    const { checkOverdueUpdates } = await import('../../src/major-incidents.js');
+    const { checkOverdueUpdates } = await import('../../src/incidents/major-incidents.js');
     await checkOverdueUpdates();
     const due = (await ownerQuery("SELECT u.username FROM notifications n JOIN users u ON u.id = n.user_id WHERE n.event = 'major_update_due' AND n.ref = $1 ORDER BY 1", [other])).rows;
     assert.ok(due.some((d: any) => d.username === 'pm'), JSON.stringify(due));

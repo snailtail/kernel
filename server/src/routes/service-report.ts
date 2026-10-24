@@ -1,9 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { requireUser } from '../auth.js';
-import * as kpi from '../kpis.js';
-import * as schedules from '../report-schedules.js';
-import * as sr from '../service-report.js';
+import { requireUser } from '../security/auth.js';
+import * as kpi from '../reporting/kpis.js';
+import * as schedules from '../reporting/report-schedules.js';
+import * as sr from '../reporting/service-report.js';
 
 type Ref = { Params: { ref: string } };
 

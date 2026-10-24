@@ -7,8 +7,8 @@ import { Client, skip, startKernel, type Harness } from './harness.js';
 describe('service levels (#43)', { skip }, () => {
   let k: Harness;
   let admin: Client, pm: Client, analyst: Client, viewer: Client;
-  let sla: typeof import('../../src/sla.js');
-  let db: typeof import('../../src/db.js');
+  let sla: typeof import('../../src/reporting/sla.js');
+  let db: typeof import('../../src/core/db.js');
   const id = async (ref: string) => (await db.query('SELECT id FROM incidents WHERE ref = $1', [ref])).rows[0].id as number;
   /** Moves an incident's clock into the past by shifting its timestamps. */
   const age = async (ref: string, minutes: number) => {
@@ -19,8 +19,8 @@ describe('service levels (#43)', { skip }, () => {
   before(async () => {
     k = await startKernel();
     [admin, pm, analyst, viewer] = await Promise.all([k.login('admin'), k.login('pm'), k.login('analyst'), k.login('viewer')]);
-    sla = await import('../../src/sla.js');
-    db = await import('../../src/db.js');
+    sla = await import('../../src/reporting/sla.js');
+    db = await import('../../src/core/db.js');
   });
   after(() => k?.close());
 

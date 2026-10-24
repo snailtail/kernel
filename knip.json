@@ -3,7 +3,7 @@
   "include": ["files", "exports", "nsExports", "types", "nsTypes", "duplicates"],
   "workspaces": {
     "server": {
-      "entry": ["src/telemetry.ts", "scripts/*.ts", "test/**/*.test.ts"],
+      "entry": ["src/core/telemetry.ts", "scripts/*.ts", "test/**/*.test.ts"],
       "project": ["src/**/*.ts", "scripts/**/*.ts", "test/**/*.ts"]
     },
     "web": {

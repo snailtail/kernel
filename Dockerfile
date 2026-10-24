@@ -35,4 +35,4 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \
   CMD wget -qO- http://127.0.0.1:8080/healthz || exit 1
 # telemetry.js starts OpenTelemetry only when OTEL_EXPORTER_OTLP_ENDPOINT is set.
-CMD ["node", "--import", "./server/dist/telemetry.js", "server/dist/index.js"]
+CMD ["node", "--import", "./server/dist/core/telemetry.js", "server/dist/index.js"]

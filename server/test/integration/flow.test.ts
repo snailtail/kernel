@@ -66,7 +66,7 @@ describe('process guidance across practices (#37)', { skip }, () => {
   });
 
   async function db(sql: string) {
-    const { query } = await import('../../src/db.js');
+    const { query } = await import('../../src/core/db.js');
     await query(sql);
   }
 });

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { BROADEST, mayCopyText, PORTAL_INCIDENT_STATUS, PORTAL_REQUEST_STATUS, type Audience } from '../src/audience.js';
+import { BROADEST, mayCopyText, PORTAL_INCIDENT_STATUS, PORTAL_REQUEST_STATUS, type Audience } from '../src/security/audience.js';
 
 const a = (restricted: boolean, teams: number[], classification: Audience['classification'] = 'normal'): Audience => ({ ref: 'X', restricted, restricted_teams: teams, classification });
 

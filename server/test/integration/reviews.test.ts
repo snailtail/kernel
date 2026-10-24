@@ -175,7 +175,7 @@ describe('post-incident reviews (#109)', { skip }, () => {
   });
 
   test('working days follow the SLA calendar, holidays included', async () => {
-    const { addWorkingDays } = await import('../../src/reviews.js');
+    const { addWorkingDays } = await import('../../src/incidents/post-incident-reviews.js');
     const cal = { always: false, hours: { 1: [[480, 1020]], 2: [[480, 1020]], 3: [[480, 1020]], 4: [[480, 1020]], 5: [[480, 1020]] } as Record<string, [number, number][]>, holidays: new Set(['2026-12-24', '2026-12-25', '2026-12-28']) };
     // Wed 23 Dec 2026 + 5 working days: 24, 25 (holidays), 26-27 (weekend), 28 (holiday) → 29, 30, 31 Dec, 1 Jan, 4 Jan.
     assert.equal(addWorkingDays(new Date('2026-12-23T10:00:00Z'), 5, cal), '2027-01-04');

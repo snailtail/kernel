@@ -1,6 +1,6 @@
 // MCP: Automation rules.
 import { z } from 'zod';
-import * as rules from '../rules.js';
+import * as rules from '../automation/rules.js';
 import { type McpContext } from './registrar.js';
 
 export function registerRulesTools({ user, tool }: McpContext) {

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
-import { codeAt, counterNow } from '../../src/totp.js';
+import { codeAt, counterNow } from '../../src/security/totp.js';
 import { Client, PASSWORD, skip, startKernel, type Harness } from './harness.js';
 
 describe('two-factor authentication and step-up', { skip }, () => {
@@ -63,7 +63,7 @@ describe('two-factor authentication and step-up', { skip }, () => {
     const viaToken = await bearer.post('/api/tokens', { name: 'minted by a token' });
     assert.equal(viaToken.status, 403);
 
-    const { pool } = await import('../../src/db.js');
+    const { pool } = await import('../../src/core/db.js');
     await pool.query("UPDATE sessions SET reauth_at = now() - interval '1 hour'");
     const stale = await pm.post('/api/tokens', { name: 'later' });
     assert.equal(stale.status, 403);
