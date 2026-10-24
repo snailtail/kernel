@@ -7,6 +7,7 @@ import { formatDate, relativeTime } from '../../format';
 import { useApi } from '../../hooks';
 import { canEdit, isManager, useSession } from '../../session';
 import type { ServiceStatus, StatusService, StatusBoard } from '../../api/types/status';
+import './styles.css';
 
 export const STATUS_LABEL: Record<ServiceStatus, string> = { operational: 'Operational', degraded: 'Degraded', partial_outage: 'Partial outage', major_outage: 'Major outage', maintenance: 'Maintenance' };
 const PHASES = ['investigating', 'identified', 'monitoring', 'resolved', 'maintenance'] as const;

@@ -3,6 +3,7 @@ import { Link } from 'react-router';
 import { useSession } from '../../session';
 import { GlossaryList } from '../../components/Glossary';
 import { ProcessMap } from '../../components/ProcessMap';
+import './styles.css';
 
 const PHASES = [
   {

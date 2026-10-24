@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 
 // A view stores the visible columns; the choice is remembered per list in this browser. Cells carry data-col and the
-// list's container lists the hidden ones in data-hide; styles.css has a rule per column (inline styles are not allowed
+// list's container lists the hidden ones in data-hide; styles/base.css has a rule per column (inline styles are not allowed
 // by the Content Security Policy), and a test checks that every column below has one.
 
 const COLUMN_KEYS = [

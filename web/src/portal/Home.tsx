@@ -3,6 +3,7 @@ import { Link } from 'react-router';
 import { api } from '../api/client';
 import { TEXT } from './text';
 import { type Me, type Ticket, when, errorText, tone, Notice } from './common';
+import './styles.css';
 
 export function Home({ me }: { me: Me }) {
   const [tickets, setTickets] = useState<Ticket[] | null>(null);

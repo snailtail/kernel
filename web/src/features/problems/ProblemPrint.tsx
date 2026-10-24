@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { api } from '../../api/client';
 import { Markdown } from '../../components/Markdown';
+import './styles.css';
 
 /** Print-friendly rendering of the problem's Markdown export (use the browser's Print → Save as PDF). */
 export function ProblemPrintPage() {

@@ -2,6 +2,7 @@ import { useApi } from '../../hooks';
 import { useSession } from '../../session';
 import { useTeams } from '../../components/Teams';
 import type { RuleKind, RuleValue, NotifyRole, RuleDraft } from '../../api/types/rules';
+import './styles.css';
 
 // The allowlists, as the server has them (rules.ts); the server checks again.
 export const KINDS: { kind: RuleKind; label: string; module?: 'incident' | 'change' | 'request' }[] = [

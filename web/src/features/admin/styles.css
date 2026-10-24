@@ -1,0 +1,25 @@
+.url-cell { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-links { display: flex; gap: 10px; }
+.event-picker { border: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 12px; }
+.event-picker legend { font-weight: 550; font-size: 13px; margin-bottom: 6px; padding: 0; }
+.chip-row { display: flex; flex-wrap: wrap; gap: 8px 18px; }
+.mfa-policy { border-top: 1px solid var(--border); padding-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+.mfa-policy p { margin: 0; }
+/* Audit trail */
+.audit-filters input:not([type='date']) { width: 150px; }
+.audit-filters input[type='date'] { width: auto; }
+.audit-changes-cell { max-width: 520px; }
+.setup-head { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+.setup-head h1 { margin: 0; }
+.module-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.module-card input { align-self: flex-start; }
+.module-card span { font-weight: 400; }
+.danger-zone { border-top: 1px solid var(--border); padding-top: 10px; }
+.security-alerts { display: flex; flex-direction: column; gap: 8px; }
+.alerting-rules input[type='number'] { width: 80px; }
+.builder { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px 12px; display: flex; flex-direction: column; gap: 8px; }
+.builder legend { padding: 0 4px; font-weight: 600; }
+.builder-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.builder-row > input:not([type='checkbox']) { flex: 1 1 160px; min-width: 0; }
+.builder-row > select { flex: 0 1 160px; }
+.builder-choices { flex-basis: 100% !important; }

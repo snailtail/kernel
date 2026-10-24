@@ -1,0 +1,9 @@
+.sp-operational { background: var(--success-soft); color: var(--success); }
+.sp-maintenance { background: var(--s-analysis-bg); color: var(--s-analysis); }
+.sp-degraded { background: var(--s-known-bg); color: var(--s-known); }
+.sp-partial_outage { background: var(--s-known-bg); color: var(--p2); }
+.sp-major_outage { background: var(--danger-soft); color: var(--danger); }
+/* Service report (#54) */
+.kpi-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; margin-bottom: 8px; }
+.period-form { display: flex; gap: 6px; flex-wrap: wrap; }
+.period-form input[type='date'] { width: auto; }

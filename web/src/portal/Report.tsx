@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router';
 import { api } from '../api/client';
 import { AFFECTED, TEXT } from './text';
 import { type Ticket, errorText, Notice } from './common';
+import './styles.css';
 
 export function Report() {
   const navigate = useNavigate();

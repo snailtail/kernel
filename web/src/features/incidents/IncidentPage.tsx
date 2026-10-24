@@ -27,6 +27,7 @@ import { HistoryPanel } from '../../components/History';
 import type { Incident } from '../../api/types/incidents';
 import { LEVEL } from './common';
 import { ResolveModal } from './components/ResolveModal';
+import './styles.css';
 
 export function IncidentPage() {
   const { ref } = useParams();

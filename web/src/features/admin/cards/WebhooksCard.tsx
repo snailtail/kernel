@@ -5,6 +5,7 @@ import { useApi } from '../../../hooks';
 import { FormModal, Modal } from '../../../components/Modal';
 import { askReason } from '../../../components/Ask';
 import type { Delivery, Webhook, WebhookList } from '../../../api/types/admin';
+import '../styles.css';
 
 export function WebhooksCard() {
   const { data, reload } = useApi<WebhookList>('/api/webhooks');

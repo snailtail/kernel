@@ -7,6 +7,7 @@ import { Hint } from '../../components/Guide';
 import { SimilarProblems } from './components/Similar';
 import { useApi } from '../../hooks';
 import { Term } from '../../components/Glossary';
+import './styles.css';
 
 export function NewProblemPage() {
   const { user, meta } = useSession();

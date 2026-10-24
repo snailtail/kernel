@@ -5,6 +5,7 @@ import { KanbanBoard } from '../../../components/KanbanBoard';
 import { IMPROVEMENT_STATUS, type ImprovementStatus } from '../../../statuses';
 import type { ImprovementRow } from '../../../api/types/improvements';
 import { STATUSES, rating, quadrantOf, transitionBody } from '../common';
+import '../styles.css';
 
 /** Kanban by status. Dragging a card is a status change with the API's rules; each card also has a menu to move it. */
 export function Board({ rows, editable, onChanged }: { rows: ImprovementRow[]; editable: boolean; onChanged: () => void }) {

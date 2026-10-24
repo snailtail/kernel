@@ -4,6 +4,7 @@ import { api, ApiError } from '../api/client';
 import { Markdown } from '../components/Markdown';
 import { RATINGS, TEXT } from './text';
 import { type Ticket, when, errorText, tone, Notice } from './common';
+import './styles.css';
 
 export function TicketPage() {
   const { ref = '' } = useParams();

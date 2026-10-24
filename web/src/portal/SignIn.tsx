@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router';
 import { api } from '../api/client';
 import { TEXT } from './text';
 import { errorText, Notice } from './common';
+import './styles.css';
 
 export function SignIn() {
   const [params] = useSearchParams();

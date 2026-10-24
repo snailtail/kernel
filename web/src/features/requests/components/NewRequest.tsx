@@ -5,6 +5,7 @@ import { PersonPicker } from '../../../components/People';
 import { useApi } from '../../../hooks';
 import type { RequestDetail, CatalogueItem, Field } from '../../../api/types/requests';
 import type { PersonRef } from '../../../api/types/people';
+import '../styles.css';
 
 // ---- New request ---------------------------------------------------------------------------
 

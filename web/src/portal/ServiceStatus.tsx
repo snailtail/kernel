@@ -3,6 +3,7 @@ import { Link } from 'react-router';
 import { api } from '../api/client';
 import { NEWS_PHASE, SERVICE_STATE, TEXT } from './text';
 import { when, errorText, Notice } from './common';
+import './styles.css';
 
 interface StatusPage { services: { name: string; description: string; status: string }[]; updates: { phase: string; status: string | null; message: string; created_at: string; services: string[] }[]; sign_up: boolean }
 

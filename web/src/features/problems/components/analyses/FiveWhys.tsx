@@ -1,4 +1,5 @@
 import { type EditorProps, replaceAt, removeAt } from './common';
+import '../../styles.css';
 
 export function FiveWhys({ data, set, readOnly }: EditorProps) {
   const whys: { why: string; because: string; evidence?: string; assumption?: boolean }[] = data.whys ?? [];

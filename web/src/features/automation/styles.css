@@ -1,0 +1,14 @@
+/* Automation rules (#49) */
+.rule-sentence strong { font-weight: 650; }
+.error-text { color: var(--danger); }
+.rule-lead { font-size: 15px; margin: 6px 0; }
+.other-rules li { padding: 4px 0; }
+.rule-name { display: flex; flex-direction: column; gap: 4px; font-weight: 550; }
+.rule-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.rule-line select, .rule-line textarea { max-width: 100%; }
+.rule-line textarea { flex: 1 1 260px; }
+.rule-multi { min-height: 5.5em; }
+.rule-preview { margin: 0; padding: 10px 12px; background: var(--surface-2); border-radius: 8px; }
+.dry-run-result p { margin: 6px 0; }
+.rule-editor .rule-line select { width: auto; flex: 0 1 auto; min-width: 0; }
+.rule-editor .rule-line select.rule-multi { flex: 1 1 180px; }

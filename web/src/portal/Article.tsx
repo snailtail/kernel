@@ -4,6 +4,7 @@ import { api } from '../api/client';
 import { Markdown } from '../components/Markdown';
 import { TEXT } from './text';
 import { Notice } from './common';
+import './styles.css';
 
 export function Article() {
   const { ref = '' } = useParams();

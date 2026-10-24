@@ -1,0 +1,5 @@
+.token-created { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--s-known); border-radius: 8px; background: var(--s-known-bg); }
+.scope-picker { border: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.scope-picker legend { font-weight: 550; font-size: 13px; margin-bottom: 4px; padding: 0; }
+.sso-btn { text-align: center; text-decoration: none; }
+.passkey-btn { width: 100%; }

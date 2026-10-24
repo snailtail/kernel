@@ -3,6 +3,7 @@ import { ROLE_LABEL } from '../../../format';
 import { useApi } from '../../../hooks';
 import { useSession } from '../../../session';
 import { askReason } from '../../../components/Ask';
+import '../styles.css';
 
 export function SecurityCard() {
   const { meta } = useSession();

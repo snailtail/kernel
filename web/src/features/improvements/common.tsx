@@ -4,6 +4,7 @@ import { useApi } from '../../hooks';
 import { useSession } from '../../session';
 import { IMPROVEMENT_STATUS, type ImprovementStatus } from '../../statuses';
 import type { LinkRow } from '../../api/types/improvements';
+import './styles.css';
 
 export const STATUSES = Object.keys(IMPROVEMENT_STATUS) as ImprovementStatus[];
 /** The dashboard tiles an improvement can watch (kpis.ts TILES). */

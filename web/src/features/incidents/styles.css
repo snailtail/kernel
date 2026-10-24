@@ -1,0 +1,7 @@
+.alert-list li { display: flex; flex-direction: column; gap: 2px; }
+.field-label { font-size: 0.85rem; font-weight: 550; color: var(--text-2); margin-bottom: 4px; }
+.major-grid { display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 8px 28px; margin: 0; padding: 0; }
+.major-grid > div { margin: 0; }
+.major-grid dt { font-size: 11.5px; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.04em; }
+.major-grid dd { margin: 2px 0 0; font-weight: 550; }
+.attention-card { border-left: 4px solid var(--danger); }

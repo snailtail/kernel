@@ -5,6 +5,7 @@ import { formatDate, relativeTime } from '../../format';
 import { useSession } from '../../session';
 import { ChangeList, recordPath } from '../../components/History';
 import type { AuditEntry } from '../../api/types/security';
+import './styles.css';
 
 
 const FILTERS = ['actor', 'actor_id', 'token_prefix', 'actor_type', 'entity_type', 'entity_ref', 'action', 'from', 'to', 'ip'] as const;

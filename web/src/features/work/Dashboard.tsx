@@ -13,6 +13,7 @@ import { isManager, useSession } from '../../session';
 import { PROBLEM_STATUS, STATUS_PHASE } from '../../statuses';
 import { isGuided } from '../../components/Guide';
 import type { Dashboard } from '../../api/types/work';
+import './styles.css';
 
 export function DashboardPage() {
   const { user, meta, setPreferences } = useSession();

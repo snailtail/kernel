@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import '../styles.css';
 
 export function EditableTitle({ value, editable, onSave }: { value: string; editable: boolean; onSave: (v: string) => Promise<void> }) {
   const [draft, setDraft] = useState<string | null>(null);

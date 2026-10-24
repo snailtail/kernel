@@ -11,6 +11,7 @@ import { useColumns, type ColumnKey } from '../../components/list/columns';
 import { SavedViews } from '../../components/SavedViews';
 import { useSession } from '../../session';
 import type { Alert, EventRule, EventSource, MaintenanceWindow } from '../../api/types/events';
+import './styles.css';
 
 const SEVERITIES = ['info', 'warning', 'minor', 'major', 'critical'] as const;
 

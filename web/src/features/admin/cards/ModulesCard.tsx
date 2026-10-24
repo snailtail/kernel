@@ -4,6 +4,7 @@ import { useApi } from '../../../hooks';
 import { useSession } from '../../../session';
 import { askReason } from '../../../components/Ask';
 import { Link } from 'react-router';
+import '../styles.css';
 
 /** Practices a team can switch off (#36); switching off never deletes anything. */
 export function ModulesCard() {

@@ -6,6 +6,7 @@ import { CLOSURE_LABEL, formatDay, PRIORITY_LABEL } from '../../format';
 import { useApi } from '../../hooks';
 import { useSession } from '../../session';
 import type { ProblemReport } from '../../api/types/reports';
+import './styles.css';
 
 const pctOf = (met: number, of: number) => (of ? `${Math.round((met / of) * 100)}%` : '–');
 

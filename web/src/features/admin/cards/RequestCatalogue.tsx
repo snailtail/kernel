@@ -7,6 +7,7 @@ import { isManager, useSession } from '../../../session';
 import { FormModal } from '../../../components/Modal';
 import { useTeams } from '../../../components/Teams';
 import type { CatalogueItem, Field, FieldType, TaskKind, TaskSpec } from '../../../api/types/requests';
+import '../styles.css';
 
 const FIELD_TYPE: Record<FieldType, string> = { text: 'Short text', textarea: 'Long text', choice: 'Choice', person: 'Person', ci: 'CI', date: 'Date' };
 const TASK_KIND: Record<TaskKind, string> = { manual: 'By a person', change: 'Standard change', webhook: 'Webhook' };

@@ -10,6 +10,7 @@ import type { Rule, RuleDetail, RuleList } from '../../api/types/rules';
 import { words, useLookups, Sentence } from './vocabulary';
 import { DryRunCard } from './components/DryRunCard';
 import { RuleEditor } from './components/RuleEditor';
+import './styles.css';
 const RUN_STATUS: Record<string, string> = { matched: 'Ran', skipped: 'Stopped', failed: 'Failed', not_matched: 'Did not match' };
 
 function RuleState({ rule }: { rule: Rule }) {

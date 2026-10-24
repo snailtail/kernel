@@ -6,6 +6,7 @@ import { LEVEL_LABEL } from '../../../format';
 import { useApi } from '../../../hooks';
 import { useSession } from '../../../session';
 import type { Candidate, CandidateDraft } from '../../../api/types/candidates';
+import '../styles.css';
 
 export function CreateModal({ candidate: c, onClose }: { candidate: Candidate; onClose: () => void }) {
   const navigate = useNavigate();

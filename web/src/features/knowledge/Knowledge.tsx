@@ -14,6 +14,7 @@ import { useApi, useListParams, useOpenOnNew, useRecord, useSearchText } from '.
 import { canEdit, isManager, useSession } from '../../session';
 import { HistoryPanel } from '../../components/History';
 import type { Article, ArticleRow, ArticleType } from '../../api/types/knowledge';
+import './styles.css';
 
 const STATUS_CLASS: Record<string, string> = { draft: 'status-new', published: 'status-resolved', retired: 'status-closed' };
 

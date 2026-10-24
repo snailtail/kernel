@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { api, type User } from '../../api/client';
 import { TwoFactor } from '../../components/TwoFactor';
 import { passkeysSupported, signInWithPasskey } from '../../components/Passkeys';
+import './styles.css';
 
 export function LoginPage({ onLogin }: { onLogin: (user: User) => void }) {
   const [username, setUsername] = useState('');

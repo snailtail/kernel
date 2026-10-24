@@ -4,6 +4,7 @@ import { api } from '../../../api/client';
 import { useApi } from '../../../hooks';
 import { Modal } from '../../../components/Modal';
 import type { Relationship, RelationshipType, CiImpact, CiImpactNode, CiGroup, CiGroupCondition, CiGroupDetail } from '../../../api/types/cmdb';
+import '../styles.css';
 
 const CRIT = ['', 'Business critical', 'High', 'Medium', 'Low'];
 

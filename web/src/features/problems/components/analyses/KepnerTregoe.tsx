@@ -1,4 +1,5 @@
 import { type EditorProps, replaceAt, removeAt } from './common';
+import '../../styles.css';
 
 const KT_DIMENSIONS = [
   ['what', 'What', 'Which object or system, what defect?'],
