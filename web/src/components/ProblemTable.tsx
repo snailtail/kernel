@@ -2,7 +2,8 @@ import { Link } from 'react-router';
 import type { Problem } from '../api';
 import { ageDays, relativeTime } from '../format';
 import { MajorBadge, PriorityBadge, StatusBadge } from './Badges';
-import type { ColumnKey, Toolkit } from './ListToolkit';
+import type { Toolkit } from './list/ListToolkit';
+import type { ColumnKey } from './list/columns';
 
 export const PROBLEM_COLUMNS: { key: ColumnKey; label: string }[] = [
   { key: 'priority', label: 'Priority' }, { key: 'status', label: 'Status' }, { key: 'service', label: 'Service' },

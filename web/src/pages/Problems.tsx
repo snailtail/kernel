@@ -1,6 +1,7 @@
 import { Link, useSearchParams } from 'react-router';
 import type { Problem } from '../api';
-import { useColumns, useListToolkit } from '../components/ListToolkit';
+import { useListToolkit } from '../components/list/ListToolkit';
+import { useColumns } from '../components/list/columns';
 import { PROBLEM_COLUMNS, ProblemTable } from '../components/ProblemTable';
 import { PRIORITY_LABEL } from '../format';
 import { useLive } from '../live';

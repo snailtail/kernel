@@ -2,14 +2,13 @@ import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { askReason } from './Ask';
 import { useTeams } from './Teams';
-
-interface Sso { enabled: boolean; issuer: string; client_id: string; has_secret: boolean; scopes: string; groups_claim: string; role_map: { group: string; role: string }[]; team_map: { group: string; team_id: number }[]; default_role: string | null; local_login: 'all' | 'admins'; label: string; trust_idp_mfa: boolean; mfa_acr_values: string[]; trust_email_claim?: boolean; redirect_uri: string }
+import type { SsoSettings } from '../api/types/admin';
 
 /** Administration: OpenID Connect (Entra ID, Google, Keycloak, Authentik, Okta…) and Cloudflare Access (#41). */
 export function SsoAdminSection() {
   const teams = useTeams();
-  const [data, setData] = useState<{ sso: Sso; cf_access: { enabled: boolean; team_domain: string; audience: string } } | null>(null);
-  const [form, setForm] = useState<Sso & { client_secret: string; roles: string; teamsMap: string } | null>(null);
+  const [data, setData] = useState<{ sso: SsoSettings; cf_access: { enabled: boolean; team_domain: string; audience: string } } | null>(null);
+  const [form, setForm] = useState<SsoSettings & { client_secret: string; roles: string; teamsMap: string } | null>(null);
   const [cf, setCf] = useState({ enabled: false, team_domain: '', audience: '' });
   const [message, setMessage] = useState<string | null>(null);
   useEffect(() => {

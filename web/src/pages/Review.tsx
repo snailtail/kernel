@@ -1,28 +1,18 @@
 import { useState } from 'react';
 import { HiddenRecordsNote } from '../components/Visibility';
 import { Link } from 'react-router';
-import { api, type Action, type Status } from '../api';
+import { api } from '../api';
 import { ActionList } from '../components/Actions';
 import { MajorBadge, PriorityBadge, StatusBadge } from '../components/Badges';
 import { formatDay, relativeTime } from '../format';
 import { useApi } from '../hooks';
 import { canEdit, useSession } from '../session';
-
-interface Item {
-  ref: string; title: string; status: Status; priority: number; is_major: boolean; assignee_id: number | null; assignee: string | null;
-  affected_service: string; created_at: string; updated_at: string; ec_decision: string | null; ec_review_date: string | null;
-}
-interface Agenda {
-  generated_at: string;
-  stale_days: number;
-  sections: { id: string; title: string; hint: string; problems: Item[] }[];
-  overdue_actions: Action[];
-}
+import type { ReviewAgenda } from '../api/types/work';
 
 export function ReviewPage() {
   const { user, meta } = useSession();
   const [staleDays, setStaleDays] = useState(14);
-  const { data, reload } = useApi<Agenda>(`/api/review?stale_days=${staleDays}`);
+  const { data, reload } = useApi<ReviewAgenda>(`/api/review?stale_days=${staleDays}`);
   const [hideEmpty, setHideEmpty] = useState(true);
   const editable = canEdit(user);
   const total = data ? data.sections.reduce((n, s) => n + s.problems.length, 0) + data.overdue_actions.length : 0;

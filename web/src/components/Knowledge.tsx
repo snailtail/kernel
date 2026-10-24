@@ -2,13 +2,8 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { api } from '../api';
 import { canEdit, useSession } from '../session';
+import type { ArticleRow, ArticleType } from '../api/types/knowledge';
 
-export interface ArticleRow {
-  ref: string; title: string; article_type: ArticleType; audience: 'internal' | 'end_users'; status: 'draft' | 'published' | 'retired';
-  owner: string | null; review_by: string | null; due_for_review: boolean; synced_with_problem: boolean; problem_ref: string | null;
-  helpful: number; not_helpful: number; used_count: number; updated_at: string;
-}
-export type ArticleType = 'how_to' | 'troubleshooting' | 'known_error' | 'faq';
 export const TYPE_LABEL: Record<ArticleType, string> = { how_to: 'How-to', troubleshooting: 'Troubleshooting', known_error: 'Known error', faq: 'FAQ' };
 
 /** Knowledge on an incident: suggested articles while it is open, the ones used, and a draft from its resolution. */

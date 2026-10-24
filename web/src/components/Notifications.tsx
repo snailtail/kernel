@@ -4,15 +4,13 @@ import { api } from '../api';
 import { relativeTime } from '../format';
 import { useApi } from '../hooks';
 import { icons } from './Icons';
-
-interface Item { id: number; event: string; ref: string; title: string; summary: string; url: string; created_at: string; read_at: string | null }
-interface List { unread: number; notifications: Item[] }
+import type { NotificationList, NotificationSettings } from '../api/types/settings';
 
 /** The bell in the sidebar: unread count, refreshed every minute and when the tab gets focus. */
 export function NotificationBell() {
   const [unread, setUnread] = useState(0);
   useEffect(() => {
-    const load = () => api.get<List>('/api/notifications?unread=true&limit=1').then((l) => setUnread(l.unread), () => {});
+    const load = () => api.get<NotificationList>('/api/notifications?unread=true&limit=1').then((l) => setUnread(l.unread), () => {});
     load();
     const t = setInterval(load, 60_000);
     window.addEventListener('focus', load);
@@ -35,9 +33,9 @@ const EVENT_LABEL: Record<string, string> = {
 };
 
 export function NotificationsPage() {
-  const { data, setData } = useApi<List>('/api/notifications?limit=100');
+  const { data, setData } = useApi<NotificationList>('/api/notifications?limit=100');
   const read = async (body: object) => {
-    setData(await api.post<List>('/api/notifications/read', body));
+    setData(await api.post<NotificationList>('/api/notifications/read', body));
     window.dispatchEvent(new Event('kernel:notifications'));
   };
   if (!data) return null;
@@ -70,20 +68,15 @@ export function NotificationsPage() {
   );
 }
 
-interface Settings {
-  email: boolean; digest: boolean; has_chat: boolean; chat_format: string; address: string | null; email_configured: boolean;
-  events: Record<string, { label: string; email: boolean; chat: boolean }>;
-}
-
 export function NotificationSettingsCard() {
-  const { data, setData } = useApi<Settings>('/api/notifications/settings');
+  const { data, setData } = useApi<NotificationSettings>('/api/notifications/settings');
   const [chat, setChat] = useState('');
   const [error, setError] = useState<string | null>(null);
   if (!data) return null;
   const save = async (body: object) => {
     setError(null);
     try {
-      setData(await api.put<Settings>('/api/notifications/settings', body));
+      setData(await api.put<NotificationSettings>('/api/notifications/settings', body));
     } catch (err) {
       setError((err as Error).message);
     }

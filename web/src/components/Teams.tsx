@@ -2,12 +2,8 @@ import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { useSession } from '../session';
 import { OnCallLine } from './OnCall';
+import type { Team } from '../api/types/teams';
 
-export interface Team {
-  id: number; name: string; description: string; email: string; auto_assign: 'none' | 'round_robin'; active: boolean;
-  members: { user_id: number; name: string; role: 'lead' | 'member' }[]; supports: { ref: string; name: string }[];
-  open_incidents: number; unassigned: number; mine: boolean;
-}
 let cache: { at: number; teams: Team[] } | null = null;
 /** Teams for selects and labels, shared between pages for a minute. */
 export function useTeams() {

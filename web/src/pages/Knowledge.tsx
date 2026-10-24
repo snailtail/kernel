@@ -1,23 +1,19 @@
-import { useState, type FormEvent } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
+import { useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router';
 import { api } from '../api';
 import { AttachmentsPanel } from '../components/Attachments';
-import { TYPE_LABEL, type ArticleRow, type ArticleType } from '../components/Knowledge';
+import { TYPE_LABEL } from '../components/Knowledge';
 import { Markdown } from '../components/Markdown';
-import { Modal } from '../components/Modal';
+import { FormModal } from '../components/Modal';
 import { richPaste } from '../components/RichPaste';
 import { formatDate, relativeTime } from '../format';
-import { useColumns, useListToolkit, type ColumnKey } from '../components/ListToolkit';
+import { useListToolkit } from '../components/list/ListToolkit';
+import { useColumns, type ColumnKey } from '../components/list/columns';
 import { SavedViews } from '../components/SavedViews';
-import { useApi, useOpenOnNew, useSearchText } from '../hooks';
+import { useApi, useListParams, useOpenOnNew, useRecord, useSearchText } from '../hooks';
 import { canEdit, isManager, useSession } from '../session';
 import { HistoryPanel } from '../components/History';
-
-interface Article extends ArticleRow {
-  body: string; owner_id: number | null; problem_status: string | null; source_incident_ref: string | null; published_at: string | null;
-  cis: { ref: string; name: string }[]; my_feedback: boolean | null; used_in: { ref: string; title: string; used_at: string }[];
-  activity: { id: number; kind: string; body: string; created_at: string; user_name: string | null; data: any }[];
-}
+import type { Article, ArticleRow, ArticleType } from '../api/types/knowledge';
 
 const STATUS_CLASS: Record<string, string> = { draft: 'status-new', published: 'status-resolved', retired: 'status-closed' };
 
@@ -32,12 +28,11 @@ const ARTICLE_COLUMNS: { key: ColumnKey; label: string }[] = [
 
 export function KnowledgePage() {
   const { user } = useSession();
-  const [params, setParams] = useSearchParams();
+  const { params, set } = useListParams();
   const [q, setQ] = useSearchText({ trim: true });
   const [creating, setCreating] = useState(false);
   useOpenOnNew(() => setCreating(true));
   const navigate = useNavigate();
-  const set = (k: string, v: string) => setParams((prev) => { const n = new URLSearchParams(prev); if (v) n.set(k, v); else n.delete(k); return n; }, { replace: true });
   const { data, loading, refresh } = useApi<ArticleRow[]>(`/api/articles?${params}`);
   const writer = canEdit(user);
   const tk = useListToolkit({ list: 'knowledge', rows: data, idOf: (a) => a.ref, hrefOf: (a) => `/knowledge/${a.ref}`, filter: params.toString(), pageSize: 50, onChanged: refresh });
@@ -102,21 +97,12 @@ export function KnowledgePage() {
 export function ArticlePage() {
   const { ref } = useParams();
   const { user } = useSession();
-  const { data: a, setData, error } = useApi<Article>(`/api/articles/${ref}`);
+  const { data: a, setData, error, actionError, run } = useRecord<Article>(`/api/articles/${ref}`);
   const [editing, setEditing] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
   const [ciRef, setCiRef] = useState('');
   if (error) return <div className="error">{error}</div>;
   if (!a) return null;
   const writer = canEdit(user);
-  const run = async (fn: () => Promise<Article>) => {
-    setActionError(null);
-    try {
-      setData(await fn());
-    } catch (err) {
-      setActionError((err as Error).message);
-    }
-  };
   const go = (to: string) => run(() => api.post(`/api/articles/${a.ref}/transition`, { to }));
   const canPublish = writer && (a.audience !== 'end_users' || isManager(user));
   return (
@@ -216,30 +202,23 @@ function ArticleModal({ article, onClose, onDone }: { article?: Article; onClose
     title: article?.title ?? '', body: article?.body ?? '', article_type: article?.article_type ?? ('how_to' as ArticleType),
     audience: article?.audience ?? ('internal' as 'internal' | 'end_users'), review_by: article?.review_by ?? '',
   });
-  const [error, setError] = useState<string | null>(null);
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
+  // Pasting a screenshot uploads it; a failed upload shows here, a failed save in the modal's own error line.
+  const [pasteError, setPasteError] = useState<string | null>(null);
+  const submit = async () => {
     const body = { ...form, review_by: form.review_by || null };
-    try {
-      onDone(article ? await api.patch<Article>(`/api/articles/${article.ref}`, body) : await api.post<Article>('/api/articles', body));
-    } catch (err) {
-      setError((err as Error).message);
-    }
+    onDone(article ? await api.patch<Article>(`/api/articles/${article.ref}`, body) : await api.post<Article>('/api/articles', body));
   };
   return (
-    <Modal title={article ? `Edit ${article.ref}` : 'Write an article'} onClose={onClose}>
-      <form className="form" onSubmit={submit}>
-        <label className="full">Title<input required minLength={3} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="What the reader wants to do or fix" /></label>
-        <label>Type<select value={form.article_type} onChange={(e) => setForm({ ...form, article_type: e.target.value as ArticleType })}>{Object.entries(TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
-        <label>Audience<select value={form.audience} onChange={(e) => setForm({ ...form, audience: e.target.value as 'internal' })}><option value="internal">Internal (service desk, engineers)</option><option value="end_users">End users</option></select></label>
-        <label className="full">Text
-          <textarea rows={12} value={form.body} onChange={(e) => setForm({ ...form, body: e.target.value })} placeholder="Steps, symptoms, cause… Markdown; paste formatted text or screenshots once the article is saved."
-            {...richPaste(article?.ref ?? null, (v) => setForm((f) => ({ ...f, body: v })), setError)} />
-        </label>
-        <label>Review by<input type="date" value={form.review_by} onChange={(e) => setForm({ ...form, review_by: e.target.value })} /></label>
-        {error && <div className="error full">{error}</div>}
-        <div className="actions full"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary">{article ? 'Save' : 'Save draft'}</button></div>
-      </form>
-    </Modal>
+    <FormModal title={article ? `Edit ${article.ref}` : 'Write an article'} submitLabel={article ? 'Save' : 'Save draft'} onClose={onClose} onSubmit={submit}>
+      <label className="full">Title<input required minLength={3} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="What the reader wants to do or fix" /></label>
+      <label>Type<select value={form.article_type} onChange={(e) => setForm({ ...form, article_type: e.target.value as ArticleType })}>{Object.entries(TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
+      <label>Audience<select value={form.audience} onChange={(e) => setForm({ ...form, audience: e.target.value as 'internal' })}><option value="internal">Internal (service desk, engineers)</option><option value="end_users">End users</option></select></label>
+      <label className="full">Text
+        <textarea rows={12} value={form.body} onChange={(e) => setForm({ ...form, body: e.target.value })} placeholder="Steps, symptoms, cause… Markdown; paste formatted text or screenshots once the article is saved."
+          {...richPaste(article?.ref ?? null, (v) => setForm((f) => ({ ...f, body: v })), setPasteError)} />
+      </label>
+      <label>Review by<input type="date" value={form.review_by} onChange={(e) => setForm({ ...form, review_by: e.target.value })} /></label>
+      {pasteError && <div className="error full">{pasteError}</div>}
+    </FormModal>
   );
 }

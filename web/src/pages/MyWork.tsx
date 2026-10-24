@@ -1,6 +1,6 @@
 import { Fragment, type ReactNode } from 'react';
 import { Link } from 'react-router';
-import { api, type Action, type ProblemDetail, type Status } from '../api';
+import { api, type ProblemDetail } from '../api';
 import { ActionList } from '../components/Actions';
 import { ApprovalDetails } from '../components/ApprovalDetails';
 import { PriorityBadge, StatusBadge } from '../components/Badges';
@@ -11,26 +11,7 @@ import { useApi } from '../hooks';
 import { focusPractice, type Practice } from '../nav';
 import { StartPageSelects } from '../components/StartPage';
 import { canEdit, useSession } from '../session';
-
-interface MyWork {
-  problems: { ref: string; title: string; status: Status; priority: number; updated_at: string; url: string }[];
-  incidents: { ref: string; title: string; status: string; priority: number; is_major: boolean; created_at: string; update_overdue?: boolean }[];
-  reviews?: { ref: string; incident_ref: string; title: string; status: string; due: string | null; overdue: boolean }[];
-  improvements?: { ref: string; title: string; status: string; value: number | null; effort: number | null }[];
-  /** Service requests (#44), when the module is on. */
-  request_tasks?: { ref: string; title: string; task_id: number; task: string; resolution_due_at: string | null }[];
-  request_approvals?: { ref: string; title: string; created_at: string }[];
-  request_queue?: { ref: string; title: string; task_id: number; task: string; team: string; at_risk: boolean }[];
-  major_updates?: { ref: string; title: string; priority: number; next_update_at: string | null; update_overdue: boolean; role: string }[];
-  teams?: { id: number; name: string; role: string; unassigned: number }[];
-  team_queue?: { ref: string; title: string; status: string; priority: number; is_major: boolean; created_at: string; team: string }[];
-  change_votes: { ref: string; title: string; change_type: string; planned_start: string | null }[];
-  changes: { ref: string; title: string; status: string; change_type: string; planned_start: string | null }[];
-  actions: Action[];
-  watched_changes: { ref: string; title: string; kind: string; body: string; created_at: string; by: string | null }[];
-  decisions: { ref: string; title: string; priority: number; known_error_at: string }[];
-  approvals: { id: number; ref: string; title: string; summary: string; payload: Record<string, unknown>; requested_by: string; created_at: string; human_confirmation: string; changed_since_request: boolean }[];
-}
+import type { MyWork } from '../api/types/work';
 
 /** One calm place for everything that needs me, most urgent first. */
 export function MyWorkPage() {

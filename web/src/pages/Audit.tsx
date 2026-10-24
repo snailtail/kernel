@@ -3,9 +3,9 @@ import { Link, useSearchParams } from 'react-router';
 import { api } from '../api';
 import { formatDate, relativeTime } from '../format';
 import { useSession } from '../session';
-import { ChangeList, recordPath, type AuditEntry } from '../components/History';
+import { ChangeList, recordPath } from '../components/History';
+import type { AuditEntry } from '../api/types/security';
 
-type Entry = AuditEntry;
 
 const FILTERS = ['actor', 'actor_id', 'token_prefix', 'actor_type', 'entity_type', 'entity_ref', 'action', 'from', 'to', 'ip'] as const;
 const ACTOR_TYPES = ['user', 'api_token', 'mcp', 'integration', 'system', 'anonymous'];
@@ -15,7 +15,7 @@ export function AuditPage() {
   const { user } = useSession();
   const [params, setParams] = useSearchParams();
   const [draft, setDraft] = useState(() => Object.fromEntries(FILTERS.map((f) => [f, params.get(f) ?? ''])) as Record<string, string>);
-  const [entries, setEntries] = useState<Entry[]>([]);
+  const [entries, setEntries] = useState<AuditEntry[]>([]);
   const [more, setMore] = useState(false);
   const [open, setOpen] = useState<number | null>(null);
   const [verify, setVerify] = useState<{ ok: boolean; checked: number; broken_at?: number } | null>(null);
@@ -28,7 +28,7 @@ export function AuditPage() {
       const q = new URLSearchParams(filterQuery);
       q.set('limit', '100');
       if (beforeId) q.set('before_id', String(beforeId));
-      const rows = await api.get<Entry[]>(`/api/audit?${q}`);
+      const rows = await api.get<AuditEntry[]>(`/api/audit?${q}`);
       setEntries((prev) => (beforeId ? [...prev, ...rows] : rows));
       setMore(rows.length === 100);
     } catch (err) {

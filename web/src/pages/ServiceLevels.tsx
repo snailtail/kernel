@@ -1,14 +1,11 @@
-import { useState, type FormEvent } from 'react';
+import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { api } from '../api';
-import { Modal } from '../components/Modal';
+import { FormModal } from '../components/Modal';
 import { useApi } from '../hooks';
 import { useSession } from '../session';
 import { duration } from '../format';
-
-interface Sla { id: number; name: string; description: string; calendar_id: number; calendar: string; response_minutes: Record<string, number>; resolution_minutes: Record<string, number>; availability_target: number | null; is_default: boolean; services: number }
-interface Cal { id: number; name: string; timezone: string; always: boolean; include_customary: boolean; hours: Record<string, [number, number][]>; holiday_preset: string | null; holidays: { day: string; name: string }[] }
-interface Service { ref: string; name: string; status: string; criticality: number; team: string; owner: string | null; user_description: string; how_to_get_help: string; in_catalogue: boolean; sla: string | null; support_hours: string | null; response_minutes: Record<string, number> | null; resolution_minutes: Record<string, number> | null; open_incidents: number }
+import type { Sla, SlaCalendar, SlaService } from '../api/types/service-levels';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const hm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
@@ -37,10 +34,10 @@ export function ServiceLevelsPage() {
 }
 
 function Catalogue() {
-  const { data } = useApi<Service[]>('/api/service-catalogue');
+  const { data } = useApi<SlaService[]>('/api/service-catalogue');
   const listed = data?.filter((s) => s.in_catalogue) ?? [];
   const other = data?.filter((s) => !s.in_catalogue) ?? [];
-  const card = (s: Service) => (
+  const card = (s: SlaService) => (
     <article key={s.ref} className="card service-card">
       <header>
         <h2><Link to={`/cis/${s.ref}`}>{s.name}</Link></h2>
@@ -74,7 +71,7 @@ function Slas() {
   const { user } = useSession();
   const manager = user.role === 'admin' || user.role === 'manager';
   const { data, reload } = useApi<Sla[]>('/api/slas');
-  const { data: cals } = useApi<Cal[]>('/api/calendars');
+  const { data: cals } = useApi<SlaCalendar[]>('/api/calendars');
   const [editing, setEditing] = useState<Partial<Sla> | null>(null);
   return (
     <>
@@ -102,58 +99,48 @@ function Slas() {
   );
 }
 
-function SlaEditor({ sla, calendars, onClose, onDone }: { sla: Partial<Sla>; calendars: Cal[]; onClose: () => void; onDone: () => void }) {
+function SlaEditor({ sla, calendars, onClose, onDone }: { sla: Partial<Sla>; calendars: SlaCalendar[]; onClose: () => void; onDone: () => void }) {
   const [form, setForm] = useState({ ...sla });
-  const [error, setError] = useState<string | null>(null);
   const setTarget = (kind: 'response_minutes' | 'resolution_minutes', p: number, v: string) => {
     const next = { ...(form[kind] ?? {}) };
     if (v) next[p] = Number(v);
     else delete next[p];
     setForm({ ...form, [kind]: next });
   };
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
+  const submit = async () => {
     const body = { name: form.name, description: form.description ?? '', calendar_id: Number(form.calendar_id), response_minutes: form.response_minutes, resolution_minutes: form.resolution_minutes, availability_target: form.availability_target ?? null, is_default: !!form.is_default };
-    try {
-      if (sla.id) await api.put(`/api/slas/${sla.id}`, body);
-      else await api.post('/api/slas', body);
-      onDone();
-    } catch (err) {
-      setError((err as Error).message);
-    }
+    if (sla.id) await api.put(`/api/slas/${sla.id}`, body);
+    else await api.post('/api/slas', body);
+    onDone();
   };
   return (
-    <Modal title={sla.id ? `Edit ${sla.name}` : 'New SLA'} onClose={onClose}>
-      <form className="form" onSubmit={submit}>
-        <label>Name<input required value={form.name ?? ''} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
-        <label>Business hours<select value={form.calendar_id} onChange={(e) => setForm({ ...form, calendar_id: Number(e.target.value) })}>{calendars.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
-        <label className="full">Description<input value={form.description ?? ''} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
-        <table className="table compact full targets">
-          <thead><tr><th>Priority</th><th>Response (minutes)</th><th>Resolution (minutes)</th></tr></thead>
-          <tbody>
-            {[1, 2, 3, 4, 5].map((p) => (
-              <tr key={p}>
-                <td>P{p}</td>
-                <td><input type="number" min={1} value={form.response_minutes?.[p] ?? ''} onChange={(e) => setTarget('response_minutes', p, e.target.value)} aria-label={`P${p} response`} /></td>
-                <td><input type="number" min={1} value={form.resolution_minutes?.[p] ?? ''} onChange={(e) => setTarget('resolution_minutes', p, e.target.value)} aria-label={`P${p} resolution`} /></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <label>Availability target (%)<input type="number" step="0.001" min={0} max={100} value={form.availability_target ?? ''} onChange={(e) => setForm({ ...form, availability_target: e.target.value ? Number(e.target.value) : null })} /></label>
-        <label className="check"><input type="checkbox" checked={!!form.is_default} onChange={(e) => setForm({ ...form, is_default: e.target.checked })} /> Default SLA</label>
-        {error && <div className="error full">{error}</div>}
-        <div className="actions full"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary">Save</button></div>
-      </form>
-    </Modal>
+    <FormModal title={sla.id ? `Edit ${sla.name}` : 'New SLA'} submitLabel="Save" onClose={onClose} onSubmit={submit}>
+      <label>Name<input required value={form.name ?? ''} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
+      <label>Business hours<select value={form.calendar_id} onChange={(e) => setForm({ ...form, calendar_id: Number(e.target.value) })}>{calendars.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
+      <label className="full">Description<input value={form.description ?? ''} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
+      <table className="table compact full targets">
+        <thead><tr><th>Priority</th><th>Response (minutes)</th><th>Resolution (minutes)</th></tr></thead>
+        <tbody>
+          {[1, 2, 3, 4, 5].map((p) => (
+            <tr key={p}>
+              <td>P{p}</td>
+              <td><input type="number" min={1} value={form.response_minutes?.[p] ?? ''} onChange={(e) => setTarget('response_minutes', p, e.target.value)} aria-label={`P${p} response`} /></td>
+              <td><input type="number" min={1} value={form.resolution_minutes?.[p] ?? ''} onChange={(e) => setTarget('resolution_minutes', p, e.target.value)} aria-label={`P${p} resolution`} /></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <label>Availability target (%)<input type="number" step="0.001" min={0} max={100} value={form.availability_target ?? ''} onChange={(e) => setForm({ ...form, availability_target: e.target.value ? Number(e.target.value) : null })} /></label>
+      <label className="check"><input type="checkbox" checked={!!form.is_default} onChange={(e) => setForm({ ...form, is_default: e.target.checked })} /> Default SLA</label>
+    </FormModal>
   );
 }
 
 function Calendars() {
   const { user } = useSession();
   const manager = user.role === 'admin' || user.role === 'manager';
-  const { data, reload } = useApi<Cal[]>('/api/calendars');
-  const [editing, setEditing] = useState<Partial<Cal> | null>(null);
+  const { data, reload } = useApi<SlaCalendar[]>('/api/calendars');
+  const [editing, setEditing] = useState<Partial<SlaCalendar> | null>(null);
   return (
     <>
       <div className="section-head"><p className="muted">Open hours are evaluated in the calendar's time zone, so daylight saving changes are handled.</p>{manager && <button className="btn primary" onClick={() => setEditing({ name: '', timezone: 'Europe/Stockholm', always: false, hours: { 1: [[480, 1020]], 2: [[480, 1020]], 3: [[480, 1020]], 4: [[480, 1020]], 5: [[480, 1020]] }, holiday_preset: 'SE', holidays: [] })}>New calendar</button>}</div>
@@ -171,52 +158,42 @@ function Calendars() {
   );
 }
 
-function CalendarEditor({ cal, onClose, onDone }: { cal: Partial<Cal>; onClose: () => void; onDone: () => void }) {
+function CalendarEditor({ cal, onClose, onDone }: { cal: Partial<SlaCalendar>; onClose: () => void; onDone: () => void }) {
   const toText = (v: [number, number][] | undefined) => (v ?? []).map(([s, e]) => `${hm(s)}-${hm(e)}`).join(', ');
   const [form, setForm] = useState({
     name: cal.name ?? '', timezone: cal.timezone ?? 'Europe/Stockholm', always: !!cal.always, holiday_preset: cal.holiday_preset ?? '', include_customary: cal.include_customary ?? true,
     hours: Object.fromEntries(DAYS.map((_, n) => [n + 1, toText(cal.hours?.[n + 1])])) as Record<number, string>,
     holidays: (cal.holidays ?? []).map((h) => `${h.day} ${h.name}`).join('\n'),
   });
-  const [error, setError] = useState<string | null>(null);
   const parse = (text: string): [number, number][] =>
     text.split(',').map((p) => p.trim()).filter(Boolean).map((p) => {
       const m = p.match(/^(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})$/);
       if (!m) throw new Error(`Write hours as 08:00-17:00 (got "${p}")`);
       return [+m[1] * 60 + +m[2], +m[3] * 60 + +m[4]];
     });
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    try {
-      const body = {
-        name: form.name, timezone: form.timezone, always: form.always, holiday_preset: form.holiday_preset || null, include_customary: form.include_customary,
-        hours: Object.fromEntries(Object.entries(form.hours).map(([d, t]) => [d, parse(t)]).filter(([, v]) => (v as unknown[]).length)),
-        holidays: form.holidays.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => ({ day: l.slice(0, 10), name: l.slice(11).trim() })),
-      };
-      if (cal.id) await api.put(`/api/calendars/${cal.id}`, body);
-      else await api.post('/api/calendars', body);
-      onDone();
-    } catch (err) {
-      setError((err as Error).message);
-    }
+  const submit = async () => {
+    const body = {
+      name: form.name, timezone: form.timezone, always: form.always, holiday_preset: form.holiday_preset || null, include_customary: form.include_customary,
+      hours: Object.fromEntries(Object.entries(form.hours).map(([d, t]) => [d, parse(t)]).filter(([, v]) => (v as unknown[]).length)),
+      holidays: form.holidays.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => ({ day: l.slice(0, 10), name: l.slice(11).trim() })),
+    };
+    if (cal.id) await api.put(`/api/calendars/${cal.id}`, body);
+    else await api.post('/api/calendars', body);
+    onDone();
   };
   return (
-    <Modal title={cal.id ? `Edit ${cal.name}` : 'New calendar'} onClose={onClose}>
-      <form className="form" onSubmit={submit}>
-        <label>Name<input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
-        <label>Time zone<input required value={form.timezone} onChange={(e) => setForm({ ...form, timezone: e.target.value })} /></label>
-        <label className="check full"><input type="checkbox" checked={form.always} onChange={(e) => setForm({ ...form, always: e.target.checked })} /> Open around the clock (24/7)</label>
-        {!form.always && (
-          <>
-            {DAYS.map((d, n) => <label key={d}>{d}<input placeholder="closed" value={form.hours[n + 1]} onChange={(e) => setForm({ ...form, hours: { ...form.hours, [n + 1]: e.target.value } })} /></label>)}
-            <label>Public holidays<select value={form.holiday_preset} onChange={(e) => setForm({ ...form, holiday_preset: e.target.value })}><option value="">None</option><option value="SE">Sweden</option></select></label>
-            {form.holiday_preset === 'SE' && <label className="check"><input type="checkbox" checked={form.include_customary} onChange={(e) => setForm({ ...form, include_customary: e.target.checked })} /> Also closed on customary days off (Julafton, Nyårsafton, Midsommarafton – not public holidays)</label>}
-            <label className="full">Extra closed days <span className="muted small">(one per line: 2026-12-23 Inventory)</span><textarea rows={3} value={form.holidays} onChange={(e) => setForm({ ...form, holidays: e.target.value })} /></label>
-          </>
-        )}
-        {error && <div className="error full">{error}</div>}
-        <div className="actions full"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary">Save</button></div>
-      </form>
-    </Modal>
+    <FormModal title={cal.id ? `Edit ${cal.name}` : 'New calendar'} submitLabel="Save" onClose={onClose} onSubmit={submit}>
+      <label>Name<input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
+      <label>Time zone<input required value={form.timezone} onChange={(e) => setForm({ ...form, timezone: e.target.value })} /></label>
+      <label className="check full"><input type="checkbox" checked={form.always} onChange={(e) => setForm({ ...form, always: e.target.checked })} /> Open around the clock (24/7)</label>
+      {!form.always && (
+        <>
+          {DAYS.map((d, n) => <label key={d}>{d}<input placeholder="closed" value={form.hours[n + 1]} onChange={(e) => setForm({ ...form, hours: { ...form.hours, [n + 1]: e.target.value } })} /></label>)}
+          <label>Public holidays<select value={form.holiday_preset} onChange={(e) => setForm({ ...form, holiday_preset: e.target.value })}><option value="">None</option><option value="SE">Sweden</option></select></label>
+          {form.holiday_preset === 'SE' && <label className="check"><input type="checkbox" checked={form.include_customary} onChange={(e) => setForm({ ...form, include_customary: e.target.checked })} /> Also closed on customary days off (Julafton, Nyårsafton, Midsommarafton – not public holidays)</label>}
+          <label className="full">Extra closed days <span className="muted small">(one per line: 2026-12-23 Inventory)</span><textarea rows={3} value={form.holidays} onChange={(e) => setForm({ ...form, holidays: e.target.value })} /></label>
+        </>
+      )}
+    </FormModal>
   );
 }

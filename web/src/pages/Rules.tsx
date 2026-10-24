@@ -8,51 +8,30 @@ import { formatDate, relativeTime } from '../format';
 import { useApi } from '../hooks';
 import { canEdit, useSession } from '../session';
 import { useTeams } from '../components/Teams';
-
-type Kind = 'incident' | 'problem' | 'change' | 'request';
-type Trigger = { type: 'created' } | { type: 'field_changed'; field: string } | { type: 'status_changed'; to?: string } | { type: 'in_status_for'; status: string; hours: number } | { type: 'due_in'; hours: number };
-type Value = string | number | boolean;
-interface Condition { field: string; op: string; value?: Value | Value[] }
-type Action =
-  | { type: 'set_field'; field: string; value: number | null }
-  | { type: 'assign_team'; team_id: number }
-  | { type: 'add_comment'; text: string }
-  | { type: 'notify'; users: number[]; teams: number[]; roles?: Role[] }
-  | { type: 'transition'; to: string }
-  | { type: 'webhook'; webhook_id: number };
-type Role = 'assignee' | 'team_lead' | 'approvers' | 'owner';
-interface RuleDraft { name: string; kind: Kind; trigger: Trigger; conditions: Condition[]; actions: Action[] }
-interface Rule extends RuleDraft {
-  id: number; enabled: boolean; proposed_by_agent: boolean; recommended: string | null; owner: string | null; created_by: string | null; tripped_at: string | null; updated_at: string;
-  matched_30d?: number; failed_30d?: number; last_matched_at?: string | null;
-}
-interface Run { id: number; record_ref: string; event: Trigger; depth: number; status: string; detail: string; results: { type: string; ok: boolean; note?: string; error?: string }[]; created_at: string; finished_at: string | null }
-interface RuleDetail extends Rule { runs: Run[]; stats_30d: { matched: number; not_matched: number; skipped: number; failed: number } }
-interface RuleList { rules: Rule[]; other_rules: { kind: string; label: string; count: number; enabled: number; path: string }[]; can_manage: boolean; webhooks: { id: number; name: string }[] }
-interface DryRun { days: number; checked: number; matched: number; latest: { ref: string; title: string }[]; note: string }
+import type { RuleKind, RuleValue, RuleCondition, RuleAction, NotifyRole, RuleDraft, Rule, RuleDetail, RuleList, RuleDryRun } from '../api/types/rules';
 
 // The allowlists, as the server has them (rules.ts); the server checks again.
-const KINDS: { kind: Kind; label: string; module?: 'incident' | 'change' | 'request' }[] = [
+const KINDS: { kind: RuleKind; label: string; module?: 'incident' | 'change' | 'request' }[] = [
   { kind: 'incident', label: 'an incident', module: 'incident' }, { kind: 'problem', label: 'a problem' },
   { kind: 'change', label: 'a change', module: 'change' }, { kind: 'request', label: 'a service request', module: 'request' },
 ];
-const STATUSES: Record<Kind, string[]> = {
+const STATUSES: Record<RuleKind, string[]> = {
   incident: ['new', 'in_progress', 'on_hold', 'resolved', 'closed'],
   problem: ['new', 'analysis', 'known_error', 'resolved', 'closed'],
   change: ['draft', 'assess', 'authorize', 'scheduled', 'implementing', 'review', 'closed', 'rejected', 'cancelled'],
   request: ['submitted', 'awaiting_approval', 'in_fulfilment', 'fulfilled', 'rejected', 'cancelled'],
 };
-const SOURCES: Partial<Record<Kind, string[]>> = { incident: ['user', 'event', 'api', 'mcp', 'email', 'portal'], change: ['user', 'api', 'mcp', 'pipeline'] };
-const CONDITION_FIELDS: Record<Kind, string[]> = {
+const SOURCES: Partial<Record<RuleKind, string[]>> = { incident: ['user', 'event', 'api', 'mcp', 'email', 'portal'], change: ['user', 'api', 'mcp', 'pipeline'] };
+const CONDITION_FIELDS: Record<RuleKind, string[]> = {
   incident: ['service', 'ci', 'priority', 'category', 'team', 'assignee', 'status', 'caller_vip', 'source', 'is_major', 'requester_reopened'],
   problem: ['service', 'ci', 'priority', 'category', 'team', 'assignee', 'status', 'is_major'],
   change: ['service', 'ci', 'team', 'assignee', 'status', 'source'],
   request: ['service', 'priority', 'status', 'caller_vip'],
 };
-const TRIGGER_FIELDS: Record<Kind, string[]> = { incident: ['priority', 'category', 'team', 'assignee'], problem: ['priority', 'category', 'team', 'assignee'], change: ['team', 'assignee'], request: ['priority'] };
+const TRIGGER_FIELDS: Record<RuleKind, string[]> = { incident: ['priority', 'category', 'team', 'assignee'], problem: ['priority', 'category', 'team', 'assignee'], change: ['team', 'assignee'], request: ['priority'] };
 const SETTABLE = TRIGGER_FIELDS;
-const NOTIFY_ROLES: Record<Kind, Role[]> = { incident: ['assignee', 'team_lead', 'owner'], problem: ['assignee', 'team_lead', 'owner'], change: ['assignee', 'team_lead', 'owner'], request: ['approvers', 'owner'] };
-const ROLE_LABEL: Record<Role, string> = { assignee: 'the assignee', team_lead: "the team's leads", approvers: 'the approvers', owner: "the action's owner" };
+const NOTIFY_ROLES: Record<RuleKind, NotifyRole[]> = { incident: ['assignee', 'team_lead', 'owner'], problem: ['assignee', 'team_lead', 'owner'], change: ['assignee', 'team_lead', 'owner'], request: ['approvers', 'owner'] };
+const ROLE_LABEL: Record<NotifyRole, string> = { assignee: 'the assignee', team_lead: "the team's leads", approvers: 'the approvers', owner: "the action's owner" };
 const DURATIONS = [0.25, 0.5, 1, 2, 4, 8, 24, 48, 72, 120, 168, 336, 720];
 /** 0.25 → "15 minutes", 24 → "1 day", 120 → "5 days". */
 const duration = (hours: number) =>
@@ -90,7 +69,7 @@ function useLookups(webhooks: { id: number; name: string }[] = []): Lookups & { 
   };
 }
 
-function valueLabel(field: string, v: Value, l: Lookups) {
+function valueLabel(field: string, v: RuleValue, l: Lookups) {
   if (field === 'priority') return `P${v}`;
   if (field === 'team') return l.team(v as number);
   if (field === 'assignee') return l.user(v as number);
@@ -300,11 +279,11 @@ export function RulePage() {
 }
 
 function DryRunCard({ rule }: { rule: RuleDraft & { id?: number } }) {
-  const [result, setResult] = useState<DryRun | null>(null);
+  const [result, setResult] = useState<RuleDryRun | null>(null);
   const [error, setError] = useState<string | null>(null);
   const run = async () => {
     try {
-      setResult(await api.post<DryRun>('/api/rules/dry-run', rule.id ? { id: rule.id } : { name: rule.name || 'Draft', kind: rule.kind, trigger: rule.trigger, conditions: rule.conditions, actions: rule.actions }));
+      setResult(await api.post<RuleDryRun>('/api/rules/dry-run', rule.id ? { id: rule.id } : { name: rule.name || 'Draft', kind: rule.kind, trigger: rule.trigger, conditions: rule.conditions, actions: rule.actions }));
       setError(null);
     } catch (err) {
       setError((err as Error).message);
@@ -328,7 +307,7 @@ function DryRunCard({ rule }: { rule: RuleDraft & { id?: number } }) {
   );
 }
 
-const emptyDraft = (kind: Kind): RuleDraft => ({ name: '', kind, trigger: { type: 'created' }, conditions: [], actions: [{ type: 'assign_team', team_id: 0 }] });
+const emptyDraft = (kind: RuleKind): RuleDraft => ({ name: '', kind, trigger: { type: 'created' }, conditions: [], actions: [{ type: 'assign_team', team_id: 0 }] });
 
 function RuleEditor({ rule, manage, webhooks, onClose, onSaved }: { rule?: Rule; manage: boolean; webhooks: { id: number; name: string }[]; onClose: () => void; onSaved: (id: number) => void }) {
   const { meta } = useSession();
@@ -349,7 +328,7 @@ function RuleEditor({ rule, manage, webhooks, onClose, onSaved }: { rule?: Rule;
           : v.startsWith('status:') ? { type: 'status_changed', ...(v.slice(7) ? { to: v.slice(7) } : {}) } : { type: 'field_changed', field: v.slice(6) },
   });
 
-  const options = (field: string): { value: Value; label: string }[] => {
+  const options = (field: string): { value: RuleValue; label: string }[] => {
     switch (field) {
       case 'service': return lookups.services.map((s) => ({ value: s.ref, label: s.name }));
       case 'ci': return lookups.cis.map((s) => ({ value: s.ref, label: `${s.name} (${s.ref})` }));
@@ -362,17 +341,17 @@ function RuleEditor({ rule, manage, webhooks, onClose, onSaved }: { rule?: Rule;
       default: return [{ value: true, label: 'yes' }, { value: false, label: 'no' }];
     }
   };
-  const decode = (field: string, raw: string): Value => {
+  const decode = (field: string, raw: string): RuleValue => {
     const o = options(field).find((x) => String(x.value) === raw);
     return o ? o.value : raw;
   };
-  const setCondition = (n: number, c: Condition) => set({ conditions: draft.conditions.map((x, i) => (i === n ? c : x)) });
-  const newCondition = (field: string): Condition => {
+  const setCondition = (n: number, c: RuleCondition) => set({ conditions: draft.conditions.map((x, i) => (i === n ? c : x)) });
+  const newCondition = (field: string): RuleCondition => {
     const first = options(field)[0]?.value;
     return typeOf(field) === 'bool' ? { field, op: 'is', value: true } : { field, op: 'is', ...(first !== undefined ? { value: first } : {}) };
   };
-  const setAction = (n: number, a: Action) => set({ actions: draft.actions.map((x, i) => (i === n ? a : x)) });
-  const newAction = (type: Action['type']): Action => {
+  const setAction = (n: number, a: RuleAction) => set({ actions: draft.actions.map((x, i) => (i === n ? a : x)) });
+  const newAction = (type: RuleAction['type']): RuleAction => {
     switch (type) {
       case 'set_field': return { type, field: SETTABLE[k][0], value: SETTABLE[k][0] === 'priority' ? 2 : null };
       case 'assign_team': return { type, team_id: teams[0]?.id ?? 0 };
@@ -382,14 +361,14 @@ function RuleEditor({ rule, manage, webhooks, onClose, onSaved }: { rule?: Rule;
       case 'webhook': return { type, webhook_id: webhooks[0]?.id ?? 0 };
     }
   };
-  const actionTypes: { type: Action['type']; label: string }[] = [
+  const actionTypes: { type: RuleAction['type']; label: string }[] = [
     ...(SETTABLE[k].includes('team') ? [{ type: 'assign_team' as const, label: 'assign to a team' }] : []),
     { type: 'set_field', label: 'set a field' }, { type: 'add_comment', label: 'add an internal note' }, { type: 'notify', label: 'notify' },
     ...(k === 'incident' ? [{ type: 'transition' as const, label: 'move it' }] : []),
     ...(webhooks.length ? [{ type: 'webhook' as const, label: 'send to a webhook' }] : []),
   ];
 
-  const changeKind = (kind: Kind) => setDraft((d) => ({ ...emptyDraft(kind), name: d.name, actions: [kind === 'request' ? { type: 'add_comment', text: '' } : { type: 'assign_team', team_id: teams[0]?.id ?? 0 }] }));
+  const changeKind = (kind: RuleKind) => setDraft((d) => ({ ...emptyDraft(kind), name: d.name, actions: [kind === 'request' ? { type: 'add_comment', text: '' } : { type: 'assign_team', team_id: teams[0]?.id ?? 0 }] }));
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -411,7 +390,7 @@ function RuleEditor({ rule, manage, webhooks, onClose, onSaved }: { rule?: Rule;
         <fieldset className="rule-part">
           <legend>When</legend>
           <div className="rule-line">
-            <select aria-label="Kind of record" value={k} disabled={!!rule} onChange={(e) => changeKind(e.target.value as Kind)}>
+            <select aria-label="Kind of record" value={k} disabled={!!rule} onChange={(e) => changeKind(e.target.value as RuleKind)}>
               {kinds.map((x) => <option key={x.kind} value={x.kind}>{x.label}</option>)}
             </select>
             <select aria-label="When" value={triggerValue} onChange={(e) => setTrigger(e.target.value)}>
@@ -460,7 +439,7 @@ function RuleEditor({ rule, manage, webhooks, onClose, onSaved }: { rule?: Rule;
                   </select>
                 )}
                 {c.op === 'in' ? (
-                  <select multiple aria-label="Values" className="rule-multi" value={(c.value as Value[] ?? []).map(String)} onChange={(e) => setCondition(n, { ...c, value: [...e.target.selectedOptions].map((o) => decode(c.field, o.value)) })}>
+                  <select multiple aria-label="Values" className="rule-multi" value={(c.value as RuleValue[] ?? []).map(String)} onChange={(e) => setCondition(n, { ...c, value: [...e.target.selectedOptions].map((o) => decode(c.field, o.value)) })}>
                     {opts.map((o) => <option key={String(o.value)} value={String(o.value)}>{o.label}</option>)}
                   </select>
                 ) : c.op !== 'is_empty' && (
@@ -481,7 +460,7 @@ function RuleEditor({ rule, manage, webhooks, onClose, onSaved }: { rule?: Rule;
           {draft.actions.map((a, n) => (
             <div className="rule-line" key={n}>
               {n > 0 && <span className="muted">and</span>}
-              <select aria-label="Action" value={a.type} onChange={(e) => setAction(n, newAction(e.target.value as Action['type']))}>
+              <select aria-label="Action" value={a.type} onChange={(e) => setAction(n, newAction(e.target.value as RuleAction['type']))}>
                 {actionTypes.map((t) => <option key={t.type} value={t.type}>{t.label}</option>)}
               </select>
               {a.type === 'assign_team' && (

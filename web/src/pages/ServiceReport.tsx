@@ -5,16 +5,7 @@ import { formatDate } from '../format';
 import { api } from '../api';
 import { useApi } from '../hooks';
 import { canEdit, isManager, useSession } from '../session';
-
-interface Report {
-  service: { ref: string; name: string; criticality: number; sla: string | null; owner_id: number | null };
-  period: { from: string; to: string; minutes: number };
-  availability: { percent: number | null; target: number | null; outage_minutes: number; degraded_minutes: number; maintenance_minutes: number; basis: string };
-  incidents: { total: number; by_priority: { priority: number; count: number }[]; resolution_sla: { met: number; of: number; percent: number } | null; mttr_minutes: number | null; linked_to_problems: number; major: { ref: string; title: string; created_at: string; resolved_at: string | null }[] };
-  changes: { total: number; completed: number; successful: number; success_rate: number | null; failed: { ref: string; title: string; outcome: string }[] };
-  problems: { ref: string; title: string; status: string; priority: number; workaround: string | null; workaround_masked?: boolean }[];
-  restricted_records_left_out: boolean;
-}
+import type { ServiceReport, ReportSchedule } from '../api/types/reports';
 
 const dur = (m: number | null) => (m === null ? '–' : m < 60 ? `${m} min` : m < 1440 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${Math.floor(m / 1440)} d ${Math.floor((m % 1440) / 60)} h`);
 
@@ -25,7 +16,7 @@ export function ServiceReportPage() {
   const [params, setParams] = useSearchParams();
   const [from, setFrom] = useState(params.get('from') ?? '');
   const [to, setTo] = useState(params.get('to') ?? '');
-  const { data: r, error } = useApi<Report>(`/api/services/${ref}/report?${params}`);
+  const { data: r, error } = useApi<ServiceReport>(`/api/services/${ref}/report?${params}`);
   if (error) return <div className="error">{error}</div>;
   if (!r) return null;
   const missed = r.availability.target != null && r.availability.percent != null && r.availability.percent < r.availability.target;
@@ -93,13 +84,11 @@ export function ServiceReportPage() {
   );
 }
 
-interface Schedule { id: number; frequency: 'monthly' | 'quarterly'; recipient: string; user_id: number; last_sent: string | null }
-
 /** The service's owner (or a manager) gets the report by email each month or quarter, without restricted records. */
-function ScheduleReport({ service }: { service: Report['service'] }) {
+function ScheduleReport({ service }: { service: ServiceReport['service'] }) {
   const { user } = useSession();
   const allowed = isManager(user) || service.owner_id === user.id;
-  const { data, reload } = useApi<{ schedules: Schedule[] }>(allowed ? `/api/report-schedules?service=${service.ref}` : null);
+  const { data, reload } = useApi<{ schedules: ReportSchedule[] }>(allowed ? `/api/report-schedules?service=${service.ref}` : null);
   const [frequency, setFrequency] = useState<'monthly' | 'quarterly'>('monthly');
   const [error, setError] = useState('');
   if (!allowed || !data) return null;

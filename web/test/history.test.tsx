@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { describeEntry, recordPath, showValue, type AuditEntry } from '../src/components/History.js';
+import { describeEntry, recordPath, showValue } from '../src/components/History.js';
+import type { AuditEntry } from '../src/api/types/security.js';
 
 const entry = (e: Partial<AuditEntry>): AuditEntry => ({
   id: 1, at: '2026-10-17T10:00:00Z', actor_user_id: 2, actor_name: 'Anna', actor_type: 'user', channel: 'web', token_prefix: '',

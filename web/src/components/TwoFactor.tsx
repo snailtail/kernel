@@ -2,8 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { formatDate } from '../format';
 import { useApi } from '../hooks';
-
-interface Status { enabled: boolean; enabled_at: string | null; recovery_codes_left: number; required: boolean }
+import type { TwoFactorStatus } from '../api/types/settings';
 
 function RecoveryCodes({ codes, onDone }: { codes: string[]; onDone: () => void }) {
   const text = `Kernel recovery codes (each works once)\n\n${codes.join('\n')}\n`;
@@ -23,7 +22,7 @@ function RecoveryCodes({ codes, onDone }: { codes: string[]; onDone: () => void 
 
 /** Two-factor authentication: status, TOTP enrolment, recovery codes and turning it off. */
 export function TwoFactor({ onEnabled }: { onEnabled?: () => void }) {
-  const { data: status, reload } = useApi<Status>('/api/auth/mfa');
+  const { data: status, reload } = useApi<TwoFactorStatus>('/api/auth/mfa');
   const [setup, setSetup] = useState<{ secret: string; qr: string; otpauth_url: string } | null>(null);
   const [code, setCode] = useState('');
   const [codes, setCodes] = useState<string[] | null>(null);

@@ -9,18 +9,7 @@ import { CopyBlock } from '../components/CopyBlock';
 import { TwoFactor } from '../components/TwoFactor';
 import { StartPageSelects } from '../components/StartPage';
 import { canEdit, useSession } from '../session';
-
-interface Token {
-  scopes?: string[];
-  last_used_ip?: string;
-  id: number;
-  name: string;
-  prefix: string;
-  created_at: string;
-  last_used_at: string | null;
-  expires_at: string | null;
-  token?: string;
-}
+import type { ApiToken, UserSession } from '../api/types/settings';
 
 export function SettingsPage() {
   const { user } = useSession();
@@ -141,12 +130,12 @@ function PasswordCard() {
 
 function TokensCard() {
   const { meta, user } = useSession();
-  const { data: tokens, reload } = useApi<Token[]>('/api/tokens');
+  const { data: tokens, reload } = useApi<ApiToken[]>('/api/tokens');
   const [name, setName] = useState('');
   const [expires, setExpires] = useState('90');
   const [scopes, setScopes] = useState<string[]>(['read', 'mcp']);
   const toggleScope = (s: string) => setScopes(scopes.includes(s) ? scopes.filter((x) => x !== s) : [...scopes, s]);
-  const [created, setCreated] = useState<Token | null>(null);
+  const [created, setCreated] = useState<ApiToken | null>(null);
   const [error, setError] = useState<string | null>(null);
   const mcpUrl = meta.mcp_url ?? `${window.location.origin}/mcp`;
 
@@ -154,7 +143,7 @@ function TokensCard() {
     e.preventDefault();
     setError(null);
     try {
-      setCreated(await api.post<Token>('/api/tokens', { name, expires_in_days: Number(expires), scopes }));
+      setCreated(await api.post<ApiToken>('/api/tokens', { name, expires_in_days: Number(expires), scopes }));
       setName('');
       reload();
     } catch (err) {
@@ -162,16 +151,16 @@ function TokensCard() {
     }
   };
   // A successor with the same scopes; the old token keeps working for a day so clients can switch over.
-  const rotate = async (t: Token) => {
+  const rotate = async (t: ApiToken) => {
     if (!confirm(`Rotate "${t.name}"? You get a new token; the old one keeps working for 24 hours.`)) return;
     try {
-      setCreated(await api.post<Token>(`/api/tokens/${t.id}/rotate`, {}));
+      setCreated(await api.post<ApiToken>(`/api/tokens/${t.id}/rotate`, {}));
       reload();
     } catch (err) {
       setError((err as Error).message);
     }
   };
-  const revoke = async (t: Token) => {
+  const revoke = async (t: ApiToken) => {
     if (!confirm(`Revoke token "${t.name}"? Clients using it stop working immediately.`)) return;
     await api.del(`/api/tokens/${t.id}`);
     reload();
@@ -254,8 +243,6 @@ function TokensCard() {
 }
 
 
-interface Session { id: string; created_at: string; last_seen_at: string; ip: string; user_agent: string; current: boolean }
-
 /** A short, readable device description from a user agent string. */
 function device(ua: string) {
   const browser = /Edg\//.test(ua) ? 'Edge' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : ua ? 'Browser' : 'Unknown';
@@ -264,8 +251,8 @@ function device(ua: string) {
 }
 
 function SessionsCard() {
-  const { data, reload } = useApi<Session[]>('/api/auth/sessions');
-  const revoke = async (s: Session) => {
+  const { data, reload } = useApi<UserSession[]>('/api/auth/sessions');
+  const revoke = async (s: UserSession) => {
     await api.del(`/api/auth/sessions/${s.id}`);
     reload();
   };

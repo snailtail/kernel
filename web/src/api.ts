@@ -158,9 +158,9 @@ export interface ProblemDetail extends Problem {
   /** Improvements that came from it or are linked to it (#52). */
   improvements?: { ref: string; title: string; status: string }[];
   knowledge_article?: { ref: string; status: string } | null;
-  affected_cis: import('./components/AffectedCis').AffectedCi[];
-  affected_services: import('./components/AffectedCis').AffectedService[];
-  impact_hint: import('./components/AffectedCis').ImpactHint | null;
+  affected_cis: import('./api/types/cmdb').AffectedCi[];
+  affected_services: import('./api/types/cmdb').AffectedService[];
+  impact_hint: import('./api/types/cmdb').ImpactHint | null;
   impact_incomplete: boolean;
   incidents: { ref: string; title: string; status: string; priority: number; created_at: string }[];
   /** Post-incident reviews (#109) whose contributing factors became this problem. */
@@ -220,17 +220,26 @@ export const setReauthHandler = (h: ReauthHandler | null) => {
   reauthHandler = h;
 };
 
-async function request<T>(method: string, path: string, body?: unknown, retried = false): Promise<T> {
+interface Send {
+  /** A JSON body, or a raw one (a file upload) with its content type. */
+  json?: unknown;
+  raw?: { body: Blob; type: string };
+  /** Read the response as text (e.g. a Markdown export) instead of JSON. */
+  text?: boolean;
+}
+
+async function request<T>(method: string, path: string, send: Send = {}, retried = false): Promise<T> {
+  const { json, raw } = send;
   const res = await fetch(path, {
     method,
     credentials: 'same-origin',
     headers: {
       'X-Kernel-Request': '1',
-      ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      ...(raw ? { 'Content-Type': raw.type } : json !== undefined ? { 'Content-Type': 'application/json' } : {}),
     },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    body: raw ? raw.body : json !== undefined ? JSON.stringify(json) : undefined,
   });
-  const data = res.status === 204 ? null : await res.json().catch(() => null);
+  const data = res.status === 204 ? null : send.text && res.ok ? await res.text() : await res.json().catch(() => null);
   // Sensitive data (#61): tell the user what the server removed from what they sent.
   const redacted = res.headers.get('X-Kernel-Redacted');
   if (redacted && res.ok) window.dispatchEvent(new CustomEvent('kernel:redacted', { detail: redacted.split(',') }));
@@ -238,7 +247,7 @@ async function request<T>(method: string, path: string, body?: unknown, retried 
     if (res.status === 401 && !path.startsWith('/api/auth/login') && path !== '/api/auth/reauth') window.dispatchEvent(new Event('kernel:unauthorized'));
     // Sensitive action: confirm identity, then retry once.
     if (res.status === 403 && data?.reauth_required && reauthHandler && !retried && (await reauthHandler(!!data.mfa))) {
-      return request<T>(method, path, body, true);
+      return request<T>(method, path, send, true);
     }
     throw new ApiError(res.status, data?.error ?? res.statusText, data ?? {});
   }
@@ -247,8 +256,12 @@ async function request<T>(method: string, path: string, body?: unknown, retried 
 
 export const api = {
   get: <T>(path: string) => request<T>('GET', path),
-  post: <T>(path: string, body: unknown = {}) => request<T>('POST', path, body),
-  patch: <T>(path: string, body: unknown) => request<T>('PATCH', path, body),
-  put: <T>(path: string, body: unknown) => request<T>('PUT', path, body),
+  post: <T>(path: string, body: unknown = {}) => request<T>('POST', path, { json: body }),
+  patch: <T>(path: string, body: unknown) => request<T>('PATCH', path, { json: body }),
+  put: <T>(path: string, body: unknown) => request<T>('PUT', path, { json: body }),
   del: <T>(path: string) => request<T>('DELETE', path),
+  /** A file as the request body; the server decides its type from the content. */
+  upload: <T>(path: string, file: Blob) => request<T>('POST', path, { raw: { body: file, type: 'application/octet-stream' } }),
+  /** A GET whose answer is text, not JSON. */
+  text: (path: string) => request<string>('GET', path, { text: true }),
 };

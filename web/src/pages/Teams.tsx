@@ -1,17 +1,14 @@
 import { PagingCard } from '../components/OnCall';
-import { useState, type FormEvent } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router';
 import { api } from '../api';
 import { PriorityBadge } from '../components/Badges';
-import { Modal } from '../components/Modal';
-import { forgetTeams, type Team } from '../components/Teams';
+import { FormModal, Modal } from '../components/Modal';
+import { forgetTeams } from '../components/Teams';
 import { relativeTime } from '../format';
 import { useApi } from '../hooks';
 import { useSession } from '../session';
-
-interface QueueRow { ref: string; title: string; status: string; priority: number; assignee: string | null; created_at: string; at_risk: boolean }
-interface RequestTaskRow { ref: string; title: string; task_id: number; task: string; assignee: string | null; opened_at: string; at_risk: boolean }
-interface Queue { team: { id: number; name: string }; unassigned: QueueRow[]; mine: QueueRow[]; at_risk: QueueRow[]; all: QueueRow[]; request_tasks?: RequestTaskRow[] }
+import type { Team, TeamQueue } from '../api/types/teams';
 
 export function TeamsPage() {
   const { user } = useSession();
@@ -59,7 +56,7 @@ export function TeamsPage() {
 }
 
 function TeamDetail({ team: t, canEdit, canMembers, onEdit, onMembers }: { team: Team; canEdit: boolean; canMembers: boolean; onEdit: () => void; onMembers: () => void }) {
-  const { data: q } = useApi<Queue>(`/api/teams/${t.id}/queue`);
+  const { data: q } = useApi<TeamQueue>(`/api/teams/${t.id}/queue`);
   const [tab, setTab] = useState<'unassigned' | 'mine' | 'at_risk' | 'all'>('unassigned');
   const rows = q?.[tab] ?? [];
   return (
@@ -140,16 +137,11 @@ function TeamModal({ team, onClose, onDone }: { team?: Team; onClose: () => void
     active: team?.active ?? true, cis: (team?.supports ?? []).map((c) => c.ref).join(', '),
   });
   const [error, setError] = useState<string | null>(null);
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
+  const submit = async () => {
     const body = { ...form, cis: form.cis.split(/[\s,]+/).filter(Boolean) };
-    try {
-      if (team) await api.put(`/api/teams/${team.id}`, body);
-      else await api.post('/api/teams', body);
-      onDone();
-    } catch (err) {
-      setError((err as Error).message);
-    }
+    if (team) await api.put(`/api/teams/${team.id}`, body);
+    else await api.post('/api/teams', body);
+    onDone();
   };
   const remove = async () => {
     if (!team || !window.confirm(`Remove the team ${team.name}?`)) return;
@@ -161,21 +153,16 @@ function TeamModal({ team, onClose, onDone }: { team?: Team; onClose: () => void
     }
   };
   return (
-    <Modal title={team ? `Edit ${team.name}` : 'Add a team'} onClose={onClose}>
-      <form className="form" onSubmit={submit}>
-        <label>Name<input required minLength={2} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Service desk, Network, DBA" /></label>
-        <label>Email<input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></label>
-        <label className="full">What the team does<textarea rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
-        <label className="full">Supports <span className="muted small">(services and CIs, e.g. SVC000003 CI000012 – their new incidents go to this team)</span><input value={form.cis} onChange={(e) => setForm({ ...form, cis: e.target.value })} /></label>
-        <label>New work<select value={form.auto_assign} onChange={(e) => setForm({ ...form, auto_assign: e.target.value as Team['auto_assign'] })}><option value="none">Waits in the queue</option><option value="round_robin">Assigned in turn (round robin)</option></select></label>
-        {team && <label className="check"><input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Active</label>}
-        {error && <div className="error full">{error}</div>}
-        <div className="actions full">
-          {team && <button type="button" className="btn danger" onClick={remove}>Remove</button>}
-          <button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary">Save</button>
-        </div>
-      </form>
-    </Modal>
+    <FormModal title={team ? `Edit ${team.name}` : 'Add a team'} submitLabel="Save" onClose={onClose} onSubmit={submit}
+      actions={team && <button type="button" className="btn danger" onClick={remove}>Remove</button>}>
+      <label>Name<input required minLength={2} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Service desk, Network, DBA" /></label>
+      <label>Email<input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></label>
+      <label className="full">What the team does<textarea rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
+      <label className="full">Supports <span className="muted small">(services and CIs, e.g. SVC000003 CI000012 – their new incidents go to this team)</span><input value={form.cis} onChange={(e) => setForm({ ...form, cis: e.target.value })} /></label>
+      <label>New work<select value={form.auto_assign} onChange={(e) => setForm({ ...form, auto_assign: e.target.value as Team['auto_assign'] })}><option value="none">Waits in the queue</option><option value="round_robin">Assigned in turn (round robin)</option></select></label>
+      {team && <label className="check"><input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Active</label>}
+      {error && <div className="error full">{error}</div>}
+    </FormModal>
   );
 }
 

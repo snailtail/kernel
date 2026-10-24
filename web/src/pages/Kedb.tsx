@@ -4,7 +4,7 @@ import { PriorityBadge, StatusBadge } from '../components/Badges';
 import { Markdown } from '../components/Markdown';
 import { DECISION_LABEL, EFFECTIVENESS_LABEL, formatDate } from '../format';
 import { useApi, useSearchText } from '../hooks';
-import { useListToolkit } from '../components/ListToolkit';
+import { useListToolkit } from '../components/list/ListToolkit';
 import { SavedViews } from '../components/SavedViews';
 
 export function KedbPage() {

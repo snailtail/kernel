@@ -1,27 +1,30 @@
 // The continual improvement register (#52): a list, a Kanban board by status and a value/effort matrix, and the page
 // of one improvement. Lightweight on purpose: the work itself happens in the changes, problems and actions it links.
-import { useEffect, useState, type DragEvent, type FormEvent } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
-import { api, type Action, type Guidance } from '../api';
+import { useEffect, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router';
+import { api } from '../api';
 import { ActionsCard } from '../components/Actions';
 import { askReason, askText } from '../components/Ask';
 import { StatusBadge } from '../components/Badges';
 import { CommentBox } from '../components/CommentBox';
 import { GuidePanel, isGuided } from '../components/Guide';
 import { HistoryPanel } from '../components/History';
+import { KanbanBoard } from '../components/KanbanBoard';
 import { formatKpi, periodLabel, Trend } from '../components/Kpis';
-import { useColumns, useListToolkit, type ColumnKey } from '../components/ListToolkit';
+import { useListToolkit } from '../components/list/ListToolkit';
+import { useColumns, type ColumnKey } from '../components/list/columns';
 import { Markdown } from '../components/Markdown';
-import { Modal } from '../components/Modal';
+import { FormModal } from '../components/Modal';
 import { Presence } from '../components/Presence';
 import { SavedViews } from '../components/SavedViews';
 import { TransitionButtons } from '../components/TransitionButtons';
 import { RecordNotFound, VisibilityPanel } from '../components/Visibility';
 import { formatDate, relativeTime } from '../format';
-import { useApi, useSearchText } from '../hooks';
+import { useApi, useListParams, useRecord, useSearchText } from '../hooks';
 import { useLive } from '../live';
 import { canEdit, useSession } from '../session';
 import { IMPROVEMENT_STATUS, type ImprovementStatus } from '../statuses';
+import type { ImprovementRow, Improvement, LinkRow } from '../api/types/improvements';
 
 const STATUSES = Object.keys(IMPROVEMENT_STATUS) as ImprovementStatus[];
 const SOURCE: Record<string, string> = { review: 'Post-incident review', problem: 'Problem', service_review: 'Service review', idea: 'Idea' };
@@ -33,24 +36,6 @@ const KPI_LABEL: Record<string, string> = {
 const TRANSITION_LABEL: Record<ImprovementStatus, string> = { idea: 'Back to idea', approved: 'Approve', in_progress: 'Start', done: 'Mark done', rejected: 'Reject' };
 /** A move back is not a decision: "Back to approved" pauses work, "Reopen" picks done work up again. */
 const transitionLabel = (from: ImprovementStatus, to: ImprovementStatus) => (from === 'in_progress' && to === 'approved' ? 'Back to approved' : from === 'done' && to === 'in_progress' ? 'Reopen' : TRANSITION_LABEL[to]);
-
-interface Row {
-  ref: string; title: string; status: ImprovementStatus; source: string; source_ref: string | null; value: number | null; effort: number | null; kpi: string | null;
-  owner_id: number | null; owner: string | null; service_ref: string | null; service_name: string | null; created_at: string; updated_at: string; links: number;
-}
-interface LinkRow { id: number; kind: string; reference: string; system: string; url: string; note: string; title: string | null; status: string | null; action_problem_ref: string | null; action_path?: string }
-interface Detail extends Omit<Row, 'links'> {
-  id: number; description: string | null; benefit: string | null; reject_reason: string | null; created_by: number | null; created_by_name: string | null;
-  decided_by_name: string | null; decided_at: string | null; done_at: string | null;
-  service: { ref: string; name: string } | null; restricted: boolean; restricted_teams: number[]; classification: 'normal' | 'confidential'; confidential_masked?: boolean;
-  links: LinkRow[];
-  actions: Action[];
-  kpi_tile: { id: string; label: string; value: number | null; unit: 'minutes' | 'percent' | 'count'; trend: (number | null)[]; trend_label: string; lower_is_better: boolean; starts: string[]; link: string } | null;
-  transitions: ImprovementStatus[];
-  may_decide: boolean;
-  activity: { id: number; kind: string; body: string; data: any; channel: string; created_at: string; user_name: string | null }[];
-  next_steps: Guidance;
-}
 
 const rating = (m: { value: number | null; effort: number | null }) => (m.value && m.effort ? `V${m.value} · E${m.effort}` : '–');
 /** The matrix quadrants, the same split as the server's quick_wins filter: value 4–5 is high, effort 1–2 is low. */
@@ -89,7 +74,7 @@ const PREFILL = ['source', 'service', 'from', 'to', 'kpi', 'source_ref'];
 export function ImprovementsPage() {
   const { user } = useSession();
   const navigate = useNavigate();
-  const [params, setParams] = useSearchParams();
+  const { params, setParams, set } = useListParams();
   const [q, setQ] = useSearchText();
   const tab = params.get('tab') ?? 'list';
   // A link from a service report or a KPI tile opens the form with what it knows (#54); those keys are not filters.
@@ -102,11 +87,10 @@ export function ImprovementsPage() {
     setParams(next, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params]);
-  const set = (k: string, v: string) => setParams((prev) => { const n = new URLSearchParams(prev); if (v) n.set(k, v); else n.delete(k); return n; }, { replace: true });
   const query = new URLSearchParams([...params].filter(([k]) => k !== 'tab' && !PREFILL.includes(k)));
   // The board shows every status in its own column.
   if (tab === 'board' && !query.has('status')) query.set('status', 'all');
-  const { data, loading, refresh, reload } = useApi<Row[]>(params.get('new') === '1' ? null : `/api/improvements?${query}`);
+  const { data, loading, refresh, reload } = useApi<ImprovementRow[]>(params.get('new') === '1' ? null : `/api/improvements?${query}`);
   useLive(['improvement:*'], refresh);
   const empty = data?.length === 0 && ![...query.keys()].some((k) => k !== 'status' || query.get('status') !== 'all');
 
@@ -150,7 +134,7 @@ const COLUMNS: { key: ColumnKey; label: string }[] = [
   { key: 'status', label: 'Status' }, { key: 'priority', label: 'Value / effort' }, { key: 'assignee', label: 'Owner' }, { key: 'service', label: 'Service' }, { key: 'updated', label: 'Updated' },
 ];
 
-function ImprovementList({ rows, loading, filter, onChanged }: { rows: Row[] | null; loading: boolean; filter: string; onChanged: () => void }) {
+function ImprovementList({ rows, loading, filter, onChanged }: { rows: ImprovementRow[] | null; loading: boolean; filter: string; onChanged: () => void }) {
   const tk = useListToolkit({ list: 'improvements', rows, idOf: (m) => m.ref, hrefOf: (m) => `/improvements/${m.ref}`, filter, onChanged });
   const cols = useColumns('improvements', COLUMNS);
   return (
@@ -186,57 +170,35 @@ function ImprovementList({ rows, loading, filter, onChanged }: { rows: Row[] | n
 }
 
 /** Kanban by status. Dragging a card is a status change with the API's rules; each card also has a menu to move it. */
-function Board({ rows, editable, onChanged }: { rows: Row[]; editable: boolean; onChanged: () => void }) {
+function Board({ rows, editable, onChanged }: { rows: ImprovementRow[]; editable: boolean; onChanged: () => void }) {
   const [error, setError] = useState<string | null>(null);
-  const [over, setOver] = useState<ImprovementStatus | null>(null);
-  const move = async (ref: string, to: ImprovementStatus) => {
-    const row = rows.find((r) => r.ref === ref);
-    if (!row || row.status === to) return;
+  const move = async (row: ImprovementRow, to: ImprovementStatus) => {
     const body = await transitionBody(to);
     if (!body) return;
     setError(null);
     try {
-      await api.post(`/api/improvements/${ref}/transition`, body);
+      await api.post(`/api/improvements/${row.ref}/transition`, body);
     } catch (err) {
-      setError(`${ref}: ${(err as Error).message}`);
+      setError(`${row.ref}: ${(err as Error).message}`);
     }
     onChanged();
   };
-  const drop = (to: ImprovementStatus) => (e: DragEvent) => { e.preventDefault(); setOver(null); const ref = e.dataTransfer.getData('text/plain'); if (ref) move(ref, to); };
   return (
     <>
       {error && <div className="error">{error}</div>}
-      <div className="kanban" aria-label="Improvements by status">
-        {STATUSES.map((s) => {
-          const cards = rows.filter((r) => r.status === s);
-          return (
-            <section key={s} className={`kanban-col${over === s ? ' over' : ''}`} aria-label={IMPROVEMENT_STATUS[s]}
-              onDragOver={editable ? (e) => { e.preventDefault(); setOver(s); } : undefined} onDragLeave={() => setOver(null)} onDrop={editable ? drop(s) : undefined}>
-              <h2>{IMPROVEMENT_STATUS[s]} <span className="count">{cards.length}</span></h2>
-              {cards.map((m) => (
-                <article key={m.ref} className="kanban-card" draggable={editable} onDragStart={(e) => { e.dataTransfer.setData('text/plain', m.ref); e.dataTransfer.effectAllowed = 'move'; }}>
-                  <Link to={`/improvements/${m.ref}`} className="kanban-title">{m.title}</Link>
-                  <div className="kanban-meta">
-                    <span className="mono small">{m.ref}</span>
-                    <span className="small">{rating(m)}</span>
-                    {quadrantOf(m) === 'quick' && <span className="tag quick-win">quick win</span>}
-                  </div>
-                  <div className="kanban-meta">
-                    <span className="muted small">{m.owner ?? 'No owner'}{m.service_name ? ` · ${m.service_name}` : ''}</span>
-                    {editable && (
-                      <select className="kanban-move" value="" aria-label={`Move ${m.ref}`} onChange={(e) => e.target.value && move(m.ref, e.target.value as ImprovementStatus)}>
-                        <option value="">Move…</option>
-                        {STATUSES.filter((t) => t !== s).map((t) => <option key={t} value={t}>{IMPROVEMENT_STATUS[t]}</option>)}
-                      </select>
-                    )}
-                  </div>
-                </article>
-              ))}
-              {cards.length === 0 && <p className="placeholder small">{editable ? 'Drop a card here.' : 'Nothing here.'}</p>}
-            </section>
-          );
-        })}
-      </div>
+      <KanbanBoard label="Improvements by status" columns={STATUSES.map((s) => ({ key: s, label: IMPROVEMENT_STATUS[s] }))} columnOf={(m) => m.status}
+        items={rows} editable={editable} onMove={move}
+        renderCard={(m) => (
+          <>
+            <Link to={`/improvements/${m.ref}`} className="kanban-title">{m.title}</Link>
+            <div className="kanban-meta">
+              <span className="mono small">{m.ref}</span>
+              <span className="small">{rating(m)}</span>
+              {quadrantOf(m) === 'quick' && <span className="tag quick-win">quick win</span>}
+            </div>
+          </>
+        )}
+        renderMeta={(m) => <span className="muted small">{m.owner ?? 'No owner'}{m.service_name ? ` · ${m.service_name}` : ''}</span>} />
     </>
   );
 }
@@ -249,7 +211,7 @@ const QUADRANTS: { id: 'quick' | 'big' | 'fill' | 'pit'; title: string; hint: st
 ];
 
 /** Value up, effort to the right; quick wins top left. */
-function Matrix({ rows }: { rows: Row[] }) {
+function Matrix({ rows }: { rows: ImprovementRow[] }) {
   const unrated = rows.filter((m) => !quadrantOf(m));
   return (
     <>
@@ -300,78 +262,57 @@ function NewImprovement({ prefill, onClose, onDone }: { prefill: Record<string, 
     title: '', service: prefill.service ?? '', value: '', effort: '', kpi: prefill.kpi && KPI_LABEL[prefill.kpi] ? prefill.kpi : '',
     description: fromReport ? `From the service review of ${prefill.service}${prefill.from ? `, ${prefill.from} – ${prefill.to}` : ''}.\n\n` : '',
   });
-  const [error, setError] = useState<string | null>(null);
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    try {
-      const m = await api.post<Detail>('/api/improvements', {
-        title: form.title, description: form.description,
-        ...(form.service ? { service: form.service } : {}), ...(form.value ? { value: Number(form.value) } : {}), ...(form.effort ? { effort: Number(form.effort) } : {}),
-        ...(form.kpi ? { kpi: form.kpi } : {}),
-        ...(prefill.source ? { source: prefill.source } : {}), ...(fromReport ? { source_ref: prefill.service } : prefill.source_ref ? { source_ref: prefill.source_ref } : {}),
-      });
-      onDone(m.ref);
-    } catch (err) {
-      setError((err as Error).message);
-    }
+  const submit = async () => {
+    const m = await api.post<Improvement>('/api/improvements', {
+      title: form.title, description: form.description,
+      ...(form.service ? { service: form.service } : {}), ...(form.value ? { value: Number(form.value) } : {}), ...(form.effort ? { effort: Number(form.effort) } : {}),
+      ...(form.kpi ? { kpi: form.kpi } : {}),
+      ...(prefill.source ? { source: prefill.source } : {}), ...(fromReport ? { source_ref: prefill.service } : prefill.source_ref ? { source_ref: prefill.source_ref } : {}),
+    });
+    onDone(m.ref);
   };
   return (
-    <Modal title="Suggest an improvement" onClose={onClose}>
-      <ModelHint />
-      <form className="form" onSubmit={submit}>
-        <label className="full">What should get better?<input required autoFocus value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="e.g. Alert 30 days before a certificate expires" /></label>
-        <label className="full">Where we are, and where we want to be<textarea rows={4} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
-        <label>Service <span className="muted small">(ref)</span><input value={form.service} onChange={(e) => setForm({ ...form, service: e.target.value })} placeholder="SVC…" /></label>
-        <label>KPI to watch
-          <select value={form.kpi} onChange={(e) => setForm({ ...form, kpi: e.target.value })}><option value="">None</option>{Object.entries(KPI_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
-        </label>
-        <RatingSelect label="Value (1–5)" value={form.value} onChange={(value) => setForm({ ...form, value })} />
-        <RatingSelect label="Effort (1–5)" value={form.effort} onChange={(effort) => setForm({ ...form, effort })} />
-        {error && <div className="error full">{error}</div>}
-        <div className="actions full"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary">Suggest</button></div>
-      </form>
-    </Modal>
+    <FormModal title="Suggest an improvement" submitLabel="Suggest" intro={<ModelHint />} onClose={onClose} onSubmit={submit}>
+      <label className="full">What should get better?<input required autoFocus value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="e.g. Alert 30 days before a certificate expires" /></label>
+      <label className="full">Where we are, and where we want to be<textarea rows={4} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
+      <label>Service <span className="muted small">(ref)</span><input value={form.service} onChange={(e) => setForm({ ...form, service: e.target.value })} placeholder="SVC…" /></label>
+      <label>KPI to watch
+        <select value={form.kpi} onChange={(e) => setForm({ ...form, kpi: e.target.value })}><option value="">None</option>{Object.entries(KPI_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
+      </label>
+      <RatingSelect label="Value (1–5)" value={form.value} onChange={(value) => setForm({ ...form, value })} />
+      <RatingSelect label="Effort (1–5)" value={form.effort} onChange={(effort) => setForm({ ...form, effort })} />
+    </FormModal>
   );
 }
 
-function EditImprovement({ m, onClose, onDone }: { m: Detail; onClose: () => void; onDone: (m: Detail) => void }) {
+function EditImprovement({ m, onClose, onDone }: { m: Improvement; onClose: () => void; onDone: (m: Improvement) => void }) {
   const { meta } = useSession();
   const [form, setForm] = useState({
     title: m.title, description: m.description ?? '', benefit: m.benefit ?? '', service: m.service?.ref ?? '', owner_id: m.owner_id ? String(m.owner_id) : '',
     value: m.value ? String(m.value) : '', effort: m.effort ? String(m.effort) : '', kpi: m.kpi ?? '',
   });
-  const [error, setError] = useState<string | null>(null);
   const masked = !!m.confidential_masked;
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    try {
-      onDone(await api.patch<Detail>(`/api/improvements/${m.ref}`, {
-        title: form.title, service: form.service || null, owner_id: form.owner_id ? Number(form.owner_id) : null,
-        value: form.value ? Number(form.value) : null, effort: form.effort ? Number(form.effort) : null, kpi: form.kpi || null,
-        // A confidential improvement's text is only sent by people who may read it.
-        ...(masked ? {} : { description: form.description, ...(form.benefit !== (m.benefit ?? '') ? { benefit: form.benefit } : {}) }),
-      }));
-    } catch (err) {
-      setError((err as Error).message);
-    }
+  const submit = async () => {
+    onDone(await api.patch<Improvement>(`/api/improvements/${m.ref}`, {
+      title: form.title, service: form.service || null, owner_id: form.owner_id ? Number(form.owner_id) : null,
+      value: form.value ? Number(form.value) : null, effort: form.effort ? Number(form.effort) : null, kpi: form.kpi || null,
+      // A confidential improvement's text is only sent by people who may read it.
+      ...(masked ? {} : { description: form.description, ...(form.benefit !== (m.benefit ?? '') ? { benefit: form.benefit } : {}) }),
+    }));
   };
   return (
-    <Modal title={`Edit ${m.ref}`} onClose={onClose}>
-      <form className="form" onSubmit={submit}>
-        <label className="full">Title<input required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></label>
-        {!masked && <label className="full">Description<textarea rows={5} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>}
-        {!masked && ['in_progress', 'done'].includes(m.status) && <label className="full">Benefit<textarea rows={3} value={form.benefit} onChange={(e) => setForm({ ...form, benefit: e.target.value })} /></label>}
-        <label>Owner<select value={form.owner_id} onChange={(e) => setForm({ ...form, owner_id: e.target.value })}><option value="">No owner</option>{meta.assignees.map((a) => <option key={a.id} value={a.id}>{a.display_name}</option>)}</select></label>
-        <label>Service <span className="muted small">(ref)</span><input value={form.service} onChange={(e) => setForm({ ...form, service: e.target.value })} /></label>
-        <RatingSelect label="Value (1–5)" value={form.value} onChange={(value) => setForm({ ...form, value })} />
-        <RatingSelect label="Effort (1–5)" value={form.effort} onChange={(effort) => setForm({ ...form, effort })} />
-        <label className="full">KPI to watch
-          <select value={form.kpi} onChange={(e) => setForm({ ...form, kpi: e.target.value })}><option value="">None</option>{Object.entries(KPI_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
-        </label>
-        {error && <div className="error full">{error}</div>}
-        <div className="actions full"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary">Save</button></div>
-      </form>
-    </Modal>
+    <FormModal title={`Edit ${m.ref}`} submitLabel="Save" onClose={onClose} onSubmit={submit}>
+      <label className="full">Title<input required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></label>
+      {!masked && <label className="full">Description<textarea rows={5} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>}
+      {!masked && ['in_progress', 'done'].includes(m.status) && <label className="full">Benefit<textarea rows={3} value={form.benefit} onChange={(e) => setForm({ ...form, benefit: e.target.value })} /></label>}
+      <label>Owner<select value={form.owner_id} onChange={(e) => setForm({ ...form, owner_id: e.target.value })}><option value="">No owner</option>{meta.assignees.map((a) => <option key={a.id} value={a.id}>{a.display_name}</option>)}</select></label>
+      <label>Service <span className="muted small">(ref)</span><input value={form.service} onChange={(e) => setForm({ ...form, service: e.target.value })} /></label>
+      <RatingSelect label="Value (1–5)" value={form.value} onChange={(value) => setForm({ ...form, value })} />
+      <RatingSelect label="Effort (1–5)" value={form.effort} onChange={(effort) => setForm({ ...form, effort })} />
+      <label className="full">KPI to watch
+        <select value={form.kpi} onChange={(e) => setForm({ ...form, kpi: e.target.value })}><option value="">None</option>{Object.entries(KPI_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
+      </label>
+    </FormModal>
   );
 }
 
@@ -380,7 +321,7 @@ const LINK_PATH: Record<string, (ref: string, x: LinkRow) => string | null> = {
   action: (_r, x) => x.action_path ?? null, document: () => null,
 };
 
-function LinksCard({ m, editable, onChange }: { m: Detail; editable: boolean; onChange: (fn: () => Promise<Detail>) => Promise<boolean> }) {
+function LinksCard({ m, editable, onChange }: { m: Improvement; editable: boolean; onChange: (fn: () => Promise<Improvement>) => Promise<boolean> }) {
   const [kind, setKind] = useState('change');
   const [reference, setReference] = useState('');
   const kernel = (x: LinkRow) => x.system === 'Kernel' || x.system === '';
@@ -417,7 +358,7 @@ function LinksCard({ m, editable, onChange }: { m: Detail; editable: boolean; on
 }
 
 /** The linked KPI tile, read-only: whether the change shows in the numbers. */
-function KpiCard({ tile }: { tile: NonNullable<Detail['kpi_tile']> }) {
+function KpiCard({ tile }: { tile: NonNullable<Improvement['kpi_tile']> }) {
   return (
     <section className="card kpi-tile">
       <h2>{tile.label}</h2>
@@ -432,24 +373,13 @@ function KpiCard({ tile }: { tile: NonNullable<Detail['kpi_tile']> }) {
 export function ImprovementPage() {
   const { ref } = useParams();
   const { user } = useSession();
-  const { data: m, setData, error, reload, refresh } = useApi<Detail>(`/api/improvements/${ref}`);
+  const { data: m, setData, error, reload, refresh, actionError, setActionError, run } = useRecord<Improvement>(`/api/improvements/${ref}`);
   const others = useLive([m && `improvement:${m.id}`], refresh, { presence: true });
-  const [actionError, setActionError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   if (error) return <RecordNotFound refId={ref ?? ''} error={error} onOpened={reload} />;
   if (!m) return null;
   const path = `/api/improvements/${m.ref}`;
   const editable = canEdit(user);
-  const run = async (fn: () => Promise<Detail>) => {
-    setActionError(null);
-    try {
-      setData(await fn());
-      return true;
-    } catch (err) {
-      setActionError((err as Error).message);
-      return false;
-    }
-  };
   const go = async (to: ImprovementStatus) => {
     const body = await transitionBody(to, m.benefit);
     if (body) await run(() => api.post(`${path}/transition`, body));

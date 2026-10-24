@@ -5,34 +5,7 @@ import { askReason } from '../components/Ask';
 import { formatDate, relativeTime } from '../format';
 import { useApi } from '../hooks';
 import { useSession } from '../session';
-
-interface SecurityEvent {
-  id: number;
-  at: string;
-  action: string;
-  category: string;
-  outcome: 'success' | 'failure' | 'denied' | 'blocked' | 'info';
-  severity: string;
-  user_id: number | null;
-  user_name: string | null;
-  username: string | null;
-  account: string;
-  actor_type: string;
-  channel: string;
-  token_prefix: string;
-  ip: string | null;
-  country: string;
-  user_agent: string;
-  request_id: string;
-  target: string;
-  detail: Record<string, unknown>;
-  message: string;
-}
-
-interface Summary {
-  outcomes: Record<string, number>;
-  top: { action: string; outcome: string; n: number }[];
-}
+import type { SecurityEvent, SecuritySummary, AlertCounting, AlertingSettings, AlertingStatus, PrivacySettings } from '../api/types/security';
 
 const FILTERS = ['action', 'category', 'outcome', 'min_severity', 'user', 'ip', 'token_prefix', 'from', 'to'] as const;
 const CATEGORIES = ['authentication', 'authorization', 'iam', 'configuration', 'data_access', 'web', 'network', 'integrity', 'api'];
@@ -51,7 +24,7 @@ export function SecurityEventsPage() {
   const [more, setMore] = useState(false);
   const [open, setOpen] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const { data: summary } = useApi<Summary>('/api/security-events/summary');
+  const { data: summary } = useApi<SecuritySummary>('/api/security-events/summary');
   const filterQuery = new URLSearchParams(Object.fromEntries(FILTERS.filter((f) => params.get(f)).map((f) => [f, params.get(f)!])));
 
   const load = async (beforeId?: number) => {
@@ -185,32 +158,14 @@ export function SecurityEventsPage() {
   );
 }
 
-// ---- Alerting (part 2 of #64) -------------------------------------------------------------------
+// ---- AlertingSettings (part 2 of #64) -------------------------------------------------------------------
 
-interface Counting { enabled: boolean; threshold: number; window_minutes: number; rows?: number }
-interface Alerting {
-  enabled: boolean;
-  failed_sign_ins: Counting;
-  denials: Counting;
-  bulk_export: Counting & { rows: number };
-  new_country: { enabled: boolean };
-  new_admin: { enabled: boolean };
-  credential_change: { enabled: boolean };
-}
-interface AlertingStatus {
-  settings: Alerting;
-  source: string;
-  rules: { id: number; name: string; enabled: boolean; min_severity: string | null; team_id: number | null; team_name: string | null }[];
-  open_alerts: { id: number; check_key: string; severity: string; message: string; count: number; last_seen: string; incident_ref: string | null }[];
-}
-interface Privacy { audit_context_days: number; security_event_days: number }
-
-const COUNTING: [keyof Alerting, string, string][] = [
+const COUNTING: [keyof AlertingSettings, string, string][] = [
   ['failed_sign_ins', 'Failed sign-ins', 'for one account, or from one address'],
   ['denials', 'Denied requests', 'from one token, user or address'],
   ['bulk_export', 'Exports', 'by one person'],
 ];
-const ONE_OFF: [keyof Alerting, string][] = [
+const ONE_OFF: [keyof AlertingSettings, string][] = [
   ['new_country', 'A sign-in from a country the account has not used before (needs Cloudflare in front)'],
   ['new_admin', 'Someone becomes an administrator'],
   ['credential_change', 'Keys, single sign-on, AI providers, connectors, webhooks or event and dev sources change'],
@@ -218,9 +173,9 @@ const ONE_OFF: [keyof Alerting, string][] = [
 
 function SecurityAlerting() {
   const { data, reload } = useApi<AlertingStatus>('/api/admin/security-alerting');
-  const { data: privacy, reload: reloadPrivacy } = useApi<Privacy>('/api/admin/privacy');
-  const [draft, setDraft] = useState<Alerting | null>(null);
-  const [keep, setKeep] = useState<Privacy | null>(null);
+  const { data: privacy, reload: reloadPrivacy } = useApi<PrivacySettings>('/api/admin/privacy');
+  const [draft, setDraft] = useState<AlertingSettings | null>(null);
+  const [keep, setKeep] = useState<PrivacySettings | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => { if (data) setDraft(data.settings); }, [data]);
   useEffect(() => { if (privacy) setKeep(privacy); }, [privacy]);
@@ -228,7 +183,7 @@ function SecurityAlerting() {
 
   const rule = data.rules[0];
   const changed = JSON.stringify(draft) !== JSON.stringify(data.settings);
-  const set = (key: keyof Alerting, patch: object) => setDraft({ ...draft, [key]: { ...(draft[key] as object), ...patch } });
+  const set = (key: keyof AlertingSettings, patch: object) => setDraft({ ...draft, [key]: { ...(draft[key] as object), ...patch } });
   const save = async () => {
     const reason = await askReason('Change security alerting', 'Detection rules decide which security events become alerts and incidents.', { confirmLabel: 'Save rules' });
     if (!reason) return;
@@ -273,7 +228,7 @@ function SecurityAlerting() {
           <thead><tr><th>Rule</th><th>Alert at</th><th>Within</th></tr></thead>
           <tbody>
             {COUNTING.map(([key, label, who]) => {
-              const c = draft[key] as Counting;
+              const c = draft[key] as AlertCounting;
               return (
                 <tr key={key}>
                   <td><label className="check"><input type="checkbox" checked={c.enabled} onChange={(e) => set(key, { enabled: e.target.checked })} /> {label}</label><div className="muted small">{who}</div></td>

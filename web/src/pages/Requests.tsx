@@ -1,47 +1,31 @@
 // Service requests (#44), an optional module: the list, the page of one request (its answers, approval and tasks in
 // order) and the "new request" flow with the item's form generated from the catalogue.
 import { useEffect, useState, type FormEvent } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
-import { api, type Guidance } from '../api';
+import { Link, useNavigate, useParams } from 'react-router';
+import { api } from '../api';
 import { askReason, askText } from '../components/Ask';
 import { StatusBadge } from '../components/Badges';
 import { CommentBox } from '../components/CommentBox';
 import { GuidePanel } from '../components/Guide';
 import { HistoryPanel } from '../components/History';
-import { useColumns, useListToolkit, type ColumnKey } from '../components/ListToolkit';
+import { useListToolkit } from '../components/list/ListToolkit';
+import { useColumns, type ColumnKey } from '../components/list/columns';
 import { Markdown } from '../components/Markdown';
 import { Modal } from '../components/Modal';
-import { PersonPicker, type PersonRef } from '../components/People';
+import { PersonPicker } from '../components/People';
 import { Presence } from '../components/Presence';
-import { type Field, type FieldType, type Item, type TaskKind } from '../components/RequestCatalogue';
 import { SavedViews } from '../components/SavedViews';
 import { TransitionButtons } from '../components/TransitionButtons';
 import { RecordNotFound, VisibilityPanel } from '../components/Visibility';
 import { formatDate, relativeTime } from '../format';
-import { useApi, useSearchText } from '../hooks';
+import { useApi, useListParams, useRecord, useSearchText } from '../hooks';
 import { useLive } from '../live';
 import { canEdit, useSession } from '../session';
 import { REQUEST_STATUS, type RequestStatus } from '../statuses';
+import type { RequestRow, RequestDetail, Task, Clock, CatalogueItem, Field } from '../api/types/requests';
+import type { PersonRef } from '../api/types/people';
 
 const STATUSES = Object.keys(REQUEST_STATUS) as RequestStatus[];
-interface Row {
-  ref: string; title: string; status: RequestStatus; priority: number; item: string; service_ref: string; service_name: string; requester: string;
-  created_at: string; updated_at: string; resolution_due_at: string | null; at_risk: boolean; open_task: string | null; open_task_team: string | null; open_task_assignee: string | null;
-}
-interface Task { kind: TaskKind; change_ref: string | null; webhook: string | null; by_change: boolean; id: number; position: number; title: string; status: 'pending' | 'open' | 'done' | 'cancelled'; note: string | null; team_id: number | null; team: string | null; assignee_id: number | null; assignee: string | null; done_at: string | null; done_by: string | null; may_complete: boolean }
-interface Clock { state: string; due_at: string | null; remaining_minutes: number | null; target_minutes: number | null }
-interface Detail {
-  id: number; ref: string; title: string; status: RequestStatus; priority: number; item: { id: number; name: string }; service: { ref: string; name: string };
-  requester: { id: number; name: string; email?: string | null }; on_behalf_of: string | null;
-  answers: { key: string; label: string; type: FieldType; value?: string | number | null; answer_text?: string | null; display?: string | null }[];
-  approval: { kind: string; approvers: string[]; decided_by: string | null; decided_at: string | null; reject_reason: string | null; may_decide: boolean };
-  cancel_reason: string | null; tasks: Task[];
-  sla: { name: string; paused: boolean; response: Clock; resolution: Clock } | null;
-  links: { id: number; kind: string; reference: string; system: string; url: string; note: string }[];
-  activity: { id: number; kind: string; body: string; data: any; channel: string; created_at: string; user_name: string | null }[];
-  restricted: boolean; restricted_teams: number[]; classification: 'normal' | 'confidential'; confidential_masked?: boolean; created_by: number | null;
-  created_at: string; resolved_at: string | null; transitions: string[]; next_steps: Guidance;
-}
 
 
 const COLUMNS: { key: ColumnKey; label: string }[] = [
@@ -51,7 +35,7 @@ const COLUMNS: { key: ColumnKey; label: string }[] = [
 export function RequestsPage() {
   const { user } = useSession();
   const navigate = useNavigate();
-  const [params, setParams] = useSearchParams();
+  const { params, setParams, set } = useListParams();
   const [q, setQ] = useSearchText();
   const [creating, setCreating] = useState(false);
   useEffect(() => {
@@ -62,9 +46,8 @@ export function RequestsPage() {
     setParams(next, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params]);
-  const set = (k: string, v: string) => setParams((prev) => { const n = new URLSearchParams(prev); if (v) n.set(k, v); else n.delete(k); return n; }, { replace: true });
   const query = new URLSearchParams([...params].filter(([k]) => k !== 'new'));
-  const { data, loading, refresh } = useApi<Row[]>(`/api/requests?${query}`);
+  const { data, loading, refresh } = useApi<RequestRow[]>(`/api/requests?${query}`);
   useLive(['request:*'], refresh);
   const tk = useListToolkit({ list: 'requests', rows: data, idOf: (r) => r.ref, hrefOf: (r) => `/requests/${r.ref}`, filter: query.toString(), onChanged: refresh });
   const cols = useColumns('requests', COLUMNS);
@@ -161,8 +144,8 @@ async function personId(p: PersonRef) {
 }
 
 function NewRequest({ onClose, onDone }: { onClose: () => void; onDone: (ref: string) => void }) {
-  const { data: items } = useApi<Item[]>('/api/request-items');
-  const [item, setItem] = useState<Item | null>(null);
+  const { data: items } = useApi<CatalogueItem[]>('/api/request-items');
+  const [item, setItem] = useState<CatalogueItem | null>(null);
   const [answers, setAnswers] = useState<Record<string, unknown>>({});
   const [requester, setRequester] = useState<{ id: number; label: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -175,7 +158,7 @@ function NewRequest({ onClose, onDone }: { onClose: () => void; onDone: (ref: st
     setBusy(true);
     try {
       const filled = Object.fromEntries(Object.entries(answers).filter(([, v]) => v !== undefined && v !== ''));
-      const r = await api.post<Detail>('/api/requests', { item_id: item.id, answers: filled, ...(requester ? { requester: { id: requester.id } } : {}) });
+      const r = await api.post<RequestDetail>('/api/requests', { item_id: item.id, answers: filled, ...(requester ? { requester: { id: requester.id } } : {}) });
       onDone(r.ref);
     } catch (err) {
       setError((err as Error).message);
@@ -238,7 +221,7 @@ function clockLabel(c: Clock, paused: boolean) {
   return `${m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`} left${c.state === 'at_risk' ? ' (at risk)' : ''}`;
 }
 
-function TaskList({ r, onRun }: { r: Detail; onRun: (fn: () => Promise<Detail>) => Promise<boolean> }) {
+function TaskList({ r, onRun }: { r: RequestDetail; onRun: (fn: () => Promise<RequestDetail>) => Promise<boolean> }) {
   const { user } = useSession();
   if (!r.tasks.length) {
     return <p className="placeholder">{r.status === 'awaiting_approval' ? 'The tasks start when the request is approved.' : 'No tasks.'}</p>;
@@ -279,25 +262,14 @@ function TaskList({ r, onRun }: { r: Detail; onRun: (fn: () => Promise<Detail>) 
 export function RequestPage() {
   const { ref } = useParams();
   const { user } = useSession();
-  const { data: r, setData, error, reload, refresh } = useApi<Detail>(`/api/requests/${ref}`);
+  const { data: r, error, reload, refresh, actionError, setActionError, run } = useRecord<RequestDetail>(`/api/requests/${ref}`);
   const others = useLive([r && `request:${r.id}`], refresh, { presence: true });
-  const [actionError, setActionError] = useState<string | null>(null);
   // A note is internal unless the person chooses to reply to the requester (#45): replies show in the portal and go by mail.
   const [toRequester, setToRequester] = useState(false);
   if (error) return <RecordNotFound refId={ref ?? ''} error={error} onOpened={reload} />;
   if (!r) return null;
   const path = `/api/requests/${r.ref}`;
   const editable = canEdit(user);
-  const run = async (fn: () => Promise<Detail>) => {
-    setActionError(null);
-    try {
-      setData(await fn());
-      return true;
-    } catch (err) {
-      setActionError((err as Error).message);
-      return false;
-    }
-  };
   const decide = async (decision: 'approve' | 'reject') => {
     const comment = decision === 'reject'
       ? await askReason(`Reject ${r.ref}`, 'Say why, so the requester knows what to do instead.', { confirmLabel: 'Reject', danger: true })

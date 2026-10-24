@@ -16,11 +16,11 @@ import { RecordNotFound, VisibilityPanel } from '../components/Visibility';
 import { DevLinksPanel } from '../components/DevLinks';
 import { SummaryButton } from '../components/Ai';
 import { AttachmentsPanel } from '../components/Attachments';
-import { FormModal, Modal } from '../components/Modal';
+import { FormModal } from '../components/Modal';
 import { CLOSURE_LABEL, DECISION_LABEL, EFFECTIVENESS_LABEL, formatDate, formatDay, LEVEL_LABEL, LINK_LABEL, PRIORITY_LABEL, relativeTime, RISK_LABEL } from '../format';
+import { useApi, useRecord } from '../hooks';
 import { useLive } from '../live';
 import { Presence } from '../components/Presence';
-import { useApi } from '../hooks';
 import { canEdit, isManager, useSession } from '../session';
 import { ActivityLine, HistoryPanel } from '../components/History';
 import { NEXT_STATUS, PROBLEM_STATUS, STATUS_PHASE, TRANSITION_LABEL } from '../statuses';
@@ -31,10 +31,9 @@ export function ProblemPage() {
   const navigate = useNavigate();
   const { ref } = useParams();
   const { user, meta } = useSession();
-  const { data: p, setData, error, reload, refresh } = useApi<ProblemDetail>(`/api/problems/${ref}`);
+  const { data: p, setData, error, reload, refresh, actionError, setActionError, run } = useRecord<ProblemDetail>(`/api/problems/${ref}`);
   const others = useLive([p && `problem:${p.id}`], refresh, { presence: true });
   const [transition, setTransition] = useState<Status | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
 
   if (error) return <RecordNotFound refId={ref ?? ''} error={error} onOpened={reload} />;
   if (!p) return null;
@@ -55,11 +54,7 @@ export function ProblemPage() {
   };
 
   const confirmFields = async (fields: string[]) => {
-    try {
-      setData(await api.post<ProblemDetail>(`/api/problems/${p.ref}/confirm`, { fields }));
-    } catch (err) {
-      setActionError((err as Error).message);
-    }
+    await run(() => api.post<ProblemDetail>(`/api/problems/${p.ref}/confirm`, { fields }));
   };
 
   const allowed = [...meta.transitions[p.status]].sort((a, b) => Number(b === NEXT_STATUS[p.status]) - Number(a === NEXT_STATUS[p.status])).filter((to) => {
@@ -460,65 +455,51 @@ function AssessmentModal({ problem: p, onClose, onDone }: { problem: ProblemDeta
     ec_review_date: p.ec_review_date ?? '',
     workaround_effectiveness: p.workaround_effectiveness ?? '',
   });
-  const [error, setError] = useState<string | null>(null);
   const set = (k: keyof typeof form) => (e: { target: { value: string } }) => setForm({ ...form, [k]: e.target.value });
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    try {
-      onDone(await api.put<ProblemDetail>(`/api/problems/${p.ref}/assessment`, {
-        ...form,
-        ec_risk_level: form.ec_risk_level ? Number(form.ec_risk_level) : null,
-        ec_decision: form.ec_decision || null,
-        ec_review_date: form.ec_review_date || null,
-        workaround_effectiveness: form.workaround_effectiveness || null,
-      }));
-    } catch (err) {
-      setError((err as Error).message);
-    }
+  const submit = async () => {
+    onDone(await api.put<ProblemDetail>(`/api/problems/${p.ref}/assessment`, {
+      ...form,
+      ec_risk_level: form.ec_risk_level ? Number(form.ec_risk_level) : null,
+      ec_decision: form.ec_decision || null,
+      ec_review_date: form.ec_review_date || null,
+      workaround_effectiveness: form.workaround_effectiveness || null,
+    }));
   };
   const managerOnly = (d: string) => (d === 'accept' || d === 'defer') && !isManager(user);
   return (
-    <Modal title={`Error control – ${p.ref}`} onClose={onClose}>
-      <form className="form" onSubmit={submit}>
-        <p className="hint full">Weigh the risk of living with this known error against the cost of a permanent fix. Accepting or deferring the risk is a decision for a manager.</p>
-        <label>Risk of not fixing
-          <select value={form.ec_risk_level} onChange={set('ec_risk_level')}>
-            <option value="">Not assessed</option>
-            {[1, 2, 3].map((l) => <option key={l} value={l}>{RISK_LABEL[l]}</option>)}
-          </select>
-        </label>
-        <label>Workaround
-          <select value={form.workaround_effectiveness} onChange={set('workaround_effectiveness')}>
-            <option value="">Not reviewed</option>
-            {meta.workaround_effectiveness.map((w) => <option key={w} value={w}>{EFFECTIVENESS_LABEL[w]}</option>)}
-          </select>
-        </label>
-        <label className="full">Risk and impact if it recurs
-          <textarea rows={3} value={form.ec_risk} onChange={set('ec_risk')} placeholder="How often, how many users, cost of applying the workaround each time" />
-        </label>
-        <label className="full">Cost of a permanent fix
-          <textarea rows={3} value={form.ec_fix_cost} onChange={set('ec_fix_cost')} placeholder="Effort, vendor dependency, change risk" />
-        </label>
-        <label>Decision
-          <select value={form.ec_decision} onChange={set('ec_decision')}>
-            <option value="">–</option>
-            {meta.ec_decisions.map((d) => <option key={d} value={d} disabled={managerOnly(d)}>{DECISION_LABEL[d]}{managerOnly(d) ? ' (managers)' : ''}</option>)}
-          </select>
-        </label>
-        <label>Review date
-          <input type="date" value={form.ec_review_date} onChange={set('ec_review_date')} />
-        </label>
-        <label className="full">Rationale
-          <textarea rows={3} value={form.ec_decision_note} onChange={set('ec_decision_note')} />
-        </label>
-        {error && <div className="error full">{error}</div>}
-        <div className="actions full">
-          <button type="button" className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn primary">Save assessment</button>
-        </div>
-      </form>
-    </Modal>
+    <FormModal title={`Error control – ${p.ref}`} submitLabel="Save assessment" onClose={onClose} onSubmit={submit}>
+      <p className="hint full">Weigh the risk of living with this known error against the cost of a permanent fix. Accepting or deferring the risk is a decision for a manager.</p>
+      <label>Risk of not fixing
+        <select value={form.ec_risk_level} onChange={set('ec_risk_level')}>
+          <option value="">Not assessed</option>
+          {[1, 2, 3].map((l) => <option key={l} value={l}>{RISK_LABEL[l]}</option>)}
+        </select>
+      </label>
+      <label>Workaround
+        <select value={form.workaround_effectiveness} onChange={set('workaround_effectiveness')}>
+          <option value="">Not reviewed</option>
+          {meta.workaround_effectiveness.map((w) => <option key={w} value={w}>{EFFECTIVENESS_LABEL[w]}</option>)}
+        </select>
+      </label>
+      <label className="full">Risk and impact if it recurs
+        <textarea rows={3} value={form.ec_risk} onChange={set('ec_risk')} placeholder="How often, how many users, cost of applying the workaround each time" />
+      </label>
+      <label className="full">Cost of a permanent fix
+        <textarea rows={3} value={form.ec_fix_cost} onChange={set('ec_fix_cost')} placeholder="Effort, vendor dependency, change risk" />
+      </label>
+      <label>Decision
+        <select value={form.ec_decision} onChange={set('ec_decision')}>
+          <option value="">–</option>
+          {meta.ec_decisions.map((d) => <option key={d} value={d} disabled={managerOnly(d)}>{DECISION_LABEL[d]}{managerOnly(d) ? ' (managers)' : ''}</option>)}
+        </select>
+      </label>
+      <label>Review date
+        <input type="date" value={form.ec_review_date} onChange={set('ec_review_date')} />
+      </label>
+      <label className="full">Rationale
+        <textarea rows={3} value={form.ec_decision_note} onChange={set('ec_decision_note')} />
+      </label>
+    </FormModal>
   );
 }
 

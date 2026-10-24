@@ -6,20 +6,7 @@ import { useApi } from '../hooks';
 import { focusPractice } from '../nav';
 import { canEdit, useSession } from '../session';
 import { Modal } from './Modal';
-
-export interface KpiTile {
-  id: string;
-  label: string;
-  value: number | null;
-  unit: 'minutes' | 'percent' | 'count';
-  trend: (number | null)[];
-  trend_label: string;
-  lower_is_better: boolean;
-  detail: string;
-  basis: string;
-  link: string;
-}
-interface Kpis { period: { unit: 'month' | 'week'; starts: string[] }; tiles: KpiTile[]; restricted_records_left_out: boolean }
+import type { KpiTile, KpiSummary } from '../api/types/reports';
 
 const dur = (m: number) => (m < 60 ? `${m} min` : m < 1440 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${Math.floor(m / 1440)} d ${Math.floor((m % 1440) / 60)} h`);
 export const formatKpi = (v: number | null, unit: KpiTile['unit']) => (v === null ? '–' : unit === 'minutes' ? dur(v) : unit === 'percent' ? `${v} %` : String(v));
@@ -58,7 +45,7 @@ export function KpiSection() {
   const { user, setPreferences } = useSession();
   const [unit, setUnit] = useState<'month' | 'week'>('month');
   const [editing, setEditing] = useState(false);
-  const { data, error } = useApi<Kpis>(`/api/dashboard/kpis?period=${unit}`);
+  const { data, error } = useApi<KpiSummary>(`/api/dashboard/kpis?period=${unit}`);
   if (error) return <div className="error">{error}</div>;
   if (!data) return null;
   const chosen = user.preferences.dashboard_tiles;

@@ -1,10 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { api } from '../api';
-
-export interface AffectedCi { ref: string; name: string; type: 'ci' | 'service'; type_label: string; status: string; criticality: number }
-export interface AffectedService { ref: string; name: string; criticality: number; via: string[] }
-export interface ImpactHint { suggested_impact: number; reason: string; incomplete: boolean }
+import type { AffectedCi, AffectedService, ImpactHint } from '../api/types/cmdb';
 
 const CRIT = ['', 'Business critical', 'High', 'Medium', 'Low'];
 
@@ -17,7 +14,7 @@ export function AffectedCisPanel<T extends WithAffected>({ record: p, basePath, 
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     if (q.trim().length < 2) return setHits([]);
-    const t = setTimeout(() => api.get<any[]>(`/api/cis?${new URLSearchParams({ q, limit: '6' })}`).then(setHits, () => setHits([])), 200);
+    const t = setTimeout(() => api.get<{ ref: string; name: string; type_label: string }[]>(`/api/cis?${new URLSearchParams({ q, limit: '6' })}`).then(setHits, () => setHits([])), 200);
     return () => clearTimeout(t);
   }, [q]);
   const run = async (fn: () => Promise<T>) => {

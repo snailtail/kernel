@@ -1,32 +1,19 @@
-import { useState, type FormEvent } from 'react';
+import { useState } from 'react';
 import { RequestCatalogueCard } from '../components/RequestCatalogue';
 import { SsoAdminSection } from '../components/SsoAdmin';
 import { AiAdminSection } from '../components/Ai';
 import { DevSourcesSection } from '../components/DevLinks';
 import { api, type Role } from '../api';
-import type { BackupStatus } from '../api/types/admin';
 import { StatusPageAdmin } from '../components/StatusPageAdmin';
 import { formatDate, relativeTime, ROLE_LABEL } from '../format';
 import { useApi } from '../hooks';
 import { isManager, useSession } from '../session';
-import { Modal } from '../components/Modal';
+import { FormModal, Modal } from '../components/Modal';
 import { askReason } from '../components/Ask';
 import { ConnectorsCard } from '../components/Connectors';
 import { Link } from 'react-router';
 import { StartPageSelects, type StartChoice } from '../components/StartPage';
-
-interface AdminUser {
-  mfa_enabled: boolean;
-  id: number;
-  username: string;
-  display_name: string;
-  email: string;
-  role: Role;
-  active: boolean;
-  ci_source_systems: string[];
-  change_templates: number[];
-  created_at: string;
-}
+import type { AdminUser, BackupStatus, Delivery, ExternalSystem, RecordTemplate, TemplateFields, Webhook, WebhookList } from '../api/types/admin';
 
 export function AdminPage() {
   const { user, meta } = useSession();
@@ -112,91 +99,79 @@ function UserModal({ user, self, roles, onClose, onDone }: { user: AdminUser | n
   });
   const [error, setError] = useState<string | null>(null);
 
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    setError(null);
+  const submit = async () => {
     const ci_source_systems = form.role === 'integration' ? form.sources.split(',').map((s) => s.trim()).filter(Boolean) : user?.ci_source_systems ?? [];
     const change_templates = form.role === 'integration' ? form.templates.split(/[\s,]+/).filter(Boolean).map(Number).filter((n) => Number.isInteger(n)) : user?.change_templates ?? [];
-    try {
-      if (user) {
-        const { username: _, password, sources: __, templates: ___, ...rest } = form;
-        const fields = { ...rest, ci_source_systems, change_templates };
-        const sourcesChanged = JSON.stringify(ci_source_systems) !== JSON.stringify(user.ci_source_systems) || JSON.stringify(change_templates) !== JSON.stringify(user.change_templates);
-        const sensitive = !self && (password || sourcesChanged || fields.role !== user.role || fields.active !== user.active);
-        const reason = sensitive ? await askReason(`Change ${user.username}`, "Changing someone's role, status, password, CI sources or change templates needs a reason.", { confirmLabel: 'Save change' }) : undefined;
-        if (sensitive && !reason) return;
-        await api.patch(`/api/users/${user.id}`, { ...(password ? { ...fields, password } : fields), reason });
-      } else {
-        const { sources: _, templates: __, ...rest } = form;
-        await api.post('/api/users', { ...rest, ci_source_systems, change_templates });
-      }
-      onDone();
-    } catch (err) {
-      setError((err as Error).message);
+    if (user) {
+      const { username: _, password, sources: __, templates: ___, ...rest } = form;
+      const fields = { ...rest, ci_source_systems, change_templates };
+      const sourcesChanged = JSON.stringify(ci_source_systems) !== JSON.stringify(user.ci_source_systems) || JSON.stringify(change_templates) !== JSON.stringify(user.change_templates);
+      const sensitive = !self && (password || sourcesChanged || fields.role !== user.role || fields.active !== user.active);
+      const reason = sensitive ? await askReason(`Change ${user.username}`, "Changing someone's role, status, password, CI sources or change templates needs a reason.", { confirmLabel: 'Save change' }) : undefined;
+      if (sensitive && !reason) return;
+      await api.patch(`/api/users/${user.id}`, { ...(password ? { ...fields, password } : fields), reason });
+    } else {
+      const { sources: _, templates: __, ...rest } = form;
+      await api.post('/api/users', { ...rest, ci_source_systems, change_templates });
     }
+    onDone();
   };
 
   return (
-    <Modal title={user ? `Edit ${user.username}` : 'Add user'} onClose={onClose}>
-      <form className="form" onSubmit={submit}>
-        <label>Username<input required disabled={!!user} value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} /></label>
-        <label>Display name<input required value={form.display_name} onChange={(e) => setForm({ ...form, display_name: e.target.value })} /></label>
-        <label>Email<input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></label>
-        <label>Role
-          <select value={form.role} disabled={self} onChange={(e) => setForm({ ...form, role: e.target.value as Role })}>
-            {roles.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
-          </select>
+    <FormModal title={user ? `Edit ${user.username}` : 'Add user'} submitLabel="Save" onClose={onClose} onSubmit={submit}>
+      <label>Username<input required disabled={!!user} value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} /></label>
+      <label>Display name<input required value={form.display_name} onChange={(e) => setForm({ ...form, display_name: e.target.value })} /></label>
+      <label>Email<input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></label>
+      <label>Role
+        <select value={form.role} disabled={self} onChange={(e) => setForm({ ...form, role: e.target.value as Role })}>
+          {roles.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
+        </select>
+      </label>
+      {form.role === 'integration' && (
+        <label className="full">CI source systems
+          <input placeholder="vCenter, Azure" value={form.sources} onChange={(e) => setForm({ ...form, sources: e.target.value })} />
+          <span className="muted small">The source systems this account may report CIs for, exactly as it names them. Empty means none.</span>
         </label>
-        {form.role === 'integration' && (
-          <label className="full">CI source systems
-            <input placeholder="vCenter, Azure" value={form.sources} onChange={(e) => setForm({ ...form, sources: e.target.value })} />
-            <span className="muted small">The source systems this account may report CIs for, exactly as it names them. Empty means none.</span>
-          </label>
-        )}
-        {form.role === 'integration' && (
-          <label className="full">Standard change templates
-            <input placeholder="Template ids, e.g. 3, 7" value={form.templates} onChange={(e) => setForm({ ...form, templates: e.target.value })} />
-            <span className="muted small">Pre-approved templates this pipeline account may register changes from (ids under Changes → Standard changes). Empty means none.</span>
-          </label>
-        )}
-        <label className="full">{user ? 'New password (leave empty to keep)' : 'Password'}
-          <input type="password" autoComplete="new-password" required={!user} minLength={12} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+      )}
+      {form.role === 'integration' && (
+        <label className="full">Standard change templates
+          <input placeholder="Template ids, e.g. 3, 7" value={form.templates} onChange={(e) => setForm({ ...form, templates: e.target.value })} />
+          <span className="muted small">Pre-approved templates this pipeline account may register changes from (ids under Changes → Standard changes). Empty means none.</span>
         </label>
-        {user && !self && (
-          <label className="check full"><input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Active</label>
-        )}
-        {user && !self && (
-          <div className="full danger-zone">
-            <button type="button" className="btn danger small" onClick={async () => {
-              const kept = await api.get<{ audit_context_days: number; security_event_days: number }>('/api/admin/privacy').catch(() => null);
-              const retention = kept ? ` IP addresses and browsers in security events and the audit trail are kept for security (legitimate interest) until their retention ends: ${kept.security_event_days} and ${kept.audit_context_days} days.` : '';
-              const reason = await askReason(`Erase ${user.username}`, `The account is anonymised and signed out everywhere; records keep a reference to "deleted user".${retention} Audit entries from before personal data was kept out of the trail may still name the user until they are re-based (see the security status).`, { danger: true, confirmLabel: 'Erase user' });
-              if (!reason) return;
-              try {
-                await api.post(`/api/users/${user.id}/erase`, { reason });
-                onDone();
-              } catch (err) {
-                setError((err as Error).message);
-              }
-            }}>Erase user (GDPR)</button>
-          </div>
-        )}
-        {user && user.mfa_enabled && (
-          <div className="full">
-            <button type="button" className="btn-link danger" onClick={async () => {
-              const reason = await askReason(`Reset two-factor authentication`, `${user.username} will have to set up two-factor authentication again.`, { confirmLabel: 'Reset', danger: true });
-              if (!reason) return;
-              try { await api.post(`/api/users/${user.id}/mfa/reset`, { reason }); onDone(); } catch (err) { setError((err as Error).message); }
-            }}>Reset two-factor authentication</button>
-          </div>
-        )}
-        {error && <div className="error full">{error}</div>}
-        <div className="actions full">
-          <button type="button" className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn primary">Save</button>
+      )}
+      <label className="full">{user ? 'New password (leave empty to keep)' : 'Password'}
+        <input type="password" autoComplete="new-password" required={!user} minLength={12} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+      </label>
+      {user && !self && (
+        <label className="check full"><input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Active</label>
+      )}
+      {user && !self && (
+        <div className="full danger-zone">
+          <button type="button" className="btn danger small" onClick={async () => {
+            const kept = await api.get<{ audit_context_days: number; security_event_days: number }>('/api/admin/privacy').catch(() => null);
+            const retention = kept ? ` IP addresses and browsers in security events and the audit trail are kept for security (legitimate interest) until their retention ends: ${kept.security_event_days} and ${kept.audit_context_days} days.` : '';
+            const reason = await askReason(`Erase ${user.username}`, `The account is anonymised and signed out everywhere; records keep a reference to "deleted user".${retention} Audit entries from before personal data was kept out of the trail may still name the user until they are re-based (see the security status).`, { danger: true, confirmLabel: 'Erase user' });
+            if (!reason) return;
+            try {
+              await api.post(`/api/users/${user.id}/erase`, { reason });
+              onDone();
+            } catch (err) {
+              setError((err as Error).message);
+            }
+          }}>Erase user (GDPR)</button>
         </div>
-      </form>
-    </Modal>
+      )}
+      {user && user.mfa_enabled && (
+        <div className="full">
+          <button type="button" className="btn-link danger" onClick={async () => {
+            const reason = await askReason(`Reset two-factor authentication`, `${user.username} will have to set up two-factor authentication again.`, { confirmLabel: 'Reset', danger: true });
+            if (!reason) return;
+            try { await api.post(`/api/users/${user.id}/mfa/reset`, { reason }); onDone(); } catch (err) { setError((err as Error).message); }
+          }}>Reset two-factor authentication</button>
+        </div>
+      )}
+      {error && <div className="error full">{error}</div>}
+    </FormModal>
   );
 }
 
@@ -280,8 +255,6 @@ function BackupsCard() {
   );
 }
 
-interface ExternalSystem { id: number; name: string; url_templates: Record<string, string>; active: boolean }
-
 function SystemsCard() {
   const { meta } = useSession();
   const { data, reload } = useApi<ExternalSystem[]>('/api/systems');
@@ -316,42 +289,26 @@ function SystemsCard() {
 function SystemModal({ system, onClose, onDone }: { system: ExternalSystem | null; onClose: () => void; onDone: () => void }) {
   const { meta } = useSession();
   const [form, setForm] = useState({ name: system?.name ?? '', url_templates: { ...(system?.url_templates ?? {}) }, active: system?.active ?? true });
-  const [error, setError] = useState<string | null>(null);
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    try {
-      if (system) await api.put(`/api/systems/${system.id}`, form);
-      else await api.post('/api/systems', form);
-      onDone();
-    } catch (err) {
-      setError((err as Error).message);
-    }
+  const submit = async () => {
+    if (system) await api.put(`/api/systems/${system.id}`, form);
+    else await api.post('/api/systems', form);
+    onDone();
   };
   return (
-    <Modal title={system ? `Edit ${system.name}` : 'Add external system'} onClose={onClose}>
-      <form className="form" onSubmit={submit}>
-        <label className="full">Name<input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="ServiceNow, Jira, Zabbix…" /></label>
-        {meta.link_kinds.map((k) => (
-          <label key={k} className="full">URL template for {k}s
-            <input value={form.url_templates[k] ?? ''} placeholder="https://…{ref}" onChange={(e) => setForm({ ...form, url_templates: { ...form.url_templates, [k]: e.target.value } })} />
-          </label>
-        ))}
-        <label className="check full"><input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Active</label>
-        {error && <div className="error full">{error}</div>}
-        <div className="actions full">
-          <button type="button" className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn primary">Save</button>
-        </div>
-      </form>
-    </Modal>
+    <FormModal title={system ? `Edit ${system.name}` : 'Add external system'} submitLabel="Save" onClose={onClose} onSubmit={submit}>
+      <label className="full">Name<input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="ServiceNow, Jira, Zabbix…" /></label>
+      {meta.link_kinds.map((k) => (
+        <label key={k} className="full">URL template for {k}s
+          <input value={form.url_templates[k] ?? ''} placeholder="https://…{ref}" onChange={(e) => setForm({ ...form, url_templates: { ...form.url_templates, [k]: e.target.value } })} />
+        </label>
+      ))}
+      <label className="check full"><input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Active</label>
+    </FormModal>
   );
 }
 
-interface Webhook { id: number; name: string; url: string; format: string; events: string[]; services: string[]; active: boolean; failed: number; last_delivered_at: string | null; secret_set_at: string; secret?: string }
-interface Delivery { id: number; event: string; status: string; attempts: number; response_status: number | null; last_error: string | null; created_at: string; summary: string | null; ref: string | null }
-
 function WebhooksCard() {
-  const { data, reload } = useApi<{ webhooks: Webhook[]; events: string[]; formats: string[] }>('/api/webhooks');
+  const { data, reload } = useApi<WebhookList>('/api/webhooks');
   const [editing, setEditing] = useState<Webhook | 'new' | null>(null);
   const [log, setLog] = useState<Webhook | null>(null);
   const [secret, setSecret] = useState<{ name: string; secret: string } | null>(null);
@@ -426,14 +383,8 @@ function WebhooksCard() {
 function WebhookModal({ hook, events, formats, onClose, onDone }: { hook: Webhook | null; events: string[]; formats: string[]; onClose: () => void; onDone: (w?: Webhook) => void }) {
   const [form, setForm] = useState({ name: hook?.name ?? '', url: hook?.url ?? '', format: hook?.format ?? 'json', events: hook?.events ?? [], services: hook?.services ?? [], active: hook?.active ?? true });
   const { data: services } = useApi<{ ref: string; name: string }[]>('/api/cis?class=service&limit=200');
-  const [error, setError] = useState<string | null>(null);
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    try {
-      onDone(hook ? await api.put<Webhook>(`/api/webhooks/${hook.id}`, form) : await api.post<Webhook>('/api/webhooks', form));
-    } catch (err) {
-      setError((err as Error).message);
-    }
+  const submit = async () => {
+    onDone(hook ? await api.put<Webhook>(`/api/webhooks/${hook.id}`, form) : await api.post<Webhook>('/api/webhooks', form));
   };
   const remove = async () => {
     const reason = hook ? await askReason(`Delete ${hook.name}`, 'The webhook and its delivery log are deleted.', { confirmLabel: 'Delete webhook', danger: true }) : null;
@@ -444,38 +395,31 @@ function WebhookModal({ hook, events, formats, onClose, onDone }: { hook: Webhoo
   };
   const toggle = (ev: string) => setForm({ ...form, events: form.events.includes(ev) ? form.events.filter((x) => x !== ev) : [...form.events, ev] });
   return (
-    <Modal title={hook ? `Edit ${hook.name}` : 'Add webhook'} onClose={onClose}>
-      <form className="form" onSubmit={submit}>
-        <label>Name<input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Team chat" /></label>
-        <label>Format
-          <select value={form.format} onChange={(e) => setForm({ ...form, format: e.target.value })}>
-            {formats.map((f) => <option key={f} value={f}>{({ json: 'Generic JSON', slack: 'Slack', teams_workflow: 'Microsoft Teams (Workflows)', teams: 'Microsoft Teams (legacy connector)' } as Record<string, string>)[f] ?? f}</option>)}
-          </select>
-        </label>
-        <label className="full">URL<input required type="url" value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} placeholder="https://hooks.slack.com/services/…" /></label>
+    <FormModal title={hook ? `Edit ${hook.name}` : 'Add webhook'} submitLabel="Save" onClose={onClose} onSubmit={submit}
+      actions={hook && <button type="button" className="btn-link danger spacer-right" onClick={remove}>Delete</button>}>
+      <label>Name<input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Team chat" /></label>
+      <label>Format
+        <select value={form.format} onChange={(e) => setForm({ ...form, format: e.target.value })}>
+          {formats.map((f) => <option key={f} value={f}>{({ json: 'Generic JSON', slack: 'Slack', teams_workflow: 'Microsoft Teams (Workflows)', teams: 'Microsoft Teams (legacy connector)' } as Record<string, string>)[f] ?? f}</option>)}
+        </select>
+      </label>
+      <label className="full">URL<input required type="url" value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} placeholder="https://hooks.slack.com/services/…" /></label>
+      <fieldset className="full event-picker">
+        <legend>Events <span className="muted small">(none selected = all problem events)</span></legend>
+        {events.map((ev) => (
+          <label key={ev} className="check"><input type="checkbox" checked={form.events.includes(ev)} onChange={() => toggle(ev)} /> {ev}</label>
+        ))}
+      </fieldset>
+      {form.events.includes('status.published') && (
         <fieldset className="full event-picker">
-          <legend>Events <span className="muted small">(none selected = all problem events)</span></legend>
-          {events.map((ev) => (
-            <label key={ev} className="check"><input type="checkbox" checked={form.events.includes(ev)} onChange={() => toggle(ev)} /> {ev}</label>
+          <legend>Status updates for <span className="muted small">(none selected = every public service; only published text under public names is sent)</span></legend>
+          {(services ?? []).map((sv) => (
+            <label key={sv.ref} className="check"><input type="checkbox" checked={form.services.includes(sv.ref)} onChange={() => setForm({ ...form, services: form.services.includes(sv.ref) ? form.services.filter((x) => x !== sv.ref) : [...form.services, sv.ref] })} /> {sv.name}</label>
           ))}
         </fieldset>
-        {form.events.includes('status.published') && (
-          <fieldset className="full event-picker">
-            <legend>Status updates for <span className="muted small">(none selected = every public service; only published text under public names is sent)</span></legend>
-            {(services ?? []).map((sv) => (
-              <label key={sv.ref} className="check"><input type="checkbox" checked={form.services.includes(sv.ref)} onChange={() => setForm({ ...form, services: form.services.includes(sv.ref) ? form.services.filter((x) => x !== sv.ref) : [...form.services, sv.ref] })} /> {sv.name}</label>
-            ))}
-          </fieldset>
-        )}
-        <label className="check full"><input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Active</label>
-        {error && <div className="error full">{error}</div>}
-        <div className="actions full">
-          {hook && <button type="button" className="btn-link danger spacer-right" onClick={remove}>Delete</button>}
-          <button type="button" className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn primary">Save</button>
-        </div>
-      </form>
-    </Modal>
+      )}
+      <label className="check full"><input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Active</label>
+    </FormModal>
   );
 }
 
@@ -717,17 +661,14 @@ function StartPagesCard() {
   );
 }
 
-interface Template { id: number; kind: 'incident' | 'problem'; name: string; fields: Record<string, any>; active: boolean }
-
 /** Templates that prefill new incidents and problems for common issues. */
 function TemplatesCard() {
   const { meta } = useSession();
-  const { data, reload } = useApi<Template[]>('/api/templates');
-  const [editing, setEditing] = useState<Partial<Template> | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { data, reload } = useApi<RecordTemplate[]>('/api/templates');
+  const [editing, setEditing] = useState<Partial<RecordTemplate> | null>(null);
   const kinds = (['problem', ...(meta.modules?.incident !== false ? ['incident'] : [])] as const);
   const f = editing?.fields ?? {};
-  const setF = (patch: Record<string, unknown>) => setEditing({ ...editing, fields: { ...f, ...patch } });
+  const setF = (patch: Partial<TemplateFields>) => setEditing({ ...editing, fields: { ...f, ...patch } });
   return (
     <section className="card">
       <div className="section-head"><h2>Templates</h2><button className="btn-link" onClick={() => setEditing({ kind: 'problem', name: '', fields: {}, active: true })}>+ Template</button></div>
@@ -737,32 +678,23 @@ function TemplatesCard() {
         {data?.map((t) => <li key={t.id}><button className="btn-link" onClick={() => setEditing(t)}>{t.name}</button> <span className="tag">{t.kind}</span>{!t.active && <span className="muted small"> inactive</span>}</li>)}
       </ul>
       {editing && (
-        <Modal title={editing.id ? `Edit ${editing.name}` : 'New template'} onClose={() => setEditing(null)}>
-          <form className="form" onSubmit={async (e) => {
-            e.preventDefault();
-            const body = { kind: editing.kind, name: editing.name, fields: Object.fromEntries(Object.entries(f).filter(([, v]) => v !== '' && v !== undefined)), active: editing.active ?? true };
-            try {
-              if (editing.id) await api.put(`/api/templates/${editing.id}`, body);
-              else await api.post('/api/templates', body);
-              setEditing(null);
-              reload();
-            } catch (err) {
-              setError((err as Error).message);
-            }
-          }}>
-            <label>For<select value={editing.kind} onChange={(e) => setEditing({ ...editing, kind: e.target.value as 'problem' })}>{kinds.map((k) => <option key={k} value={k}>{k}</option>)}</select></label>
-            <label>Name<input required value={editing.name ?? ''} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></label>
-            <label className="full">Title<input value={f.title ?? ''} onChange={(e) => setF({ title: e.target.value })} /></label>
-            <label className="full">Description<textarea rows={3} value={f.description ?? ''} onChange={(e) => setF({ description: e.target.value })} /></label>
-            <label>Impact<select value={f.impact ?? ''} onChange={(e) => setF({ impact: e.target.value ? Number(e.target.value) : undefined })}><option value="">–</option>{[1, 2, 3].map((n) => <option key={n}>{n}</option>)}</select></label>
-            <label>Urgency<select value={f.urgency ?? ''} onChange={(e) => setF({ urgency: e.target.value ? Number(e.target.value) : undefined })}><option value="">–</option>{[1, 2, 3].map((n) => <option key={n}>{n}</option>)}</select></label>
-            <label>Category<select value={f.category_id ?? ''} onChange={(e) => setF({ category_id: e.target.value ? Number(e.target.value) : undefined })}><option value="">–</option>{meta.categories.filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
-            {editing.kind === 'incident' && <label>Assignment group<input value={f.assignment_group ?? ''} onChange={(e) => setF({ assignment_group: e.target.value })} /></label>}
-            <label className="check full"><input type="checkbox" checked={editing.active ?? true} onChange={(e) => setEditing({ ...editing, active: e.target.checked })} /> Active</label>
-            {error && <div className="error full">{error}</div>}
-            <div className="actions full"><button type="button" className="btn" onClick={() => setEditing(null)}>Cancel</button><button className="btn primary">Save</button></div>
-          </form>
-        </Modal>
+        <FormModal title={editing.id ? `Edit ${editing.name}` : 'New template'} submitLabel="Save" onClose={() => setEditing(null)} onSubmit={async () => {
+          const body = { kind: editing.kind, name: editing.name, fields: Object.fromEntries(Object.entries(f).filter(([, v]) => v !== '' && v !== undefined)), active: editing.active ?? true };
+          if (editing.id) await api.put(`/api/templates/${editing.id}`, body);
+          else await api.post('/api/templates', body);
+          setEditing(null);
+          reload();
+        }}>
+          <label>For<select value={editing.kind} onChange={(e) => setEditing({ ...editing, kind: e.target.value as 'problem' })}>{kinds.map((k) => <option key={k} value={k}>{k}</option>)}</select></label>
+          <label>Name<input required value={editing.name ?? ''} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></label>
+          <label className="full">Title<input value={f.title ?? ''} onChange={(e) => setF({ title: e.target.value })} /></label>
+          <label className="full">Description<textarea rows={3} value={f.description ?? ''} onChange={(e) => setF({ description: e.target.value })} /></label>
+          <label>Impact<select value={f.impact ?? ''} onChange={(e) => setF({ impact: e.target.value ? Number(e.target.value) : undefined })}><option value="">–</option>{[1, 2, 3].map((n) => <option key={n}>{n}</option>)}</select></label>
+          <label>Urgency<select value={f.urgency ?? ''} onChange={(e) => setF({ urgency: e.target.value ? Number(e.target.value) : undefined })}><option value="">–</option>{[1, 2, 3].map((n) => <option key={n}>{n}</option>)}</select></label>
+          <label>Category<select value={f.category_id ?? ''} onChange={(e) => setF({ category_id: e.target.value ? Number(e.target.value) : undefined })}><option value="">–</option>{meta.categories.filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
+          {editing.kind === 'incident' && <label>Assignment group<input value={f.assignment_group ?? ''} onChange={(e) => setF({ assignment_group: e.target.value })} /></label>}
+          <label className="check full"><input type="checkbox" checked={editing.active ?? true} onChange={(e) => setEditing({ ...editing, active: e.target.checked })} /> Active</label>
+        </FormModal>
       )}
     </section>
   );

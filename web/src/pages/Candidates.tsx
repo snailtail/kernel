@@ -1,27 +1,11 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { api, type ProblemDetail } from '../api';
-import { FormModal, Modal } from '../components/Modal';
+import { FormModal } from '../components/Modal';
 import { formatDate, LEVEL_LABEL, relativeTime } from '../format';
 import { useApi } from '../hooks';
 import { canEdit, isManager, useSession } from '../session';
-
-type RuleId = 'recurring_records' | 'common_upstream' | 'major_without_problem' | 'recurring_resolution' | 'reported'
-  | 'flapping' | 'rising_warnings' | 'capacity_warnings' | 'self_clearing' | 'change_correlation'
-  | 'repeatedly_missing' | 'eol_versions' | 'single_point_of_failure';
-interface EvidenceRecord {
-  key: string; kind: 'incident' | 'event' | 'external' | 'change' | 'ci' | 'sync'; id: number | null; incident_ref: string | null; alert_id: number | null; change_ref?: string | null; system: string; reference: string;
-  summary: string; category: string; occurred_at: string | null; ci_ref: string | null; resolution_code?: string | null; url?: string | null; note?: string | null;
-}
-interface Series { label: string; unit: string; points: { day: string; value: number }[]; split?: string }
-interface Candidate {
-  key: string; rule: RuleId; rule_label: string; proactive: boolean; reason: string; subject: { type: string; ref: string | null; name: string };
-  service: string; ci_ref: string | null; source?: string; contains_personal_data?: boolean; count: number; incidents: number; events: number; first_at: string | null; last_at: string | null;
-  evidence: { records: EvidenceRecord[]; total_records: number; series?: Series[]; cis: { ref: string; name: string; role: 'subject' | 'upstream' | 'affected'; depth?: number }[]; notes?: string };
-  decision?: { decision: 'dismissed' | 'snoozed'; until: string | null; reason: string; by: string | null; at: string };
-}
-interface Rule { rule: RuleId; label: string; description: string; enabled: boolean; settings: Record<string, number>; count: number; error?: string }
-interface Candidates { rules: Rule[]; hidden: { dismissed: number; snoozed: number }; candidates: Candidate[] }
+import type { CandidateRuleId, EvidenceRecord, CandidateSeries, Candidate, CandidateRule, CandidateList, EolVersion, CandidateDraft } from '../api/types/candidates';
 
 const SETTING_LABEL: Record<string, string> = {
   min_records: 'At least (records)', min_cis: 'On at least (CIs)', window_days: 'Within (days)', max_depth: 'Dependency steps',
@@ -30,14 +14,14 @@ const SETTING_LABEL: Record<string, string> = {
   max_minutes: 'Cleared within (min)', min_changes: 'At least (changes)', min_percent: 'Bad (%)', within_hours: 'Incident within (hours)',
 };
 /** The rule's description with its current values filled in, for people who cannot change it. */
-const describe = (r: Rule) => r.description.replace(/\b[a-z]+_[a-z_]+\b/g, (k) => (k in r.settings ? String(r.settings[k]) : k));
+const describe = (r: CandidateRule) => r.description.replace(/\b[a-z]+_[a-z_]+\b/g, (k) => (k in r.settings ? String(r.settings[k]) : k));
 
 export function CandidatesPage() {
   const { user } = useSession();
   const [params, setParams] = useSearchParams();
-  const rule = (params.get('rule') ?? '') as RuleId | '';
+  const rule = (params.get('rule') ?? '') as CandidateRuleId | '';
   const show = params.get('show') === 'hidden' ? 'hidden' : 'open';
-  const { data, reload } = useApi<Candidates>(`/api/candidates?${new URLSearchParams({ ...(rule ? { rule } : {}), show })}`);
+  const { data, reload } = useApi<CandidateList>(`/api/candidates?${new URLSearchParams({ ...(rule ? { rule } : {}), show })}`);
   const [creating, setCreating] = useState<Candidate | null>(null);
   const [linking, setLinking] = useState<Candidate | null>(null);
   const [deciding, setDeciding] = useState<Candidate | null>(null);
@@ -202,7 +186,7 @@ function CandidateCard({ c, editable, onCreate, onLink, onDecide, onRestore }: {
  * One value per day as thin bars, oldest first. Where two windows are compared, the earlier one is muted and the
  * current one carries the accent. Each bar has its value on hover; the summary is there for screen readers.
  */
-function DailyBars({ series: s }: { series: Series }) {
+function DailyBars({ series: s }: { series: CandidateSeries }) {
   const max = Math.max(1, ...s.points.map((p) => p.value));
   const splitAt = s.split ? s.points.findIndex((p) => p.day === s.split) : -1;
   const sum = (from: number, to: number) => s.points.slice(from, to).reduce((t, p) => t + p.value, 0);
@@ -231,7 +215,7 @@ function DailyBars({ series: s }: { series: Series }) {
   );
 }
 
-function RulesCard({ rules, editable, onSaved }: { rules: Rule[]; editable: boolean; onSaved: () => void }) {
+function RulesCard({ rules, editable, onSaved }: { rules: CandidateRule[]; editable: boolean; onSaved: () => void }) {
   return (
     <details className="card candidate-rules">
       <summary><h2>How candidates are found</h2></summary>
@@ -242,7 +226,7 @@ function RulesCard({ rules, editable, onSaved }: { rules: Rule[]; editable: bool
   );
 }
 
-function RuleRow({ rule, editable, onSaved }: { rule: Rule; editable: boolean; onSaved: () => void }) {
+function RuleRow({ rule, editable, onSaved }: { rule: CandidateRule; editable: boolean; onSaved: () => void }) {
   const [form, setForm] = useState(rule);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => setForm(rule), [rule]);
@@ -282,13 +266,11 @@ function RuleRow({ rule, editable, onSaved }: { rule: Rule; editable: boolean; o
 const KIND_LABEL: Partial<Record<EvidenceRecord['kind'], string>> = { external: 'finding', ci: 'CI', sync: 'sync' };
 
 /** Trend rules: what has to join before a dismissed candidate comes back. */
-const TREND_JOINS: Partial<Record<RuleId, string>> = { flapping: 'alert', rising_warnings: 'alert', capacity_warnings: 'alert', self_clearing: 'alert', change_correlation: 'change', eol_versions: 'CI on that version' };
-
-interface Eol { id: number; product: string; version: string; eol_date: string; note: string }
+const TREND_JOINS: Partial<Record<CandidateRuleId, string>> = { flapping: 'alert', rising_warnings: 'alert', capacity_warnings: 'alert', self_clearing: 'alert', change_correlation: 'change', eol_versions: 'CI on that version' };
 
 /** The end-of-life table behind the rule: product + version → date, kept by hand (no outside service). */
 function EolTable({ editable, onSaved }: { editable: boolean; onSaved: () => void }) {
-  const { data, reload } = useApi<Eol[]>('/api/candidates/eol');
+  const { data, reload } = useApi<EolVersion[]>('/api/candidates/eol');
   const blank = { product: '', version: '', eol_date: '', note: '' };
   const [form, setForm] = useState(blank);
   const [error, setError] = useState<string | null>(null);
@@ -303,7 +285,7 @@ function EolTable({ editable, onSaved }: { editable: boolean; onSaved: () => voi
       setError((err as Error).message);
     }
   };
-  const remove = async (row: Eol) => {
+  const remove = async (row: EolVersion) => {
     if (!confirm(`Remove ${row.product} ${row.version} from the table?`)) return;
     try {
       await api.del(`/api/candidates/eol/${row.id}`);
@@ -369,58 +351,44 @@ function DecisionModal({ candidate: c, onClose, onDone }: { candidate: Candidate
   );
 }
 
-interface Draft { title: string; description: string; affected_service: string; detection: 'reactive' | 'proactive'; ci_refs: string[]; records: number }
-
 function CreateModal({ candidate: c, onClose }: { candidate: Candidate; onClose: () => void }) {
   const navigate = useNavigate();
   const { meta } = useSession();
-  const { data: draft, error: draftError } = useApi<Draft>(`/api/candidates/draft?${new URLSearchParams({ key: c.key })}`);
+  const { data: draft, error: draftError } = useApi<CandidateDraft>(`/api/candidates/draft?${new URLSearchParams({ key: c.key })}`);
   const [form, setForm] = useState({ title: '', description: '', impact: 2, urgency: 2, category_id: '' });
-  const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     if (draft) setForm((f) => ({ ...f, title: draft.title, description: draft.description }));
   }, [draft]);
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    try {
-      const p = await api.post<ProblemDetail>('/api/candidates/create', {
-        key: c.key,
-        problem: { ...form, category_id: form.category_id ? Number(form.category_id) : null },
-      });
-      navigate(`/problems/${p.ref}`);
-    } catch (err) {
-      setError((err as Error).message);
-    }
+  const submit = async () => {
+    const p = await api.post<ProblemDetail>('/api/candidates/create', {
+      key: c.key,
+      problem: { ...form, category_id: form.category_id ? Number(form.category_id) : null },
+    });
+    navigate(`/problems/${p.ref}`);
   };
   return (
-    <Modal title="Log problem from candidate" onClose={onClose}>
-      <form className="form" onSubmit={submit}>
-        <p className="hint full">
-          {draft
-            ? <>The {draft.records} records{draft.ci_refs.length ? ` and ${draft.ci_refs.length} CI${draft.ci_refs.length === 1 ? '' : 's'}` : ''} are linked to the new problem, logged as {draft.detection === 'reactive' ? 'reactively' : 'proactively'} identified.</>
-            : 'Preparing the problem from the evidence…'}
-        </p>
-        <label className="full">Title<input required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></label>
-        <label className="full">Description<textarea rows={8} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
-        <label>Impact
-          <select value={form.impact} onChange={(e) => setForm({ ...form, impact: Number(e.target.value) })}>{[1, 2, 3].map((l) => <option key={l} value={l}>{l} – {LEVEL_LABEL[l]}</option>)}</select>
-        </label>
-        <label>Urgency
-          <select value={form.urgency} onChange={(e) => setForm({ ...form, urgency: Number(e.target.value) })}>{[1, 2, 3].map((l) => <option key={l} value={l}>{l} – {LEVEL_LABEL[l]}</option>)}</select>
-        </label>
-        <label>Category
-          <select value={form.category_id} onChange={(e) => setForm({ ...form, category_id: e.target.value })}>
-            <option value="">–</option>
-            {meta.categories.filter((x) => x.active).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
-          </select>
-        </label>
-        {(error || draftError) && <div className="error full">{error ?? draftError}</div>}
-        <div className="actions full">
-          <button type="button" className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn primary" disabled={!draft}>Log problem</button>
-        </div>
-      </form>
-    </Modal>
+    <FormModal title="Log problem from candidate" submitLabel="Log problem" canSubmit={!!draft} onClose={onClose} onSubmit={submit}>
+      <p className="hint full">
+        {draft
+          ? <>The {draft.records} records{draft.ci_refs.length ? ` and ${draft.ci_refs.length} CI${draft.ci_refs.length === 1 ? '' : 's'}` : ''} are linked to the new problem, logged as {draft.detection === 'reactive' ? 'reactively' : 'proactively'} identified.</>
+          : 'Preparing the problem from the evidence…'}
+      </p>
+      <label className="full">Title<input required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></label>
+      <label className="full">Description<textarea rows={8} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
+      <label>Impact
+        <select value={form.impact} onChange={(e) => setForm({ ...form, impact: Number(e.target.value) })}>{[1, 2, 3].map((l) => <option key={l} value={l}>{l} – {LEVEL_LABEL[l]}</option>)}</select>
+      </label>
+      <label>Urgency
+        <select value={form.urgency} onChange={(e) => setForm({ ...form, urgency: Number(e.target.value) })}>{[1, 2, 3].map((l) => <option key={l} value={l}>{l} – {LEVEL_LABEL[l]}</option>)}</select>
+      </label>
+      <label>Category
+        <select value={form.category_id} onChange={(e) => setForm({ ...form, category_id: e.target.value })}>
+          <option value="">–</option>
+          {meta.categories.filter((x) => x.active).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+        </select>
+      </label>
+      {draftError && <div className="error full">{draftError}</div>}
+    </FormModal>
   );
 }
 
@@ -429,40 +397,27 @@ function LinkModal({ candidate: c, onClose }: { candidate: Candidate; onClose: (
   const [ref, setRef] = useState('');
   const q = c.subject.type === 'incident' ? '' : c.subject.name;
   const { data: open } = useApi<{ ref: string; title: string }[]>(`/api/problems?${new URLSearchParams({ q })}`);
-  const [error, setError] = useState<string | null>(null);
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    try {
-      const p = await api.post<ProblemDetail>('/api/candidates/link', { ref, key: c.key });
-      navigate(`/problems/${p.ref}`);
-    } catch (err) {
-      setError((err as Error).message);
-    }
+  const submit = async () => {
+    const p = await api.post<ProblemDetail>('/api/candidates/link', { ref, key: c.key });
+    navigate(`/problems/${p.ref}`);
   };
   return (
-    <Modal title={`Link ${c.count} records to a problem`} onClose={onClose}>
-      <form className="form" onSubmit={submit}>
-        <label className="full">Problem reference
-          <input required autoFocus placeholder="PRB000123" value={ref} onChange={(e) => setRef(e.target.value)} list="candidate-problems" />
-          <datalist id="candidate-problems">
-            {open?.map((p) => <option key={p.ref} value={p.ref}>{p.title}</option>)}
-          </datalist>
-        </label>
-        {open && open.length > 0 && q && (
-          <div className="full suggestions">
-            <span className="muted small">Open problems mentioning {q}:</span>
-            {open.slice(0, 5).map((p) => (
-              <button type="button" key={p.ref} className="chip-btn" onClick={() => setRef(p.ref)}>{p.ref} {p.title}</button>
-            ))}
-          </div>
-        )}
-        {error && <div className="error full">{error}</div>}
-        <div className="actions full">
-          <Link to="/problems" className="btn-link spacer-right">Browse problems</Link>
-          <button type="button" className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn primary">Link records</button>
+    <FormModal title={`Link ${c.count} records to a problem`} submitLabel="Link records" onClose={onClose} onSubmit={submit}
+      actions={<Link to="/problems" className="btn-link spacer-right">Browse problems</Link>}>
+      <label className="full">Problem reference
+        <input required autoFocus placeholder="PRB000123" value={ref} onChange={(e) => setRef(e.target.value)} list="candidate-problems" />
+        <datalist id="candidate-problems">
+          {open?.map((p) => <option key={p.ref} value={p.ref}>{p.title}</option>)}
+        </datalist>
+      </label>
+      {open && open.length > 0 && q && (
+        <div className="full suggestions">
+          <span className="muted small">Open problems mentioning {q}:</span>
+          {open.slice(0, 5).map((p) => (
+            <button type="button" key={p.ref} className="chip-btn" onClick={() => setRef(p.ref)}>{p.ref} {p.title}</button>
+          ))}
         </div>
-      </form>
-    </Modal>
+      )}
+    </FormModal>
   );
 }

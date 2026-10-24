@@ -3,9 +3,7 @@ import { Link, useNavigate } from 'react-router';
 import { api } from '../api';
 import { useApi } from '../hooks';
 import { useSession } from '../session';
-
-interface ModuleInfo { key: string; label: string; description: string; enabled: boolean }
-interface State { completed: boolean; has_real_data: boolean; demo_records: number; modules: ModuleInfo[] }
+import type { SetupState } from '../api/types/settings';
 
 const STEPS = ['What Kernel should help with', 'Support hours', 'Monitoring', 'Example data'] as const;
 
@@ -13,7 +11,7 @@ const STEPS = ['What Kernel should help with', 'Support hours', 'Monitoring', 'E
 export function SetupPage() {
   const { user, reloadMeta } = useSession();
   const navigate = useNavigate();
-  const { data } = useApi<State>('/api/setup');
+  const { data } = useApi<SetupState>('/api/setup');
   const [step, setStep] = useState(0);
   const [mods, setMods] = useState<Record<string, boolean> | null>(null);
   const [hours, setHours] = useState<'' | '24/7' | 'office'>('');

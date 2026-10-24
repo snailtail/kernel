@@ -5,36 +5,8 @@ import { GroupedBars, HBars, LineChart } from '../components/Charts';
 import { CLOSURE_LABEL, formatDay, PRIORITY_LABEL } from '../format';
 import { useApi } from '../hooks';
 import { useSession } from '../session';
+import type { ProblemReport } from '../api/types/reports';
 
-interface Report {
-  period: { from: string; to: string; bucket: 'week' | 'month' };
-  /** Problem management is on (#184); its fields are left out otherwise. */
-  problems: boolean;
-  summary: {
-    opened: number; major_opened: number; known_errors_raised: number; resolved: number; closed: number;
-    reopened: number; open_now: number; proactive: number; reactive: number;
-  };
-  flow: { bucket: string; opened: number; known_errors: number; resolved: number; closed: number }[];
-  backlog: { at: string; open: number }[];
-  lead_times: {
-    priority: number; known_error_count: number; known_error_median_h: number | null; known_error_p90_h: number | null;
-    resolved_count: number; resolved_median_h: number | null; resolved_p90_h: number | null;
-  }[];
-  closures: { closure_code: string; count: number }[];
-  hotspots: {
-    services: { name: string; incidents: number; events: number; open_problems: number }[];
-    categories: { name: string; logged: number; open: number }[];
-    cis: { ref: string; name: string; type_label: string; criticality: number; records: number; unlinked: number; open_problems: number; known_errors: number }[];
-    ci_types: { name: string; records: number; problems: number }[];
-  };
-  sla: { overall: Compliance; by_priority: (Compliance & { priority: number })[]; by_group: (Compliance & { name: string })[]; by_service: (Compliance & { name: string })[] };
-  changes: { requested: number; implemented: number; successful: number; failed: number; emergency: number; standard: number; followed_by_incidents: number };
-  incidents: { opened: number; resolved: number; major: number; open_now: number; reopened: number; with_problem: number; mtta_median_min: number | null; mttr_median_h: number | null; reviews?: { major_resolved: number; reviewed: number; waived: number; reviewed_share: number | null; median_days_to_review: number | null }; by_ci: { ref: string; name: string; incidents: number; without_problem: number }[] };
-  known_errors: { count: number; avg_age_days: number; with_workaround: number; with_decision: number; risk_accepted: number; review_due: number };
-  actions: { created: number; completed: number; on_time_rate: number | null; open_now: number; overdue_now: number };
-}
-
-interface Compliance { resolved: number; resolution_met: number; resolution_with_target: number; response_met: number; response_with_target: number }
 const pctOf = (met: number, of: number) => (of ? `${Math.round((met / of) * 100)}%` : '–');
 
 const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -64,7 +36,7 @@ export function ReportsPage() {
     return { name: '90d', from, to };
   });
   const query = new URLSearchParams({ from: range.from, to: range.to });
-  const { data: r, error, loading } = useApi<Report>(`/api/reports?${query}`);
+  const { data: r, error, loading } = useApi<ProblemReport>(`/api/reports?${query}`);
 
   const choose = (name: string) => {
     if (name === 'custom') return setRange({ ...range, name });

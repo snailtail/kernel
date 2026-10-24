@@ -2,36 +2,20 @@
 // turns contributing factors into problems and follow-ups into actions.
 import { useState } from 'react';
 import { Link, useParams } from 'react-router';
-import { api, type Action } from '../api';
+import { api } from '../api';
 import { ActionsCard } from '../components/Actions';
 import { useAiStatus } from '../components/Ai';
 import { StatusBadge } from '../components/Badges';
 import { CommentBox } from '../components/CommentBox';
 import { Markdown } from '../components/Markdown';
 import { formatDate } from '../format';
-import { useApi } from '../hooks';
+import { useRecord } from '../hooks';
 import { useSession } from '../session';
 import { HistoryPanel } from '../components/History';
-import { type ReviewStatus } from '../statuses';
-
-type Section = 'what_happened' | 'impact_summary' | 'went_well' | 'was_hard' | 'lucky';
-interface Item {
-  id: number; kind: 'factor' | 'follow_up' | 'gap'; body: string; created_by: string | null; problem_ref: string | null; problem_title: string | null;
-  problem_status: string | null;
-  action_id: number | null; action_title: string | null; action_status: string | null; action_due: string | null; action_owner: string | null; action_problem_ref: string | null; action_parent_kind: string | null;
-  improvement_ref: string | null; improvement_title: string | null; improvement_status: string | null;
-}
-interface Review {
-  ref: string; incident_ref: string; incident_title: string; is_major: boolean; status: ReviewStatus; owner_id: number | null; owner: string | null;
-  due: string | null; due_in_days: number | null; overdue: boolean; attendees: string; waived_reason: string; published_at: string | null; published_by: string | null;
-  items: Item[]; actions: Action[]; comments: { id: number; body: string; created_at: string; created_by: string | null }[]; may_finish: boolean; confidential_masked?: boolean;
-  context: { timeline: { at: string; label: string; body: string; key_moment: boolean }[]; impact: string; problem_ref: string | null };
-  guide: { purpose: string; wording: string; sections: Record<Section, string> };
-}
-type ReviewData = Review & Record<Section, string>;
+import type { Section, ReviewItem, ReviewData } from '../api/types/reviews';
 
 const SECTIONS: [Section, string][] = [['what_happened', 'What happened'], ['impact_summary', 'Impact'], ['went_well', 'What went well'], ['was_hard', 'What was hard'], ['lucky', 'Where we were lucky']];
-const KINDS: [Item['kind'], string, string][] = [
+const KINDS: [ReviewItem['kind'], string, string][] = [
   ['factor', 'Contributing factors', 'Conditions that made the incident possible. Each can become a problem, where root cause analysis continues.'],
   ['follow_up', 'Follow-up', 'Concrete actions with an owner and a date. Each becomes an action on this review (or on a problem), or an improvement for a change to how things work.'],
   ['gap', 'Detection and response gaps', 'What made it slow to notice or to respond: alerting, runbooks, access, people.'],
@@ -41,10 +25,9 @@ export function IncidentReviewPage() {
   const { ref } = useParams();
   const { user, meta } = useSession();
   const ai = useAiStatus();
-  const { data: r, setData, error } = useApi<ReviewData>(`/api/reviews/${ref}`);
+  const { data: r, setData, error, actionError, setActionError, run } = useRecord<ReviewData>(`/api/reviews/${ref}`);
   const [draft, setDraft] = useState<Partial<Record<Section | 'attendees', string>>>({});
   const [newItem, setNewItem] = useState<Record<string, string>>({});
-  const [actionError, setActionError] = useState<string | null>(null);
   const [hint, setHint] = useState<{ text: string; model: string } | null>(null);
   const [busy, setBusy] = useState(false);
   if (error) return <p className="error">{error}</p>;
@@ -53,10 +36,6 @@ export function IncidentReviewPage() {
   const editable = user.role !== 'viewer' && (r.status === 'scheduled' || r.status === 'draft');
   const manager = user.role === 'admin' || user.role === 'manager';
   const dirty = Object.keys(draft).length > 0;
-  const run = async (fn: () => Promise<ReviewData>) => {
-    setActionError(null);
-    try { setData(await fn()); return true; } catch (err) { setActionError((err as Error).message); return false; }
-  };
   const save = () => run(() => api.patch(path, draft)).then((ok) => ok && setDraft({}));
   const people = meta.assignees.filter((a) => a.role !== 'viewer');
 
@@ -184,7 +163,7 @@ export function IncidentReviewPage() {
 
 /** Where an item went: a problem, an action, an improvement, or the buttons to get it there. */
 function ItemOutput({ item: x, reviewPath, editable, problems, people, onChange }: {
-  item: Item; reviewPath: string; editable: boolean; problems: boolean; people: { id: number; display_name: string }[];
+  item: ReviewItem; reviewPath: string; editable: boolean; problems: boolean; people: { id: number; display_name: string }[];
   onChange: (fn: () => Promise<any>) => Promise<boolean>;
 }) {
   const [problem, setProblem] = useState('');

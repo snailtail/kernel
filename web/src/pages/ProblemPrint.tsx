@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
+import { api } from '../api';
 import { Markdown } from '../components/Markdown';
 
 /** Print-friendly rendering of the problem's Markdown export (use the browser's Print → Save as PDF). */
@@ -8,9 +9,7 @@ export function ProblemPrintPage() {
   const [text, setText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
-    fetch(`/api/problems/${ref}/export.md`, { credentials: 'same-origin' })
-      .then((r) => (r.ok ? r.text() : Promise.reject(new Error(`Could not load ${ref}`))))
-      .then(setText, (e) => setError(e.message));
+    api.text(`/api/problems/${ref}/export.md`).then(setText, () => setError(`Could not load ${ref}`));
   }, [ref]);
   return (
     <article className="print-page">

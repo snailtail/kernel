@@ -3,17 +3,13 @@ import { Link, useSearchParams } from 'react-router';
 import { api } from '../api';
 import { useApi } from '../hooks';
 import { Modal } from './Modal';
-
-export interface Relationship { id: number; type: string; direction: 'outgoing' | 'incoming'; label: string; ref: string; name: string; other_type: string; status: string; discovered_by: string | null; last_seen_at: string }
-interface RelType { name: string; label: string; inverse_label: string; propagation: string }
-interface ImpactNode { ref: string; name: string; type: 'ci' | 'service'; type_label: string; status: string; criticality: number; depth: number; via: string | null; relationship: { from: string; label: string; to: string } }
-interface Impact { meaning: string; truncated: boolean; depth_limit_reached: boolean; max_depth: number; max_nodes: number; count: number; nodes: ImpactNode[]; services: { ref: string; name: string; criticality: number }[] }
+import type { Relationship, RelationshipType, CiImpact, CiImpactNode, CiGroup, CiGroupCondition, CiGroupDetail } from '../api/types/cmdb';
 
 const CRIT = ['', 'Business critical', 'High', 'Medium', 'Low'];
 
 /** Relationships of a CI, grouped by how they read from this CI ("runs on", "hosts"…). */
 export function RelationshipsSection({ ciRef, relationships, editable, onChange }: { ciRef: string; relationships: Relationship[]; editable: boolean; onChange: (ci: any) => void }) {
-  const { data: types } = useApi<RelType[]>('/api/ci-relationship-types');
+  const { data: types } = useApi<RelationshipType[]>('/api/ci-relationship-types');
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState({ choice: 'depends_on:outgoing', target: '' });
   const [error, setError] = useState<string | null>(null);
@@ -73,8 +69,8 @@ export function RelationshipsSection({ ciRef, relationships, editable, onChange 
 /** Impact (what breaks if this is down) or dependencies, laid out by distance. */
 export function ImpactSection({ ciRef, isService }: { ciRef: string; isService: boolean }) {
   const [direction, setDirection] = useState<'up' | 'down'>(isService ? 'down' : 'up');
-  const { data } = useApi<Impact>(`/api/cis/${ciRef}/impact?direction=${direction}`);
-  const levels = new Map<number, ImpactNode[]>();
+  const { data } = useApi<CiImpact>(`/api/cis/${ciRef}/impact?direction=${direction}`);
+  const levels = new Map<number, CiImpactNode[]>();
   for (const n of data?.nodes ?? []) levels.set(n.depth, [...(levels.get(n.depth) ?? []), n]);
   return (
     <section className="card">
@@ -119,16 +115,12 @@ export function ImpactSection({ ciRef, isService }: { ciRef: string; isService: 
   );
 }
 
-interface Group { id: number; name: string; purpose: string; description: string; rules: { match: 'all' | 'any'; conditions: Condition[] }; manual_members?: number }
-interface Condition { field: string; key?: string; op: string; value: string }
-interface GroupDetail extends Group { truncated: boolean; members: { ref: string; name: string; type: string; ci_type: string; status: string; criticality: number; team: string; manual: boolean; by_rule: boolean }[] }
-
 const FIELDS = ['tag', 'ci_type', 'environment', 'status', 'team', 'name', 'criticality', 'attribute', 'source_system'];
 const OPS: Record<string, string> = { eq: 'is', neq: 'is not', contains: 'contains', starts_with: 'starts with', lte: '≤', gte: '≥' };
 const PURPOSES = ['service', 'flow', 'billing', 'monitoring', 'maintenance', 'other'];
 
 export function GroupsPage({ canManage }: { canManage: boolean }) {
-  const { data, reload } = useApi<Group[]>('/api/ci-groups');
+  const { data, reload } = useApi<CiGroup[]>('/api/ci-groups');
   const [params] = useSearchParams();
   const [open, setOpen] = useState<number | 'new' | null>(params.get('open') ? Number(params.get('open')) : null);
   return (
@@ -157,19 +149,19 @@ export function GroupsPage({ canManage }: { canManage: boolean }) {
   );
 }
 
-const describeRules = (r: Group['rules']) =>
+const describeRules = (r: CiGroup['rules']) =>
   r.conditions.length ? r.conditions.map((c) => `${c.field === 'attribute' ? c.key : c.field} ${OPS[c.op]} ${c.value}`).join(r.match === 'all' ? ' and ' : ' or ') : 'Manual members only';
 
 function GroupEditor({ id, canManage, onClose }: { id: number | null; canManage: boolean; onClose: () => void }) {
-  const { data, setData } = useApi<GroupDetail>(id ? `/api/ci-groups/${id}` : null);
-  const [draft, setDraft] = useState<Group | null>(id ? null : { id: 0, name: '', purpose: 'flow', description: '', rules: { match: 'all', conditions: [] } });
+  const { data, setData } = useApi<CiGroupDetail>(id ? `/api/ci-groups/${id}` : null);
+  const [draft, setDraft] = useState<CiGroup | null>(id ? null : { id: 0, name: '', purpose: 'flow', description: '', rules: { match: 'all', conditions: [] } });
   const [addRef, setAddRef] = useState('');
   const [error, setError] = useState<string | null>(null);
   const g = draft ?? data;
   if (!g) return null;
-  const edit = (patch: Partial<Group>) => setDraft({ ...g, ...patch });
-  const setCond = (i: number, patch: Partial<Condition>) => edit({ rules: { ...g.rules, conditions: g.rules.conditions.map((c, n) => (n === i ? { ...c, ...patch } : c)) } });
-  const run = async (fn: () => Promise<GroupDetail>) => {
+  const edit = (patch: Partial<CiGroup>) => setDraft({ ...g, ...patch });
+  const setCond = (i: number, patch: Partial<CiGroupCondition>) => edit({ rules: { ...g.rules, conditions: g.rules.conditions.map((c, n) => (n === i ? { ...c, ...patch } : c)) } });
+  const run = async (fn: () => Promise<CiGroupDetail>) => {
     setError(null);
     try {
       const saved = await fn();
@@ -208,7 +200,7 @@ function GroupEditor({ id, canManage, onClose }: { id: number | null; canManage:
           {canManage && (
             <div className="actions full">
               {id && <button className="btn danger" onClick={async () => { await api.del(`/api/ci-groups/${id}`); onClose(); }}>Delete</button>}
-              <button className="btn primary" disabled={!draft} onClick={() => run(() => (id ? api.put<GroupDetail>(`/api/ci-groups/${id}`, body) : api.post<GroupDetail>('/api/ci-groups', body)))}>{draft ? 'Save' : 'Saved'}</button>
+              <button className="btn primary" disabled={!draft} onClick={() => run(() => (id ? api.put<CiGroupDetail>(`/api/ci-groups/${id}`, body) : api.post<CiGroupDetail>('/api/ci-groups', body)))}>{draft ? 'Save' : 'Saved'}</button>
             </div>
           )}
         </div>
@@ -216,7 +208,7 @@ function GroupEditor({ id, canManage, onClose }: { id: number | null; canManage:
           <>
             <h3>Members <span className="count">{data.members.length}{data.truncated ? '+' : ''}</span></h3>
             {canManage && (
-              <form className="rel-form" onSubmit={(e) => { e.preventDefault(); run(() => api.put<GroupDetail>(`/api/ci-groups/${data.id}/members/${addRef.trim()}`, {})).then(() => setAddRef('')); }}>
+              <form className="rel-form" onSubmit={(e) => { e.preventDefault(); run(() => api.put<CiGroupDetail>(`/api/ci-groups/${data.id}/members/${addRef.trim()}`, {})).then(() => setAddRef('')); }}>
                 <input placeholder="Add by ref, e.g. CI000012" value={addRef} onChange={(e) => setAddRef(e.target.value)} />
                 <button className="btn" disabled={!addRef.trim()}>Add</button>
               </form>
@@ -228,7 +220,7 @@ function GroupEditor({ id, canManage, onClose }: { id: number | null; canManage:
                   <span className="work-meta">
                     {m.by_rule && <span className="tag">rule</span>}
                     {m.manual && <span className="tag">manual</span>}
-                    {m.manual && canManage && <button className="btn-icon small" aria-label={`Remove ${m.ref}`} onClick={() => run(() => api.del<GroupDetail>(`/api/ci-groups/${data.id}/members/${m.ref}`))}>×</button>}
+                    {m.manual && canManage && <button className="btn-icon small" aria-label={`Remove ${m.ref}`} onClick={() => run(() => api.del<CiGroupDetail>(`/api/ci-groups/${data.id}/members/${m.ref}`))}>×</button>}
                   </span>
                 </li>
               ))}

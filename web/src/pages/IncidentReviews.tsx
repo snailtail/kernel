@@ -1,25 +1,21 @@
 // All post-incident reviews (#120): what is due (overdue first), what was published and what was waived, by owner
 // and team. The view the weekly incident or problem meeting needs.
-import { Link, useSearchParams } from 'react-router';
-import { useApi } from '../hooks';
+import { Link } from 'react-router';
+import { useApi, useListParams } from '../hooks';
 import { useLive } from '../live';
 import { useSession } from '../session';
 import { useTeams } from '../components/Teams';
 import { formatDate, relativeTime } from '../format';
+import type { ReviewRow } from '../api/types/reviews';
 
-interface Row {
-  ref: string; incident_ref: string; title: string; is_major: boolean; priority: number; resolved_at: string | null; team: string | null; status: string; owner: string | null; due: string | null;
-  overdue: boolean; published_at: string | null; factors: number; factors_to_problems: number; follow_ups: number; follow_ups_to_actions: number; url: string;
-}
 const TABS = [['due', 'Due'], ['published', 'Published'], ['waived', 'Waived']] as const;
 
 export function IncidentReviewsPage() {
   const teams = useTeams();
   const { meta } = useSession();
-  const [params, setParams] = useSearchParams();
+  const { params, set } = useListParams();
   const tab = params.get('tab') ?? 'due';
-  const set = (k: string, v: string) => setParams((prev) => { const n = new URLSearchParams(prev); if (v) n.set(k, v); else n.delete(k); return n; }, { replace: true });
-  const { data, loading, refresh } = useApi<Row[]>(`/api/incident-reviews?${params}`);
+  const { data, loading, refresh } = useApi<ReviewRow[]>(`/api/incident-reviews?${params}`);
   useLive(['incident:*'], refresh);
   return (
     <>

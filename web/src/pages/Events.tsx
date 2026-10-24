@@ -3,27 +3,16 @@ import { Link, useSearchParams } from 'react-router';
 import { api } from '../api';
 import { askReason } from '../components/Ask';
 import { SeverityBadge } from '../components/Badges';
-import { Modal } from '../components/Modal';
+import { FormModal, Modal } from '../components/Modal';
 import { formatDate, relativeTime } from '../format';
-import { useApi, useSearchText } from '../hooks';
-import { useColumns, useListToolkit, type ColumnKey } from '../components/ListToolkit';
+import { useApi, useListParams, useSearchText } from '../hooks';
+import { useListToolkit } from '../components/list/ListToolkit';
+import { useColumns, type ColumnKey } from '../components/list/columns';
 import { SavedViews } from '../components/SavedViews';
 import { useSession } from '../session';
+import type { Alert, EventRule, EventSource, MaintenanceWindow } from '../api/types/events';
 
 const SEVERITIES = ['info', 'warning', 'minor', 'major', 'critical'] as const;
-interface Alert {
-  id: number; source: string; check_key: string; severity: string; status: 'open' | 'closed'; message: string; source_url: string;
-  count: number; flap_count: number; flapping: boolean; first_seen: string; last_seen: string; cleared_at: string | null; suppressed: string;
-  ci_hint: string; ci_ref: string | null; ci_name: string | null; incident_ref: string | null; incident_status: string | null;
-  acknowledged_by: string | null; rule: string | null;
-}
-interface Rule {
-  id: number; name: string; enabled: boolean; position: number; impact: number; urgency: number; assignment_group: string;
-  group_by: 'service' | 'ci' | 'rule'; group_window_minutes: number; max_incidents_per_hour: number; auto_resolve: boolean; hold_down_minutes: number;
-  conditions: { min_severity?: string; sources?: string[]; check_contains?: string; ci_types?: string[]; environments?: string[]; max_ci_criticality?: number; include_unmatched?: boolean; min_count?: number };
-}
-interface Source { id: number; name: string; kind: string; token_prefix: string; token_created_at: string; signed: boolean; ci_source_system: string; enabled: boolean; url: string; last_received_at: string | null; received_count: number; rejected_count: number }
-interface Window { id: number; ci: string | null; ci_name: string | null; group_name: string | null; include_dependencies: boolean; starts_at: string; ends_at: string; reason: string; covered_cis: number; created_by: string }
 
 const TABS = [['alerts', 'Alerts'], ['rules', 'Rules'], ['maintenance', 'Maintenance'], ['sources', 'Sources']] as const;
 
@@ -61,9 +50,8 @@ const ALERT_COLUMNS: { key: ColumnKey; label: string }[] = [
 function AlertsTab() {
   const { user } = useSession();
   // The filters live in the address, so alerts can be shared and saved as views (#110).
-  const [params, setParams] = useSearchParams();
+  const { params, set } = useListParams();
   const [q, setQ] = useSearchText();
-  const set = (k: string, v: string) => setParams((prev) => { const n = new URLSearchParams(prev); if (v) n.set(k, v); else n.delete(k); return n; }, { replace: true });
   const query = new URLSearchParams([...params].filter(([k]) => k !== 'tab'));
   const { data, reload, loading } = useApi<Alert[]>(`/api/alerts?${query}`);
   const tk = useListToolkit({ list: 'alerts', rows: data, idOf: (a) => String(a.id), filter: query.toString(), onChanged: reload });
@@ -124,7 +112,7 @@ function AlertsTab() {
   );
 }
 
-const emptyRule = (): Omit<Rule, 'id'> => ({
+const emptyRule = (): Omit<EventRule, 'id'> => ({
   name: '', enabled: true, position: 100, impact: 2, urgency: 2, assignment_group: '', group_by: 'service', group_window_minutes: 60,
   max_incidents_per_hour: 5, auto_resolve: true, hold_down_minutes: 15, conditions: { min_severity: 'major' },
 });
@@ -132,9 +120,9 @@ const emptyRule = (): Omit<Rule, 'id'> => ({
 function RulesTab() {
   const { user } = useSession();
   const manager = user.role === 'admin' || user.role === 'manager';
-  const { data, reload } = useApi<Rule[]>('/api/event-rules');
-  const [editing, setEditing] = useState<Rule | Omit<Rule, 'id'> | null>(null);
-  const describe = (r: Rule) => {
+  const { data, reload } = useApi<EventRule[]>('/api/event-rules');
+  const [editing, setEditing] = useState<EventRule | Omit<EventRule, 'id'> | null>(null);
+  const describe = (r: EventRule) => {
     const c = r.conditions;
     return [
       c.min_severity && `${c.min_severity} or worse`,
@@ -163,62 +151,50 @@ function RulesTab() {
   );
 }
 
-function RuleEditor({ rule, onClose, onDone }: { rule: Rule | Omit<Rule, 'id'>; onClose: () => void; onDone: () => void }) {
+function RuleEditor({ rule, onClose, onDone }: { rule: EventRule | Omit<EventRule, 'id'>; onClose: () => void; onDone: () => void }) {
   const [r, setR] = useState({ ...rule, sources: (rule.conditions.sources ?? []).join(', '), environments: (rule.conditions.environments ?? []).join(', ') });
-  const [error, setError] = useState<string | null>(null);
   const c = r.conditions;
-  const setC = (patch: Partial<Rule['conditions']>) => setR({ ...r, conditions: { ...c, ...patch } });
+  const setC = (patch: Partial<EventRule['conditions']>) => setR({ ...r, conditions: { ...c, ...patch } });
   const list = (v: string) => v.split(',').map((s) => s.trim()).filter(Boolean);
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    const { id: _, sources, environments, ...rest } = r as Rule & { sources: string; environments: string };
+  const submit = async () => {
+    const { id: _, sources, environments, ...rest } = r as EventRule & { sources: string; environments: string };
     const body = { ...rest, conditions: { ...c, sources: list(sources), environments: list(environments) } };
-    try {
-      if ('id' in rule) await api.put(`/api/event-rules/${rule.id}`, body);
-      else await api.post('/api/event-rules', body);
-      onDone();
-    } catch (err) {
-      setError((err as Error).message);
-    }
+    if ('id' in rule) await api.put(`/api/event-rules/${rule.id}`, body);
+    else await api.post('/api/event-rules', body);
+    onDone();
   };
   return (
-    <Modal title={'id' in rule ? `Edit ${rule.name}` : 'New event rule'} onClose={onClose}>
-      <form className="form" onSubmit={submit}>
-        <label className="full">Name<input required value={r.name} onChange={(e) => setR({ ...r, name: e.target.value })} /></label>
-        <fieldset className="full rules">
-          <legend>When</legend>
-          <label>Severity at least<select value={c.min_severity ?? ''} onChange={(e) => setC({ min_severity: e.target.value || undefined })}><option value="">any</option>{SEVERITIES.map((s) => <option key={s}>{s}</option>)}</select></label>
-          <label>Sources<input placeholder="all" value={r.sources} onChange={(e) => setR({ ...r, sources: e.target.value })} /></label>
-          <label>Check contains<input value={c.check_contains ?? ''} onChange={(e) => setC({ check_contains: e.target.value || undefined })} /></label>
-          <label>Environments<input placeholder="prod, test" value={r.environments} onChange={(e) => setR({ ...r, environments: e.target.value })} /></label>
-          <label>CI criticality at least<select value={c.max_ci_criticality ?? ''} onChange={(e) => setC({ max_ci_criticality: e.target.value ? Number(e.target.value) : undefined })}><option value="">any</option><option value="1">1 – business critical</option><option value="2">2 – high</option><option value="3">3 – medium</option></select></label>
-          <label>Repeated at least<input type="number" min={1} value={c.min_count ?? ''} onChange={(e) => setC({ min_count: e.target.value ? Number(e.target.value) : undefined })} /></label>
-          <label className="check full"><input type="checkbox" checked={c.include_unmatched !== false} onChange={(e) => setC({ include_unmatched: e.target.checked })} /> Also alerts on hosts not in the CMDB</label>
-        </fieldset>
-        <label>Impact<select value={r.impact} onChange={(e) => setR({ ...r, impact: Number(e.target.value) })}>{[1, 2, 3].map((n) => <option key={n} value={n}>{n}</option>)}</select></label>
-        <label>Urgency<select value={r.urgency} onChange={(e) => setR({ ...r, urgency: Number(e.target.value) })}>{[1, 2, 3].map((n) => <option key={n} value={n}>{n}</option>)}</select></label>
-        <label>Assignment group<input value={r.assignment_group} onChange={(e) => setR({ ...r, assignment_group: e.target.value })} /></label>
-        <label>Group alerts by<select value={r.group_by} onChange={(e) => setR({ ...r, group_by: e.target.value as 'service' })}><option value="service">Service (via the CMDB)</option><option value="ci">CI</option><option value="rule">Rule (one incident)</option></select></label>
-        <label>Max new incidents per hour<input type="number" min={1} max={100} value={r.max_incidents_per_hour} onChange={(e) => setR({ ...r, max_incidents_per_hour: Number(e.target.value) })} /></label>
-        <label>Reopen within (min)<input type="number" min={1} max={1440} value={r.group_window_minutes} onChange={(e) => setR({ ...r, group_window_minutes: Number(e.target.value) })} /></label>
-        <label className="check"><input type="checkbox" checked={r.auto_resolve} onChange={(e) => setR({ ...r, auto_resolve: e.target.checked })} /> Auto-resolve when all alerts clear</label>
-        <label>…after staying clear (min)<input type="number" min={0} max={1440} value={r.hold_down_minutes} onChange={(e) => setR({ ...r, hold_down_minutes: Number(e.target.value) })} /></label>
-        <label>Position<input type="number" min={0} value={r.position} onChange={(e) => setR({ ...r, position: Number(e.target.value) })} /></label>
-        <label className="check"><input type="checkbox" checked={r.enabled} onChange={(e) => setR({ ...r, enabled: e.target.checked })} /> Enabled</label>
-        {error && <div className="error full">{error}</div>}
-        <div className="actions full">
-          {'id' in rule && <button type="button" className="btn danger" onClick={async () => { await api.del(`/api/event-rules/${rule.id}`); onDone(); }}>Delete</button>}
-          <button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary">Save</button>
-        </div>
-      </form>
-    </Modal>
+    <FormModal title={'id' in rule ? `Edit ${rule.name}` : 'New event rule'} submitLabel="Save" onClose={onClose} onSubmit={submit}
+      actions={'id' in rule && <button type="button" className="btn danger" onClick={async () => { await api.del(`/api/event-rules/${rule.id}`); onDone(); }}>Delete</button>}>
+      <label className="full">Name<input required value={r.name} onChange={(e) => setR({ ...r, name: e.target.value })} /></label>
+      <fieldset className="full rules">
+        <legend>When</legend>
+        <label>Severity at least<select value={c.min_severity ?? ''} onChange={(e) => setC({ min_severity: e.target.value || undefined })}><option value="">any</option>{SEVERITIES.map((s) => <option key={s}>{s}</option>)}</select></label>
+        <label>Sources<input placeholder="all" value={r.sources} onChange={(e) => setR({ ...r, sources: e.target.value })} /></label>
+        <label>Check contains<input value={c.check_contains ?? ''} onChange={(e) => setC({ check_contains: e.target.value || undefined })} /></label>
+        <label>Environments<input placeholder="prod, test" value={r.environments} onChange={(e) => setR({ ...r, environments: e.target.value })} /></label>
+        <label>CI criticality at least<select value={c.max_ci_criticality ?? ''} onChange={(e) => setC({ max_ci_criticality: e.target.value ? Number(e.target.value) : undefined })}><option value="">any</option><option value="1">1 – business critical</option><option value="2">2 – high</option><option value="3">3 – medium</option></select></label>
+        <label>Repeated at least<input type="number" min={1} value={c.min_count ?? ''} onChange={(e) => setC({ min_count: e.target.value ? Number(e.target.value) : undefined })} /></label>
+        <label className="check full"><input type="checkbox" checked={c.include_unmatched !== false} onChange={(e) => setC({ include_unmatched: e.target.checked })} /> Also alerts on hosts not in the CMDB</label>
+      </fieldset>
+      <label>Impact<select value={r.impact} onChange={(e) => setR({ ...r, impact: Number(e.target.value) })}>{[1, 2, 3].map((n) => <option key={n} value={n}>{n}</option>)}</select></label>
+      <label>Urgency<select value={r.urgency} onChange={(e) => setR({ ...r, urgency: Number(e.target.value) })}>{[1, 2, 3].map((n) => <option key={n} value={n}>{n}</option>)}</select></label>
+      <label>Assignment group<input value={r.assignment_group} onChange={(e) => setR({ ...r, assignment_group: e.target.value })} /></label>
+      <label>Group alerts by<select value={r.group_by} onChange={(e) => setR({ ...r, group_by: e.target.value as 'service' })}><option value="service">Service (via the CMDB)</option><option value="ci">CI</option><option value="rule">Rule (one incident)</option></select></label>
+      <label>Max new incidents per hour<input type="number" min={1} max={100} value={r.max_incidents_per_hour} onChange={(e) => setR({ ...r, max_incidents_per_hour: Number(e.target.value) })} /></label>
+      <label>Reopen within (min)<input type="number" min={1} max={1440} value={r.group_window_minutes} onChange={(e) => setR({ ...r, group_window_minutes: Number(e.target.value) })} /></label>
+      <label className="check"><input type="checkbox" checked={r.auto_resolve} onChange={(e) => setR({ ...r, auto_resolve: e.target.checked })} /> Auto-resolve when all alerts clear</label>
+      <label>…after staying clear (min)<input type="number" min={0} max={1440} value={r.hold_down_minutes} onChange={(e) => setR({ ...r, hold_down_minutes: Number(e.target.value) })} /></label>
+      <label>Position<input type="number" min={0} value={r.position} onChange={(e) => setR({ ...r, position: Number(e.target.value) })} /></label>
+      <label className="check"><input type="checkbox" checked={r.enabled} onChange={(e) => setR({ ...r, enabled: e.target.checked })} /> Enabled</label>
+    </FormModal>
   );
 }
 
 function MaintenanceTab() {
   const { user } = useSession();
   const manager = user.role === 'admin' || user.role === 'manager';
-  const { data, reload } = useApi<Window[]>('/api/maintenance-windows');
+  const { data, reload } = useApi<MaintenanceWindow[]>('/api/maintenance-windows');
   const { data: groups } = useApi<{ id: number; name: string }[]>('/api/ci-groups');
   const hour = (h: number) => new Date(Date.now() + h * 3600_000).toISOString().slice(0, 16);
   const [form, setForm] = useState({ target: 'ci', ci: '', group_id: '', include_dependencies: true, starts_at: hour(0), ends_at: hour(2), reason: '' });
@@ -282,11 +258,10 @@ function MaintenanceTab() {
 const KIND_LABEL: Record<string, string> = { generic: 'Generic (Kernel format)', alertmanager: 'Prometheus Alertmanager', uptime_kuma: 'Uptime Kuma', azure_monitor: 'Azure Monitor (common alert schema)', op5: 'OP5 / Naemon' };
 
 function SourcesTab() {
-  const { data, reload } = useApi<Source[]>('/api/event-sources');
+  const { data, reload } = useApi<EventSource[]>('/api/event-sources');
   const [creating, setCreating] = useState(false);
   const [secret, setSecret] = useState<{ url: string; token: string; signing_secret: string | null } | null>(null);
   const [form, setForm] = useState({ name: '', kind: 'alertmanager', ci_source_system: '', signed: false });
-  const [error, setError] = useState<string | null>(null);
   const full = (path: string) => `${location.origin}${path}`;
   return (
     <>
@@ -316,26 +291,17 @@ function SourcesTab() {
         )}
       </section>
       {creating && (
-        <Modal title="Add an event source" onClose={() => setCreating(false)}>
-          <form className="form" onSubmit={async (e) => {
-            e.preventDefault();
-            try {
-              const r = await api.post<{ url: string; token: string; signing_secret: string | null }>('/api/event-sources', form);
-              setCreating(false);
-              setSecret(r);
-              reload();
-            } catch (err) {
-              setError((err as Error).message);
-            }
-          }}>
-            <label className="full">Name<input required placeholder="Prometheus prod" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
-            <label className="full">Kind<select value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })}>{Object.entries(KIND_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
-            <label className="full">CMDB source system <span className="muted small">(optional: match CIs by this source's ids, e.g. Azure or OP5)</span><input value={form.ci_source_system} onChange={(e) => setForm({ ...form, ci_source_system: e.target.value })} /></label>
-            {form.kind === 'generic' && <label className="check full"><input type="checkbox" checked={form.signed} onChange={(e) => setForm({ ...form, signed: e.target.checked })} /> Require signed requests (Standard Webhooks)</label>}
-            {error && <div className="error full">{error}</div>}
-            <div className="actions full"><button type="button" className="btn" onClick={() => setCreating(false)}>Cancel</button><button className="btn primary">Create</button></div>
-          </form>
-        </Modal>
+        <FormModal title="Add an event source" submitLabel="Create" onClose={() => setCreating(false)} onSubmit={async () => {
+          const r = await api.post<{ url: string; token: string; signing_secret: string | null }>('/api/event-sources', form);
+          setCreating(false);
+          setSecret(r);
+          reload();
+        }}>
+          <label className="full">Name<input required placeholder="Prometheus prod" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
+          <label className="full">Kind<select value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })}>{Object.entries(KIND_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
+          <label className="full">CMDB source system <span className="muted small">(optional: match CIs by this source's ids, e.g. Azure or OP5)</span><input value={form.ci_source_system} onChange={(e) => setForm({ ...form, ci_source_system: e.target.value })} /></label>
+          {form.kind === 'generic' && <label className="check full"><input type="checkbox" checked={form.signed} onChange={(e) => setForm({ ...form, signed: e.target.checked })} /> Require signed requests (Standard Webhooks)</label>}
+        </FormModal>
       )}
       {secret && (
         <Modal title="Copy these now" onClose={() => setSecret(null)}>

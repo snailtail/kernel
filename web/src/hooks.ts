@@ -1,6 +1,6 @@
 import { useSearchParams } from 'react-router';
 import { useCallback, useEffect, useState } from 'react';
-import { api } from './api';
+import { api, asConflict } from './api';
 
 /** Loads a GET endpoint and exposes the data together with a reload function. */
 export function useApi<T>(path: string | null) {
@@ -36,6 +36,43 @@ export function useApi<T>(path: string | null) {
   }, [path]);
 
   return { data, setData, error, loading, reload, refresh };
+}
+
+/**
+ * A record page: loads `path`, and `run` makes a change whose answer is the updated record. A failed change shows in
+ * `actionError` (run answers false); a conflict (someone changed the record meanwhile) also reloads it, so the page
+ * shows their version. `save(fields)` patches with the values the edit started from, so the server can detect that.
+ */
+export function useRecord<T extends object>(path: string | null) {
+  const { data, setData, error, reload, refresh } = useApi<T>(path);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const run = async (fn: () => Promise<T>) => {
+    setActionError(null);
+    try {
+      setData(await fn());
+      return true;
+    } catch (err) {
+      setActionError((err as Error).message);
+      if (asConflict(err)) reload();
+      return false;
+    }
+  };
+  const save = (fields: Record<string, unknown>) =>
+    run(() => api.patch<T>(path!, { ...fields, base: Object.fromEntries(Object.keys(fields).map((k) => [k, (data as Record<string, unknown> | null)?.[k]])) }));
+  return { data, setData, error, reload, refresh, actionError, setActionError, run, save };
+}
+
+/** A list page's filters live in the URL (?status=…&team=…), so a list can be shared and saved as a view. */
+export function useListParams() {
+  const [params, setParams] = useSearchParams();
+  /** Sets one filter; an empty value removes it. */
+  const set = (key: string, value: string) => setParams((prev) => {
+    const next = new URLSearchParams(prev);
+    if (value) next.set(key, value);
+    else next.delete(key);
+    return next;
+  }, { replace: true });
+  return { params, setParams, set };
 }
 
 /** "+ New" links to a list page with ?new=1 (#102): opens its create form, then drops the parameter. */
