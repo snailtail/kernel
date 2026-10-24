@@ -201,8 +201,8 @@ export async function openStream(req: FastifyRequest, reply: FastifyReply, user:
 }
 
 export const subscribeSchema = z.object({
-  topics: z.array(z.string().regex(/^(problem|incident|change|ci|improvement|request):(\d{1,10}|\*)$/)).max(LIMITS.maxTopics),
-  editing: z.string().regex(/^(problem|incident|change|ci|improvement|request):\d{1,10}$/).nullable().optional(),
+  topics: z.array(z.string().regex(/^(problem|incident|change|ci|improvement|request|work_item):(\d{1,10}|\*)$/)).max(LIMITS.maxTopics),
+  editing: z.string().regex(/^(problem|incident|change|ci|improvement|request|work_item):\d{1,10}$/).nullable().optional(),
 });
 
 /** Replaces what a stream follows. Record topics the user cannot see are dropped without a word. */

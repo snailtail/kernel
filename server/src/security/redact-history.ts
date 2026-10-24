@@ -94,7 +94,7 @@ export async function redactHistory(user: User, ref: string, input: z.infer<type
   if (!input.secrets && !input.text) throw badRequest('Choose what to remove: secrets, a text, or both');
   typeForRef(ref);
   const t = textKindOfRef(ref);
-  if (!t) throw badRequest('Only problems, incidents, changes, improvements and requests have a history to clean');
+  if (!t) throw badRequest('Only problems, incidents, changes, improvements, requests and work items have a history to clean');
   const type = t.type;
   if (input.text && input.text.toUpperCase().includes(ref.toUpperCase())) throw badRequest('The text cannot include the record\'s own reference');
   const clean = cleaner(input);

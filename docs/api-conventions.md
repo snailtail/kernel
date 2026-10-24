@@ -38,6 +38,7 @@ Registered types:
 | article | `KB000007` | knowledge | `/api/articles` | `get_article` |
 | improvement | `IMP000012` | always on | `/api/improvements` | `get_improvement` |
 | request (service request) | `REQ000012` | request (off by default) | `/api/requests` | `get_request` |
+| work_item (epic, story, bug, task) | `WI000012` | development (off by default) | `/api/work-items` | `get_work_item` |
 
 A post-incident review also answers to its incident's ref (`/api/incidents/INC000123/review`, `get_review` with
 `INC000123`), and shares its incident's links: linking from or to a review links the incident. Its comments are kept
@@ -54,6 +55,14 @@ People, by the user who logs it. Its `answers` are checked against the item's fo
 come back as `answer_text` and are masked like other free text on a confidential request. Approving and rejecting are
 a person's decision: `POST /api/requests/:ref/approval` signed in, or the approval link (#48), never an API token or
 MCP. Tasks are done in order (`POST /api/requests/:ref/tasks/:id/complete`, `complete_request_task`).
+
+A work item (#165) is one kind with an `item_type` (epic, story, bug, task), so its ref stays when a story becomes a
+bug; `type` is `work_item` as for every record. The hierarchy is epic → story or bug → task. Each team has a backlog
+ordered by rank: a new item goes last, `POST /api/work-items/:ref/move` (`reorder_backlog`) puts it before or after
+another item of the same backlog or at the top or bottom, and moving to another team puts it at the bottom there. A
+team's Definition of Ready and Done (`/api/teams/:id/work-definitions`) is shown when an item moves to ready or done;
+the transition's `checked` lists what holds and the rest is logged as skipped, never refused. A child starts as narrow
+as its parent. Links to ITSM records come with #167.
 
 ## REST
 

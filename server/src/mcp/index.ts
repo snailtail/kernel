@@ -14,6 +14,7 @@ import { registerCandidatesTools } from './candidates.js';
 import { registerChangesTools } from './changes.js';
 import { registerCmdbTools } from './cmdb.js';
 import { registerDevTools } from './dev.js';
+import { registerDevelopmentTools } from './development.js';
 import { registerEventsTools } from './events.js';
 import { registerGuidesTools } from './guides.js';
 import { registerImprovementsTools } from './improvements.js';
@@ -72,6 +73,7 @@ function buildServer(user: User, scopes?: string[]) {
   registerChangesTools(ctx);
   registerImprovementsTools(ctx);
   registerRequestsTools(ctx);
+  registerDevelopmentTools(ctx);
   registerReportsTools(ctx);
   registerEventsTools(ctx);
   registerRulesTools(ctx);

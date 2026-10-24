@@ -23,6 +23,10 @@ const MATRIX: [string, string, unknown, RoleName[]][] = [
   ['GET', '/api/actions', undefined, READERS],
   ['GET', '/api/improvements', undefined, READERS],
   ['POST', '/api/improvements', { title: 'Matrix' }, WORKERS],
+  // Development work (#165; the module is turned on below).
+  ['GET', '/api/work-items', undefined, READERS],
+  ['POST', '/api/work-items', { type: 'story', title: 'Matrix' }, WORKERS],
+  ['PUT', '/api/teams/999999/work-definitions', { ready: [], done: [] }, MANAGERS],
   // Service requests (#44; the module is turned on below).
   ['GET', '/api/requests', undefined, READERS],
   ['GET', '/api/request-items', undefined, READERS],
@@ -89,7 +93,7 @@ describe('authorisation', { skip }, () => {
     // Fixtures: two problems to act on.
     await clients.analyst.post('/api/problems', { title: 'Fixture one' });
     await clients.analyst.post('/api/problems', { title: 'Fixture two' });
-    await clients.admin.put('/api/admin/modules', { request: true, reason: 'Matrix' });
+    await clients.admin.put('/api/admin/modules', { request: true, development: true, reason: 'Matrix' });
   });
   after(() => k?.close());
 

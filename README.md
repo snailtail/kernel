@@ -193,6 +193,14 @@ item's SLA runs from submission to fulfilment and pauses while the request waits
 `create_request`, `update_request`, `transition_request` (cancel only), `complete_request_task`. A task can also be a
 standard change (its outcome completes the task) or a webhook that calls back with a single-use token, and the
 requester hears about their request in plain words; see [docs/service-requests.md](docs/service-requests.md).
+**Development work** (an optional module, off until an administrator turns it on, #164): epics, stories, bugs and
+tasks (`WI000012`) in a backlog per team, ordered by dragging, with story points (1, 2, 3, 5, 8, 13), acceptance
+criteria, labels and a bug's report (where it was found, steps, expected and actual result). An epic shows its progress in
+done and total points. Each team keeps a Definition of Ready and Done, shown when an item moves on; skipping it is
+allowed and logged. Restricted and confidential items work as for problems, and a child starts as narrow as its
+parent. API: `/api/work-items` (+ `/:ref/transition`, `/move`, `/links`, `/comments`), `/api/teams/:id/work-definitions`;
+MCP: `list_work_items`, `get_work_item`, `create_work_item`, `update_work_item`, `transition_work_item`,
+`reorder_backlog`.
 Viewers stay strictly read-only (auditors, stakeholders): end users report incidents through the service desk or,
 later, the self-service portal (#45), not with a viewer account.
 

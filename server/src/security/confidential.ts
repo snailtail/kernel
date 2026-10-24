@@ -27,6 +27,8 @@ export const MASKED_FIELDS = new Set([
   'benefit', 'reject_reason',
   // Service requests (#44): free-text answers to the item's form.
   'answer_text',
+  // Work items (#165): a bug's report, the reason it was removed, and each acceptance criterion.
+  'found_in', 'steps_to_reproduce', 'expected_result', 'actual_result', 'remove_reason', 'criterion',
 ]);
 
 const kindOfRef = (ref: string) => textKindOfRef(ref)?.type;
@@ -170,7 +172,7 @@ export async function setClassification(user: User, ref: string, input: z.infer<
   authorize(user, 'record.restrict');
   const reason = requireReason(input.reason);
   const t = textKindOfRef(ref);
-  if (!t) throw badRequest('Only problems, incidents, changes, improvements and requests can be confidential');
+  if (!t) throw badRequest('Only problems, incidents, changes, improvements, requests and work items can be confidential');
   const kind = t.type;
   const result = await tx(async (db) => {
     const { rows } = await db.query(`SELECT id, ref, classification FROM ${t.table} WHERE ref = $1 FOR UPDATE`, [ref.toUpperCase()]);
@@ -203,7 +205,7 @@ export async function setClassification(user: User, ref: string, input: z.infer<
 export async function reveal(user: User, ref: string, reasonInput: string | undefined) {
   const reason = requireReason(reasonInput);
   const t = textKindOfRef(ref);
-  if (!t) throw badRequest('Only problems, incidents, changes, improvements and requests can be confidential');
+  if (!t) throw badRequest('Only problems, incidents, changes, improvements, requests and work items can be confidential');
   const kind = t.type;
   typeForRef(ref);
   return tx(async (db) => {
