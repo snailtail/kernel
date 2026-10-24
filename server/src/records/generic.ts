@@ -25,6 +25,7 @@ import { attentionCount, incidentRefOf, myReviews } from '../incidents/post-inci
 import { addImprovementLink, improvementLinkSchema, myImprovements } from '../improvements/improvements.js';
 import { addRequestLink, myRequestWork, requestLinkSchema, teamRequestTasks } from '../requests/requests.js';
 import { actionCounts, myActions } from '../problems/actions.js';
+import { addWorkItemLink, myWorkItems, workItemLinkSchema } from '../development/work-items.js';
 
 export const searchSchema = z.object({
   q: z.string().trim().min(1).max(200),
@@ -101,6 +102,10 @@ export async function linkRecords(user: User, from: string, to: string, options:
   if (source.type === 'improvement') {
     return (await addImprovementLink(user, from, improvementLinkSchema.parse({ kind, reference: to, system: options.system, url: options.url, note: options.note }))).links;
   }
+  // A work item (#165) links related work items and documents; the links to ITSM records come with #167.
+  if (source.type === 'work_item') {
+    return (await addWorkItemLink(user, from, workItemLinkSchema.parse({ kind, reference: to, system: options.system, url: options.url, note: options.note }))).links;
+  }
   // A service request (#44) keeps its own links: the incident, change or problem it relates to, a CI, a document.
   if (source.type === 'request') {
     return (await addRequestLink(user, from, requestLinkSchema.parse({ kind: kind === 'service' ? 'ci' : kind, reference: to, system: options.system, url: options.url, note: options.note }))).links;
@@ -172,6 +177,8 @@ export async function myWork(user: User) {
   const improvements = can(user.role, 'improvement.read') ? await myImprovements(user.id) : [];
   // Service requests (#44), when the module is on: my tasks, my teams' open tasks and what waits for my approval.
   const requests = can(user.role, 'request.read') ? await myRequestWork(user.id) : null;
+  // Development work (#165), when the module is on: what I am working on.
+  const workItems = can(user.role, 'work.read') ? await myWorkItems(user.id) : [];
   const problemType = recordTypes().find((t) => t.type === 'problem')!;
   return {
     teams,
@@ -181,6 +188,7 @@ export async function myWork(user: User) {
     major_updates: incidentWork?.major_updates ?? [],
     reviews,
     improvements,
+    work_items: workItems,
     request_tasks: requests?.tasks ?? [],
     request_approvals: requests?.approvals ?? [],
     request_queue: requests && teams.length ? (await teamRequestTasks(teams.map((t) => t.id))).filter((t) => !t.assignee_id) : [],

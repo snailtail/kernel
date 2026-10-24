@@ -8,13 +8,13 @@ import { type Db, query, tx } from '../core/db.js';
 import { badRequest, conflict, forbidden, notFound } from '../core/errors.js';
 import { authorize, can, type Action } from '../security/policy.js';
 
-export const LISTS = ['problems', 'actions', 'incidents', 'changes', 'alerts', 'known_errors', 'knowledge', 'cis', 'candidates', 'improvements', 'requests'] as const;
+export const LISTS = ['problems', 'actions', 'incidents', 'changes', 'alerts', 'known_errors', 'knowledge', 'cis', 'candidates', 'improvements', 'requests', 'work_items'] as const;
 export type ListName = (typeof LISTS)[number];
 
 /** Reading a list's views needs the same permission as reading the list. */
 const READ: Record<ListName, Action> = {
   problems: 'problem.read', actions: 'action.read', incidents: 'incident.read', changes: 'change.read', alerts: 'event.read',
-  known_errors: 'kedb.read', knowledge: 'article.read', cis: 'ci.read', candidates: 'candidate.read', improvements: 'improvement.read', requests: 'request.read',
+  known_errors: 'kedb.read', knowledge: 'article.read', cis: 'ci.read', candidates: 'candidate.read', improvements: 'improvement.read', requests: 'request.read', work_items: 'work.read',
 };
 
 interface BuiltIn {
@@ -65,6 +65,12 @@ const BUILT_IN: Record<ListName, BuiltIn[]> = {
     { key: 'ideas', name: 'Ideas to decide on', query: 'status=idea' },
     { key: 'mine', name: 'Mine', query: 'owner=me' },
     { key: 'done', name: 'Done', query: 'status=done' },
+  ],
+  work_items: [
+    { key: 'mine', name: 'Mine', query: 'assignee=me' },
+    { key: 'bugs', name: 'Bugs', query: 'type=bug' },
+    { key: 'epics', name: 'Epics', query: 'type=epic' },
+    { key: 'done', name: 'Done', query: 'status=done&sort=updated' },
   ],
   requests: [
     { key: 'my-tasks', name: 'My tasks', query: 'task=mine' },

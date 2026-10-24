@@ -27,7 +27,7 @@ export async function visibilityRoutes(app: FastifyInstance) {
     const admin = requireUser(req, 'mfa.policy');
     await requireStepUp(req);
     const body = z.object({
-      team_scoped: z.object({ incident: z.boolean(), problem: z.boolean(), change: z.boolean() }),
+      team_scoped: z.object({ incident: z.boolean(), problem: z.boolean(), change: z.boolean(), work_item: z.boolean().optional() }),
       restricted_categories: z.array(z.number().int()).max(100),
       reason: z.string().max(1000).optional(),
     }).parse(req.body);

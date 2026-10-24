@@ -62,7 +62,7 @@ export async function setVisibility(user: User, ref: string, input: z.infer<type
   authorize(user, 'record.restrict');
   typeForRef(ref);
   const t = textKindOfRef(ref);
-  if (!t) throw badRequest('Only problems, incidents, changes, improvements and requests can be restricted');
+  if (!t) throw badRequest('Only problems, incidents, changes, improvements, requests and work items can be restricted');
   const { type, table } = t;
   await tx(async (db) => {
     // The caller must see the record (row-level security), so no one restricts or opens what they cannot see.

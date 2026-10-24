@@ -16,6 +16,7 @@ import * as changes from '../changes/changes.js';
 import * as cmdb from '../cmdb/cmdb.js';
 import * as events from '../events/events.js';
 import * as improvements from '../improvements/improvements.js';
+import * as workItems from '../development/work-items.js';
 import * as requests from '../requests/requests.js';
 import * as incidents from '../incidents/incidents.js';
 import * as knowledge from './knowledge.js';
@@ -27,7 +28,7 @@ import { authorize, type Action } from '../security/policy.js';
 import * as problems from '../problems/problems.js';
 
 export const BULK_LIMIT = 500;
-export const PRACTICES = ['incidents', 'problems', 'changes', 'alerts', 'actions', 'articles', 'cis', 'improvements', 'requests'] as const;
+export const PRACTICES = ['incidents', 'problems', 'changes', 'alerts', 'actions', 'articles', 'cis', 'improvements', 'requests', 'work-items'] as const;
 export type Practice = (typeof PRACTICES)[number];
 
 const ref = z.string().trim().min(1).max(30);
@@ -219,6 +220,23 @@ const DEFS: Record<Practice, PracticeDef> = {
       assign: { action: 'improvement.write', noop: assignNoop('owner_id'), undo: assignUndo('owner_id'), apply: (u, r, op) => improvements.updateImprovementLean(u, r.id, op.assignee_id !== undefined ? { owner_id: op.assignee_id } : {}) },
       // Approving and rejecting take a manager (transitionImprovement checks); rejecting needs details.reason.
       status: { action: 'improvement.write', noop: statusNoop, apply: (u, r, op) => improvements.transitionImprovementLean(u, r.id, improvements.transitionImprovementSchema.parse({ ...op.details, to: op.to })) },
+    },
+  },
+  'work-items': {
+    read: 'work.read',
+    rows: workItems.workItemRows,
+    select: async (user, f, limit) => (await workItems.listWorkItems(user, workItems.listWorkItemsSchema.parse(params(f, limit)))).map((r) => r.ref),
+    ops: {
+      assign: { action: 'work.write', noop: assignNoop('assignee_id'), undo: assignUndo('assignee_id'), apply: (u, r, op) => workItems.updateWorkItemLean(u, r.id, assignInput(op)) },
+      // Removing needs details.reason.
+      status: { action: 'work.write', noop: statusNoop, apply: (u, r, op) => workItems.transitionWorkItemLean(u, r.id, workItems.transitionWorkItemSchema.parse({ ...op.details, to: op.to })) },
+      // Labels, with the same operation as tags elsewhere.
+      tags: {
+        action: 'work.write',
+        noop: (row, op) => op.add.every((t: string) => row.tags.includes(t)) && !op.remove.some((t: string) => row.tags.includes(t)),
+        undo: (row, op) => ({ op: 'tags', add: op.remove.filter((t: string) => row.tags.includes(t)), remove: op.add.filter((t: string) => !row.tags.includes(t)) }),
+        apply: (u, r, op) => workItems.updateWorkItemLean(u, r.id, { labels: [...new Set([...r.tags.filter((t: string) => !op.remove.includes(t)), ...op.add])] }),
+      },
     },
   },
   requests: {

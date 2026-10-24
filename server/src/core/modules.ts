@@ -13,12 +13,13 @@ export const MODULES = {
   knowledge: { label: 'Knowledge', description: 'Articles from known errors and resolutions, suggested while logging incidents.' },
   request: { label: 'Service requests', description: 'A catalogue of things people can ask for (accounts, access, VMs), with approval and fulfilment tasks, kept apart from incidents.' },
   portal: { label: 'Self-service portal', description: 'A simple page at /portal where people outside IT report problems, follow their tickets and answer replies, signed in by SSO or an email link.' },
+  development: { label: 'Development', description: 'Epics, stories, bugs and tasks in a backlog per team, for teams that build what they run.' },
 } as const;
 export type Module = keyof typeof MODULES;
 
-// Service requests (#44) and the portal (#45) are off until someone turns them on: existing installations keep the
-// menus they know, and nothing faces people outside IT unless an administrator chose it.
-export const MODULE_DEFAULTS: Record<Module, boolean> = { problem: true, incident: true, change: true, event: true, cmdb: true, sla: true, knowledge: true, request: false, portal: false };
+// Service requests (#44), the portal (#45) and development work (#164) are off until someone turns them on: existing
+// installations keep the menus they know, and nothing faces people outside IT unless an administrator chose it.
+export const MODULE_DEFAULTS: Record<Module, boolean> = { problem: true, incident: true, change: true, event: true, cmdb: true, sla: true, knowledge: true, request: false, portal: false, development: false };
 let state: Record<Module, boolean> = { ...MODULE_DEFAULTS };
 let loadedAt = 0;
 
@@ -48,6 +49,7 @@ export function moduleOfAction(action: string): Module | null {
   if (prefix === 'incident' || prefix === 'change' || prefix === 'event' || prefix === 'sla' || prefix === 'request') return prefix;
   if (prefix === 'ci') return 'cmdb';
   if (prefix === 'article') return 'knowledge';
+  if (prefix === 'work') return 'development';
   return null;
 }
 
@@ -57,4 +59,4 @@ export const actionEnabled = (action: string) => {
 };
 
 /** OpenAPI tags and MCP prompts per module, so the documentation and agent surface follow the switches too. */
-export const MODULE_TAGS: Record<string, Module> = { Problems: 'problem', Analyses: 'problem', 'Known errors': 'problem', 'Problem candidates': 'problem', Incidents: 'incident', Changes: 'change', Events: 'event', CMDB: 'cmdb', 'Service levels': 'sla', 'Service requests': 'request', Portal: 'portal' };
+export const MODULE_TAGS: Record<string, Module> = { Problems: 'problem', Analyses: 'problem', 'Known errors': 'problem', 'Problem candidates': 'problem', Incidents: 'incident', Changes: 'change', Events: 'event', CMDB: 'cmdb', 'Service levels': 'sla', 'Service requests': 'request', Portal: 'portal', 'Work items': 'development' };

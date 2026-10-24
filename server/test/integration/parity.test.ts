@@ -17,8 +17,9 @@ describe('API and MCP parity', { skip }, () => {
     k = await startKernel();
     analyst = await k.login('analyst');
     pm = await k.login('pm');
-    // Service requests (#44) are an optional module, off by default: on here so the check covers them.
-    await (await k.login('admin')).put('/api/admin/modules', { request: true, reason: 'Parity' });
+    // Service requests (#44) and development work (#165) are optional modules, off by default: on here so the check
+    // covers them.
+    await (await k.login('admin')).put('/api/admin/modules', { request: true, development: true, reason: 'Parity' });
     doc = (await analyst.get('/api/openapi.json')).body;
     mcp = new McpClient({ name: 'parity', version: '1' });
     // An administrator sees every tool, so the parity check covers all of them.
@@ -64,6 +65,7 @@ describe('API and MCP parity', { skip }, () => {
     service: async () => (await pm.post('/api/cis', { name: `Parity service ${Date.now()}`, ci_type: 'business_service' })).body.ref,
     article: async () => (await analyst.post('/api/articles', { title: 'Parity envelope', body: 'Steps.' })).body.ref,
     improvement: async () => (await analyst.post('/api/improvements', { title: 'Parity envelope' })).body.ref,
+    work_item: async () => (await analyst.post('/api/work-items', { type: 'story', title: 'Parity envelope' })).body.ref,
     request: async () => {
       const service = (await pm.post('/api/cis', { name: `Parity requests ${Date.now()}`, ci_type: 'business_service' })).body.ref;
       const item = (await pm.post('/api/request-items', { service, name: 'Parity item', fulfilment_tasks: [{ title: 'Do it' }] })).body.id;

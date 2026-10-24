@@ -16,6 +16,7 @@ import * as oc from './people/oncall.js';
 import * as events from './events/events.js';
 import * as ch from './changes/changes.js';
 import * as imp from './improvements/improvements.js';
+import * as wi from './development/work-items.js';
 import * as rq from './requests/requests.js';
 import * as portal from './requests/portal.js';
 import * as slaMod from './reporting/sla.js';
@@ -72,7 +73,7 @@ const user = z.object({
 });
 const ids = candidates.candidateIdsSchema.extend({ key: z.string().optional() });
 
-const BULK_TAG: Record<bulkMod.Practice, string> = { incidents: 'Incidents', problems: 'Problems', changes: 'Changes', alerts: 'Events', actions: 'Actions', articles: 'Knowledge', cis: 'CMDB', improvements: 'Improvements', requests: 'Service requests' };
+const BULK_TAG: Record<bulkMod.Practice, string> = { incidents: 'Incidents', problems: 'Problems', changes: 'Changes', alerts: 'Events', actions: 'Actions', articles: 'Knowledge', cis: 'CMDB', improvements: 'Improvements', requests: 'Service requests', 'work-items': 'Work items' };
 
 export const OPERATIONS: Op[] = [
   { method: 'post', path: '/api/auth/login', tag: 'Authentication', summary: 'Sign in with username and password (sets a session cookie)', body: z.object({ username: z.string(), password: z.string() }), public: true },
@@ -357,6 +358,17 @@ export const OPERATIONS: Op[] = [
   { method: 'get', path: '/api/change-freezes', tag: 'Changes', summary: 'Change freezes' },
   { method: 'post', path: '/api/change-freezes', tag: 'Changes', summary: 'Add a change freeze (change authority)', body: ch.freezeSchema },
   { method: 'delete', path: '/api/change-freezes/:id', tag: 'Changes', summary: 'Remove a change freeze' },
+  { method: 'get', path: '/api/work-items', tag: 'Work items', summary: 'The backlog: open epics, stories, bugs and tasks in rank order per team, or filtered by status, type, team, assignee, label or epic', query: wi.listWorkItemsSchema },
+  { method: 'post', path: '/api/work-items', tag: 'Work items', summary: 'Add an epic, story, bug or task to the bottom of a backlog; a child starts as narrow as its parent. Supports Idempotency-Key', body: wi.createWorkItemSchema },
+  { method: 'get', path: '/api/work-items/:ref', tag: 'Work items', summary: "A work item with its parent and children, an epic's progress, the team's Definition of Ready and Done, links, history and next steps" },
+  { method: 'patch', path: '/api/work-items/:ref', tag: 'Work items', summary: 'Update a work item; another team puts it at the bottom of that backlog', body: wi.updateWorkItemSchema },
+  { method: 'post', path: '/api/work-items/:ref/transition', tag: 'Work items', summary: "new → ready → in_progress → in_review → done | removed (with a reason); to ready or done, checked lists what holds of the team's definition and the rest is logged", body: wi.transitionWorkItemSchema },
+  { method: 'post', path: '/api/work-items/:ref/move', tag: 'Work items', summary: 'Move it in its backlog: before or after another item, or to the top or the bottom', body: wi.moveWorkItemSchema },
+  { method: 'post', path: '/api/work-items/:ref/comments', tag: 'Work items', summary: 'Add a note', body: z.object({ body: z.string() }) },
+  { method: 'post', path: '/api/work-items/:ref/links', tag: 'Work items', summary: 'Link a related work item or a document', body: wi.workItemLinkSchema },
+  { method: 'delete', path: '/api/work-items/:ref/links/:id', tag: 'Work items', summary: 'Remove a link' },
+  { method: 'get', path: '/api/teams/:id/work-definitions', tag: 'Work items', summary: "A team's Definition of Ready and Definition of Done" },
+  { method: 'put', path: '/api/teams/:id/work-definitions', tag: 'Work items', summary: "Change a team's Definition of Ready and Definition of Done (managers); kept in the audit trail", body: wi.workDefinitionsSchema },
   { method: 'get', path: '/api/improvements', tag: 'Improvements', summary: 'The continual improvement register (open by default); quick_wins=true for value 4–5 and effort 1–2', query: imp.listImprovementsSchema },
   { method: 'get', path: '/api/improvements/model', tag: 'Improvements', summary: 'The continual improvement model in four lines, for guided mode' },
   { method: 'post', path: '/api/improvements', tag: 'Improvements', summary: 'Suggest an improvement; from a review, problem or service review it starts as narrow as its source. Supports Idempotency-Key', body: imp.createImprovementSchema },
@@ -519,7 +531,7 @@ export const OPERATIONS: Op[] = [
   // Bulk actions (#110): one per practice list.
   ...bulkMod.PRACTICES.map((p): Op => ({
     method: 'post', path: `/api/${p}/bulk`, tag: BULK_TAG[p], body: bulkMod.bulkSchema,
-    summary: `Apply one operation (${bulkMod.operationsFor(p).join(', ')}) to many ${p} by ids or the list filter (at most ${bulkMod.BULK_LIMIT}), through the same rules as single edits; dry_run previews. Returns an outcome per record and, when reversible, an undo body. Supports Idempotency-Key`,
+    summary: `Apply one operation (${bulkMod.operationsFor(p).join(', ')}) to many ${p.replace('-', ' ')} by ids or the list filter (at most ${bulkMod.BULK_LIMIT}), through the same rules as single edits; dry_run previews. Returns an outcome per record and, when reversible, an undo body. Supports Idempotency-Key`,
   })),
 ];
 
