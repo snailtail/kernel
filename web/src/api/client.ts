@@ -1,3 +1,5 @@
+import type { WorkItemType } from './types/development';
+import type { WorkItemStatus } from '../statuses';
 export type Role = 'admin' | 'manager' | 'analyst' | 'viewer' | 'integration';
 export type Status = 'new' | 'analysis' | 'known_error' | 'resolved' | 'closed';
 export type LinkKind = 'incident' | 'event' | 'change' | 'problem';
@@ -190,6 +192,8 @@ export interface Meta {
   workaround_effectiveness: Effectiveness[];
   categories: { id: number; name: string; active: boolean }[];
   assignees: { id: number; display_name: string; role: Role }[];
+  /** Development work (#165): the hierarchy and the transitions, from the server; null with the module off. */
+  work_items?: { parent_types: Record<WorkItemType, WorkItemType[]>; transitions: Record<WorkItemStatus, WorkItemStatus[]> } | null;
 }
 
 export class ApiError extends Error {

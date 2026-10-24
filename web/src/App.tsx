@@ -41,6 +41,9 @@ const ImprovementsPage = lazy(() => import('./features/improvements/Improvements
 const ImprovementPage = lazy(() => import('./features/improvements/ImprovementPage').then((m) => ({ default: m.ImprovementPage })));
 const BacklogPage = lazy(() => import('./features/development/Backlog').then((m) => ({ default: m.BacklogPage })));
 const WorkItemPage = lazy(() => import('./features/development/WorkItemPage').then((m) => ({ default: m.WorkItemPage })));
+const BoardPage = lazy(() => import('./features/development/Board').then((m) => ({ default: m.BoardPage })));
+const SprintsPage = lazy(() => import('./features/development/Sprints').then((m) => ({ default: m.SprintsPage })));
+const SprintPage = lazy(() => import('./features/development/SprintPage').then((m) => ({ default: m.SprintPage })));
 const RequestsPage = lazy(() => import('./features/requests/Requests').then((m) => ({ default: m.RequestsPage })));
 const RequestPage = lazy(() => import('./features/requests/RequestPage').then((m) => ({ default: m.RequestPage })));
 const ArticlePage = lazy(() => import('./features/knowledge/Knowledge').then((m) => ({ default: m.ArticlePage })));
@@ -159,6 +162,9 @@ export function App() {
             <Route path="/improvements/:ref" element={<ImprovementPage />} />
             <Route path="/work" element={<BacklogPage />} />
             <Route path="/work/:ref" element={<WorkItemPage />} />
+            <Route path="/board" element={<BoardPage />} />
+            <Route path="/sprints" element={<SprintsPage />} />
+            <Route path="/sprints/:id" element={<SprintPage />} />
             <Route path="/requests" element={<RequestsPage />} />
             <Route path="/requests/:ref" element={<RequestPage />} />
             <Route path="/knowledge" element={<KnowledgePage />} />

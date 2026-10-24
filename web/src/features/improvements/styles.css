@@ -1,4 +1,3 @@
-.kanban-title { font-weight: 550; color: var(--text); }
 .matrix { display: grid; grid-template-columns: 22px 1fr; grid-template-rows: 1fr auto; gap: 6px; margin-bottom: 16px; }
 .matrix-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .matrix-quick { border-color: var(--success); background: var(--success-soft); }

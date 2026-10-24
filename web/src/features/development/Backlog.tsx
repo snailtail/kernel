@@ -1,16 +1,15 @@
 // Development work (#165): a team's backlog in rank order, with drag and drop and the keyboard to reorder it, filters
 // on type, label and epic, and the team's Definition of Ready and Done.
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { api } from '../../api/client';
 import { SavedViews } from '../../components/SavedViews';
-import { useApi, useListParams, useSearchText } from '../../hooks';
+import { useApi, useSearchText } from '../../hooks';
 import { useLive } from '../../hooks/useLive';
 import { canEdit, useSession } from '../../session';
 import { WORK_ITEM_STATUS, type WorkItemStatus } from '../../statuses';
-import type { Team } from '../../api/types/teams';
 import type { WorkItemRow } from '../../api/types/development';
-import { TYPE_LABEL, TYPES } from './common';
+import { TYPE_LABEL, TYPES, useTeamParam } from './common';
 import { BacklogList, type Place } from './components/BacklogList';
 import { DefinitionsCard } from './components/DefinitionsCard';
 import { NewWorkItem } from './components/WorkItemForms';
@@ -18,21 +17,10 @@ import { NewWorkItem } from './components/WorkItemForms';
 export function BacklogPage() {
   const { user } = useSession();
   const navigate = useNavigate();
-  const { params, setParams, set } = useListParams();
+  const { team, picker, params, set } = useTeamParam({ allowNone: true });
   const [q, setQ] = useSearchText();
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { data: teams } = useApi<Team[]>('/api/teams');
-  const team = params.get('team');
-  // Without a team in the URL, open the person's own team's backlog (or the first one).
-  useEffect(() => {
-    if (team || !teams) return;
-    const first = teams.find((t) => t.mine && t.active) ?? teams.find((t) => t.active);
-    const next = new URLSearchParams(params);
-    next.set('team', first ? String(first.id) : 'none');
-    setParams(next, { replace: true });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [team, teams]);
   const { data, loading, refresh, reload } = useApi<WorkItemRow[]>(team ? `/api/work-items?${params}` : null);
   const { data: epics } = useApi<WorkItemRow[]>(team ? `/api/work-items?type=epic&limit=200&team=${team}` : null);
   useLive(['work_item:*'], refresh);
@@ -59,10 +47,7 @@ export function BacklogPage() {
         {editable && <button className="btn primary page-new" onClick={() => setCreating(true)}>New item</button>}
       </header>
       <div className="filters">
-        <select value={team ?? ''} onChange={(e) => set('team', e.target.value)} aria-label="Team">
-          {(teams ?? []).filter((t) => t.active).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-          <option value="none">No team</option>
-        </select>
+        {picker}
         <input className="search" placeholder="Search the backlog…" value={q} onChange={(e) => setQ(e.target.value)} />
         <select value={status} onChange={(e) => set('status', e.target.value === 'open' ? '' : e.target.value)} aria-label="Status">
           <option value="open">Backlog (open)</option>{(Object.keys(WORK_ITEM_STATUS) as WorkItemStatus[]).map((s) => <option key={s} value={s}>{WORK_ITEM_STATUS[s]}</option>)}<option value="all">All</option>

@@ -1225,6 +1225,10 @@ ol.timeline.compact li { grid-template-columns: 8rem 1fr; padding: 5px 0; font-s
 .kanban { display: grid; grid-template-columns: repeat(5, minmax(160px, 1fr)); gap: 12px; overflow-x: auto; padding-bottom: 8px; }
 .kanban-col { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; min-height: 160px; display: flex; flex-direction: column; gap: 8px; }
 .kanban-col.over { border-color: var(--accent); background: var(--accent-soft); }
+.kanban-col.warn { border-color: var(--warn); }
+.kanban-note { margin: -4px 0 2px; }
+.kanban-title { font-weight: 550; color: var(--text); }
+.kanban-note.warn { color: var(--warn); font-weight: 600; }
 .kanban-col h2 { font-size: 13px; margin: 0 0 2px; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.04em; }
 .kanban-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 4px; }
 .kanban-card[draggable='true'] { cursor: grab; }

@@ -6,7 +6,7 @@ import type { Home, Meta, NewKind, User } from './api/client';
 import { canEdit, isManager } from './session';
 
 export type Module = keyof Meta['modules'];
-type IconName = 'home' | 'events' | 'incidents' | 'status' | 'candidates' | 'problems' | 'kedb' | 'changes' | 'actions' | 'improvements' | 'backlog' | 'requests' | 'knowledge' | 'review' | 'pir' | 'dashboard' | 'reports' | 'services' | 'cmdb' | 'teams' | 'people' | 'rules' | 'help' | 'admin';
+type IconName = 'home' | 'events' | 'incidents' | 'status' | 'candidates' | 'problems' | 'kedb' | 'changes' | 'actions' | 'improvements' | 'backlog' | 'board' | 'sprints' | 'requests' | 'knowledge' | 'review' | 'pir' | 'dashboard' | 'reports' | 'services' | 'cmdb' | 'teams' | 'people' | 'rules' | 'help' | 'admin';
 export type BadgeKey = 'my_work' | 'events' | 'incidents' | 'kedb' | 'actions' | 'reviews' | 'requests';
 
 export interface NavItem {
@@ -67,6 +67,8 @@ export const NAV: NavGroup[] = [
       { to: '/actions', label: 'Actions', icon: 'actions', hint: 'Follow-ups with an owner and a date', badge: 'actions', key: 'a' },
       { to: '/improvements', label: 'Improvements', icon: 'improvements', hint: 'Continual improvement register: ideas, quick wins and their benefit', key: 'o', match: ['/improvements/'] },
       { to: '/work', label: 'Backlog', icon: 'backlog', hint: 'Epics, stories, bugs and tasks, ordered per team', module: 'development', key: 'j', match: ['/work/'] },
+      { to: '/board', label: 'Board', icon: 'board', hint: 'The sprint, or Kanban with WIP limits', module: 'development' },
+      { to: '/sprints', label: 'Sprints', icon: 'sprints', hint: 'Planning, burndown, velocity and retrospectives', module: 'development', match: ['/sprints/'] },
     ],
   },
   {
