@@ -81,10 +81,10 @@ describe('visibility and restricted records (#53)', { skip }, () => {
   const leaks = (body: unknown) => JSON.stringify(body ?? '').includes(MARKER);
   const around = (body: unknown) => { const t = JSON.stringify(body ?? ''); const i = t.indexOf(MARKER); return t.slice(Math.max(0, i - 200), i + 40); };
 
-  test('every table attached to a problem, incident, change, improvement or request has row-level security, or is a reviewed exception', async () => {
+  test('every table attached to a problem, incident, change, improvement, request, work item or sprint has row-level security, or is a reviewed exception', async () => {
     const { rows } = await ownerQuery(
       `SELECT DISTINCT c.table_name FROM information_schema.columns c JOIN pg_class t ON t.relname = c.table_name AND t.relkind = 'r'
-       WHERE c.table_schema = 'public' AND c.column_name IN ('incident_id', 'problem_id', 'change_id', 'review_id', 'improvement_id', 'request_id') AND NOT t.relrowsecurity
+       WHERE c.table_schema = 'public' AND c.column_name IN ('incident_id', 'problem_id', 'change_id', 'review_id', 'improvement_id', 'request_id', 'work_item_id', 'sprint_id') AND NOT t.relrowsecurity
          -- In the audit trail and security events, request_id is the HTTP request's id, not a service request.
          AND NOT (c.column_name = 'request_id' AND c.table_name IN ('audit_log', 'security_events')) ORDER BY 1`,
     );

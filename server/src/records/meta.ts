@@ -6,9 +6,10 @@ import type { User } from '../security/auth.js';
 import { config } from '../core/config.js';
 import { query } from '../core/db.js';
 import { conflict, notFound } from '../core/errors.js';
-import { modules } from '../core/modules.js';
+import { moduleEnabled, modules } from '../core/modules.js';
 import * as problems from '../problems/problems.js';
 import { hiddenRecordsExist } from '../security/visibility.js';
+import { WORK_ITEM_PARENT_TYPES, WORK_ITEM_TRANSITIONS } from '../development/work-items.js';
 import { CLOSURE_CODES, EC_DECISIONS, ROLES, STATUSES, TRANSITIONS, WORKAROUND_EFFECTIVENESS } from '../problems/workflow.js';
 
 /** All categories, inactive ones too (records may still carry them). */
@@ -59,6 +60,8 @@ export async function getMeta(user: User) {
     techniques: analyses.TECHNIQUES,
     ec_decisions: EC_DECISIONS,
     workaround_effectiveness: WORKAROUND_EFFECTIVENESS,
+    // Development work (#165): which parent each type can have and where an item can go, so the UI keeps no copy.
+    work_items: moduleEnabled('development') ? { parent_types: WORK_ITEM_PARENT_TYPES, transitions: WORK_ITEM_TRANSITIONS } : null,
     mcp_url: config.mcpUrl,
     categories,
     assignees: assignees.map(({ id, display_name, role }) => ({ id, display_name, role })),

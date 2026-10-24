@@ -8,7 +8,7 @@ import { moduleEnabled } from '../core/modules.js';
 import { authorize, can } from '../security/policy.js';
 import { hiddenRecordsExist } from '../security/visibility.js';
 
-export const TILES = ['mttr', 'sla', 'change_success', 'recurring', 'problems_resolved', 'major_open', 'requests_fulfilled', 'satisfaction'] as const;
+export const TILES = ['mttr', 'sla', 'change_success', 'recurring', 'problems_resolved', 'major_open', 'requests_fulfilled', 'satisfaction', 'points_done', 'unplanned_work'] as const;
 type TileId = (typeof TILES)[number];
 const PERIODS = 6;
 
@@ -48,7 +48,9 @@ export async function kpis(user: User, { period }: z.infer<typeof kpiSchema>) {
   const none = { rows: [] as any[] };
   // How people rated their closed tickets in the portal (#45): only while the portal is on.
   const portal = moduleEnabled('portal') && (incident || request);
-  const [periods, resolved, changes, recurring, problems, knownErrors, major, requests, ratings] = await Promise.all([
+  // Development work (#166): only with the module on.
+  const development = moduleEnabled('development') && can(user.role, 'work.read');
+  const [periods, resolved, changes, recurring, problems, knownErrors, major, requests, ratings, done, sprints] = await Promise.all([
     query(`${P} SELECT start::date::text AS start FROM p ORDER BY start`, [period]),
     incident
       ? query(
@@ -122,6 +124,26 @@ export async function kpis(user: User, { period }: z.infer<typeof kpiSchema>) {
              AND (f.incident_id IS NULL OR $2) AND (f.request_id IS NULL OR $3)
            GROUP BY 1`,
           [period, incident, request],
+        )
+      : none,
+    development
+      ? query(
+          `${P} SELECT p.start::date::text AS start, coalesce(sum(w.points), 0)::int AS points, count(w.id)::int AS items
+           FROM p LEFT JOIN work_items w ON w.status = 'done' AND w.type <> 'epic' AND w.done_at >= p.start AND w.done_at < p.stop
+           GROUP BY 1`,
+          [period],
+        )
+      : none,
+    // A completed sprint's stays keep their points and outcome (development/sprints.ts), so these do not move later.
+    development
+      ? query(
+          `${P} SELECT p.start::date::text AS start, count(DISTINCT s.id)::int AS sprints,
+             coalesce(sum(si.points) FILTER (WHERE si.outcome IS NOT NULL), 0)::int AS scope,
+             coalesce(sum(si.points) FILTER (WHERE si.outcome IS NOT NULL AND si.unplanned), 0)::int AS unplanned
+           FROM p LEFT JOIN sprints s ON s.status = 'completed' AND s.completed_at >= p.start AND s.completed_at < p.stop
+           LEFT JOIN sprint_items si ON si.sprint_id = s.id
+           GROUP BY 1`,
+          [period],
         )
       : none,
   ]);
@@ -210,6 +232,24 @@ export async function kpis(user: User, { period }: z.infer<typeof kpiSchema>) {
       detail: now?.total ? `${now.good} good, ${now.okay} okay, ${now.bad} not good, of ${now.total} ratings.` : `No ratings this ${unit}.`,
       basis: `The share of ratings that were "good", from the one-click question people get in the portal when their ticket is closed.`,
       link: '/incidents?status=closed',
+    });
+  }
+  if (development) {
+    const points = per(done.rows, (rs) => rs[0]?.points ?? 0);
+    const now = done.rows.find((r) => r.start === last(starts));
+    tiles.push({
+      id: 'points_done', label: 'Story points done', value: last(points), unit: 'count', trend: points, trend_label: `per ${unit}`, lower_is_better: false,
+      detail: `${now?.items ?? 0} stories, bugs and tasks finished this ${unit}.`,
+      basis: `The story points of work items finished in the ${unit}, in sprints or on a Kanban board: the teams' velocity over time.`,
+      link: '/work?status=done',
+    });
+    const unplanned = per(sprints.rows, (rs) => pct(rs[0]?.unplanned ?? 0, rs[0]?.scope ?? 0));
+    const sprintsNow = sprints.rows.find((r) => r.start === last(starts));
+    tiles.push({
+      id: 'unplanned_work', label: 'Unplanned work', value: last(unplanned), unit: 'percent', trend: unplanned, trend_label: `per ${unit}`, lower_is_better: true,
+      detail: sprintsNow?.sprints ? `${sprintsNow.unplanned} of ${sprintsNow.scope} points in ${sprintsNow.sprints} completed sprint${sprintsNow.sprints === 1 ? '' : 's'} came after the start.` : `No sprints completed this ${unit}.`,
+      basis: `Sprints completed in the ${unit}: the share of their points that were added after the sprint started.`,
+      link: '/work',
     });
   }
   return {

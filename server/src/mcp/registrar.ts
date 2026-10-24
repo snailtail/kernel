@@ -61,6 +61,7 @@ const TOOL_ACTIONS: Record<string, Action> = {
   list_request_items: 'request.read', list_requests: 'request.read', get_request: 'request.read', create_request: 'request.write', update_request: 'request.write',
   transition_request: 'request.write', complete_request_task: 'request.write',
   list_work_items: 'work.read', get_work_item: 'work.read', create_work_item: 'work.write', update_work_item: 'work.write', transition_work_item: 'work.write', reorder_backlog: 'work.write',
+  list_sprints: 'work.read', get_sprint: 'work.read', plan_sprint: 'work.write', complete_sprint: 'work.write',
   register_standard_change: 'change.register', approve_change: 'change.approve', link_ci_to_change: 'change.update',
   report_event: 'event.ingest', list_alerts: 'event.read', acknowledge_alert: 'event.ack', close_alert: 'event.ack', list_event_rules: 'event.read',
   list_rules: 'rule.read', get_rule: 'rule.read', dry_run_rule: 'rule.read', propose_rule: 'rule.propose',
