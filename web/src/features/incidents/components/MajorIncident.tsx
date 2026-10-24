@@ -8,6 +8,7 @@ import { useSession } from '../../../session';
 import { Markdown } from '../../../components/Markdown';
 import { FormModal } from '../../../components/Modal';
 import type { MajorInfo, Communication, ReviewSummary, RelatedRow, StatusProposal, TimelineEntry } from '../../../api/types/incidents';
+import '../styles.css';
 
 /** "in 12 min" / "8 min overdue", refreshed every 15 seconds. */
 function useCountdown(at: string | null) {

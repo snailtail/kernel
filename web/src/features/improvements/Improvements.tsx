@@ -13,6 +13,7 @@ import { ImprovementList } from './components/ImprovementList';
 import { Board } from './components/Board';
 import { Matrix } from './components/Matrix';
 import { NewImprovement } from './components/ImprovementForms';
+import './styles.css';
 
 /** Keys a link to the create form carries (a service report, a KPI tile); they are not list filters. */
 const PREFILL = ['source', 'service', 'from', 'to', 'kpi', 'source_ref'];

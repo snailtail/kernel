@@ -10,6 +10,7 @@ import { Term } from '../../../components/Glossary';
 import type { Incident } from '../../../api/types/incidents';
 import type { PersonRef } from '../../../api/types/people';
 import { LEVEL } from '../common';
+import '../styles.css';
 
 export function NewIncident({ onClose, onDone }: { onClose: () => void; onDone: (ref: string) => void }) {
   const { meta } = useSession();

@@ -1,6 +1,7 @@
 import { Link } from 'react-router';
 import { formatDate, relativeTime } from '../../../format';
 import type { EvidenceRecord, CandidateSeries, Candidate } from '../../../api/types/candidates';
+import '../styles.css';
 
 export function CandidateCard({ c, editable, onCreate, onLink, onDecide, onRestore }: { c: Candidate; editable: boolean; onCreate: () => void; onLink: () => void; onDecide: () => void; onRestore: () => void }) {
   const ev = c.evidence;

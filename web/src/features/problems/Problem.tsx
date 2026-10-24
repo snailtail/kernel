@@ -29,6 +29,7 @@ import { ActionsSection } from './components/ActionsSection';
 import { ActivitySection } from './components/ActivitySection';
 import { TransitionModal } from './components/TransitionModal';
 import { ProblemIncidents, ProblemImprovements, ProblemChanges } from './components/RelatedRecords';
+import './styles.css';
 
 export function ProblemPage() {
   const navigate = useNavigate();

@@ -10,6 +10,7 @@ import { TwoFactor } from '../../components/TwoFactor';
 import { StartPageSelects } from '../../components/StartPage';
 import { canEdit, useSession } from '../../session';
 import type { ApiToken, UserSession } from '../../api/types/settings';
+import './styles.css';
 
 export function SettingsPage() {
   const { user } = useSession();

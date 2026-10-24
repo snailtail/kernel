@@ -9,6 +9,7 @@ import { relativeTime } from '../../format';
 import { useApi } from '../../hooks';
 import { useSession } from '../../session';
 import type { Team, TeamQueue } from '../../api/types/teams';
+import './styles.css';
 
 export function TeamsPage() {
   const { user } = useSession();

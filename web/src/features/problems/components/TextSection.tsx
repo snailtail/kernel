@@ -3,6 +3,7 @@ import { asConflict, type Conflict } from '../../../api/client';
 import { Markdown } from '../../../components/Markdown';
 import { richPaste } from '../../../components/RichPaste';
 import { relativeTime } from '../../../format';
+import '../styles.css';
 
 export function TextSection(props: { recordRef: string; title: string; hint: string; value: string; editable: boolean; onSave: (v: string, base: string) => Promise<void>; proposed?: boolean; onConfirm?: () => void }) {
   const [draft, setDraft] = useState<string | null>(null);

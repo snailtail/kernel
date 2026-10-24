@@ -9,6 +9,7 @@ import { RulesCard } from './components/RulesCard';
 import { DecisionModal } from './components/DecisionModal';
 import { CreateModal } from './components/CreateModal';
 import { LinkModal } from './components/LinkModal';
+import './styles.css';
 
 export function CandidatesPage() {
   const { user } = useSession();

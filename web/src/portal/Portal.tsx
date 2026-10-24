@@ -13,6 +13,7 @@ import { Report } from './Report';
 import { Article } from './Article';
 import { Catalogue } from './Catalogue';
 import { Ask } from './Ask';
+import './styles.css';
 
 export function PortalApp() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);

@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { api } from '../../../api/client';
 import { useApi } from '../../../hooks';
 import type { CandidateRule, EolVersion } from '../../../api/types/candidates';
+import '../styles.css';
 
 const SETTING_LABEL: Record<string, string> = {
   min_records: 'At least (records)', min_cis: 'On at least (CIs)', window_days: 'Within (days)', max_depth: 'Dependency steps',

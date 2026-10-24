@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { api } from '../../../api/client';
 import { FormModal } from '../../../components/Modal';
 import type { CandidateRuleId, Candidate } from '../../../api/types/candidates';
+import '../styles.css';
 
 /** Trend rules: what has to join before a dismissed candidate comes back. */
 const TREND_JOINS: Partial<Record<CandidateRuleId, string>> = { flapping: 'alert', rising_warnings: 'alert', capacity_warnings: 'alert', self_clearing: 'alert', change_correlation: 'change', eol_versions: 'CI on that version' };

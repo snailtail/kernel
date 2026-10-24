@@ -6,6 +6,7 @@ import { api } from '../../api/client';
 import { useApi } from '../../hooks';
 import { canEdit, isManager, useSession } from '../../session';
 import type { ServiceReport, ReportSchedule } from '../../api/types/reports';
+import './styles.css';
 
 const dur = (m: number | null) => (m === null ? '–' : m < 60 ? `${m} min` : m < 1440 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${Math.floor(m / 1440)} d ${Math.floor((m % 1440) / 60)} h`);
 

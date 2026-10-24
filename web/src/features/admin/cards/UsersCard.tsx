@@ -7,6 +7,7 @@ import { FormModal } from '../../../components/Modal';
 import { askReason } from '../../../components/Ask';
 import { Link } from 'react-router';
 import type { AdminUser } from '../../../api/types/admin';
+import '../styles.css';
 
 export function UsersCard() {
   const { user: me, meta, reloadMeta } = useSession();

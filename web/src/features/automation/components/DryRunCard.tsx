@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api } from '../../../api/client';
 import type { RuleDraft, RuleDryRun } from '../../../api/types/rules';
+import '../styles.css';
 
 export function DryRunCard({ rule }: { rule: RuleDraft & { id?: number } }) {
   const [result, setResult] = useState<RuleDryRun | null>(null);

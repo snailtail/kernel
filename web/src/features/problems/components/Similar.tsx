@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { api, type ProblemDetail, type Status } from '../../../api/client';
 import { StatusBadge } from '../../../components/Badges';
+import '../styles.css';
 
 interface Similar { ref: string; title: string; status: Status; priority: number; affected_service: string; workaround: string; score: number }
 

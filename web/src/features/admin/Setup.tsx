@@ -4,6 +4,7 @@ import { api } from '../../api/client';
 import { useApi } from '../../hooks';
 import { useSession } from '../../session';
 import type { SetupState } from '../../api/types/settings';
+import './styles.css';
 
 const STEPS = ['What Kernel should help with', 'Support hours', 'Monitoring', 'Example data'] as const;
 

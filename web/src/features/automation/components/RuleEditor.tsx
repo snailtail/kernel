@@ -6,6 +6,7 @@ import { useTeams } from '../../../components/Teams';
 import type { RuleKind, RuleValue, RuleCondition, RuleAction, RuleDraft, Rule } from '../../../api/types/rules';
 import { KINDS, STATUSES, SOURCES, CONDITION_FIELDS, TRIGGER_FIELDS, NOTIFY_ROLES, ROLE_LABEL, DURATIONS, duration, FIELD_LABEL, OPS, typeOf, words, useLookups, Sentence } from '../vocabulary';
 import { DryRunCard } from './DryRunCard';
+import '../styles.css';
 
 const SETTABLE = TRIGGER_FIELDS;
 

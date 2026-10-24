@@ -2,6 +2,7 @@ import { Link } from 'react-router';
 import { IMPROVEMENT_STATUS } from '../../../statuses';
 import type { ImprovementRow } from '../../../api/types/improvements';
 import { rating, quadrantOf } from '../common';
+import '../styles.css';
 
 const QUADRANTS: { id: 'quick' | 'big' | 'fill' | 'pit'; title: string; hint: string }[] = [
   { id: 'quick', title: 'Quick wins', hint: 'High value, low effort: do these first.' },

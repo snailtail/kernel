@@ -12,6 +12,7 @@ import { focusPractice, type Practice } from '../../nav';
 import { StartPageSelects } from '../../components/StartPage';
 import { canEdit, useSession } from '../../session';
 import type { MyWork } from '../../api/types/work';
+import './styles.css';
 
 /** One calm place for everything that needs me, most urgent first. */
 export function MyWorkPage() {

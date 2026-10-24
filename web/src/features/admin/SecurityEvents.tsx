@@ -6,6 +6,7 @@ import { formatDate, relativeTime } from '../../format';
 import { useApi } from '../../hooks';
 import { useSession } from '../../session';
 import type { SecurityEvent, SecuritySummary, AlertCounting, AlertingSettings, AlertingStatus, PrivacySettings } from '../../api/types/security';
+import './styles.css';
 
 const FILTERS = ['action', 'category', 'outcome', 'min_severity', 'user', 'ip', 'token_prefix', 'from', 'to'] as const;
 const CATEGORIES = ['authentication', 'authorization', 'iam', 'configuration', 'data_access', 'web', 'network', 'integrity', 'api'];

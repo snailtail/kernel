@@ -4,6 +4,7 @@ import { api, type ProblemDetail } from '../../../api/client';
 import { FormModal } from '../../../components/Modal';
 import { useApi } from '../../../hooks';
 import type { Candidate } from '../../../api/types/candidates';
+import '../styles.css';
 
 export function LinkModal({ candidate: c, onClose }: { candidate: Candidate; onClose: () => void }) {
   const navigate = useNavigate();

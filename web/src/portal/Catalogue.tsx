@@ -3,6 +3,7 @@ import { Link } from 'react-router';
 import { api } from '../api/client';
 import { TEXT } from './text';
 import { errorText, Notice, type CatalogueItem } from './common';
+import './styles.css';
 
 export function Catalogue() {
   const [items, setItems] = useState<CatalogueItem[] | null>(null);

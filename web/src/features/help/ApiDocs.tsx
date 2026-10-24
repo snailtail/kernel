@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Markdown } from '../../components/Markdown';
 import { useApi } from '../../hooks';
+import './styles.css';
 
 interface OpenApi {
   info: { title: string; description: string };

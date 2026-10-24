@@ -1,4 +1,5 @@
 import { type EditorProps, replaceAt } from './common';
+import '../../styles.css';
 
 export function Ishikawa({ data, set, readOnly }: EditorProps) {
   const categories: { name: string; causes: string[]; considered?: boolean }[] = data.categories ?? [];

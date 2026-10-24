@@ -4,6 +4,7 @@ import { api, ApiError } from '../api/client';
 import { Markdown } from '../components/Markdown';
 import { TEXT } from './text';
 import { type Ticket, errorText, Notice, type CatalogueItem } from './common';
+import './styles.css';
 
 export function Ask() {
   const { id = '' } = useParams();

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { type EditorProps, replaceAt, removeAt } from './common';
+import '../../styles.css';
 
 const EVENT_KINDS = ['incident', 'change', 'deployment', 'alert', 'observation', 'other'];
 

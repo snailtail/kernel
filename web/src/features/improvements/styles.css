@@ -1,0 +1,12 @@
+.kanban-title { font-weight: 550; color: var(--text); }
+.matrix { display: grid; grid-template-columns: 22px 1fr; grid-template-rows: 1fr auto; gap: 6px; margin-bottom: 16px; }
+.matrix-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.matrix-quick { border-color: var(--success); background: var(--success-soft); }
+.matrix-axis { color: var(--text-3); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+.matrix-y { writing-mode: vertical-rl; transform: rotate(180deg); text-align: right; align-self: start; }
+.matrix-x { grid-column: 2; text-align: right; }
+@media (max-width: 720px) {
+  .matrix { grid-template-columns: 1fr; }
+  .matrix-grid { grid-template-columns: 1fr; }
+  .matrix-axis { display: none; }
+}

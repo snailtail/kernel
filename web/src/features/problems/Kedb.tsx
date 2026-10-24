@@ -6,6 +6,7 @@ import { DECISION_LABEL, EFFECTIVENESS_LABEL, formatDate } from '../../format';
 import { useApi, useSearchText } from '../../hooks';
 import { useListToolkit } from '../../components/list/ListToolkit';
 import { SavedViews } from '../../components/SavedViews';
+import './styles.css';
 
 export function KedbPage() {
   // Search and "include resolved" live in the address, so they can be shared and saved as views (#110).

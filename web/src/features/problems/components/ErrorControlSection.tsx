@@ -4,6 +4,7 @@ import { Markdown } from '../../../components/Markdown';
 import { DECISION_LABEL, EFFECTIVENESS_LABEL, formatDay, relativeTime, RISK_LABEL } from '../../../format';
 import { canEdit, useSession } from '../../../session';
 import { AssessmentModal } from './AssessmentModal';
+import '../styles.css';
 
 export function ErrorControlSection({ problem: p, onChange }: { problem: ProblemDetail; onChange: (p: ProblemDetail) => void }) {
   const { user } = useSession();

@@ -8,6 +8,7 @@ import { KepnerTregoe } from './KepnerTregoe';
 import { Timeline } from './Timeline';
 import { MethodGuide } from './MethodGuide';
 import { QualityCheck } from './QualityCheck';
+import '../../styles.css';
 
 export function AnalysisEditor({ problem: p, analysis, editable, onChange }: { problem: ProblemDetail; analysis: Analysis; editable: boolean; onChange: (p: ProblemDetail) => void }) {
   const [data, setData] = useState<any>(analysis.data);

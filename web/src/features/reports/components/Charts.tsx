@@ -1,5 +1,6 @@
 // Small dependency-free SVG charts. Colors come from --series-* tokens (validated palette, light and dark).
 import { useRef, useState, type ReactNode } from 'react';
+import '../styles.css';
 
 interface Series {
   key: string;
