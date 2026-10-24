@@ -18,8 +18,6 @@ import type { StartNarrow } from '../problems/problems.js';
 
 export const WORK_ITEM_TYPES = ['epic', 'story', 'bug', 'task'] as const;
 export const WORK_ITEM_STATUSES = ['new', 'ready', 'in_progress', 'in_review', 'done', 'removed'] as const;
-/** Story points: a fixed scale, so estimates stay rough on purpose. */
-export const POINTS = [1, 2, 3, 5, 8, 13] as const;
 const WORK_ITEM_LINK_KINDS = ['work_item', 'document'] as const;
 type Type = (typeof WORK_ITEM_TYPES)[number];
 type Status = (typeof WORK_ITEM_STATUSES)[number];
@@ -47,6 +45,7 @@ const fields = {
   title: z.string().trim().min(1).max(300),
   description: z.string().max(20000),
   type: z.enum(WORK_ITEM_TYPES),
+  /** Story points: a fixed scale, so estimates stay rough on purpose. */
   points: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(5), z.literal(8), z.literal(13)]).nullable(),
   team_id: z.number().int().nullable(),
   assignee_id: z.number().int().nullable(),
@@ -215,7 +214,7 @@ const PROGRESS = (w: string) => `
                             'items_done', count(*) FILTER (WHERE d.status = 'done'), 'items', count(*))
    FROM work_items d WHERE d.status <> 'removed' AND (d.parent_id = ${w}.id OR d.parent_id IN (SELECT s.id FROM work_items s WHERE s.parent_id = ${w}.id)))`;
 
-export async function definitionsOf(teamId: number | null) {
+async function definitionsOf(teamId: number | null) {
   if (!teamId) return { ready: [] as string[], done: [] as string[] };
   const { rows } = await query('SELECT ready, done FROM work_definitions WHERE team_id = $1', [teamId]);
   return { ready: (rows[0]?.ready ?? []) as string[], done: (rows[0]?.done ?? []) as string[] };
