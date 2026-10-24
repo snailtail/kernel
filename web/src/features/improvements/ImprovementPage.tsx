@@ -21,7 +21,7 @@ import { EditImprovement } from './components/ImprovementForms';
 import { LinksCard } from './components/LinksCard';
 import { KpiCard } from './components/KpiCard';
 
-const SOURCE: Record<string, string> = { review: 'Post-incident review', problem: 'Problem', service_review: 'Service review', idea: 'Idea' };
+const SOURCE: Record<string, string> = { review: 'Post-incident review', problem: 'Problem', service_review: 'Service review', idea: 'Idea', retrospective: 'Sprint retrospective' };
 const TRANSITION_LABEL: Record<ImprovementStatus, string> = { idea: 'Back to idea', approved: 'Approve', in_progress: 'Start', done: 'Mark done', rejected: 'Reject' };
 /** A move back is not a decision: "Back to approved" pauses work, "Reopen" picks done work up again. */
 const transitionLabel = (from: ImprovementStatus, to: ImprovementStatus) => (from === 'in_progress' && to === 'approved' ? 'Back to approved' : from === 'done' && to === 'in_progress' ? 'Reopen' : TRANSITION_LABEL[to]);

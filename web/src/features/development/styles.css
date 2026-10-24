@@ -44,3 +44,60 @@
 .wi-report h3 { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-3); margin: 6px 0 2px; }
 .wi-report p { margin: 0 0 6px; }
 @media (max-width: 640px) { .wi-report { grid-template-columns: 1fr; } }
+.warn { color: var(--warn); }
+/* Sprints (#166) */
+.sp-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.sp-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.sp-row-main { min-width: 0; }
+.sp-status-active { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.sp-status-completed { color: var(--text-3); }
+.sp-guide { margin: 0 0 12px; }
+.sp-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+.sp-stat { display: flex; flex-direction: column; gap: 2px; }
+.sp-stat strong { font-size: 22px; font-variant-numeric: tabular-nums; }
+.sp-capacity { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 10px; }
+.sp-capacity-bar { width: 140px; }
+.sp-capacity.warn .sp-capacity-bar > span { background: var(--warn); }
+.sp-plan { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.sp-plan-col { border-radius: var(--radius); padding: 4px; }
+.sp-plan-col.over { outline: 2px dashed var(--accent); }
+.sp-plan-col h3 { font-size: 13px; margin: 0 0 6px; color: var(--text-2); }
+.sp-charts { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.sp-notes { width: 100%; }
+.sp-retro { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.sp-retro-col { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; }
+.sp-retro-col h3 { font-size: 13px; margin: 0 0 6px; }
+.sp-retro-col ul { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 6px; }
+.sp-retro-col li { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; display: grid; gap: 4px; }
+.sp-retro-body { overflow-wrap: anywhere; }
+.sp-retro-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.sp-retro-add { display: flex; gap: 6px; }
+.sp-retro-add input { flex: 1; min-width: 0; }
+.sp-carry { display: grid; gap: 8px; border: 0; padding: 0; margin: 0; }
+.sp-carry-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.sp-carry-title { min-width: 0; overflow-wrap: anywhere; }
+.chart { margin: 0; overflow-x: auto; }
+.chart svg { width: 100%; min-width: 360px; height: auto; display: block; }
+.chart-grid { stroke: var(--border); stroke-width: 1; }
+.chart-axis text, .chart-x, .chart-label { font-size: 13px; fill: var(--text-3); }
+.chart-label { fill: var(--text); font-weight: 600; }
+.chart-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
+.chart-ideal { fill: none; stroke: var(--text-3); stroke-width: 1.5; stroke-dasharray: 4 4; }
+.chart-dot { fill: var(--accent); stroke: var(--surface); stroke-width: 2; }
+.chart-bar { fill: var(--accent); }
+.chart-bar-committed { fill: var(--border-strong); }
+.chart-legend { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 4px; color: var(--text-2); }
+.chart-legend .key { display: inline-block; width: 14px; height: 3px; border-radius: 2px; margin-left: 6px; }
+.chart-legend .key:first-child { margin-left: 0; }
+.key-actual { background: var(--accent); }
+.key-ideal { background: repeating-linear-gradient(90deg, var(--text-3) 0 4px, transparent 4px 7px); }
+.key-committed { background: var(--border-strong); height: 8px !important; }
+.chart-table { margin-top: 6px; }
+.chart-table table { border-collapse: collapse; margin-top: 4px; }
+.chart-table th, .chart-table td { padding: 2px 10px 2px 0; text-align: left; }
+@media (max-width: 900px) {
+  .sp-plan, .sp-charts, .sp-retro { grid-template-columns: 1fr; }
+  .sp-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.wi-wip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; border: 0; padding: 0; margin: 0; }
+.wi-wip legend { margin-bottom: 4px; }

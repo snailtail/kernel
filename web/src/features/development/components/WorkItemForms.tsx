@@ -5,13 +5,13 @@ import { useApi } from '../../../hooks';
 import { useSession } from '../../../session';
 import type { Team } from '../../../api/types/teams';
 import type { WorkItem, WorkItemRow, WorkItemType } from '../../../api/types/development';
-import { PARENT_TYPES, POINTS, TYPE_LABEL, TYPES } from '../common';
+import { POINTS, TYPE_LABEL, TYPES, useParentTypes } from '../common';
 
 const labelsOf = (text: string) => [...new Set(text.split(',').map((l) => l.trim()).filter(Boolean))];
 
 /** The parents an item of this type can have, from the open backlog. */
 function ParentSelect({ type, value, self, onChange }: { type: WorkItemType; value: string; self?: string; onChange: (v: string) => void }) {
-  const allowed = PARENT_TYPES[type];
+  const allowed = useParentTypes()[type];
   const { data } = useApi<WorkItemRow[]>(allowed.length ? `/api/work-items?status=open&limit=500&sort=updated` : null);
   if (!allowed.length) return null;
   const options = (data ?? []).filter((w) => allowed.includes(w.item_type) && w.ref !== self);
@@ -56,6 +56,7 @@ export function NewWorkItem({ team, parent, onClose, onDone }: { team?: string; 
   });
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v, ...(k === 'type' && !parent ? { parent: '' } : {}) }));
   const type = form.type as WorkItemType;
+  const parentTypes = useParentTypes();
   const submit = async () => {
     const w = await api.post<WorkItem>('/api/work-items', {
       type, title: form.title, description: form.description, labels: labelsOf(form.labels),
@@ -68,7 +69,7 @@ export function NewWorkItem({ team, parent, onClose, onDone }: { team?: string; 
     <FormModal title={parent ? `New item under ${parent.ref}` : 'New work item'} submitLabel="Add to the backlog" onClose={onClose} onSubmit={submit}>
       <label>Type
         <select value={form.type} onChange={(e) => set('type', e.target.value)}>
-          {TYPES.filter((t) => !parent || PARENT_TYPES[t].includes(parent.type)).map((t) => <option key={t} value={t}>{TYPE_LABEL[t]}</option>)}
+          {TYPES.filter((t) => !parent || parentTypes[t].includes(parent.type)).map((t) => <option key={t} value={t}>{TYPE_LABEL[t]}</option>)}
         </select>
       </label>
       <label>Story points

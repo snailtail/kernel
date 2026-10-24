@@ -205,7 +205,9 @@ points against capacity, completing sends each unfinished item back to the backl
 sprint shows a burndown, the velocity of the last six sprints and the share of unplanned work. Kanban teams use the
 same board without sprints, with WIP limits per column as a warning. A retrospective's "to change" becomes an
 improvement with one click. API: `/api/sprints` (+ `/:id/items`, `/start`, `/complete`, `/retro`),
-`/api/teams/:id/board`; MCP: `list_sprints`, `get_sprint`, `plan_sprint`, `complete_sprint`.
+`/api/teams/:id/board`; MCP: `list_sprints`, `get_sprint`, `plan_sprint`, `complete_sprint`. In the web UI: **Board**
+(drag or "Move…", the team's definition on ready and done) and **Sprints** (planning by dragging from the backlog,
+the burndown and velocity charts with a table view, the sprint review and the retrospective).
 Viewers stay strictly read-only (auditors, stakeholders): end users report incidents through the service desk or,
 later, the self-service portal (#45), not with a viewer account.
 

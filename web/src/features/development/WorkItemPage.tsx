@@ -16,7 +16,7 @@ import { useLive } from '../../hooks/useLive';
 import { canEdit, useSession } from '../../session';
 import { WORK_ITEM_STATUS, type WorkItemStatus } from '../../statuses';
 import type { Criterion, WorkItem } from '../../api/types/development';
-import { DefinitionCheck, PARENT_TYPES, ProgressBar, transitionLabel, TYPE_LABEL, TypeBadge } from './common';
+import { DefinitionCheck, ProgressBar, useParentTypes, transitionLabel, TYPE_LABEL, TypeBadge } from './common';
 import { EditWorkItem, NewWorkItem } from './components/WorkItemForms';
 import './styles.css';
 
@@ -31,6 +31,7 @@ export function WorkItemPage() {
   const [editing, setEditing] = useState(false);
   const [adding, setAdding] = useState(false);
   const [checking, setChecking] = useState<'ready' | 'done' | null>(null);
+  const parentTypes = useParentTypes();
   if (error) return <RecordNotFound refId={ref ?? ''} error={error} onOpened={reload} />;
   if (!w) return null;
   const path = `/api/work-items/${w.ref}`;
@@ -59,6 +60,7 @@ export function WorkItemPage() {
           <TypeBadge type={w.item_type} />
           <StatusBadge kind="work_item" status={w.status} />
           {w.points !== null && <span className="tag">{w.points} {w.points === 1 ? 'point' : 'points'}</span>}
+          {w.sprint && <Link to={`/sprints/${w.sprint.id}`} className="tag">{w.sprint.status === 'completed' ? `Done in ${w.sprint.name}` : w.sprint.name}</Link>}
           {w.labels.map((l) => <Link key={l} to={`/work?team=${w.team_id ?? 'none'}&label=${encodeURIComponent(l)}`} className="tag">{l}</Link>)}
           <span className="muted small">Added by {w.created_by_name ?? 'someone'} {relativeTime(w.created_at)}</span>
         </div>
@@ -95,7 +97,7 @@ export function WorkItemPage() {
             <section className="card"><h2>Description</h2>{masked ? <p className="placeholder">Confidential.</p> : w.description ? <Markdown text={w.description} /> : <p className="placeholder">No description.</p>}</section>
           )}
           {w.item_type !== 'epic' && <CriteriaCard criteria={w.acceptance_criteria} editable={editable && !masked} onChange={setCriteria} />}
-          {(w.children.length > 0 || PARENT_TYPES.task.includes(w.item_type) || w.item_type === 'epic') && (
+          {(w.children.length > 0 || parentTypes.task.includes(w.item_type) || w.item_type === 'epic') && (
             <section className="card">
               <h2>{w.item_type === 'epic' ? 'Stories and bugs' : 'Tasks'} <span className="count">{w.children.length}</span> {w.progress && <ProgressBar p={w.progress} />}</h2>
               {w.children.length === 0 && <p className="placeholder">{w.item_type === 'epic' ? 'Split it into stories small enough for a sprint each.' : 'Break it into tasks if that helps the team.'}</p>}

@@ -1,7 +1,10 @@
-// Development work (#165): what the backlog and an item's page share.
-import { useState } from 'react';
+// Development work (#165, #166): what the backlog, the board, the sprints and an item's page share.
+import { useEffect, useState } from 'react';
 import { FormModal } from '../../components/Modal';
+import { useApi, useListParams } from '../../hooks';
+import { useSession } from '../../session';
 import type { WorkItemStatus } from '../../statuses';
+import type { Team } from '../../api/types/teams';
 import type { Progress, WorkItemType } from '../../api/types/development';
 import './styles.css';
 
@@ -9,8 +12,35 @@ export const TYPES: WorkItemType[] = ['epic', 'story', 'bug', 'task'];
 export const TYPE_LABEL: Record<WorkItemType, string> = { epic: 'Epic', story: 'Story', bug: 'Bug', task: 'Task' };
 /** Story points: the server's fixed scale. */
 export const POINTS = [1, 2, 3, 5, 8, 13];
-/** The parents each type can have, as on the server: epic → story or bug → task. */
-export const PARENT_TYPES: Record<WorkItemType, WorkItemType[]> = { epic: [], story: ['epic'], bug: ['epic'], task: ['story', 'bug'] };
+const NO_PARENTS: Record<WorkItemType, WorkItemType[]> = { epic: [], story: [], bug: [], task: [] };
+/** The parents each type can have (epic → story or bug → task), as the server delivers them in /api/meta. */
+export const useParentTypes = () => useSession().meta.work_items?.parent_types ?? NO_PARENTS;
+
+/**
+ * The team in the URL (?team=), for the backlog, the board and the sprints. Without one, the person's own team (or
+ * the first one) is put there; `allowNone` offers the items without a team, which have a backlog but no sprints.
+ */
+export function useTeamParam({ allowNone = false } = {}) {
+  const { params, setParams, set } = useListParams();
+  const { data: teams } = useApi<Team[]>('/api/teams');
+  const team = params.get('team');
+  useEffect(() => {
+    if (team || !teams) return;
+    const first = teams.find((t) => t.mine && t.active) ?? teams.find((t) => t.active);
+    if (!first && !allowNone) return;
+    const next = new URLSearchParams(params);
+    next.set('team', first ? String(first.id) : 'none');
+    setParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [team, teams]);
+  const picker = (
+    <select value={team ?? ''} onChange={(e) => set('team', e.target.value)} aria-label="Team">
+      {(teams ?? []).filter((t) => t.active).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+      {allowNone && <option value="none">No team</option>}
+    </select>
+  );
+  return { team, teams, picker, params, set };
+}
 
 const TRANSITION_LABEL: Record<WorkItemStatus, string> = { new: 'Back to new', ready: 'Mark ready', in_progress: 'Start', in_review: 'To review', done: 'Mark done', removed: 'Remove' };
 /** A move back says so: "Back to ready" pauses work, "Reopen" picks done work up again. */
