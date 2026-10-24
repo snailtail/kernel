@@ -10,6 +10,8 @@ export const PROBLEM_STATUS: Record<Status, string> = {
   closed: 'Closed',
 };
 
+export const PROBLEM_LIFECYCLE: Status[] = ['new', 'analysis', 'known_error', 'resolved', 'closed'];
+
 // ITIL 4 problem management phases
 export const STATUS_PHASE: Record<Status, string> = {
   new: 'Problem identification',
