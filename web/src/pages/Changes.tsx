@@ -1,7 +1,7 @@
-import { useState, type FormEvent } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
-import { api, type Guidance } from '../api';
-import { AffectedCisPanel, type AffectedCi, type AffectedService } from '../components/AffectedCis';
+import { useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router';
+import { api } from '../api';
+import { AffectedCisPanel } from '../components/AffectedCis';
 import { PersonalDataBadge, StatusBadge } from '../components/Badges';
 import { CommentBox } from '../components/CommentBox';
 import { GuidePanel } from '../components/Guide';
@@ -11,40 +11,28 @@ import { RecordNotFound, VisibilityPanel } from '../components/Visibility';
 import { DevLinksPanel } from '../components/DevLinks';
 import { SummaryButton } from '../components/Ai';
 import { AttachmentsPanel } from '../components/Attachments';
-import { FormModal, Modal } from '../components/Modal';
-import { useColumns, useListToolkit, type ColumnKey } from '../components/ListToolkit';
+import { FormModal } from '../components/Modal';
+import { useListToolkit } from '../components/list/ListToolkit';
+import { useColumns, type ColumnKey } from '../components/list/columns';
 import { SavedViews } from '../components/SavedViews';
 import { Term } from '../components/Glossary';
 import { formatDate, relativeTime } from '../format';
 import { useLive } from '../live';
 import { Presence } from '../components/Presence';
-import { useApi, useOpenOnNew } from '../hooks';
+import { useApi, useListParams, useOpenOnNew, useRecord } from '../hooks';
 import { useSession } from '../session';
 import { HistoryPanel } from '../components/History';
 import { CHANGE_STATUS, type ChangeStatus } from '../statuses';
+import type { ChangeRow, Change } from '../api/types/changes';
 
 const OUTCOME: Record<string, string> = { successful: 'Successful', failed: 'Failed', rolled_back: 'Rolled back' };
-interface Row { id: number; ref: string; title: string; change_type: string; status: ChangeStatus; risk: string | null; planned_start: string | null; planned_end: string | null; outcome: string | null; source: string; assignee: string | null; problem_ref: string | null; cis: string[] | null }
-interface Change extends Row {
-  description: string; template: string | null; template_id: number | null; implementation_plan: string; test_plan: string; backout_plan: string; review: string;
-  risk: string; risk_assessed: string; risk_reason: string; risk_overridden: boolean; actual_start: string | null; actual_end: string | null; assignee_id: number | null;
-  requested_by: string | null; problem_title: string | null; problem_status: string | null; created_at: string;
-  affected_cis: AffectedCi[]; affected_services: AffectedService[];
-  votes: { approver: string; decision: string; comment: string; created_at: string }[]; approvals: { required: number; approved: number }; can_vote: boolean;
-  collisions: { ref: string; title: string; ci: string; planned_start: string; planned_end: string }[]; freezes: { name: string; starts_at: string; ends_at: string; reason: string }[];
-  related_incidents: { ref: string; title: string; status: string; created_at: string }[];
-  links: { id: number; kind: string; reference: string; system: string; url: string }[];
-  activity: { id: number; kind: string; body: string; data: any; channel: string; created_at: string; user_name: string | null }[];
-  next_steps: Guidance;
-}
 
 const fmtWindow = (s: string | null, e: string | null) => (s ? `${formatDate(s)}${e ? ` – ${formatDate(e)}` : ''}` : 'Not planned');
 
 export function ChangesPage() {
   const { user } = useSession();
-  const [params, setParams] = useSearchParams();
+  const { params, setParams, set } = useListParams();
   const tab = params.get('tab') ?? 'list';
-  const set = (k: string, v: string) => setParams((prev) => { const n = new URLSearchParams(prev); if (v) n.set(k, v); else n.delete(k); return n; }, { replace: true });
   const [creating, setCreating] = useState(false);
   useOpenOnNew(() => setCreating(true));
   const navigate = useNavigate();
@@ -79,7 +67,7 @@ const CHANGE_COLUMNS: { key: ColumnKey; label: string }[] = [
 
 function ChangeList({ params, set }: { params: URLSearchParams; set: (k: string, v: string) => void }) {
   const query = new URLSearchParams([...params].filter(([k]) => k !== 'tab'));
-  const { data, loading, refresh } = useApi<Row[]>(`/api/changes?${query}`);
+  const { data, loading, refresh } = useApi<ChangeRow[]>(`/api/changes?${query}`);
   useLive(['change:*'], refresh);
   const { user } = useSession();
   const tk = useListToolkit({ list: 'changes', rows: data, idOf: (c) => c.ref, hrefOf: (c) => `/changes/${c.ref}`, filter: query.toString(), onChanged: refresh });
@@ -124,7 +112,7 @@ function ChangeList({ params, set }: { params: URLSearchParams; set: (k: string,
 }
 
 function Schedule() {
-  const { data } = useApi<{ changes: (Row & { cis: string[] | null })[]; freezes: { id: number; name: string; starts_at: string; ends_at: string; reason: string }[]; collisions: { change: string; with: string; ci_name: string }[] }>('/api/changes/schedule');
+  const { data } = useApi<{ changes: (ChangeRow & { cis: string[] | null })[]; freezes: { id: number; name: string; starts_at: string; ends_at: string; reason: string }[]; collisions: { change: string; with: string; ci_name: string }[] }>('/api/changes/schedule');
   if (!data) return null;
   // Group by day of the planned start; freezes are shown above the days they cover.
   const days = new Map<string, typeof data.changes>();
@@ -164,7 +152,6 @@ function Templates({ manager }: { manager: boolean }) {
   const { data, reload } = useApi<{ id: number; name: string; description: string; max_risk: string; ci_types: string[]; implementation_plan: string; test_plan: string; backout_plan: string; active: boolean }[]>('/api/change-templates');
   const { data: types } = useApi<{ name: string; label: string; class: string }[]>('/api/ci-types');
   const [editing, setEditing] = useState<any>(null);
-  const [error, setError] = useState<string | null>(null);
   return (
     <>
       <div className="section-head"><p className="muted">Standard changes are pre-approved, low-risk and repeatable: they need no authorisation. Pipelines can register them automatically.</p>{manager && <button className="btn primary" onClick={() => setEditing({ name: '', description: '', max_risk: 'low', ci_types: [], implementation_plan: '', test_plan: '', backout_plan: '', active: true })}>New template</button>}</div>
@@ -179,25 +166,23 @@ function Templates({ manager }: { manager: boolean }) {
       </div>
       {data?.length === 0 && <p className="empty">No standard change templates yet.</p>}
       {editing && (
-        <Modal title={editing.id ? `Edit ${editing.name}` : 'New standard change template'} onClose={() => setEditing(null)}>
-          <form className="form" onSubmit={async (e) => {
-            e.preventDefault();
-            const { id, created_by: _c, created_at: _d, ...body } = editing;
-            delete (body as any).id;
-            try { if (id) await api.put(`/api/change-templates/${id}`, body); else await api.post('/api/change-templates', body); setEditing(null); reload(); } catch (err) { setError((err as Error).message); }
-          }}>
-            <label className="full">Name<input required value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></label>
-            <label className="full">Description<textarea rows={2} value={editing.description} onChange={(e) => setEditing({ ...editing, description: e.target.value })} /></label>
-            <label>Pre-approved up to<select value={editing.max_risk} onChange={(e) => setEditing({ ...editing, max_risk: e.target.value })}><option value="low">Low risk</option><option value="medium">Medium risk</option><option value="high">High risk</option></select></label>
-            <label>For CI types<select multiple size={4} value={editing.ci_types} onChange={(e) => setEditing({ ...editing, ci_types: [...e.target.selectedOptions].map((o) => o.value) })}>{types?.filter((t) => t.class === 'ci').map((t) => <option key={t.name} value={t.name}>{t.label}</option>)}</select><span className="muted small">None selected: any type</span></label>
-            <label className="full">Implementation plan<textarea required rows={3} value={editing.implementation_plan} onChange={(e) => setEditing({ ...editing, implementation_plan: e.target.value })} /></label>
-            <label className="full">Test plan<textarea rows={2} value={editing.test_plan} onChange={(e) => setEditing({ ...editing, test_plan: e.target.value })} /></label>
-            <label className="full">Backout plan<textarea required rows={2} value={editing.backout_plan} onChange={(e) => setEditing({ ...editing, backout_plan: e.target.value })} /></label>
-            <label className="check full"><input type="checkbox" checked={editing.active} onChange={(e) => setEditing({ ...editing, active: e.target.checked })} /> Active</label>
-            {error && <div className="error full">{error}</div>}
-            <div className="actions full"><button type="button" className="btn" onClick={() => setEditing(null)}>Cancel</button><button className="btn primary">Save</button></div>
-          </form>
-        </Modal>
+        <FormModal title={editing.id ? `Edit ${editing.name}` : 'New standard change template'} submitLabel="Save" onClose={() => setEditing(null)} onSubmit={async () => {
+          const { id, created_by: _c, created_at: _d, ...body } = editing;
+          delete (body as any).id;
+          if (id) await api.put(`/api/change-templates/${id}`, body);
+          else await api.post('/api/change-templates', body);
+          setEditing(null);
+          reload();
+        }}>
+          <label className="full">Name<input required value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></label>
+          <label className="full">Description<textarea rows={2} value={editing.description} onChange={(e) => setEditing({ ...editing, description: e.target.value })} /></label>
+          <label>Pre-approved up to<select value={editing.max_risk} onChange={(e) => setEditing({ ...editing, max_risk: e.target.value })}><option value="low">Low risk</option><option value="medium">Medium risk</option><option value="high">High risk</option></select></label>
+          <label>For CI types<select multiple size={4} value={editing.ci_types} onChange={(e) => setEditing({ ...editing, ci_types: [...e.target.selectedOptions].map((o) => o.value) })}>{types?.filter((t) => t.class === 'ci').map((t) => <option key={t.name} value={t.name}>{t.label}</option>)}</select><span className="muted small">None selected: any type</span></label>
+          <label className="full">Implementation plan<textarea required rows={3} value={editing.implementation_plan} onChange={(e) => setEditing({ ...editing, implementation_plan: e.target.value })} /></label>
+          <label className="full">Test plan<textarea rows={2} value={editing.test_plan} onChange={(e) => setEditing({ ...editing, test_plan: e.target.value })} /></label>
+          <label className="full">Backout plan<textarea required rows={2} value={editing.backout_plan} onChange={(e) => setEditing({ ...editing, backout_plan: e.target.value })} /></label>
+          <label className="check full"><input type="checkbox" checked={editing.active} onChange={(e) => setEditing({ ...editing, active: e.target.checked })} /> Active</label>
+        </FormModal>
       )}
     </>
   );
@@ -246,47 +231,36 @@ function Freezes({ manager }: { manager: boolean }) {
 function NewChange({ onClose, onDone }: { onClose: () => void; onDone: (ref: string) => void }) {
   const { data: templates } = useApi<{ id: number; name: string; active: boolean }[]>('/api/change-templates');
   const [form, setForm] = useState({ title: '', description: '', change_type: 'normal', template_id: '', cis: '', planned_start: '', planned_end: '' });
-  const [error, setError] = useState<string | null>(null);
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    try {
-      const c = await api.post<Change>('/api/changes', {
-        title: form.title, description: form.description,
-        ...(form.change_type === 'standard' ? { template_id: Number(form.template_id) } : { change_type: form.change_type }),
-        cis: form.cis.split(/[\s,]+/).filter(Boolean),
-        ...(form.planned_start ? { planned_start: new Date(form.planned_start).toISOString() } : {}),
-        ...(form.planned_end ? { planned_end: new Date(form.planned_end).toISOString() } : {}),
-      });
-      onDone(c.ref);
-    } catch (err) {
-      setError((err as Error).message);
-    }
+  const submit = async () => {
+    const c = await api.post<Change>('/api/changes', {
+      title: form.title, description: form.description,
+      ...(form.change_type === 'standard' ? { template_id: Number(form.template_id) } : { change_type: form.change_type }),
+      cis: form.cis.split(/[\s,]+/).filter(Boolean),
+      ...(form.planned_start ? { planned_start: new Date(form.planned_start).toISOString() } : {}),
+      ...(form.planned_end ? { planned_end: new Date(form.planned_end).toISOString() } : {}),
+    });
+    onDone(c.ref);
   };
   return (
-    <Modal title="Request a change" onClose={onClose}>
-      <form className="form" onSubmit={submit}>
-        <label className="full">What will change?<input required autoFocus value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></label>
-        <label>Type <span className="muted small">(<Term id="standard_change">standard</Term> · <Term id="emergency_change">emergency</Term>)</span><select value={form.change_type} onChange={(e) => setForm({ ...form, change_type: e.target.value })}><option value="normal">Normal</option><option value="standard">Standard (pre-approved)</option><option value="emergency">Emergency</option></select></label>
-        {form.change_type === 'standard' && (
-          <label>Template<select required value={form.template_id} onChange={(e) => setForm({ ...form, template_id: e.target.value })}><option value="">–</option>{templates?.filter((t) => t.active).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
-        )}
-        <label className="full">Why and what<textarea rows={3} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
-        <label className="full">Affected CIs <span className="muted small">(refs; risk and collisions come from them)</span><input value={form.cis} onChange={(e) => setForm({ ...form, cis: e.target.value })} /></label>
-        <label>Planned start<input type="datetime-local" value={form.planned_start} onChange={(e) => setForm({ ...form, planned_start: e.target.value })} /></label>
-        <label>Planned end<input type="datetime-local" value={form.planned_end} onChange={(e) => setForm({ ...form, planned_end: e.target.value })} /></label>
-        {error && <div className="error full">{error}</div>}
-        <div className="actions full"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary">Request</button></div>
-      </form>
-    </Modal>
+    <FormModal title="Request a change" submitLabel="Request" onClose={onClose} onSubmit={submit}>
+      <label className="full">What will change?<input required autoFocus value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></label>
+      <label>Type <span className="muted small">(<Term id="standard_change">standard</Term> · <Term id="emergency_change">emergency</Term>)</span><select value={form.change_type} onChange={(e) => setForm({ ...form, change_type: e.target.value })}><option value="normal">Normal</option><option value="standard">Standard (pre-approved)</option><option value="emergency">Emergency</option></select></label>
+      {form.change_type === 'standard' && (
+        <label>Template<select required value={form.template_id} onChange={(e) => setForm({ ...form, template_id: e.target.value })}><option value="">–</option>{templates?.filter((t) => t.active).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
+      )}
+      <label className="full">Why and what<textarea rows={3} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
+      <label className="full">Affected CIs <span className="muted small">(refs; risk and collisions come from them)</span><input value={form.cis} onChange={(e) => setForm({ ...form, cis: e.target.value })} /></label>
+      <label>Planned start<input type="datetime-local" value={form.planned_start} onChange={(e) => setForm({ ...form, planned_start: e.target.value })} /></label>
+      <label>Planned end<input type="datetime-local" value={form.planned_end} onChange={(e) => setForm({ ...form, planned_end: e.target.value })} /></label>
+    </FormModal>
   );
 }
 
 export function ChangePage() {
   const { ref } = useParams();
   const { user } = useSession();
-  const { data: c, setData, error, reload, refresh } = useApi<Change>(`/api/changes/${ref}`);
+  const { data: c, setData, error, reload, refresh, actionError, setActionError, run } = useRecord<Change>(`/api/changes/${ref}`);
   const others = useLive([c && `change:${c.id}`], refresh, { presence: true });
-  const [actionError, setActionError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [finishing, setFinishing] = useState<null | 'review' | 'closed'>(null);
   if (error) return <RecordNotFound refId={ref ?? ''} error={error} onOpened={reload} />;
@@ -294,16 +268,6 @@ export function ChangePage() {
   const path = `/api/changes/${c.ref}`;
   const editable = user.role !== 'viewer' && !['closed', 'rejected', 'cancelled'].includes(c.status);
   const draftish = ['draft', 'assess'].includes(c.status);
-  const run = async (fn: () => Promise<Change>) => {
-    setActionError(null);
-    try {
-      setData(await fn());
-      return true;
-    } catch (err) {
-      setActionError((err as Error).message);
-      return false;
-    }
-  };
   const go = (body: object) => run(() => api.post(`${path}/transition`, body));
   const vote = async (decision: 'approve' | 'reject') => {
     const comment = window.prompt(decision === 'approve' ? 'Comment (optional)' : 'Why is it rejected?') ?? '';
@@ -321,7 +285,7 @@ export function ChangePage() {
         <div className="crumbs"><Link to="/changes">Changes</Link> / <span className="mono">{c.ref}</span> <Presence people={others} /></div>
         <h1>{c.title}</h1>
         <div className="badges">
-          {(c as any).contains_personal_data && <PersonalDataBadge />}
+          {c.contains_personal_data && <PersonalDataBadge />}
           <StatusBadge kind="change" status={c.status} />
           <span className={`tag type-${c.change_type}`}>{c.change_type}{c.template && `: ${c.template}`}</span>
           <span className={`badge risk-${c.risk}`} title={c.risk_reason}>{c.risk} risk{c.risk_overridden && ` (assessed ${c.risk_assessed})`}</span>
@@ -403,7 +367,7 @@ export function ChangePage() {
         </div>
         <aside className="problem-side">
           <SummaryButton recordRef={c.ref} onAddNote={async (body) => { await api.post(`/api/changes/${c.ref}/comments`, { body }); reload(); }} />
-          <VisibilityPanel record={c as any} onChange={reload} />
+          <VisibilityPanel record={c} onChange={reload} />
           <DevLinksPanel recordRef={c.ref} editable={editable} />
           <AttachmentsPanel recordRef={c.ref} editable={editable} canDelete={(a) => a.uploaded_by === user.id || user.role === 'admin' || user.role === 'manager'} />
           <HistoryPanel recordRef={c.ref} version={c} />
@@ -443,32 +407,26 @@ function EditChange({ change: c, onClose, onDone }: { change: Change; onClose: (
     title: c.title, description: c.description, change_type: c.change_type, implementation_plan: c.implementation_plan, test_plan: c.test_plan,
     backout_plan: c.backout_plan, planned_start: local(c.planned_start), planned_end: local(c.planned_end), risk: c.risk_overridden ? c.risk : '',
   });
-  const [error, setError] = useState<string | null>(null);
   return (
-    <Modal title={`Edit ${c.ref}`} onClose={onClose}>
-      <form className="form" onSubmit={async (e) => {
-        e.preventDefault();
-        const body = {
-          ...form, risk: form.risk || null,
-          planned_start: form.planned_start ? new Date(form.planned_start).toISOString() : null,
-          planned_end: form.planned_end ? new Date(form.planned_end).toISOString() : null,
-          ...(c.template_id ? { change_type: undefined } : {}),
-        };
-        try { onDone(await api.patch<Change>(`/api/changes/${c.ref}`, body)); } catch (err) { setError((err as Error).message); }
-      }}>
-        <label className="full">Title<input required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></label>
-        {!c.template_id && <label>Type<select value={form.change_type} onChange={(e) => setForm({ ...form, change_type: e.target.value })}><option value="normal">Normal</option><option value="emergency">Emergency</option></select></label>}
-        <label>Risk<select value={form.risk} onChange={(e) => setForm({ ...form, risk: e.target.value })}><option value="">Assessed: {c.risk_assessed}</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label>
-        <label>Planned start<input type="datetime-local" value={form.planned_start} onChange={(e) => setForm({ ...form, planned_start: e.target.value })} /></label>
-        <label>Planned end<input type="datetime-local" value={form.planned_end} onChange={(e) => setForm({ ...form, planned_end: e.target.value })} /></label>
-        <label className="full">Description<textarea rows={3} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
-        <label className="full">Implementation plan<textarea rows={3} value={form.implementation_plan} onChange={(e) => setForm({ ...form, implementation_plan: e.target.value })} /></label>
-        <label className="full">Test plan<textarea rows={2} value={form.test_plan} onChange={(e) => setForm({ ...form, test_plan: e.target.value })} /></label>
-        <label className="full">Backout plan<textarea rows={2} value={form.backout_plan} onChange={(e) => setForm({ ...form, backout_plan: e.target.value })} /></label>
-        {error && <div className="error full">{error}</div>}
-        <div className="actions full"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary">Save</button></div>
-      </form>
-    </Modal>
+    <FormModal title={`Edit ${c.ref}`} submitLabel="Save" onClose={onClose} onSubmit={async () => {
+      const body = {
+        ...form, risk: form.risk || null,
+        planned_start: form.planned_start ? new Date(form.planned_start).toISOString() : null,
+        planned_end: form.planned_end ? new Date(form.planned_end).toISOString() : null,
+        ...(c.template_id ? { change_type: undefined } : {}),
+      };
+      onDone(await api.patch<Change>(`/api/changes/${c.ref}`, body));
+    }}>
+      <label className="full">Title<input required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></label>
+      {!c.template_id && <label>Type<select value={form.change_type} onChange={(e) => setForm({ ...form, change_type: e.target.value })}><option value="normal">Normal</option><option value="emergency">Emergency</option></select></label>}
+      <label>Risk<select value={form.risk} onChange={(e) => setForm({ ...form, risk: e.target.value })}><option value="">Assessed: {c.risk_assessed}</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label>
+      <label>Planned start<input type="datetime-local" value={form.planned_start} onChange={(e) => setForm({ ...form, planned_start: e.target.value })} /></label>
+      <label>Planned end<input type="datetime-local" value={form.planned_end} onChange={(e) => setForm({ ...form, planned_end: e.target.value })} /></label>
+      <label className="full">Description<textarea rows={3} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
+      <label className="full">Implementation plan<textarea rows={3} value={form.implementation_plan} onChange={(e) => setForm({ ...form, implementation_plan: e.target.value })} /></label>
+      <label className="full">Test plan<textarea rows={2} value={form.test_plan} onChange={(e) => setForm({ ...form, test_plan: e.target.value })} /></label>
+      <label className="full">Backout plan<textarea rows={2} value={form.backout_plan} onChange={(e) => setForm({ ...form, backout_plan: e.target.value })} /></label>
+    </FormModal>
   );
 }
 

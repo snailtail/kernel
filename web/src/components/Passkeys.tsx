@@ -2,8 +2,7 @@ import { startAuthentication, startRegistration } from '@simplewebauthn/browser'
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { formatDate } from '../format';
-
-interface Passkey { id: number; name: string; backed_up: boolean; created_at: string; last_used_at: string | null }
+import type { Passkey } from '../api/types/settings';
 
 export const passkeysSupported = () => typeof window !== 'undefined' && !!window.PublicKeyCredential;
 

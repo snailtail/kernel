@@ -1,27 +1,13 @@
 // Major incidents (#108): the response header (lead, comms lead, bridge, next update), declaring, stakeholder
 // updates, related incidents, the status page proposal and the timeline of key moments.
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { api } from '../api';
 import { formatDate, relativeTime } from '../format';
 import { useSession } from '../session';
 import { Markdown } from './Markdown';
-import { Modal } from './Modal';
-
-export interface MajorInfo {
-  declared_at: string | null; lead_id: number | null; lead: string | null; comms_id: number | null; comms: string | null; bridge: string;
-  update_minutes: number | null; next_update_at: string | null; update_overdue: boolean; last_update: { body: string; created_at: string } | null;
-  communications: Communication[];
-}
-/** A status update on the incident and who outside was told (#46). */
-export interface Communication {
-  id: number; created_at: string; phase: string; message: string; public: boolean; retracted_at: string | null; author: string | null;
-  contacts: { person_id: number | null; name: string | null; organisation: string; status: string; sent_at: string | null }[];
-  subscribers_sent: number; subscribers_pending: number; subscribers_last_sent_at: string | null;
-}
-export interface ReviewSummary { status: 'scheduled' | 'draft' | 'published' | 'waived'; owner: string | null; due: string | null; due_in_days: number | null; overdue: boolean; published_at: string | null }
-export interface RelatedRow { ref: string; title: string; status: string; priority?: number; resolve_with_parent?: boolean; is_major?: boolean }
-export interface StatusProposal { services: string[]; status: string; phase: string; message: string }
+import { FormModal } from './Modal';
+import type { MajorInfo, Communication, ReviewSummary, RelatedRow, StatusProposal, TimelineEntry } from '../api/types/incidents';
 
 /** "in 12 min" / "8 min overdue", refreshed every 15 seconds. */
 function useCountdown(at: string | null) {
@@ -84,16 +70,12 @@ export function MajorHeader({ incidentRef, major, open, canEdit, onChange }: { i
 /** Pre-filled with the last update: most updates change a line or two. */
 function PostUpdateModal({ incidentRef, last, onClose, onDone }: { incidentRef: string; last: MajorInfo['last_update']; onClose: () => void; onDone: (i: any) => void }) {
   const [body, setBody] = useState(last?.body ?? 'Affected: …\nWhat we know: …\nWhat we are doing: …\nNext update: …');
-  const [error, setError] = useState<string | null>(null);
   return (
-    <Modal title="Stakeholder update" onClose={onClose}>
-      <form className="form" onSubmit={async (e) => { e.preventDefault(); try { onDone(await api.post(`/api/incidents/${incidentRef}/communications`, { body })); } catch (err) { setError((err as Error).message); } }}>
-        <p className="hint-box full">Plain language for people outside IT: what is affected, what you know, what you are doing and when the next update comes. {last ? `Pre-filled with the update from ${relativeTime(last.created_at)}.` : ''}</p>
-        <label className="full">Update<textarea rows={6} required value={body} onChange={(e) => setBody(e.target.value)} /></label>
-        {error && <div className="error full">{error}</div>}
-        <div className="actions full"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={!body.trim()}>Post update</button></div>
-      </form>
-    </Modal>
+    <FormModal title="Stakeholder update" submitLabel="Post update" canSubmit={!!body.trim()} onClose={onClose}
+      onSubmit={async () => onDone(await api.post(`/api/incidents/${incidentRef}/communications`, { body }))}>
+      <p className="hint-box full">Plain language for people outside IT: what is affected, what you know, what you are doing and when the next update comes. {last ? `Pre-filled with the update from ${relativeTime(last.created_at)}.` : ''}</p>
+      <label className="full">Update<textarea rows={6} required value={body} onChange={(e) => setBody(e.target.value)} /></label>
+    </FormModal>
   );
 }
 
@@ -113,25 +95,15 @@ export function DeclareMajorModal({ incidentRef, onClose, onDone }: { incidentRe
   const [lead, setLead] = useState(String(user.id));
   const [comms, setComms] = useState('');
   const [bridge, setBridge] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    try {
-      onDone(await api.post(`/api/incidents/${incidentRef}/major`, { lead_id: Number(lead), comms_id: comms ? Number(comms) : null, ...(bridge.trim() ? { bridge: bridge.trim() } : {}) }));
-    } catch (err) {
-      setError((err as Error).message);
-    }
+  const submit = async () => {
+    onDone(await api.post(`/api/incidents/${incidentRef}/major`, { lead_id: Number(lead), comms_id: comms ? Number(comms) : null, ...(bridge.trim() ? { bridge: bridge.trim() } : {}) }));
   };
   return (
-    <Modal title="Declare a major incident" onClose={onClose}>
-      <form className="form" onSubmit={submit}>
-        <p className="hint-box full">A major incident gets a lead, a place to talk and stakeholder updates on a fixed rhythm (by priority; the lead can change it). Problem managers are told, and the timeline starts now.</p>
-        <PeopleFields lead={lead} comms={comms} setLead={setLead} setComms={setComms} />
-        <label className="full">Bridge <span className="muted small">(meeting link or phone number, optional)</span><input placeholder="https://teams.microsoft.com/… or +46 8 …" value={bridge} onChange={(e) => setBridge(e.target.value)} /></label>
-        {error && <div className="error full">{error}</div>}
-        <div className="actions full"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary danger">Declare major incident</button></div>
-      </form>
-    </Modal>
+    <FormModal title="Declare a major incident" submitLabel="Declare major incident" submitClass="btn primary danger" onClose={onClose} onSubmit={submit}>
+      <p className="hint-box full">A major incident gets a lead, a place to talk and stakeholder updates on a fixed rhythm (by priority; the lead can change it). Problem managers are told, and the timeline starts now.</p>
+      <PeopleFields lead={lead} comms={comms} setLead={setLead} setComms={setComms} />
+      <label className="full">Bridge <span className="muted small">(meeting link or phone number, optional)</span><input placeholder="https://teams.microsoft.com/… or +46 8 …" value={bridge} onChange={(e) => setBridge(e.target.value)} /></label>
+    </FormModal>
   );
 }
 
@@ -140,24 +112,14 @@ function MajorTeamModal({ incidentRef, major, onClose, onDone }: { incidentRef: 
   const [comms, setComms] = useState(major.comms_id ? String(major.comms_id) : '');
   const [bridge, setBridge] = useState(major.bridge);
   const [minutes, setMinutes] = useState(major.update_minutes ?? 60);
-  const [error, setError] = useState<string | null>(null);
   return (
-    <Modal title="Major incident team" onClose={onClose}>
-      <form className="form" onSubmit={async (e) => {
-        e.preventDefault();
-        try {
-          onDone(await api.patch(`/api/incidents/${incidentRef}/major`, { ...(lead ? { lead_id: Number(lead) } : {}), comms_id: comms ? Number(comms) : null, bridge: bridge.trim(), update_minutes: Number(minutes) }));
-        } catch (err) {
-          setError((err as Error).message);
-        }
-      }}>
-        <PeopleFields lead={lead} comms={comms} setLead={setLead} setComms={setComms} />
-        <label className="full">Bridge<input value={bridge} onChange={(e) => setBridge(e.target.value)} /></label>
-        <label>Update every (minutes)<input type="number" min={5} max={1440} value={minutes} onChange={(e) => setMinutes(Number(e.target.value))} /></label>
-        {error && <div className="error full">{error}</div>}
-        <div className="actions full"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary">Save</button></div>
-      </form>
-    </Modal>
+    <FormModal title="Major incident team" submitLabel="Save" onClose={onClose} onSubmit={async () => {
+      onDone(await api.patch(`/api/incidents/${incidentRef}/major`, { ...(lead ? { lead_id: Number(lead) } : {}), comms_id: comms ? Number(comms) : null, bridge: bridge.trim(), update_minutes: Number(minutes) }));
+    }}>
+      <PeopleFields lead={lead} comms={comms} setLead={setLead} setComms={setComms} />
+      <label className="full">Bridge<input value={bridge} onChange={(e) => setBridge(e.target.value)} /></label>
+      <label>Update every (minutes)<input type="number" min={5} max={1440} value={minutes} onChange={(e) => setMinutes(Number(e.target.value))} /></label>
+    </FormModal>
   );
 }
 
@@ -267,8 +229,6 @@ export function CommunicationLogCard({ log }: { log: Communication[] }) {
     </section>
   );
 }
-
-interface TimelineEntry { activity_id: number; at: string; kind: string; key_moment: boolean; by: string | null; label: string; body: string }
 
 /** Key moments only, oldest first; the start of the post-incident review. */
 export function IncidentTimeline({ incidentRef, version }: { incidentRef: string; version: unknown }) {

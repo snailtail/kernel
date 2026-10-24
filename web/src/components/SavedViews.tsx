@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { api } from '../api';
 import { useApi } from '../hooks';
+import { FormModal } from './Modal';
 import { useTeams } from './Teams';
 import { isManager, useSession } from '../session';
-import { columnStore } from './ListToolkit';
-import { Modal } from './Modal';
+import { columnStore } from './list/columns';
 
 export type ListName = 'problems' | 'actions' | 'incidents' | 'changes' | 'alerts' | 'known_errors' | 'knowledge' | 'cis' | 'candidates' | 'improvements' | 'requests';
 
@@ -115,53 +115,39 @@ function SaveView({ list, query, onClose, onSaved }: { list: ListName; query: st
   const teams = useTeams();
   const [name, setName] = useState('');
   const [share, setShare] = useState('personal');
-  const [error, setError] = useState<string | null>(null);
   // Leads share with their own teams; administrators with any team.
   const shareable = teams.filter((t) => t.active && (user.role === 'admin' || t.members.some((m) => m.user_id === user.id && m.role === 'lead')));
 
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!name.trim()) return;
+  const submit = async () => {
     const scope = share.startsWith('team:') ? 'team' : share;
-    try {
-      await api.post('/api/views', { list, name: name.trim(), query, columns: columnStore.get(list), scope, team_id: scope === 'team' ? Number(share.slice(5)) : null });
-      onSaved();
-    } catch (err) {
-      setError((err as Error).message);
-    }
+    await api.post('/api/views', { list, name: name.trim(), query, columns: columnStore.get(list), scope, team_id: scope === 'team' ? Number(share.slice(5)) : null });
+    onSaved();
   };
 
   return (
-    <Modal title="Save view" onClose={onClose}>
-      <form className="form" onSubmit={submit}>
-        <p className="hint full">Saves the current filters and sorting as a view you can open with one click.</p>
-        <label className="full">
-          Name
-          <input autoFocus value={name} maxLength={60} onChange={(e) => setName(e.target.value)} />
-        </label>
-        <label className="full">
-          Who sees it
-          <select value={share} onChange={(e) => setShare(e.target.value)}>
-            <option value="personal">Only me</option>
-            {shareable.map((t) => <option key={t.id} value={`team:${t.id}`}>Team {t.name}</option>)}
-            {isManager(user) && <option value="everyone">Everyone</option>}
-          </select>
-        </label>
-        {share !== 'personal' && (
-          <div className="hint full">
-            <p>
-              {share === 'everyone' ? 'Everyone' : `Everyone in ${shareable.find((t) => `team:${t.id}` === share)?.name ?? 'the team'}`} will see these filters, search text included:
-            </p>
-            <code className="view-query">{describeQuery(query)}</code>
-            <p>A shared view belongs to {share === 'everyone' ? 'everyone: managers can change it' : 'the team: its leads can change it'}.</p>
-          </div>
-        )}
-        {error && <div className="error full" role="alert">{error}</div>}
-        <div className="actions full">
-          <button type="button" className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn primary" disabled={!name.trim()}>Save view</button>
+    <FormModal title="Save view" submitLabel="Save view" canSubmit={!!name.trim()} onClose={onClose} onSubmit={submit}>
+      <p className="hint full">Saves the current filters and sorting as a view you can open with one click.</p>
+      <label className="full">
+        Name
+        <input autoFocus value={name} maxLength={60} onChange={(e) => setName(e.target.value)} />
+      </label>
+      <label className="full">
+        Who sees it
+        <select value={share} onChange={(e) => setShare(e.target.value)}>
+          <option value="personal">Only me</option>
+          {shareable.map((t) => <option key={t.id} value={`team:${t.id}`}>Team {t.name}</option>)}
+          {isManager(user) && <option value="everyone">Everyone</option>}
+        </select>
+      </label>
+      {share !== 'personal' && (
+        <div className="hint full">
+          <p>
+            {share === 'everyone' ? 'Everyone' : `Everyone in ${shareable.find((t) => `team:${t.id}` === share)?.name ?? 'the team'}`} will see these filters, search text included:
+          </p>
+          <code className="view-query">{describeQuery(query)}</code>
+          <p>A shared view belongs to {share === 'everyone' ? 'everyone: managers can change it' : 'the team: its leads can change it'}.</p>
         </div>
-      </form>
-    </Modal>
+      )}
+    </FormModal>
   );
 }

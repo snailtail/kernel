@@ -1,9 +1,9 @@
-import { useState, type FormEvent } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router';
 import { api, type Action } from '../api';
 import { daysUntil, formatDay } from '../format';
-import type { Toolkit } from './ListToolkit';
-import { Modal } from './Modal';
+import type { Toolkit } from './list/ListToolkit';
+import { FormModal } from './Modal';
 import { useSession } from '../session';
 
 function DueLabel({ action }: { action: Action }) {
@@ -99,53 +99,47 @@ function ActionModal({ parent, action, onClose, onDone }: { parent: string; acti
       setError((err as Error).message);
     }
   };
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    run(() =>
-      action
-        ? api.patch<Action>(`/api/actions/${action.id}`, body())
-        : api.post<Action>('/api/actions', { ...body(), parent }),
-    );
+  const submit = async () => {
+    await (action
+      ? api.patch<Action>(`/api/actions/${action.id}`, body())
+      : api.post<Action>('/api/actions', { ...body(), parent }));
+    onDone();
   };
 
   return (
-    <Modal title={action ? 'Edit action' : 'Add follow-up action'} onClose={onClose}>
-      <form className="form" onSubmit={submit}>
-        <label className="full">What needs to be done
-          <input autoFocus required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="E.g. Vendor to deliver patch for connection leak" />
-        </label>
-        <label>Owner
-          <select value={form.owner_id} onChange={(e) => setForm({ ...form, owner_id: e.target.value })}>
-            <option value="">No owner</option>
-            {meta.assignees.map((u) => <option key={u.id} value={u.id}>{u.display_name}</option>)}
-          </select>
-        </label>
-        <label>Due date
-          <input type="date" value={form.due_date} onChange={(e) => setForm({ ...form, due_date: e.target.value })} />
-        </label>
-        <label>Change reference
-          <input value={form.change_ref} onChange={(e) => setForm({ ...form, change_ref: e.target.value })} placeholder="CHG0042" />
-        </label>
-        <label className="full">Details
-          <textarea rows={3} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
-        </label>
-        {error && <div className="error full">{error}</div>}
-        <div className="actions full">
-          {action && action.status !== 'cancelled' && (
-            <button type="button" className="btn-link danger spacer-right" onClick={() => run(() => api.patch(`/api/actions/${action.id}`, { status: 'cancelled' }))}>
-              Cancel action
-            </button>
-          )}
-          {action && action.status === 'cancelled' && (
-            <button type="button" className="btn-link spacer-right" onClick={() => run(() => api.patch(`/api/actions/${action.id}`, { status: 'open' }))}>
-              Reopen action
-            </button>
-          )}
-          <button type="button" className="btn" onClick={onClose}>Close</button>
-          <button className="btn primary">{action ? 'Save' : 'Add action'}</button>
-        </div>
-      </form>
-    </Modal>
+    <FormModal title={action ? 'Edit action' : 'Add follow-up action'} submitLabel={action ? 'Save' : 'Add action'} cancelLabel="Close" onClose={onClose} onSubmit={submit}
+      actions={<>
+        {action && action.status !== 'cancelled' && (
+          <button type="button" className="btn-link danger spacer-right" onClick={() => run(() => api.patch(`/api/actions/${action.id}`, { status: 'cancelled' }))}>
+            Cancel action
+          </button>
+        )}
+        {action && action.status === 'cancelled' && (
+          <button type="button" className="btn-link spacer-right" onClick={() => run(() => api.patch(`/api/actions/${action.id}`, { status: 'open' }))}>
+            Reopen action
+          </button>
+        )}
+      </>}>
+      <label className="full">What needs to be done
+        <input autoFocus required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="E.g. Vendor to deliver patch for connection leak" />
+      </label>
+      <label>Owner
+        <select value={form.owner_id} onChange={(e) => setForm({ ...form, owner_id: e.target.value })}>
+          <option value="">No owner</option>
+          {meta.assignees.map((u) => <option key={u.id} value={u.id}>{u.display_name}</option>)}
+        </select>
+      </label>
+      <label>Due date
+        <input type="date" value={form.due_date} onChange={(e) => setForm({ ...form, due_date: e.target.value })} />
+      </label>
+      <label>Change reference
+        <input value={form.change_ref} onChange={(e) => setForm({ ...form, change_ref: e.target.value })} placeholder="CHG0042" />
+      </label>
+      <label className="full">Details
+        <textarea rows={3} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+      </label>
+      {error && <div className="error full">{error}</div>}
+    </FormModal>
   );
 }
 

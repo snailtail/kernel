@@ -2,7 +2,7 @@ import { ActivityLine } from '../components/History';
 import { HealthTips } from '../components/ProcessMap';
 import { HiddenRecordsNote } from '../components/Visibility';
 import { Link } from 'react-router';
-import type { Action, Activity, Problem, Status } from '../api';
+import type { Status } from '../api';
 import type { BackupStatus } from '../api/types/admin';
 import { ActionList } from '../components/Actions';
 import { KpiSection } from '../components/Kpis';
@@ -12,18 +12,7 @@ import { useApi } from '../hooks';
 import { isManager, useSession } from '../session';
 import { PROBLEM_STATUS, STATUS_PHASE } from '../statuses';
 import { isGuided } from '../components/Guide';
-
-interface Dashboard {
-  by_status: Partial<Record<Status, number>>;
-  open_by_priority: { priority: number; count: number }[];
-  open_summary: { under_30: number; d30_90: number; over_90: number; major: number; unassigned: number; needs_decision: number; review_due: number };
-  open_links_by_kind: Partial<Record<string, number>>;
-  my_problems: Problem[];
-  my_actions: Action[];
-  actions: { open: number; overdue: number };
-  watched_activity: Activity[];
-  recent_activity: Activity[];
-}
+import type { Dashboard } from '../api/types/work';
 
 export function DashboardPage() {
   const { user, meta, setPreferences } = useSession();

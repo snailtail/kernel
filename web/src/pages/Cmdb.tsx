@@ -1,36 +1,24 @@
 import { Fragment, useState, type FormEvent } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
+import { Link, useNavigate, useParams } from 'react-router';
 import { api, type User } from '../api';
-import { GroupsPage, ImpactSection, RelationshipsSection, type Relationship } from '../components/CmdbGraph';
+import { GroupsPage, ImpactSection, RelationshipsSection } from '../components/CmdbGraph';
 import { CommentBox } from '../components/CommentBox';
 import { Markdown } from '../components/Markdown';
 import { AttachmentsPanel } from '../components/Attachments';
 import { SeverityBadge } from '../components/Badges';
-import { Modal } from '../components/Modal';
+import { FormModal } from '../components/Modal';
 import { PersonField } from '../components/People';
 import { Term } from '../components/Glossary';
 import { formatDate, relativeTime } from '../format';
 import { useLive } from '../live';
 import { Presence } from '../components/Presence';
-import { useApi, useSearchText } from '../hooks';
-import { useColumns, useListToolkit, type ColumnKey } from '../components/ListToolkit';
+import { useApi, useListParams, useRecord, useSearchText } from '../hooks';
+import { useListToolkit } from '../components/list/ListToolkit';
+import { useColumns, type ColumnKey } from '../components/list/columns';
 import { SavedViews } from '../components/SavedViews';
 import { useSession } from '../session';
 import { HistoryPanel } from '../components/History';
-
-export interface CiType { name: string; label: string; class: 'ci' | 'service'; attributes: { key: string; label: string; type: 'string' | 'number' }[]; active: boolean }
-interface Source { id: number; source_system: string; source_id: string; source_url: string; first_seen_at: string; last_seen_at: string }
-interface CiLink { id: number; kind: string; reference: string; system: string; url: string; note: string }
-interface CiActivity { id: number; kind: string; body: string; data: any; channel: string; created_at: string; user_name: string | null }
-export interface Ci {
-  id: number; ref: string; type: 'ci' | 'service'; class: 'ci' | 'service'; name: string; ci_type: string; type_label: string; status: string;
-  environment: string; criticality: number; owner_id: number | null; owner: string | null; team: string; description: string;
-  tags: string[]; attributes: Record<string, unknown>; created_at: string; updated_at: string; last_seen_at: string | null;
-  has_end_users?: boolean; business_owner_id?: number | null; business_owner?: string | null; technical_contact_id?: number | null; technical_contact?: string | null;
-  source_systems: string[] | null; url: string;
-}
-interface CiProblem { ref: string; title: string; status: string; priority: number; workaround?: string; workaround_effectiveness?: string | null; ec_decision?: string | null }
-interface CiDetail extends Ci { alerts: { id: number; source: string; check_key: string; severity: string; status: string; count: number; flap_count: number; last_seen: string; suppressed: string; incident_ref: string | null }[]; maintenance_windows: { id: number; starts_at: string; ends_at: string; reason: string }[]; incidents: { ref: string; title: string; status: string; priority: number }[]; problems: CiProblem[]; known_errors: CiProblem[]; recent_records: { system: string; kind: string; reference: string; summary: string; occurred_at: string; linked: boolean }[]; sources: Source[]; links: CiLink[]; activity: CiActivity[]; relationships: Relationship[]; groups: { id: number; name: string; purpose: string; membership: string }[] }
+import type { Ci, CiDetail, CiType, RetireProposal, RetireResult } from '../api/types/cmdb';
 
 const STATUSES = ['planned', 'active', 'maintenance', 'retired', 'missing'];
 const CRITICALITY: Record<number, string> = { 1: 'Business critical', 2: 'High', 3: 'Medium', 4: 'Low' };
@@ -47,12 +35,11 @@ const CI_COLUMNS: { key: ColumnKey; label: string }[] = [
 
 export function CmdbListPage() {
   const { user } = useSession();
-  const [params, setParams] = useSearchParams();
+  const { params, set } = useListParams();
   const [q, setQ] = useSearchText();
   const { data: types } = useApi<CiType[]>('/api/ci-types');
   const [creating, setCreating] = useState(false);
   const navigate = useNavigate();
-  const set = (k: string, v: string) => setParams((prev) => { const n = new URLSearchParams(prev); if (v) n.set(k, v); else n.delete(k); return n; }, { replace: true });
   const { data, loading, refresh } = useApi<Ci[]>(`/api/cis?${params}`);
   useLive(['ci:*'], refresh);
   const tk = useListToolkit({ list: 'cis', rows: data, idOf: (c) => c.ref, hrefOf: (c) => `/cis/${c.ref}`, filter: params.toString(), onChanged: refresh });
@@ -127,24 +114,15 @@ export function CmdbListPage() {
 export function CiPage() {
   const { ref } = useParams();
   const { user } = useSession();
-  const { data: ci, setData, error, refresh } = useApi<CiDetail>(`/api/cis/${ref}`);
+  const { data: ci, setData, error, refresh, actionError, setActionError, run } = useRecord<CiDetail>(`/api/cis/${ref}`);
   const others = useLive([ci && `ci:${ci.id}`], refresh, { presence: true });
   const { data: types } = useApi<CiType[]>('/api/ci-types');
   const [editing, setEditing] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
   if (error) return <div className="error">{error}</div>;
   if (!ci) return null;
   const type = types?.find((t) => t.name === ci.ci_type);
   const manage = canManage(user);
   const annotate = user.role !== 'viewer';
-  const run = async (fn: () => Promise<CiDetail>) => {
-    setActionError(null);
-    try {
-      setData(await fn());
-    } catch (err) {
-      setActionError((err as Error).message);
-    }
-  };
 
   return (
     <>
@@ -338,16 +316,14 @@ function CiModal({ types, ci, onClose, onDone }: { types: CiType[]; ci?: Ci; onC
     team: ci?.team ?? '', owner_id: ci?.owner_id ? String(ci.owner_id) : '', tags: (ci?.tags ?? []).join(', '), description: ci?.description ?? '',
     attributes: Object.fromEntries(Object.entries(ci?.attributes ?? {}).map(([k, v]) => [k, String(v)])) as Record<string, string>,
     source_system: '', source_id: '', source_url: '',
-    sla_id: (ci as any)?.sla_id ? String((ci as any).sla_id) : '', user_description: (ci as any)?.user_description ?? '', how_to_get_help: (ci as any)?.how_to_get_help ?? '', in_catalogue: !!(ci as any)?.in_catalogue,
+    sla_id: ci?.sla_id ? String(ci?.sla_id) : '', user_description: ci?.user_description ?? '', how_to_get_help: ci?.how_to_get_help ?? '', in_catalogue: !!ci?.in_catalogue,
     has_end_users: !!ci?.has_end_users,
     business_owner: ci?.business_owner_id ? { id: ci.business_owner_id, name: ci.business_owner ?? '' } : null as { id: number; name: string } | null,
     technical_contact: ci?.technical_contact_id ? { id: ci.technical_contact_id, name: ci.technical_contact ?? '' } : null as { id: number; name: string } | null,
   });
   const { data: slas } = useApi<{ id: number; name: string }[]>('/api/slas');
-  const [error, setError] = useState<string | null>(null);
   const type = types.find((t) => t.name === form.ci_type);
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
+  const submit = async () => {
     const body = {
       name: form.name, ci_type: form.ci_type, environment: form.environment, criticality: Number(form.criticality), team: form.team,
       owner_id: form.owner_id ? Number(form.owner_id) : null, description: form.description,
@@ -355,55 +331,47 @@ function CiModal({ types, ci, onClose, onDone }: { types: CiType[]; ci?: Ci; onC
       ...(type?.class === 'service' ? { sla_id: form.sla_id ? Number(form.sla_id) : null, user_description: form.user_description, how_to_get_help: form.how_to_get_help, in_catalogue: form.in_catalogue, has_end_users: form.has_end_users, business_owner_id: form.business_owner?.id ?? null, technical_contact_id: form.technical_contact?.id ?? null } : {}),
       ...(!ci && form.source_system && form.source_id ? { source: { system: form.source_system, id: form.source_id, url: form.source_url } } : {}),
     };
-    try {
-      onDone(ci ? await api.patch<Ci>(`/api/cis/${ci.ref}`, body) : await api.post<Ci>('/api/cis', body));
-    } catch (err) {
-      setError((err as Error).message);
-    }
+    onDone(ci ? await api.patch<Ci>(`/api/cis/${ci.ref}`, body) : await api.post<Ci>('/api/cis', body));
   };
   return (
-    <Modal title={ci ? `Edit ${ci.ref}` : 'Add a CI or service'} onClose={onClose}>
-      <form className="form" onSubmit={submit}>
-        <label className="full">Name<input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
-        <label>Type
-          <select value={form.ci_type} onChange={(e) => setForm({ ...form, ci_type: e.target.value })}>
-            <optgroup label="Services">{types.filter((t) => t.class === 'service' && t.active && (!ci || ci.class === 'service')).map((t) => <option key={t.name} value={t.name}>{t.label}</option>)}</optgroup>
-            <optgroup label="Configuration items">{types.filter((t) => t.class === 'ci' && t.active && (!ci || ci.class === 'ci')).map((t) => <option key={t.name} value={t.name}>{t.label}</option>)}</optgroup>
-          </select>
-        </label>
-        <label>Environment<select value={form.environment} onChange={(e) => setForm({ ...form, environment: e.target.value })}>{['prod', 'test', 'dev', 'other'].map((x) => <option key={x}>{x}</option>)}</select></label>
-        <label><Term id="criticality" /><select value={form.criticality} onChange={(e) => setForm({ ...form, criticality: Number(e.target.value) })}>{[1, 2, 3, 4].map((c) => <option key={c} value={c}>{c} – {CRITICALITY[c]}</option>)}</select></label>
-        <label>Owner<select value={form.owner_id} onChange={(e) => setForm({ ...form, owner_id: e.target.value })}><option value="">–</option>{meta.assignees.map((a) => <option key={a.id} value={a.id}>{a.display_name}</option>)}</select></label>
-        <label>Team<input value={form.team} onChange={(e) => setForm({ ...form, team: e.target.value })} /></label>
-        <label>Tags<input value={form.tags} placeholder="app=payroll, pci" onChange={(e) => setForm({ ...form, tags: e.target.value })} /></label>
-        {type?.attributes.map((a) => (
-          <label key={a.key}>{a.label}<input type={a.type === 'number' ? 'number' : 'text'} value={form.attributes[a.key] ?? ''} onChange={(e) => setForm({ ...form, attributes: { ...form.attributes, [a.key]: e.target.value } })} /></label>
-        ))}
-        <label className="full">Description<textarea rows={3} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
-        {type?.class === 'service' && (
-          <fieldset className="full source-fields">
-            <legend>Service catalogue</legend>
-            <label>SLA<select value={form.sla_id} onChange={(e) => setForm({ ...form, sla_id: e.target.value })}><option value="">Default</option>{slas?.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
-            <label>For users<textarea rows={2} placeholder="What the service is, in plain words" value={form.user_description} onChange={(e) => setForm({ ...form, user_description: e.target.value })} /></label>
-            <label>How to get help<textarea rows={2} value={form.how_to_get_help} onChange={(e) => setForm({ ...form, how_to_get_help: e.target.value })} /></label>
-            <label className="check"><input type="checkbox" checked={form.in_catalogue} onChange={(e) => setForm({ ...form, in_catalogue: e.target.checked })} /> Show in the service catalogue</label>
-            <label className="check"><input type="checkbox" checked={form.has_end_users} onChange={(e) => setForm({ ...form, has_end_users: e.target.checked })} /> Has end users <span className="muted small">(incidents ask who is affected)</span></label>
-            <label>Business owner<PersonField value={form.business_owner} placeholder="Business owner: name or email…" onChange={(v) => setForm({ ...form, business_owner: v })} /></label>
-            <label>Technical contact<PersonField value={form.technical_contact} placeholder="Technical contact: name or email…" onChange={(v) => setForm({ ...form, technical_contact: v })} /></label>
-          </fieldset>
-        )}
-        {!ci && (
-          <fieldset className="full source-fields">
-            <legend>Source <span className="muted small">(optional: where it lives)</span></legend>
-            <input placeholder="System, e.g. vCenter" value={form.source_system} onChange={(e) => setForm({ ...form, source_system: e.target.value })} />
-            <input placeholder="Id in that system" value={form.source_id} onChange={(e) => setForm({ ...form, source_id: e.target.value })} />
-            <input type="url" placeholder="https://… link to it" value={form.source_url} onChange={(e) => setForm({ ...form, source_url: e.target.value })} />
-          </fieldset>
-        )}
-        {error && <div className="error full">{error}</div>}
-        <div className="actions full"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary">Save</button></div>
-      </form>
-    </Modal>
+    <FormModal title={ci ? `Edit ${ci.ref}` : 'Add a CI or service'} submitLabel="Save" onClose={onClose} onSubmit={submit}>
+      <label className="full">Name<input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
+      <label>Type
+        <select value={form.ci_type} onChange={(e) => setForm({ ...form, ci_type: e.target.value })}>
+          <optgroup label="Services">{types.filter((t) => t.class === 'service' && t.active && (!ci || ci.class === 'service')).map((t) => <option key={t.name} value={t.name}>{t.label}</option>)}</optgroup>
+          <optgroup label="Configuration items">{types.filter((t) => t.class === 'ci' && t.active && (!ci || ci.class === 'ci')).map((t) => <option key={t.name} value={t.name}>{t.label}</option>)}</optgroup>
+        </select>
+      </label>
+      <label>Environment<select value={form.environment} onChange={(e) => setForm({ ...form, environment: e.target.value })}>{['prod', 'test', 'dev', 'other'].map((x) => <option key={x}>{x}</option>)}</select></label>
+      <label><Term id="criticality" /><select value={form.criticality} onChange={(e) => setForm({ ...form, criticality: Number(e.target.value) })}>{[1, 2, 3, 4].map((c) => <option key={c} value={c}>{c} – {CRITICALITY[c]}</option>)}</select></label>
+      <label>Owner<select value={form.owner_id} onChange={(e) => setForm({ ...form, owner_id: e.target.value })}><option value="">–</option>{meta.assignees.map((a) => <option key={a.id} value={a.id}>{a.display_name}</option>)}</select></label>
+      <label>Team<input value={form.team} onChange={(e) => setForm({ ...form, team: e.target.value })} /></label>
+      <label>Tags<input value={form.tags} placeholder="app=payroll, pci" onChange={(e) => setForm({ ...form, tags: e.target.value })} /></label>
+      {type?.attributes.map((a) => (
+        <label key={a.key}>{a.label}<input type={a.type === 'number' ? 'number' : 'text'} value={form.attributes[a.key] ?? ''} onChange={(e) => setForm({ ...form, attributes: { ...form.attributes, [a.key]: e.target.value } })} /></label>
+      ))}
+      <label className="full">Description<textarea rows={3} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
+      {type?.class === 'service' && (
+        <fieldset className="full source-fields">
+          <legend>Service catalogue</legend>
+          <label>SLA<select value={form.sla_id} onChange={(e) => setForm({ ...form, sla_id: e.target.value })}><option value="">Default</option>{slas?.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
+          <label>For users<textarea rows={2} placeholder="What the service is, in plain words" value={form.user_description} onChange={(e) => setForm({ ...form, user_description: e.target.value })} /></label>
+          <label>How to get help<textarea rows={2} value={form.how_to_get_help} onChange={(e) => setForm({ ...form, how_to_get_help: e.target.value })} /></label>
+          <label className="check"><input type="checkbox" checked={form.in_catalogue} onChange={(e) => setForm({ ...form, in_catalogue: e.target.checked })} /> Show in the service catalogue</label>
+          <label className="check"><input type="checkbox" checked={form.has_end_users} onChange={(e) => setForm({ ...form, has_end_users: e.target.checked })} /> Has end users <span className="muted small">(incidents ask who is affected)</span></label>
+          <label>Business owner<PersonField value={form.business_owner} placeholder="Business owner: name or email…" onChange={(v) => setForm({ ...form, business_owner: v })} /></label>
+          <label>Technical contact<PersonField value={form.technical_contact} placeholder="Technical contact: name or email…" onChange={(v) => setForm({ ...form, technical_contact: v })} /></label>
+        </fieldset>
+      )}
+      {!ci && (
+        <fieldset className="full source-fields">
+          <legend>Source <span className="muted small">(optional: where it lives)</span></legend>
+          <input placeholder="System, e.g. vCenter" value={form.source_system} onChange={(e) => setForm({ ...form, source_system: e.target.value })} />
+          <input placeholder="Id in that system" value={form.source_id} onChange={(e) => setForm({ ...form, source_id: e.target.value })} />
+          <input type="url" placeholder="https://… link to it" value={form.source_url} onChange={(e) => setForm({ ...form, source_url: e.target.value })} />
+        </fieldset>
+      )}
+    </FormModal>
   );
 }
 
@@ -412,14 +380,6 @@ export function CiGroupsPage() {
   return <GroupsPage canManage={canManage(user)} />;
 }
 
-interface RetireProposal {
-  ref: string; class: 'ci' | 'service'; name: string; type_label: string; environment: string; owner: string | null; team: string;
-  missing_since: string; retire_after_days: number; proposed_at: string; last_seen_at: string | null; can_retire: boolean;
-  sources: { source_system: string; source_id: string; source_url: string; last_seen_at: string; connector: string | null }[];
-  relationships: { type: string; direction: 'in' | 'out'; ref: string; name: string }[];
-  open_records: { ref: string; kind: string; title: string }[];
-}
-interface RetireResult { ref: string; outcome: 'retired' | 'unchanged' | 'skipped' | 'failed'; reason?: string }
 const RECORD_PATH: Record<string, string> = { incident: '/incidents', problem: '/problems', change: '/changes' };
 
 /** CIs missing long enough to retire (#18): a person decides, one at a time or several at once. */
@@ -481,32 +441,22 @@ export function CiRetirePage() {
 function RetireConfirm({ items, onClose, onDone }: { items: RetireProposal[]; onClose: () => void; onDone: (r: RetireResult[]) => void }) {
   const [comment, setComment] = useState('');
   const [acknowledge, setAcknowledge] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const named = items.filter((p) => p.open_records.length);
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    try {
-      const r = await api.post<{ results: RetireResult[] }>('/api/cis/retire', { refs: items.map((p) => p.ref), comment: comment.trim() || undefined, acknowledge_open: acknowledge });
-      onDone(r.results);
-    } catch (err) {
-      setError((err as Error).message);
-    }
+  const submit = async () => {
+    const r = await api.post<{ results: RetireResult[] }>('/api/cis/retire', { refs: items.map((p) => p.ref), comment: comment.trim() || undefined, acknowledge_open: acknowledge });
+    onDone(r.results);
   };
   return (
-    <Modal title={items.length === 1 ? `Retire ${items[0].ref}?` : `Retire ${items.length} CIs?`} onClose={onClose}>
-      <form className="form" onSubmit={submit}>
-        <p className="full">{items.length === 1 ? <><strong>{items[0].name}</strong> is</> : 'They are'} kept with {items.length === 1 ? 'its' : 'their'} history and can be set active again. Nothing is deleted.</p>
-        {named.length > 0 && (
-          <div className="full warn-box">
-            <p>Open records still name {named.length === 1 ? 'this CI' : `${named.length} of them`}: {named.flatMap((p) => p.open_records.map((o) => o.ref)).join(', ')}.</p>
-            <label className="check"><input type="checkbox" checked={acknowledge} onChange={(e) => setAcknowledge(e.target.checked)} /> Retire {named.length === 1 ? 'it' : 'them'} anyway</label>
-          </div>
-        )}
-        <label className="full">Why <span className="muted small">(optional, shown in the history)</span><textarea rows={2} placeholder="e.g. Decommissioned in change CHG000123" value={comment} onChange={(e) => setComment(e.target.value)} /></label>
-        {error && <div className="error full">{error}</div>}
-        <div className="actions full"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary">Retire</button></div>
-      </form>
-    </Modal>
+    <FormModal title={items.length === 1 ? `Retire ${items[0].ref}?` : `Retire ${items.length} CIs?`} submitLabel="Retire" onClose={onClose} onSubmit={submit}>
+      <p className="full">{items.length === 1 ? <><strong>{items[0].name}</strong> is</> : 'They are'} kept with {items.length === 1 ? 'its' : 'their'} history and can be set active again. Nothing is deleted.</p>
+      {named.length > 0 && (
+        <div className="full warn-box">
+          <p>Open records still name {named.length === 1 ? 'this CI' : `${named.length} of them`}: {named.flatMap((p) => p.open_records.map((o) => o.ref)).join(', ')}.</p>
+          <label className="check"><input type="checkbox" checked={acknowledge} onChange={(e) => setAcknowledge(e.target.checked)} /> Retire {named.length === 1 ? 'it' : 'them'} anyway</label>
+        </div>
+      )}
+      <label className="full">Why <span className="muted small">(optional, shown in the history)</span><textarea rows={2} placeholder="e.g. Decommissioned in change CHG000123" value={comment} onChange={(e) => setComment(e.target.value)} /></label>
+    </FormModal>
   );
 }
 

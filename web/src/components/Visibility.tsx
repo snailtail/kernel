@@ -3,7 +3,7 @@ import { api } from '../api';
 import { useTeams } from './Teams';
 import { canEdit, isManager, useSession } from '../session';
 import { askReason } from './Ask';
-import { Modal } from './Modal';
+import { FormModal, Modal } from './Modal';
 
 interface Restricted { ref: string; restricted: boolean; restricted_teams: number[]; assignee_id: number | null; created_by?: number | null; classification?: 'normal' | 'confidential'; confidential_masked?: boolean }
 
@@ -69,36 +69,24 @@ function VisibilityModal({ record: r, onClose, onDone }: { record: Restricted; o
   const teams = useTeams();
   const [restricted, setRestricted] = useState(true);
   const [chosen, setChosen] = useState<number[]>(r.restricted_teams);
-  const [error, setError] = useState<string | null>(null);
-  const save = async (nextRestricted: boolean) => {
-    const reason = await askReason(nextRestricted ? `Restrict ${r.ref}` : `Open ${r.ref} to everyone`, nextRestricted ? 'Who needs to know, and why? People outside the chosen teams will no longer find it.' : 'Why may everyone see it now?');
+  const save = async () => {
+    const reason = await askReason(restricted ? `Restrict ${r.ref}` : `Open ${r.ref} to everyone`, restricted ? 'Who needs to know, and why? People outside the chosen teams will no longer find it.' : 'Why may everyone see it now?');
     if (!reason) return;
-    try {
-      await api.put(`/api/records/${r.ref}/visibility`, { restricted: nextRestricted, teams: nextRestricted ? chosen : [], reason });
-      onDone();
-    } catch (err) {
-      setError((err as Error).message);
-    }
+    await api.put(`/api/records/${r.ref}/visibility`, { restricted, teams: restricted ? chosen : [], reason });
+    onDone();
   };
   return (
-    <Modal title={`Who can see ${r.ref}`} onClose={onClose}>
-      <div className="form">
-        <label className="check full"><input type="checkbox" checked={restricted} onChange={(e) => setRestricted(e.target.checked)} /> Restricted: only the assignee, the creator and these teams</label>
-        {restricted && (
-          <div className="full check-grid">
-            {teams.filter((t) => t.active).map((t) => (
-              <label key={t.id} className="check"><input type="checkbox" checked={chosen.includes(t.id)} onChange={(e) => setChosen(e.target.checked ? [...chosen, t.id] : chosen.filter((x) => x !== t.id))} /> {t.name}</label>
-            ))}
-            {teams.length === 0 && <span className="muted small">No teams yet; then only the assignee and the creator can see it.</span>}
-          </div>
-        )}
-        {error && <div className="error full">{error}</div>}
-        <div className="actions full">
-          <button type="button" className="btn" onClick={onClose}>Cancel</button>
-          <button type="button" className="btn primary" onClick={() => save(restricted)}>Save</button>
+    <FormModal title={`Who can see ${r.ref}`} submitLabel="Save" onClose={onClose} onSubmit={save}>
+      <label className="check full"><input type="checkbox" checked={restricted} onChange={(e) => setRestricted(e.target.checked)} /> Restricted: only the assignee, the creator and these teams</label>
+      {restricted && (
+        <div className="full check-grid">
+          {teams.filter((t) => t.active).map((t) => (
+            <label key={t.id} className="check"><input type="checkbox" checked={chosen.includes(t.id)} onChange={(e) => setChosen(e.target.checked ? [...chosen, t.id] : chosen.filter((x) => x !== t.id))} /> {t.name}</label>
+          ))}
+          {teams.length === 0 && <span className="muted small">No teams yet; then only the assignee and the creator can see it.</span>}
         </div>
-      </div>
-    </Modal>
+      )}
+    </FormModal>
   );
 }
 

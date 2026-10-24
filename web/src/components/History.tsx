@@ -4,25 +4,7 @@ import { CLOSURE_LABEL, FIELD_LABEL, formatDate, relativeTime } from '../format'
 import { useSession } from '../session';
 import { PROBLEM_STATUS } from '../statuses';
 import { Markdown } from './Markdown';
-
-/** One entry of the audit trail, as /api/audit and /api/records/:ref/history return it. */
-export interface AuditEntry {
-  id: number;
-  at: string;
-  actor_user_id: number | null;
-  actor_name: string;
-  actor_type: string;
-  channel: string;
-  token_prefix: string;
-  ip?: string;
-  user_agent?: string;
-  request_id: string;
-  entity_type: string;
-  entity_ref: string;
-  action: string;
-  changes: Record<string, unknown>;
-  reason: string;
-}
+import type { AuditEntry } from '../api/types/security';
 
 const PATH: Record<string, string> = { PRB: '/problems', INC: '/incidents', CHG: '/changes', KB: '/knowledge', PIR: '/reviews', IMP: '/improvements', REQ: '/requests', CI: '/cis', SVC: '/cis' };
 /** The page of a record ref (PRB000001, CI000012…), or null for anything else. */

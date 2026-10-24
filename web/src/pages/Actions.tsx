@@ -2,7 +2,7 @@ import { useSearchParams } from 'react-router';
 import type { Action } from '../api';
 import { ActionList } from '../components/Actions';
 import { SavedViews } from '../components/SavedViews';
-import { useListToolkit } from '../components/ListToolkit';
+import { useListToolkit } from '../components/list/ListToolkit';
 import { useApi, useSearchText } from '../hooks';
 import { canEdit, useSession } from '../session';
 

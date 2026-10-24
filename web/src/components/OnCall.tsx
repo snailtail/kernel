@@ -1,20 +1,19 @@
 // On-call (#111): who is on call for a team, the team's paging target and rotation, and an incident's pages.
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { formatDate, relativeTime } from '../format';
 import { useSession } from '../session';
-import { Modal } from './Modal';
-import type { Team } from './Teams';
+import { FormModal } from './Modal';
+import type { OnCallNow, PagingTarget, Team, TeamPaging, OnCallPage } from '../api/types/teams';
 
-interface OnCall { team_id: number; team: string; source: string; people: { name: string; until: string | null }[]; unavailable?: string }
-let cache: { at: number; list: OnCall[] } | null = null;
+let cache: { at: number; list: OnCallNow[] } | null = null;
 
 /** Who is on call per team; the server caches a minute too. */
 function useOnCall() {
-  const [list, setList] = useState<OnCall[]>(cache?.list ?? []);
+  const [list, setList] = useState<OnCallNow[]>(cache?.list ?? []);
   useEffect(() => {
     if (cache && Date.now() - cache.at < 60_000) return;
-    api.get<OnCall[]>('/api/on-call').then((l) => { cache = { at: Date.now(), list: l }; setList(l); }, () => {});
+    api.get<OnCallNow[]>('/api/on-call').then((l) => { cache = { at: Date.now(), list: l }; setList(l); }, () => {});
   }, []);
   return list;
 }
@@ -37,20 +36,18 @@ export function OnCallLine({ teamId }: { teamId: number | null | undefined }) {
   );
 }
 
-interface Target { id: number; kind: string; config: Record<string, any>; rule: { priorities: number[]; major: boolean; services: string[]; hours: string }; enabled: boolean; has_secret: boolean; private_allow: string[] }
-interface Paging { target: Target | null; rotation: { members: number[]; handover_dow: number; handover_minute: number; timezone: string } | null; overrides: { id: number; user_id: number; name: string; starts_at: string; ends_at: string; reason: string }[]; inbound_url: string | null }
 const KIND_LABEL: Record<string, string> = { pagerduty: 'PagerDuty', opsgenie: 'Opsgenie', grafana_oncall: 'Grafana OnCall', webhook: 'Signed webhook', rotation: 'Built-in rotation' };
 const DAYS = ['', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
 /** On the team page: who is on call, how the team is paged, and the rotation. */
 export function PagingCard({ team }: { team: Team }) {
   const { user } = useSession();
-  const [p, setP] = useState<Paging | null>(null);
+  const [p, setP] = useState<TeamPaging | null>(null);
   const [editing, setEditing] = useState(false);
   const [rotating, setRotating] = useState(false);
   const [token, setToken] = useState<{ url: string; token: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const load = () => api.get<Paging>(`/api/teams/${team.id}/paging`).then(setP, () => {});
+  const load = () => api.get<TeamPaging>(`/api/teams/${team.id}/paging`).then(setP, () => {});
   useEffect(() => { load(); }, [team.id]);
   const admin = user.role === 'admin';
   const lead = team.members.some((m) => m.user_id === user.id && m.role === 'lead');
@@ -95,7 +92,7 @@ export function PagingCard({ team }: { team: Team }) {
   );
 }
 
-function PagingModal({ team, target, onClose, onDone }: { team: Team; target: Target | null; onClose: () => void; onDone: (r: any) => void }) {
+function PagingModal({ team, target, onClose, onDone }: { team: Team; target: PagingTarget | null; onClose: () => void; onDone: (r: any) => void }) {
   const [kind, setKind] = useState(target?.kind ?? 'pagerduty');
   const [cfg, setCfg] = useState<Record<string, any>>(target?.config ?? {});
   const [secret, setSecret] = useState<Record<string, string>>({});
@@ -105,7 +102,6 @@ function PagingModal({ team, target, onClose, onDone }: { team: Team; target: Ta
   const [services, setServices] = useState((target?.rule.services ?? []).join(', '));
   const [allow, setAllow] = useState((target?.private_allow ?? []).join(', '));
   const [enabled, setEnabled] = useState(target?.enabled ?? true);
-  const [error, setError] = useState<string | null>(null);
   const keep = target?.has_secret && target.kind === kind ? 'unchanged' : '';
   const field = (k: string, label: string, hint = '', placeholder = '') => (
     <label className="full">{label} {hint && <span className="muted small">({hint})</span>}<input value={cfg[k] ?? ''} placeholder={placeholder} onChange={(e) => setCfg({ ...cfg, [k]: e.target.value })} /></label>
@@ -113,86 +109,69 @@ function PagingModal({ team, target, onClose, onDone }: { team: Team; target: Ta
   const secretField = (k: string, label: string) => (
     <label className="full">{label}<input type="password" autoComplete="new-password" placeholder={keep} value={secret[k] ?? ''} onChange={(e) => setSecret({ ...secret, [k]: e.target.value })} /></label>
   );
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    try {
-      const filled = Object.fromEntries(Object.entries(secret).filter(([, v]) => v.trim()));
-      onDone(await api.put(`/api/teams/${team.id}/paging`, {
-        kind, config: Object.fromEntries(Object.entries(cfg).filter(([, v]) => v !== '' && v !== undefined)), ...(Object.keys(filled).length ? { secret: filled } : {}),
-        rule: { priorities, major, hours, services: services.split(/[\s,]+/).filter(Boolean) }, private_allow: allow.split(/[\s,]+/).filter(Boolean), enabled, new_inbound_token: !target,
-      }));
-    } catch (err) { setError((err as Error).message); }
+  const submit = async () => {
+    const filled = Object.fromEntries(Object.entries(secret).filter(([, v]) => v.trim()));
+    onDone(await api.put(`/api/teams/${team.id}/paging`, {
+      kind, config: Object.fromEntries(Object.entries(cfg).filter(([, v]) => v !== '' && v !== undefined)), ...(Object.keys(filled).length ? { secret: filled } : {}),
+      rule: { priorities, major, hours, services: services.split(/[\s,]+/).filter(Boolean) }, private_allow: allow.split(/[\s,]+/).filter(Boolean), enabled, new_inbound_token: !target,
+    }));
   };
   return (
-    <Modal title={`Paging for ${team.name}`} onClose={onClose}>
-      <form className="form" onSubmit={submit}>
-        <p className="hint-box full">Kernel pages the team through your paging tool: it triggers on a matching incident, acknowledges when someone responds in Kernel and resolves with the incident (the incident ref is the dedup key). Escalation, phone calls and schedules stay in the tool.</p>
-        <label className="full">Tool<select value={kind} onChange={(e) => { setKind(e.target.value); setSecret({}); }}>{Object.entries(KIND_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
-        {kind === 'pagerduty' && <>{secretField('routing_key', 'Integration (routing) key')}{field('escalation_policy_id', 'Escalation policy ID', 'for "who is on call"', 'P1234AB')}{secretField('api_token', 'REST API token (read-only, for who is on call)')}</>}
-        {kind === 'opsgenie' && <>{secretField('api_key', 'API key (Alerts)')}<label>Region<select value={cfg.region ?? 'us'} onChange={(e) => setCfg({ ...cfg, region: e.target.value })}><option value="us">US</option><option value="eu">EU</option></select></label>{field('schedule_id', 'Schedule ID', 'for "who is on call"')}</>}
-        {kind === 'grafana_oncall' && secretField('url', 'Integration URL (formatted webhook)')}
-        {kind === 'webhook' && <>{field('url', 'URL', 'SMS gateway, ntfy… https only', 'https://')}{secretField('signing_secret', 'Signing secret (Standard Webhooks)')}</>}
-        {kind === 'rotation' && <p className="muted small full">Set the members and the handover under Rotation. The person on call gets a notification in Kernel (and by email or chat as they chose).</p>}
-        <fieldset className="full"><legend>Page for</legend>
-          {[1, 2, 3, 4, 5].map((n) => <label key={n} className="check"><input type="checkbox" checked={priorities.includes(n)} onChange={(e) => setPriorities(e.target.checked ? [...priorities, n].sort() : priorities.filter((x) => x !== n))} /> P{n}</label>)}
-          <label className="check"><input type="checkbox" checked={major} onChange={(e) => setMajor(e.target.checked)} /> Major incidents</label>
-        </fieldset>
-        <label>When<select value={hours} onChange={(e) => setHours(e.target.value)}><option value="always">Always</option><option value="business">In business hours</option><option value="out_of_hours">Out of hours</option></select></label>
-        <label>Only these services <span className="muted small">(refs, optional)</span><input value={services} onChange={(e) => setServices(e.target.value)} placeholder="SVC000001" /></label>
-        <label className="full">Private network access <span className="muted small">(for a self-hosted tool on your LAN)</span><input value={allow} onChange={(e) => setAllow(e.target.value)} /></label>
-        <label className="check full"><input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} /> Enabled</label>
-        {error && <div className="error full">{error}</div>}
-        <div className="actions full">
-          {target && <button type="button" className="btn danger" onClick={async () => { await api.del(`/api/teams/${team.id}/paging`); onDone(null); }}>Remove</button>}
-          <button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary">Save</button>
-        </div>
-      </form>
-    </Modal>
+    <FormModal title={`Paging for ${team.name}`} submitLabel="Save" onClose={onClose} onSubmit={submit}
+      actions={target && <button type="button" className="btn danger" onClick={async () => { await api.del(`/api/teams/${team.id}/paging`); onDone(null); }}>Remove</button>}>
+      <p className="hint-box full">Kernel pages the team through your paging tool: it triggers on a matching incident, acknowledges when someone responds in Kernel and resolves with the incident (the incident ref is the dedup key). Escalation, phone calls and schedules stay in the tool.</p>
+      <label className="full">Tool<select value={kind} onChange={(e) => { setKind(e.target.value); setSecret({}); }}>{Object.entries(KIND_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
+      {kind === 'pagerduty' && <>{secretField('routing_key', 'Integration (routing) key')}{field('escalation_policy_id', 'Escalation policy ID', 'for "who is on call"', 'P1234AB')}{secretField('api_token', 'REST API token (read-only, for who is on call)')}</>}
+      {kind === 'opsgenie' && <>{secretField('api_key', 'API key (Alerts)')}<label>Region<select value={cfg.region ?? 'us'} onChange={(e) => setCfg({ ...cfg, region: e.target.value })}><option value="us">US</option><option value="eu">EU</option></select></label>{field('schedule_id', 'Schedule ID', 'for "who is on call"')}</>}
+      {kind === 'grafana_oncall' && secretField('url', 'Integration URL (formatted webhook)')}
+      {kind === 'webhook' && <>{field('url', 'URL', 'SMS gateway, ntfy… https only', 'https://')}{secretField('signing_secret', 'Signing secret (Standard Webhooks)')}</>}
+      {kind === 'rotation' && <p className="muted small full">Set the members and the handover under Rotation. The person on call gets a notification in Kernel (and by email or chat as they chose).</p>}
+      <fieldset className="full"><legend>Page for</legend>
+        {[1, 2, 3, 4, 5].map((n) => <label key={n} className="check"><input type="checkbox" checked={priorities.includes(n)} onChange={(e) => setPriorities(e.target.checked ? [...priorities, n].sort() : priorities.filter((x) => x !== n))} /> P{n}</label>)}
+        <label className="check"><input type="checkbox" checked={major} onChange={(e) => setMajor(e.target.checked)} /> Major incidents</label>
+      </fieldset>
+      <label>When<select value={hours} onChange={(e) => setHours(e.target.value)}><option value="always">Always</option><option value="business">In business hours</option><option value="out_of_hours">Out of hours</option></select></label>
+      <label>Only these services <span className="muted small">(refs, optional)</span><input value={services} onChange={(e) => setServices(e.target.value)} placeholder="SVC000001" /></label>
+      <label className="full">Private network access <span className="muted small">(for a self-hosted tool on your LAN)</span><input value={allow} onChange={(e) => setAllow(e.target.value)} /></label>
+      <label className="check full"><input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} /> Enabled</label>
+    </FormModal>
   );
 }
 
-function RotationModal({ team, paging, onClose, onDone }: { team: Team; paging: Paging; onClose: () => void; onDone: (p: Paging) => void }) {
+function RotationModal({ team, paging, onClose, onDone }: { team: Team; paging: TeamPaging; onClose: () => void; onDone: (p: TeamPaging) => void }) {
   const [order, setOrder] = useState<number[]>(paging.rotation?.members ?? team.members.map((m) => m.user_id));
   const [dow, setDow] = useState(paging.rotation?.handover_dow ?? 1);
   const [at, setAt] = useState(() => { const m = paging.rotation?.handover_minute ?? 540; return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`; });
-  const [error, setError] = useState<string | null>(null);
   const name = (id: number) => team.members.find((m) => m.user_id === id)?.name ?? `#${id}`;
   const move = (i: number, d: number) => { const n = [...order]; [n[i], n[i + d]] = [n[i + d], n[i]]; setOrder(n); };
   return (
-    <Modal title={`Rotation for ${team.name}`} onClose={onClose}>
-      <form className="form" onSubmit={async (e) => {
-        e.preventDefault();
-        const [h, m] = at.split(':').map(Number);
-        try { onDone(await api.put(`/api/teams/${team.id}/rotation`, { members: order, handover_dow: dow, handover_minute: h * 60 + m, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone })); } catch (err) { setError((err as Error).message); }
-      }}>
-        <p className="muted small full">One person a week, in this order. Anyone in the team can take a shift for a while (an override).</p>
-        <ol className="full rotation-order">
-          {order.map((id, i) => (
-            <li key={id}>{name(id)}
-              <span className="actions">
-                <button type="button" className="btn-link small" disabled={i === 0} onClick={() => move(i, -1)} aria-label="Earlier">↑</button>
-                <button type="button" className="btn-link small" disabled={i === order.length - 1} onClick={() => move(i, 1)} aria-label="Later">↓</button>
-                <button type="button" className="btn-link small" onClick={() => setOrder(order.filter((x) => x !== id))}>Remove</button>
-              </span>
-            </li>
-          ))}
-        </ol>
-        {team.members.some((m) => !order.includes(m.user_id)) && (
-          <label className="full">Add<select value="" onChange={(e) => e.target.value && setOrder([...order, Number(e.target.value)])}><option value="">…</option>{team.members.filter((m) => !order.includes(m.user_id)).map((m) => <option key={m.user_id} value={m.user_id}>{m.name}</option>)}</select></label>
-        )}
-        <label>Handover<select value={dow} onChange={(e) => setDow(Number(e.target.value))}>{DAYS.slice(1).map((d, i) => <option key={d} value={i + 1}>{d}</option>)}</select></label>
-        <label>At<input type="time" value={at} onChange={(e) => setAt(e.target.value)} /></label>
-        {error && <div className="error full">{error}</div>}
-        <div className="actions full"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary">Save</button></div>
-      </form>
-    </Modal>
+    <FormModal title={`Rotation for ${team.name}`} submitLabel="Save" onClose={onClose} onSubmit={async () => {
+      const [h, m] = at.split(':').map(Number);
+      onDone(await api.put(`/api/teams/${team.id}/rotation`, { members: order, handover_dow: dow, handover_minute: h * 60 + m, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }));
+    }}>
+      <p className="muted small full">One person a week, in this order. Anyone in the team can take a shift for a while (an override).</p>
+      <ol className="full rotation-order">
+        {order.map((id, i) => (
+          <li key={id}>{name(id)}
+            <span className="actions">
+              <button type="button" className="btn-link small" disabled={i === 0} onClick={() => move(i, -1)} aria-label="Earlier">↑</button>
+              <button type="button" className="btn-link small" disabled={i === order.length - 1} onClick={() => move(i, 1)} aria-label="Later">↓</button>
+              <button type="button" className="btn-link small" onClick={() => setOrder(order.filter((x) => x !== id))}>Remove</button>
+            </span>
+          </li>
+        ))}
+      </ol>
+      {team.members.some((m) => !order.includes(m.user_id)) && (
+        <label className="full">Add<select value="" onChange={(e) => e.target.value && setOrder([...order, Number(e.target.value)])}><option value="">…</option>{team.members.filter((m) => !order.includes(m.user_id)).map((m) => <option key={m.user_id} value={m.user_id}>{m.name}</option>)}</select></label>
+      )}
+      <label>Handover<select value={dow} onChange={(e) => setDow(Number(e.target.value))}>{DAYS.slice(1).map((d, i) => <option key={d} value={i + 1}>{d}</option>)}</select></label>
+      <label>At<input type="time" value={at} onChange={(e) => setAt(e.target.value)} /></label>
+    </FormModal>
   );
 }
 
-interface Page { id: number; action: string; kind: string; reason: string; status: string; attempts: number; error: string; created_at: string; sent_at: string | null; team: string | null; paged_user: string | null }
-
 /** On the incident: who is on call for its team, and every page that went out (or failed). */
-export function PagesCard({ teamId, pages }: { teamId: number | null; pages: Page[] }) {
+export function PagesCard({ teamId, pages }: { teamId: number | null; pages: OnCallPage[] }) {
   if (!teamId && !pages.length) return null;
   return (
     <section className="card">

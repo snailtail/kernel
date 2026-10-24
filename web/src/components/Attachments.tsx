@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api, ApiError } from '../api';
+import { api } from '../api';
 import { formatDate } from '../format';
 import { AnalyzeLogButton } from './Ai';
 import { Modal } from './Modal';
@@ -21,14 +21,7 @@ const fileSize = (n: number) => (n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${Math
 
 /** Uploads a file to a record; the server decides the type from the content. */
 export async function uploadAttachment(recordRef: string, file: Blob, filename: string): Promise<Attachment> {
-  const res = await fetch(`/api/records/${recordRef}/attachments?filename=${encodeURIComponent(filename)}`, {
-    method: 'POST',
-    credentials: 'same-origin',
-    headers: { 'X-Kernel-Request': '1', 'Content-Type': 'application/octet-stream' },
-    body: file,
-  });
-  const data = await res.json().catch(() => null);
-  if (!res.ok) throw new ApiError(res.status, data?.error ?? res.statusText, data ?? {});
+  const data = await api.upload<Attachment>(`/api/records/${recordRef}/attachments?filename=${encodeURIComponent(filename)}`, file);
   window.dispatchEvent(new CustomEvent(CHANGED, { detail: recordRef }));
   return data;
 }

@@ -2,11 +2,12 @@ import { api } from '../api';
 import { useApi } from '../hooks';
 import { isManager, useSession } from '../session';
 import { askReason } from './Ask';
+import type { StatusSettings } from '../api/types/status';
 
 /** Administration: the public page switch, with what it takes to reach it from outside. */
 export function StatusPageAdmin() {
   const { user } = useSession();
-  const { data, reload } = useApi<{ settings: { public_enabled: boolean; title: string; sign_up: boolean } }>('/api/status');
+  const { data, reload } = useApi<{ settings: StatusSettings }>('/api/status');
   if (!isManager(user) || !data) return null;
   const toggle = async () => {
     const reason = await askReason('Public status page', data.settings.public_enabled ? 'The public page will be turned off.' : 'Anyone who can reach /status will see the services and updates you publish.', { confirmLabel: 'Change setting' });

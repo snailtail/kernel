@@ -1,5 +1,5 @@
-import { useState, type FormEvent } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
+import { useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router';
 import { api, type Guidance } from '../api';
 import { CommentBox } from '../components/CommentBox';
 import { GuidePanel } from '../components/Guide';
@@ -8,52 +8,30 @@ import { RecordNotFound, VisibilityPanel } from '../components/Visibility';
 import { DevLinksPanel } from '../components/DevLinks';
 import { PagesCard } from '../components/OnCall';
 import { SummaryButton } from '../components/Ai';
-import { useColumns, useListToolkit, type ColumnKey } from '../components/ListToolkit';
+import { useListToolkit } from '../components/list/ListToolkit';
+import { useColumns, type ColumnKey } from '../components/list/columns';
 import { SavedViews } from '../components/SavedViews';
 import { InboundReview } from '../components/InboundReview';
 import { INCIDENT_RESOLUTION, INCIDENT_STATUS, type IncidentStatus } from '../statuses';
 import { TeamAndAssignee, useTeams } from '../components/Teams';
-import { ArticleSuggestions, IncidentKnowledgePanel, type ArticleRow } from '../components/Knowledge';
+import { ArticleSuggestions, IncidentKnowledgePanel } from '../components/Knowledge';
 import { AttachmentsPanel } from '../components/Attachments';
-import { IncidentPeoplePanel, PersonPicker, type PersonLite, type PersonRef } from '../components/People';
-import { AffectedCisPanel, type AffectedCi, type AffectedService, type ImpactHint } from '../components/AffectedCis';
+import { IncidentPeoplePanel, PersonPicker } from '../components/People';
+import { AffectedCisPanel } from '../components/AffectedCis';
 import { MajorBadge, PersonalDataBadge, PriorityBadge, StatusBadge } from '../components/Badges';
 import { Markdown } from '../components/Markdown';
-import { CommunicationLogCard, DeclareMajorModal, IncidentTimeline, KeyMomentToggle, MajorHeader, RelatedIncidentsPanel, ReviewCard, StatusProposalCard, type MajorInfo, type RelatedRow, type ReviewSummary, type StatusProposal } from '../components/MajorIncident';
-import { FormModal, Modal } from '../components/Modal';
+import { CommunicationLogCard, DeclareMajorModal, IncidentTimeline, KeyMomentToggle, MajorHeader, RelatedIncidentsPanel, ReviewCard, StatusProposalCard } from '../components/MajorIncident';
+import { FormModal } from '../components/Modal';
 import { duration, formatDate, relativeTime } from '../format';
 import { useLive } from '../live';
 import { Presence } from '../components/Presence';
-import { useApi, useOpenOnNew, useSearchText } from '../hooks';
+import { useApi, useListParams, useOpenOnNew, useRecord, useSearchText } from '../hooks';
 import { useSession } from '../session';
 import { Term } from '../components/Glossary';
 import { SeverityBadge, SlaBadge } from '../components/Badges';
 import { HistoryPanel } from '../components/History';
-
-interface IncidentRow {
-  id: number; ref: string; title: string; status: IncidentStatus; priority: number; is_major: boolean; assignee: string | null;
-  assignment_group: string; source: string; created_at: string; resolved_at: string | null; problem_ref: string | null; cis: string[] | null;
-  sla_state?: string | null; resolution_due_at?: string | null;
-  next_update_at?: string | null; update_overdue?: boolean; parent_ref?: string | null; child_count?: number;
-}
-interface Incident extends IncidentRow {
-  description: string; impact: number; urgency: number; category_id: number | null; category: string | null; assignee_id: number | null; team_id: number | null; team_hops: number;
-  reporter: string; hold_reason: string; resolution_code: string | null; resolution: string; reopen_count: number;
-  responded_at: string | null; closed_at: string | null; problem_title: string | null; problem_status: string | null;
-  affected_cis: AffectedCi[]; affected_services: AffectedService[]; impact_hint: ImpactHint | null; impact_incomplete: boolean;
-  suggested_articles?: ArticleRow[]; articles_used?: { ref: string; title: string }[];
-  caller: PersonLite | null; affected_people: PersonLite[]; people_hint: { suggested_impact: number; reason: string } | null; asks_affected_users: boolean;
-  sla: { name: string; calendar: string; paused: boolean; response: SlaClock; resolution: SlaClock } | null;
-  possible_change_causes: { ref: string; title: string; status: string; change_type: string; outcome: string | null; started_at: string; ci: string; ci_name: string }[];
-  known_errors: { ref: string; title: string; workaround: string; workaround_effectiveness: string | null; ci_ref: string; ci_name: string }[];
-  links: { id: number; kind: string; reference: string; system: string; url: string }[];
-  alerts: { id: number; source: string; check_key: string; severity: string; status: string; count: number; flap_count: number; last_seen: string; ci_hint: string; ci_ref: string | null; ci_name: string | null; source_url: string }[];
-  activity: { id: number; kind: string; body: string; data: any; channel: string; key_moment: boolean; created_at: string; user_name: string | null }[];
-  major: MajorInfo | null; review: ReviewSummary | null; pages: Parameters<typeof PagesCard>[0]['pages']; parent: RelatedRow | null; children: RelatedRow[]; suggested_parent: RelatedRow | null; status_proposal: StatusProposal | null;
-  next_steps: { phase: string; purpose: string; next: string; steps: { id: string; label: string; hint: string; done: boolean }[] };
-}
-
-interface SlaClock { target_minutes: number | null; due_at: string | null; elapsed_minutes: number; remaining_minutes: number | null; state: string; met_at?: string | null }
+import type { Incident, IncidentRow } from '../api/types/incidents';
+import type { PersonRef } from '../api/types/people';
 
 const LEVEL = ['', 'High', 'Medium', 'Low'];
 
@@ -66,12 +44,11 @@ const INCIDENT_COLUMNS: { key: ColumnKey; label: string }[] = [
 export function IncidentsPage() {
   const teams = useTeams();
   const { user } = useSession();
-  const [params, setParams] = useSearchParams();
+  const { params, set } = useListParams();
   const [q, setQ] = useSearchText();
   const [creating, setCreating] = useState(false);
   useOpenOnNew(() => setCreating(true));
   const navigate = useNavigate();
-  const set = (k: string, v: string) => setParams((prev) => { const n = new URLSearchParams(prev); if (v) n.set(k, v); else n.delete(k); return n; }, { replace: true });
   const { data, loading, refresh } = useApi<IncidentRow[]>(`/api/incidents?${params}`);
   useLive(['incident:*'], refresh);
   const tk = useListToolkit({ list: 'incidents', rows: data, idOf: (i) => i.ref, hrefOf: (i) => `/incidents/${i.ref}`, filter: params.toString(), onChanged: refresh });
@@ -157,55 +134,45 @@ function NewIncident({ onClose, onDone }: { onClose: () => void; onDone: (ref: s
     setForm((cur) => ({ ...cur, ...(f.title ? { title: f.title } : {}), ...(f.description ? { description: f.description } : {}), ...(f.impact ? { impact: f.impact } : {}), ...(f.urgency ? { urgency: f.urgency } : {}), ...(f.category_id ? { category_id: String(f.category_id) } : {}), ...(f.assignment_group ? { assignment_group: f.assignment_group } : {}), ...(f.cis ? { cis: f.cis.join(', ') } : {}) }));
     if (f.assignment_group || f.category_id) setMore(true);
   };
-  const [error, setError] = useState<string | null>(null);
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    try {
-      const created = await api.post<Incident>('/api/incidents', {
-        title: form.title, description: form.description, impact: Number(form.impact), urgency: Number(form.urgency),
-        category_id: form.category_id ? Number(form.category_id) : null, assignee_id: form.assignee_id ? Number(form.assignee_id) : null,
-        ...(form.team_id ? { team_id: Number(form.team_id) } : form.assignment_group ? { assignment_group: form.assignment_group } : {}), reporter: form.reporter,
-        cis: form.cis.split(/[\s,]+/).map((c) => c.trim()).filter(Boolean),
-        ...(caller ? { caller: 'id' in caller ? { id: caller.id } : caller } : {}),
-      });
-      onDone(created.ref);
-    } catch (err) {
-      setError((err as Error).message);
-    }
+  const submit = async () => {
+    const created = await api.post<Incident>('/api/incidents', {
+      title: form.title, description: form.description, impact: Number(form.impact), urgency: Number(form.urgency),
+      category_id: form.category_id ? Number(form.category_id) : null, assignee_id: form.assignee_id ? Number(form.assignee_id) : null,
+      ...(form.team_id ? { team_id: Number(form.team_id) } : form.assignment_group ? { assignment_group: form.assignment_group } : {}), reporter: form.reporter,
+      cis: form.cis.split(/[\s,]+/).map((c) => c.trim()).filter(Boolean),
+      ...(caller ? { caller: 'id' in caller ? { id: caller.id } : caller } : {}),
+    });
+    onDone(created.ref);
   };
   return (
-    <Modal title="Log an incident" onClose={onClose}>
-      <form className="form" onSubmit={submit}>
-        {!!templates?.filter((t) => t.active).length && (
-          <label className="full">Start from a template<select defaultValue="" onChange={(e) => applyTemplate(Number(e.target.value))}><option value="">–</option>{templates.filter((t) => t.active).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
-        )}
-        <label className="full">What is wrong?<input required autoFocus placeholder="As the user experiences it, e.g. Checkout times out" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></label>
-        <label className="full">Description<textarea rows={3} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
-        <div className="full">
-          <div className="field-label">Caller <span className="muted small">(optional: who reported it – a name or email creates a contact)</span></div>
-          {caller ? <span className="person-field">{'id' in caller ? caller.label : `${caller.name}${caller.email && caller.email !== caller.name ? ` <${caller.email}>` : ''} (new contact)`} <button type="button" className="btn-icon small" aria-label="Clear caller" onClick={() => setCaller(null)}>×</button></span>
-            : <PersonPicker placeholder="Name or email…" onPick={setCaller} />}
-        </div>
-        <label><Term id="impact" /><select value={form.impact} onChange={(e) => setForm({ ...form, impact: Number(e.target.value) })}>{[1, 2, 3].map((n) => <option key={n} value={n}>{n} – {LEVEL[n]}</option>)}</select></label>
-        <label><Term id="urgency" /><select value={form.urgency} onChange={(e) => setForm({ ...form, urgency: Number(e.target.value) })}>{[1, 2, 3].map((n) => <option key={n} value={n}>{n} – {LEVEL[n]}</option>)}</select></label>
-        {meta.modules?.knowledge !== false && <ArticleSuggestions text={form.title} cis={form.cis} />}
-        {meta.modules?.cmdb !== false && <label className="full">Affected CIs or services <span className="muted small">(refs, e.g. CI000012 SVC000003; shows impact and known workarounds)</span><input value={form.cis} onChange={(e) => setForm({ ...form, cis: e.target.value })} /></label>}
-        <div className="full more-toggle">
-          <button type="button" className="btn-link" aria-expanded={more} onClick={() => setMore(!more)}>{more ? '− Fewer details' : '+ More details'}</button>
-          {!more && <span className="muted small"> team, assignee, category, reporter – all optional</span>}
-        </div>
-        {more && (
-          <>
-            <label>Assignee<select value={form.assignee_id} onChange={(e) => setForm({ ...form, assignee_id: e.target.value })}><option value="">–</option>{meta.assignees.map((a) => <option key={a.id} value={a.id}>{a.display_name}</option>)}</select></label>
-            <label>Team<select value={form.team_id} onChange={(e) => setForm({ ...form, team_id: e.target.value, assignment_group: '' })}><option value="">{form.assignment_group ? `${form.assignment_group} (from the template)` : 'From the CI or service'}</option>{teams.filter((t) => t.active).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
-            <label>Category<select value={form.category_id} onChange={(e) => setForm({ ...form, category_id: e.target.value })}><option value="">–</option>{meta.categories.filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
-            <label>Reported by<input value={form.reporter} onChange={(e) => setForm({ ...form, reporter: e.target.value })} /></label>
-          </>
-        )}
-        {error && <div className="error full">{error}</div>}
-        <div className="actions full"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary">Log incident</button></div>
-      </form>
-    </Modal>
+    <FormModal title="Log an incident" submitLabel="Log incident" onClose={onClose} onSubmit={submit}>
+      {!!templates?.filter((t) => t.active).length && (
+        <label className="full">Start from a template<select defaultValue="" onChange={(e) => applyTemplate(Number(e.target.value))}><option value="">–</option>{templates.filter((t) => t.active).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
+      )}
+      <label className="full">What is wrong?<input required autoFocus placeholder="As the user experiences it, e.g. Checkout times out" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></label>
+      <label className="full">Description<textarea rows={3} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
+      <div className="full">
+        <div className="field-label">Caller <span className="muted small">(optional: who reported it – a name or email creates a contact)</span></div>
+        {caller ? <span className="person-field">{'id' in caller ? caller.label : `${caller.name}${caller.email && caller.email !== caller.name ? ` <${caller.email}>` : ''} (new contact)`} <button type="button" className="btn-icon small" aria-label="Clear caller" onClick={() => setCaller(null)}>×</button></span>
+          : <PersonPicker placeholder="Name or email…" onPick={setCaller} />}
+      </div>
+      <label><Term id="impact" /><select value={form.impact} onChange={(e) => setForm({ ...form, impact: Number(e.target.value) })}>{[1, 2, 3].map((n) => <option key={n} value={n}>{n} – {LEVEL[n]}</option>)}</select></label>
+      <label><Term id="urgency" /><select value={form.urgency} onChange={(e) => setForm({ ...form, urgency: Number(e.target.value) })}>{[1, 2, 3].map((n) => <option key={n} value={n}>{n} – {LEVEL[n]}</option>)}</select></label>
+      {meta.modules?.knowledge !== false && <ArticleSuggestions text={form.title} cis={form.cis} />}
+      {meta.modules?.cmdb !== false && <label className="full">Affected CIs or services <span className="muted small">(refs, e.g. CI000012 SVC000003; shows impact and known workarounds)</span><input value={form.cis} onChange={(e) => setForm({ ...form, cis: e.target.value })} /></label>}
+      <div className="full more-toggle">
+        <button type="button" className="btn-link" aria-expanded={more} onClick={() => setMore(!more)}>{more ? '− Fewer details' : '+ More details'}</button>
+        {!more && <span className="muted small"> team, assignee, category, reporter – all optional</span>}
+      </div>
+      {more && (
+        <>
+          <label>Assignee<select value={form.assignee_id} onChange={(e) => setForm({ ...form, assignee_id: e.target.value })}><option value="">–</option>{meta.assignees.map((a) => <option key={a.id} value={a.id}>{a.display_name}</option>)}</select></label>
+          <label>Team<select value={form.team_id} onChange={(e) => setForm({ ...form, team_id: e.target.value, assignment_group: '' })}><option value="">{form.assignment_group ? `${form.assignment_group} (from the template)` : 'From the CI or service'}</option>{teams.filter((t) => t.active).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
+          <label>Category<select value={form.category_id} onChange={(e) => setForm({ ...form, category_id: e.target.value })}><option value="">–</option>{meta.categories.filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
+          <label>Reported by<input value={form.reporter} onChange={(e) => setForm({ ...form, reporter: e.target.value })} /></label>
+        </>
+      )}
+    </FormModal>
   );
 }
 
@@ -213,7 +180,7 @@ export function IncidentPage() {
   const { ref } = useParams();
   const { user, meta } = useSession();
   const navigate = useNavigate();
-  const { data: i, setData, error, reload, refresh } = useApi<Incident>(`/api/incidents/${ref}`);
+  const { data: i, setData, error, reload, refresh, actionError, setActionError, run, save } = useRecord<Incident>(`/api/incidents/${ref}`);
   const others = useLive([i && `incident:${i.id}`], refresh, { presence: true });
   const [noteKind, setNoteKind] = useState<'comment' | 'communication'>('comment');
   // A note is internal unless the person chooses to reply to the caller (#45): replies show in the portal and go by mail.
@@ -222,24 +189,12 @@ export function IncidentPage() {
   const [declaring, setDeclaring] = useState(false);
   const [view, setView] = useState<'all' | 'timeline'>('all');
   const [problemRef, setProblemRef] = useState('');
-  const [actionError, setActionError] = useState<string | null>(null);
   if (error) return <RecordNotFound refId={ref ?? ''} error={error} onOpened={reload} />;
   if (!i) return null;
   const editable = user.role !== 'viewer' && i.status !== 'closed';
   const manager = user.role === 'admin' || user.role === 'manager';
-  const run = async (fn: () => Promise<Incident>) => {
-    setActionError(null);
-    try {
-      setData(await fn());
-      return true;
-    } catch (err) {
-      setActionError((err as Error).message);
-      return false;
-    }
-  };
   const path = `/api/incidents/${i.ref}`;
   const go = (body: object) => run(() => api.post(`${path}/transition`, body));
-  const save = (fields: object) => run(() => api.patch(path, { ...fields, base: Object.fromEntries(Object.keys(fields).map((k) => [k, (i as any)[k]])) }));
   const unresolved = ['new', 'in_progress', 'on_hold'].includes(i.status);
   const hold = async () => {
     const reason = window.prompt('Why is it on hold? (e.g. waiting for the customer or a supplier)');
@@ -252,7 +207,7 @@ export function IncidentPage() {
         <div className="crumbs"><Link to="/incidents">Incidents</Link> / <span className="mono">{i.ref}</span> <Presence people={others} /></div>
         <h1>{i.title}</h1>
         <div className="badges">
-          {(i as any).contains_personal_data && <PersonalDataBadge />}
+          {i.contains_personal_data && <PersonalDataBadge />}
           <StatusBadge kind="incident" status={i.status} />
           <PriorityBadge priority={i.priority} />
           {i.is_major && <MajorBadge />}
@@ -403,7 +358,7 @@ export function IncidentPage() {
           <IncidentPeoplePanel record={i} basePath={path} editable={editable} onChange={setData} />
           {meta.modules?.knowledge !== false && <IncidentKnowledgePanel incident={i} editable={editable} onChange={() => api.get<Incident>(path).then(setData)} />}
           <SummaryButton recordRef={i.ref} onAddNote={async (body) => { await api.post(`/api/incidents/${i.ref}/comments`, { body, kind: 'comment' }); reload(); }} />
-          <VisibilityPanel record={i as any} onChange={reload} />
+          <VisibilityPanel record={i} onChange={reload} />
           <DevLinksPanel recordRef={i.ref} editable={editable} />
           <AttachmentsPanel recordRef={i.ref} editable={editable} canDelete={(a) => a.uploaded_by === user.id || manager} />
           <HistoryPanel recordRef={i.ref} version={i} />

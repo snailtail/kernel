@@ -3,6 +3,7 @@ import { api } from '../api';
 import { useSession } from '../session';
 import { askReason } from './Ask';
 import { Markdown } from './Markdown';
+import type { AiProviderList, AiResult } from '../api/types/admin';
 
 let status: Record<string, boolean> | null = null;
 /** Which AI tasks an administrator has set up (all off by default). */
@@ -14,8 +15,6 @@ export function useAiStatus() {
   }, []);
   return s ?? {};
 }
-
-interface AiResult { text: string; model: string; provider: string; lines_sent?: number; lines_total?: number }
 
 /** An AI result: labelled, rendered as Markdown (never HTML), and used only when a person chooses to. */
 function AiOutput({ result, onUse }: { result: AiResult; onUse?: (text: string) => void }) {
@@ -85,15 +84,10 @@ export function AnalyzeLogButton({ attachmentId }: { attachmentId: number }) {
   );
 }
 
-interface Provider {
-  id: number; name: string; kind: string; base_url: string; has_key: boolean; models: string[]; location: 'on_prem' | 'cloud'; data_classes: string[];
-  private_allow: string[]; monthly_token_budget: number; enabled: boolean; calls: number; tokens_this_month: string;
-}
-
 /** Administration: model providers, where they run, what they may receive, and which model does which task. */
 export function AiAdminSection() {
   const { user } = useSession();
-  const [data, setData] = useState<{ providers: Provider[]; routing: Record<string, { provider_id: number; model: string }>; tasks: Record<string, string> } | null>(null);
+  const [data, setData] = useState<AiProviderList | null>(null);
   const [form, setForm] = useState({ name: '', kind: 'openai_compatible', base_url: '', api_key: '', models: '', location: 'on_prem', personal: false, confidential: false, restricted: false, private_allow: '', monthly_token_budget: 1000000 });
   const [message, setMessage] = useState<string | null>(null);
   const load = () => api.get<typeof data>('/api/admin/ai/providers').then(setData, () => setData(null));

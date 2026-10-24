@@ -1,5 +1,5 @@
-import { useEffect, useState, type FormEvent } from 'react';
-import { Modal } from './Modal';
+import { useEffect, useState } from 'react';
+import { FormModal } from './Modal';
 
 interface Request {
   title: string;
@@ -50,27 +50,17 @@ export function AskHost() {
     req.resolve(v);
     setReq(null);
   };
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    if (value.trim()) close(value.trim());
-  };
   return (
-    <Modal title={req.title} onClose={() => close(null)}>
-      <form className="form" onSubmit={submit}>
-        {req.message && <p className="hint full">{req.message}</p>}
-        <label className="full">
-          {req.label} {req.audited && <span className="muted small">(kept permanently in the audit trail – no personal details; refer to people by account or record ref)</span>}
-          {req.multiline ? (
-            <textarea autoFocus rows={3} value={value} onChange={(e) => setValue(e.target.value)} maxLength={1000} />
-          ) : (
-            <input autoFocus value={value} onChange={(e) => setValue(e.target.value)} maxLength={60} />
-          )}
-        </label>
-        <div className="actions full">
-          <button type="button" className="btn" onClick={() => close(null)}>Cancel</button>
-          <button className={`btn ${req.danger ? 'danger' : 'primary'}`} disabled={!value.trim()}>{req.confirmLabel}</button>
-        </div>
-      </form>
-    </Modal>
+    <FormModal title={req.title} submitLabel={req.confirmLabel} danger={req.danger} canSubmit={!!value.trim()} onClose={() => close(null)} onSubmit={async () => close(value.trim())}>
+      {req.message && <p className="hint full">{req.message}</p>}
+      <label className="full">
+        {req.label} {req.audited && <span className="muted small">(kept permanently in the audit trail – no personal details; refer to people by account or record ref)</span>}
+        {req.multiline ? (
+          <textarea autoFocus rows={3} value={value} onChange={(e) => setValue(e.target.value)} maxLength={1000} />
+        ) : (
+          <input autoFocus value={value} onChange={(e) => setValue(e.target.value)} maxLength={60} />
+        )}
+      </label>
+    </FormModal>
   );
 }

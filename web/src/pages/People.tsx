@@ -1,23 +1,12 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { api } from '../api';
 import { askReason } from '../components/Ask';
-import { Modal } from '../components/Modal';
+import { FormModal } from '../components/Modal';
 import { formatDate } from '../format';
 import { useApi } from '../hooks';
 import { canEdit, isManager, useSession } from '../session';
-
-interface Person {
-  id: number; name: string; email: string | null; phone: string; title: string; department: string; location: string;
-  organisation_id: number | null; organisation: string | null; manager_id: number | null; manager: string | null;
-  is_vip: boolean; status_contact: boolean; active: boolean; external_id: string | null; source: string; user_id: number | null; erased_at: string | null;
-}
-interface PersonPage extends Person {
-  incidents: { ref: string; title: string; status: string; priority: number; created_at: string; role: string }[];
-  services: { ref: string; name: string; criticality: number }[];
-  owns: { ref: string; name: string; class: string; role: string }[];
-}
-interface Organisation { id: number; name: string; kind: 'internal' | 'customer'; description: string; active: boolean; people: number; services: { ref: string; name: string }[] }
+import type { Person, PersonDetail, Organisation } from '../api/types/people';
 
 export function PeoplePage() {
   const { user } = useSession();
@@ -113,7 +102,7 @@ export function PeoplePage() {
 export function PersonPage() {
   const { id } = useParams();
   const { user } = useSession();
-  const { data: p, error, reload } = useApi<PersonPage>(`/api/people/${id}`);
+  const { data: p, error, reload } = useApi<PersonDetail>(`/api/people/${id}`);
   const { data: orgs } = useApi<Organisation[]>('/api/organisations');
   const [editing, setEditing] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -189,72 +178,52 @@ function PersonModal({ person, orgs, onClose, onDone }: { person?: Person; orgs:
     name: person?.name ?? '', email: person?.email ?? '', phone: person?.phone ?? '', title: person?.title ?? '', department: person?.department ?? '',
     location: person?.location ?? '', organisation_id: person?.organisation_id ? String(person.organisation_id) : '', is_vip: person?.is_vip ?? false, status_contact: person?.status_contact ?? false, active: person?.active ?? true,
   });
-  const [error, setError] = useState<string | null>(null);
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
+  const submit = async () => {
     const body: Record<string, unknown> = {
       name: form.name, email: form.email.trim() || null, phone: form.phone, title: form.title, department: form.department, location: form.location,
       organisation_id: form.organisation_id ? Number(form.organisation_id) : null, active: form.active,
     };
     if (isManager(user)) Object.assign(body, { is_vip: form.is_vip, status_contact: form.status_contact });
-    try {
-      onDone(person ? await api.patch<Person>(`/api/people/${person.id}`, body) : await api.post<Person>('/api/people', body));
-    } catch (err) {
-      setError((err as Error).message);
-    }
+    onDone(person ? await api.patch<Person>(`/api/people/${person.id}`, body) : await api.post<Person>('/api/people', body));
   };
   const field = (k: 'name' | 'email' | 'phone' | 'title' | 'department' | 'location', label: string, type = 'text') => (
     <label>{label}<input type={type} required={k === 'name'} value={form[k]} onChange={(e) => setForm({ ...form, [k]: e.target.value })} /></label>
   );
   return (
-    <Modal title={person ? `Edit ${person.name}` : 'Add a contact'} onClose={onClose}>
-      <form className="form" onSubmit={submit}>
-        {field('name', 'Name')}{field('email', 'Email', 'email')}{field('phone', 'Phone', 'tel')}{field('title', 'Title')}{field('department', 'Department')}{field('location', 'Location')}
-        <label>Organisation<select value={form.organisation_id} onChange={(e) => setForm({ ...form, organisation_id: e.target.value })}><option value="">–</option>{orgs.filter((o) => o.active).map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select></label>
-        {isManager(user) && <label className="check"><input type="checkbox" checked={form.is_vip} onChange={(e) => setForm({ ...form, is_vip: e.target.checked })} /> VIP <span className="muted small">(raises the suggested impact of their incidents)</span></label>}
-        {isManager(user) && <label className="check"><input type="checkbox" checked={form.status_contact} onChange={(e) => setForm({ ...form, status_contact: e.target.checked })} /> Status contact <span className="muted small">(gets published status updates by email for the services their organisation uses)</span></label>}
-        {person && <label className="check"><input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Active</label>}
-        <p className="muted small full">Record only what is needed to handle incidents. Contact details are personal data.</p>
-        {error && <div className="error full">{error}</div>}
-        <div className="actions full"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary">Save</button></div>
-      </form>
-    </Modal>
+    <FormModal title={person ? `Edit ${person.name}` : 'Add a contact'} submitLabel="Save" onClose={onClose} onSubmit={submit}>
+      {field('name', 'Name')}{field('email', 'Email', 'email')}{field('phone', 'Phone', 'tel')}{field('title', 'Title')}{field('department', 'Department')}{field('location', 'Location')}
+      <label>Organisation<select value={form.organisation_id} onChange={(e) => setForm({ ...form, organisation_id: e.target.value })}><option value="">–</option>{orgs.filter((o) => o.active).map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select></label>
+      {isManager(user) && <label className="check"><input type="checkbox" checked={form.is_vip} onChange={(e) => setForm({ ...form, is_vip: e.target.checked })} /> VIP <span className="muted small">(raises the suggested impact of their incidents)</span></label>}
+      {isManager(user) && <label className="check"><input type="checkbox" checked={form.status_contact} onChange={(e) => setForm({ ...form, status_contact: e.target.checked })} /> Status contact <span className="muted small">(gets published status updates by email for the services their organisation uses)</span></label>}
+      {person && <label className="check"><input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Active</label>}
+      <p className="muted small full">Record only what is needed to handle incidents. Contact details are personal data.</p>
+    </FormModal>
   );
 }
 
 function OrganisationModal({ org, onClose, onDone }: { org?: Organisation; onClose: () => void; onDone: () => void }) {
   const [form, setForm] = useState({ name: org?.name ?? '', kind: org?.kind ?? 'internal', description: org?.description ?? '', active: org?.active ?? true, services: (org?.services ?? []).map((s) => s.ref) });
   const { data: services } = useApi<{ ref: string; name: string }[]>('/api/cis?class=service&limit=200');
-  const [error, setError] = useState<string | null>(null);
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    try {
-      if (org) await api.put(`/api/organisations/${org.id}`, form);
-      else await api.post('/api/organisations', form);
-      onDone();
-    } catch (err) {
-      setError((err as Error).message);
-    }
+  const submit = async () => {
+    if (org) await api.put(`/api/organisations/${org.id}`, form);
+    else await api.post('/api/organisations', form);
+    onDone();
   };
   return (
-    <Modal title={org ? `Edit ${org.name}` : 'Add an organisation'} onClose={onClose}>
-      <form className="form" onSubmit={submit}>
-        <label>Name<input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
-        <label>Kind<select value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value as 'internal' | 'customer' })}><option value="internal">Internal department</option><option value="customer">Customer</option></select></label>
-        <label className="full">Description<textarea rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
-        <fieldset className="full source-fields">
-          <legend>Services consumed</legend>
-          <div className="check-grid">
-            {services?.map((s) => (
-              <label key={s.ref} className="check"><input type="checkbox" checked={form.services.includes(s.ref)} onChange={(e) => setForm({ ...form, services: e.target.checked ? [...form.services, s.ref] : form.services.filter((r) => r !== s.ref) })} /> {s.name}</label>
-            ))}
-            {services?.length === 0 && <span className="muted small">No services in the CMDB yet.</span>}
-          </div>
-        </fieldset>
-        {org && <label className="check"><input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Active</label>}
-        {error && <div className="error full">{error}</div>}
-        <div className="actions full"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary">Save</button></div>
-      </form>
-    </Modal>
+    <FormModal title={org ? `Edit ${org.name}` : 'Add an organisation'} submitLabel="Save" onClose={onClose} onSubmit={submit}>
+      <label>Name<input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
+      <label>Kind<select value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value as 'internal' | 'customer' })}><option value="internal">Internal department</option><option value="customer">Customer</option></select></label>
+      <label className="full">Description<textarea rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
+      <fieldset className="full source-fields">
+        <legend>Services consumed</legend>
+        <div className="check-grid">
+          {services?.map((s) => (
+            <label key={s.ref} className="check"><input type="checkbox" checked={form.services.includes(s.ref)} onChange={(e) => setForm({ ...form, services: e.target.checked ? [...form.services, s.ref] : form.services.filter((r) => r !== s.ref) })} /> {s.name}</label>
+          ))}
+          {services?.length === 0 && <span className="muted small">No services in the CMDB yet.</span>}
+        </div>
+      </fieldset>
+      {org && <label className="check"><input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Active</label>}
+    </FormModal>
   );
 }

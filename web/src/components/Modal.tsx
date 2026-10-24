@@ -22,12 +22,19 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
 
 /**
  * A modal holding one form: the fields, then Cancel and the submit button. `onSubmit` does the work; a thrown error
- * is shown above the buttons and the modal stays open.
+ * is shown above the buttons and the modal stays open. `actions` go left of Cancel (e.g. Delete); `canSubmit` false
+ * keeps the submit button off until the form is filled in. `intro` sits above the form (e.g. a guide).
  */
-export function FormModal({ title, submitLabel, danger, onClose, onSubmit, children }: {
+export function FormModal({ title, submitLabel, danger, submitClass, canSubmit = true, actions, cancelLabel = 'Cancel', intro, onClose, onSubmit, children }: {
   title: string;
   submitLabel: string;
   danger?: boolean;
+  /** The submit button's classes when neither primary nor danger fits (e.g. 'btn primary danger'). */
+  submitClass?: string;
+  canSubmit?: boolean;
+  actions?: ReactNode;
+  cancelLabel?: string;
+  intro?: ReactNode;
   onClose: () => void;
   onSubmit: () => Promise<unknown>;
   children: ReactNode;
@@ -36,6 +43,7 @@ export function FormModal({ title, submitLabel, danger, onClose, onSubmit, child
   const [busy, setBusy] = useState(false);
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    if (!canSubmit) return;
     setBusy(true);
     setError(null);
     try {
@@ -48,12 +56,14 @@ export function FormModal({ title, submitLabel, danger, onClose, onSubmit, child
   };
   return (
     <Modal title={title} onClose={onClose}>
+      {intro}
       <form className="form" onSubmit={submit}>
         {children}
-        {error && <div className="error full">{error}</div>}
+        {error && <div className="error full" role="alert">{error}</div>}
         <div className="actions full">
-          <button type="button" className="btn" onClick={onClose}>Cancel</button>
-          <button className={`btn ${danger ? 'danger' : 'primary'}`} disabled={busy}>{submitLabel}</button>
+          {actions}
+          <button type="button" className="btn" onClick={onClose}>{cancelLabel}</button>
+          <button className={submitClass ?? `btn ${danger ? 'danger' : 'primary'}`} disabled={busy || !canSubmit}>{submitLabel}</button>
         </div>
       </form>
     </Modal>
