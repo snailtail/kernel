@@ -73,7 +73,7 @@ export async function createWorkItemFrom(user: User, sourceRef: string, input: z
 }
 
 /** The work items linked to a record, as the caller sees them (row-level security on both sides). */
-export async function workItemsLinkedTo(kind: Source | 'change', ref: string) {
+async function workItemsLinkedTo(kind: Source | 'change', ref: string) {
   const { rows } = await query(
     `SELECT w.ref, w.type AS item_type, w.title, w.status, w.points, t.name AS team, s.name AS sprint, w.done_at
      FROM work_item_links l JOIN work_items w ON w.id = l.work_item_id LEFT JOIN teams t ON t.id = w.team_id LEFT JOIN sprints s ON s.id = w.sprint_id

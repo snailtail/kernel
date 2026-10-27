@@ -8,13 +8,13 @@ import { audienceOf, startNarrow } from '../security/audience.js';
 import { audit } from '../security/audit.js';
 import type { User } from '../security/auth.js';
 import { assertMayWriteText, forgetExists, textFilterSql } from '../security/confidential.js';
-import { contextStore, currentContext } from '../core/context.js';
 import { type Db, query, tx } from '../core/db.js';
 import { badRequest, conflict, notFound } from '../core/errors.js';
 import { authorize, can } from '../security/policy.js';
 import { checkAssigneeInTeam, validTeam } from '../people/teams.js';
 import { recordUrl, registerRecordType, typeOfPrefix, type RecordType } from '../records/records.js';
-import { assertVisibleRef } from '../security/visibility.js';
+import { assertVisibleRef, seeingAll } from '../security/visibility.js';
+import { recordSummaries } from '../records/summaries.js';
 import type { StartNarrow } from '../problems/problems.js';
 
 export const WORK_ITEM_TYPES = ['epic', 'story', 'bug', 'task'] as const;
@@ -168,7 +168,6 @@ async function checkChildren(db: Db, id: number, type: Type) {
 // after the caller's own access was checked.
 
 const GAP = 1024;
-export const seeingAll = <T>(fn: () => Promise<T>) => contextStore.run({ ...currentContext(), viewer: 'system' }, fn);
 const lockBacklog = (db: Db, teamId: number | null) => db.query("SELECT pg_advisory_xact_lock(hashtext('kernel.backlog'), $1)", [teamId ?? 0]);
 const inBacklog = 'coalesce(team_id, 0) = coalesce($1::int, 0)';
 
@@ -287,24 +286,18 @@ export async function getWorkItem(user: User, ref: string) {
   return { ...detail, next_steps: workItemGuidance(detail) };
 }
 
-/** The title and status of a linked Kernel record, as the caller sees it (a link to one they cannot see is hidden). */
-const LINKED = `LEFT JOIN LATERAL (
-    SELECT title, status, type AS item_type FROM work_items WHERE l.kind = 'work_item' AND ref = l.reference
-    UNION ALL SELECT title, status, NULL FROM problems WHERE l.kind = 'problem' AND ref = l.reference
-    UNION ALL SELECT title, status, NULL FROM incidents WHERE l.kind = 'incident' AND ref = l.reference
-    UNION ALL SELECT title, status, NULL FROM changes WHERE l.kind = 'change' AND ref = l.reference
-    UNION ALL SELECT title, status, NULL FROM improvements WHERE l.kind = 'improvement' AND ref = l.reference
-    UNION ALL SELECT title, status, NULL FROM requests WHERE l.kind = 'request' AND ref = l.reference
-  ) o ON l.system IN ('', 'Kernel')`;
-
+/** The links, with the title and status of each linked Kernel record as the caller sees it (one they cannot see is hidden). */
 async function linksOf(workItemId: number) {
   const { rows } = await query(
-    `SELECT l.id, l.kind, l.reference, l.system, l.url, l.note, l.created_at, o.title, o.status, o.item_type
-     FROM work_item_links l ${LINKED}
-     WHERE l.work_item_id = $1 ORDER BY l.kind, l.created_at`,
+    'SELECT l.id, l.kind, l.reference, l.system, l.url, l.note, l.created_at FROM work_item_links l WHERE l.work_item_id = $1 ORDER BY l.kind, l.created_at',
     [workItemId],
   );
-  return rows;
+  const kernel = (l: { kind: string; system: string }) => l.kind !== 'document' && (l.system === '' || l.system === 'Kernel');
+  const linked = await recordSummaries(rows.filter(kernel).map((l) => l.reference), WORK_ITEM_LINK_KINDS);
+  return rows.map((l) => {
+    const o = kernel(l) ? linked.get(l.reference) : undefined;
+    return { ...l, title: o?.title ?? null, status: o?.status ?? null, item_type: o?.item_type ?? null };
+  });
 }
 
 /** Guided mode (#37): what the item still needs on its way through the backlog. */
@@ -622,6 +615,7 @@ const WORK_ITEM_TYPE: RecordType = {
   },
   mcp: { list: 'list_work_items', get: 'get_work_item', create: 'create_work_item', update: 'update_work_item', transition: 'transition_work_item' },
   table: 'work_items',
+  subtype: 'type',
   module: 'development',
   activity: { table: 'work_item_activity', fk: 'work_item_id', after: async (db, e) => void (await touchAndAudit(db, 'work_item', e)) },
   people: { assignee: 'assignee_id', team: 'team_id' },

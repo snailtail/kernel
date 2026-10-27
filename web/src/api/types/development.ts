@@ -10,7 +10,7 @@ export interface WorkItemRow {
   created_at: string; updated_at: string; done_at: string | null; progress: Progress | null; sprint_id: number | null;
 }
 /** The service management records a work item belongs to (#167). */
-export type ItsmKind = 'problem' | 'incident' | 'change' | 'improvement' | 'request';
+type ItsmKind = 'problem' | 'incident' | 'change' | 'improvement' | 'request';
 interface WorkItemLink { id: number; kind: 'work_item' | 'document' | ItsmKind; reference: string; system: string; url: string; note: string; title: string | null; status: WorkItemStatus | null; item_type: WorkItemType | null }
 export interface Criterion { criterion: string | null; done: boolean }
 export interface WorkItem extends Omit<WorkItemRow, 'parent_ref' | 'parent_title'> {

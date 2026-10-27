@@ -54,8 +54,10 @@ export interface RecordType {
    * entity type whose changes contain the given JSON, such as the sync batches that created or updated a CI.
    */
   history?: { entityType?: string; refs?: (record: Record<string, unknown>) => string[]; mentions?: (record: Record<string, unknown>) => { entity_type: string; changes: unknown }[] };
-  /** The table its rows live in (with `id` and `ref`). */
+  /** The table its rows live in (with `id` and `ref`, and `title`, `status` and `created_at` for recordSummaries). */
   table: string;
+  /** The column of its own type, when the kind has several (a work item's epic, story, bug or task). */
+  subtype?: string;
   /**
    * Its activity log (none for a kind whose notes go in another record's): the table, the column that points at the
    * record, extra columns the history shows, how many entries it shows (default all), and what else an entry does

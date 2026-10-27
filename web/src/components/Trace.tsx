@@ -72,14 +72,16 @@ function Node({ n, current }: { n: TraceNode; current: boolean }) {
   );
 }
 
-/** "Create a bug" or "Create a story" (#167): the new item is as narrow as the record, links back to it and opens. */
+/** "Create a bug" or "Create a story" (#167): the new item is as narrow as the record and links back to it. Its ref. */
+export const createWorkItemFrom = async (recordRef: string) => (await api.post<{ ref: string }>(`/api/records/${recordRef}/work-items`, {})).ref;
+
 function CreateWorkItemButton({ recordRef, label }: { recordRef: string; label: string }) {
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
   const create = async () => {
     setError(null);
     try {
-      navigate(`/work/${(await api.post<{ ref: string }>(`/api/records/${recordRef}/work-items`, {})).ref}`);
+      navigate(`/work/${await createWorkItemFrom(recordRef)}`);
     } catch (err) {
       setError((err as Error).message);
     }

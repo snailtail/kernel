@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { User } from './auth.js';
 import { audit } from './audit.js';
 import { query, tx } from '../core/db.js';
+import { contextStore, currentContext } from '../core/context.js';
 import { badRequest, notFound } from '../core/errors.js';
 import { managers, notify } from '../notifications/notifications.js';
 import { authorize } from './policy.js';
@@ -139,6 +140,13 @@ export async function saveVisibilitySettings(actor: User, value: { team_scoped: 
 }
 
 /** A record derived from a restricted one (a problem from an incident, a change from a problem) is restricted too. */
+
+/**
+ * Runs `fn` with every row visible (row-level security off for this call). Only for reads that must count rows the
+ * caller cannot see (a backlog's ranks) or show that something is there without showing it (the trace, #167), after
+ * the caller's own access was checked. What comes out must be filtered by the caller's visibility again.
+ */
+export const seeingAll = <T>(fn: () => Promise<T>) => contextStore.run({ ...currentContext(), viewer: 'system' }, fn);
 
 /** A Kernel ref the caller may not see answers exactly like one that does not exist (no existence oracle). */
 export async function assertVisibleRef(ref: string) {

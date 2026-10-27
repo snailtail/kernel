@@ -10,7 +10,7 @@ import { SimilarProblems } from './components/Similar';
 import { TransitionButtons } from '../../components/TransitionButtons';
 import { RecordNotFound, VisibilityPanel } from '../../components/Visibility';
 import { DevLinksPanel } from '../../components/DevLinks';
-import { TraceCard } from '../../components/Trace';
+import { createWorkItemFrom, TraceCard } from '../../components/Trace';
 import { SummaryButton } from '../../components/Ai';
 import { AttachmentsPanel } from '../../components/Attachments';
 import { relativeTime } from '../../format';
@@ -136,8 +136,8 @@ export function ProblemPage() {
               if (c) navigate(`/changes/${c.ref}`);
             }
             if (h.action === 'create_bug') {
-              const w = await api.post<{ ref: string }>(`/api/records/${p.ref}/work-items`, {}).catch((err) => { alert((err as Error).message); return null; });
-              if (w) navigate(`/work/${w.ref}`);
+              const w = await createWorkItemFrom(p.ref).catch((err) => { alert((err as Error).message); return null; });
+              if (w) navigate(`/work/${w}`);
             }
           }} />
           <TextSection recordRef={p.ref} title="Description" hint="Symptoms, scope and business impact" value={p.description} editable={editable} onSave={(v, b) => save({ description: v }, { description: b }, true)} proposed={p.mcp_proposed?.includes('description')} onConfirm={() => confirmFields(['description'])} />
@@ -160,7 +160,7 @@ export function ProblemPage() {
             <TextSection recordRef={p.ref} title="Major problem review" hint="What went well, what could be improved, how to prevent recurrence, follow-up actions"
               value={p.major_review} editable={editable} onSave={(v, b) => save({ major_review: v }, { major_review: b }, true)}  proposed={p.mcp_proposed?.includes('major_review')} onConfirm={() => confirmFields(['major_review'])} />
           )}
-          <TraceCard recordRef={p.ref} version={p} create={p.fix_type === 'code' && editable ? 'Create a bug' : undefined} />
+          <TraceCard recordRef={p.ref} version={p} />
           <ActionsSection problem={p} onChange={setData} />
           <ActivitySection problem={p} onChange={setData} />
         </div>
