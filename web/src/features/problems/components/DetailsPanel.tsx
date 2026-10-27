@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { type ProblemDetail } from '../../../api/client';
-import { CLOSURE_LABEL, formatDate, LEVEL_LABEL, PRIORITY_LABEL } from '../../../format';
+import { CLOSURE_LABEL, FIX_TYPE_LABEL, formatDate, LEVEL_LABEL, PRIORITY_LABEL } from '../../../format';
 import { isManager, useSession } from '../../../session';
 
 export function DetailsPanel({ problem: p, editable, onSave }: { problem: ProblemDetail; editable: boolean; onSave: (f: Record<string, unknown>, base?: Record<string, unknown>) => Promise<void> }) {
@@ -39,6 +39,7 @@ export function DetailsPanel({ problem: p, editable, onSave }: { problem: Proble
         {field('Major problem', editable && isManager(user) ? (
           <label className="check"><input type="checkbox" checked={p.is_major} onChange={(e) => onSave({ is_major: e.target.checked }, { is_major: p.is_major }).catch(() => {})} /> {p.is_major ? 'Yes' : 'No'}</label>
         ) : p.is_major ? 'Yes' : 'No')}
+        {p.status !== 'new' && field('Fix', select('fix_type', p.fix_type, Object.entries(FIX_TYPE_LABEL), 'Not decided'))}
         {p.closure_code && field('Closure code', CLOSURE_LABEL[p.closure_code])}
       </dl>
       <dl className="dates">

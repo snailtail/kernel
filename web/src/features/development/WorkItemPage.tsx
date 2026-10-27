@@ -5,7 +5,8 @@ import { askReason } from '../../components/Ask';
 import { StatusBadge } from '../../components/Badges';
 import { CommentBox } from '../../components/CommentBox';
 import { GuidePanel } from '../../components/Guide';
-import { HistoryPanel } from '../../components/History';
+import { HistoryPanel, recordPath } from '../../components/History';
+import { TraceCard } from '../../components/Trace';
 import { Markdown } from '../../components/Markdown';
 import { Presence } from '../../components/Presence';
 import { TransitionButtons } from '../../components/TransitionButtons';
@@ -113,6 +114,7 @@ export function WorkItemPage() {
             </section>
           )}
           <LinksCard w={w} editable={editable} onChange={run} />
+          <TraceCard recordRef={w.ref} version={w} />
           <section className="card">
             <h2>Notes &amp; history</h2>
             {editable && <CommentBox recordRef={w.ref} placeholder="Add a note" onError={setActionError} onSubmit={(body) => run(() => api.post(`${path}/comments`, { body }))} />}
@@ -191,18 +193,30 @@ function CriteriaCard({ criteria, editable, onChange }: { criteria: Criterion[];
   );
 }
 
+/** What a work item links (#165, #167): related items, documents, and the service management records it belongs to. */
+const LINK_KINDS: { kind: WorkItem['links'][number]['kind']; label: string; placeholder: string }[] = [
+  { kind: 'work_item', label: 'Work item', placeholder: 'WI…' },
+  { kind: 'problem', label: 'Problem', placeholder: 'PRB…' },
+  { kind: 'incident', label: 'Incident', placeholder: 'INC…' },
+  { kind: 'change', label: 'Change', placeholder: 'CHG…' },
+  { kind: 'improvement', label: 'Improvement', placeholder: 'IMP…' },
+  { kind: 'request', label: 'Request', placeholder: 'REQ…' },
+  { kind: 'document', label: 'Document (URL)', placeholder: 'https://…' },
+];
+
 function LinksCard({ w, editable, onChange }: { w: WorkItem; editable: boolean; onChange: (fn: () => Promise<WorkItem>) => Promise<boolean> }) {
-  const [kind, setKind] = useState<'work_item' | 'document'>('work_item');
+  const [kind, setKind] = useState<WorkItem['links'][number]['kind']>('work_item');
   const [reference, setReference] = useState('');
   const submit = () => onChange(() => api.post(`/api/work-items/${w.ref}/links`, kind === 'document' ? { kind, reference: reference.trim(), url: reference.trim() } : { kind, reference: reference.trim() }));
   return (
     <section className="card">
       <h2>Related <span className="count">{w.links.length}</span></h2>
-      {w.links.length === 0 && <p className="placeholder">Link related work items or a design document.</p>}
+      {w.links.length === 0 && <p className="placeholder">Link related work items, the problem or incident it fixes, the change that ships it, or a design document.</p>}
       <ul className="plain-list">
         {w.links.map((x) => (
           <li key={x.id}>
             {x.kind === 'work_item' ? <>{x.item_type && <TypeBadge type={x.item_type} />} <Link to={`/work/${x.reference}`} className="mono">{x.reference}</Link>{x.title && ` ${x.title}`} {x.status && <StatusBadge kind="work_item" status={x.status} />}</>
+              : x.kind !== 'document' ? <><span className="tag">{x.kind}</span> {['', 'Kernel'].includes(x.system) && recordPath(x.reference) ? <Link to={recordPath(x.reference)!} className="mono">{x.reference}</Link> : <span className="mono">{x.reference}</span>}{x.title && ` ${x.title}`} {x.status && <StatusBadge kind={x.kind} status={x.status as never} />}</>
               : <><span className="tag">document</span> {x.url ? <a href={x.url} target="_blank" rel="noreferrer">{x.reference}</a> : x.reference}</>}
             {x.note && <span className="muted small"> · {x.note}</span>}
             {editable && <button className="btn-link small" aria-label={`Remove link to ${x.reference}`} onClick={() => onChange(() => api.del(`/api/work-items/${w.ref}/links/${x.id}`))}>Remove</button>}
@@ -211,8 +225,8 @@ function LinksCard({ w, editable, onChange }: { w: WorkItem; editable: boolean; 
       </ul>
       {editable && (
         <form className="rel-form small" onSubmit={async (e) => { e.preventDefault(); if (await submit()) setReference(''); }}>
-          <select value={kind} onChange={(e) => setKind(e.target.value as 'work_item' | 'document')} aria-label="Kind"><option value="work_item">Work item</option><option value="document">Document (URL)</option></select>
-          <input value={reference} onChange={(e) => setReference(e.target.value)} placeholder={kind === 'work_item' ? 'WI…' : 'https://…'} aria-label="Reference" />
+          <select value={kind} onChange={(e) => setKind(e.target.value as typeof kind)} aria-label="Kind">{LINK_KINDS.map((k) => <option key={k.kind} value={k.kind}>{k.label}</option>)}</select>
+          <input value={reference} onChange={(e) => setReference(e.target.value)} placeholder={LINK_KINDS.find((k) => k.kind === kind)!.placeholder} aria-label="Reference" />
           <button className="btn small" disabled={!reference.trim()}>Link</button>
         </form>
       )}

@@ -1329,3 +1329,13 @@ ol.timeline.compact li { grid-template-columns: 8rem 1fr; padding: 5px 0; font-s
   .rule-table td:first-child { min-width: 7em; }
 }
 .rule-table td .btn.small { margin-left: 6px; }
+
+/* The trace of a record (#167): linked records by kind, in the order work flows. */
+.trace-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.trace-column h3 { margin: 0 0 6px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--text-2); }
+.trace-node { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; transition: opacity .15s; }
+.trace-node.current { border-color: var(--accent); background: var(--accent-soft); }
+.trace-node.faded { opacity: .35; }
+.trace-ref { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.trace-title { font-size: 13px; overflow-wrap: anywhere; }
+.trace-actions { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }

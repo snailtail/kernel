@@ -9,7 +9,9 @@ export interface WorkItemRow {
   team_id: number | null; team: string | null; assignee_id: number | null; assignee: string | null; parent_ref: string | null; parent_title: string | null;
   created_at: string; updated_at: string; done_at: string | null; progress: Progress | null; sprint_id: number | null;
 }
-interface WorkItemLink { id: number; kind: 'work_item' | 'document'; reference: string; system: string; url: string; note: string; title: string | null; status: WorkItemStatus | null; item_type: WorkItemType | null }
+/** The service management records a work item belongs to (#167). */
+export type ItsmKind = 'problem' | 'incident' | 'change' | 'improvement' | 'request';
+interface WorkItemLink { id: number; kind: 'work_item' | 'document' | ItsmKind; reference: string; system: string; url: string; note: string; title: string | null; status: WorkItemStatus | null; item_type: WorkItemType | null }
 export interface Criterion { criterion: string | null; done: boolean }
 export interface WorkItem extends Omit<WorkItemRow, 'parent_ref' | 'parent_title'> {
   id: number; description: string | null; acceptance_criteria: Criterion[];
@@ -58,3 +60,13 @@ export interface Board {
   sprint: { id: number; name: string; goal: string; starts_on: string; ends_on: string; capacity: number | null } | null;
   columns: { status: BoardColumn; wip_limit: number | null; over_limit: boolean; items: BoardCard[] }[];
 }
+
+/** A work item linked to a problem (#167): its status, team and sprint. */
+export interface LinkedWorkItem { ref: string; item_type: WorkItemType; title: string; status: WorkItemStatus; points: number | null; team: string | null; sprint: string | null; done_at: string | null }
+
+/** /api/records/:ref/trace (#167): the graph of linked records; one the reader may not see has no ref or title. */
+export interface TraceNode {
+  id: string; type: 'incident' | 'problem' | 'work_item' | 'change' | 'improvement' | 'request'; restricted: boolean;
+  ref?: string; title?: string; status?: string; item_type?: WorkItemType; created_at?: string;
+}
+export interface RecordTrace { ref: string; nodes: TraceNode[]; edges: { from: string; to: string }[]; truncated: boolean }

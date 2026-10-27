@@ -18,6 +18,7 @@ import * as ch from './changes/changes.js';
 import * as imp from './improvements/improvements.js';
 import * as sp from './development/sprints.js';
 import * as wi from './development/work-items.js';
+import * as itsm from './development/itsm.js';
 import * as rq from './requests/requests.js';
 import * as portal from './requests/portal.js';
 import * as slaMod from './reporting/sla.js';
@@ -132,6 +133,7 @@ export const OPERATIONS: Op[] = [
   { method: 'get', path: '/api/records/:ref', tag: 'Records', summary: 'Any record by ref (the prefix selects the type)' },
   { method: 'get', path: '/api/records/:ref/next-steps', tag: 'Records', summary: 'Process phase and remaining steps for a record' },
   { method: 'post', path: '/api/records/:ref/links', tag: 'Records', summary: 'Link a record to another record or an external reference', body: z.object({ to: z.string(), kind: z.string().optional(), system: z.string().optional(), url: z.string().optional(), note: z.string().optional() }) },
+  { method: 'get', path: '/api/records/:ref/trace', tag: 'Records', summary: 'The trace of a record: the graph of incidents, problems, work items, changes, improvements and requests linked to it, with status and date; a record you may not see is shown as restricted, without its ref or title' },
   { method: 'get', path: '/api/records/:ref/history', tag: 'Records', summary: 'Who changed what on any record, newest first, from the audit trail (read access and visibility apply)', query: z.object({ limit: z.coerce.number().int().min(1).max(500).optional() }) },
   { method: 'get', path: '/api/records/:ref/impact', tag: 'Records', summary: 'What is affected if a CI or service is down (other record types give 400)', query: z.object({ max_depth: z.coerce.number().int().optional() }) },
   { method: 'post', path: '/api/records/:ref/comments', tag: 'Records', summary: 'Add a work note to any record. Supports Idempotency-Key', body: z.object({ body: z.string() }) },
@@ -361,6 +363,7 @@ export const OPERATIONS: Op[] = [
   { method: 'delete', path: '/api/change-freezes/:id', tag: 'Changes', summary: 'Remove a change freeze' },
   { method: 'get', path: '/api/work-items', tag: 'Work items', summary: 'The backlog: open epics, stories, bugs and tasks in rank order per team, or filtered by status, type, team, assignee, label or epic', query: wi.listWorkItemsSchema },
   { method: 'post', path: '/api/work-items', tag: 'Work items', summary: 'Add an epic, story, bug or task to the bottom of a backlog; a child starts as narrow as its parent. Supports Idempotency-Key', body: wi.createWorkItemSchema },
+  { method: 'post', path: '/api/records/:ref/work-items', tag: 'Work items', summary: 'A bug from a problem or an incident, a story (or an epic) from an improvement or a request: as narrow as the record, linked to it, with only the text you may read. Supports Idempotency-Key', body: itsm.workItemFromSchema },
   { method: 'get', path: '/api/work-items/:ref', tag: 'Work items', summary: "A work item with its parent and children, an epic's progress, the team's Definition of Ready and Done, links, history and next steps" },
   { method: 'patch', path: '/api/work-items/:ref', tag: 'Work items', summary: 'Update a work item; another team puts it at the bottom of that backlog', body: wi.updateWorkItemSchema },
   { method: 'post', path: '/api/work-items/:ref/transition', tag: 'Work items', summary: "new → ready → in_progress → in_review → done | removed (with a reason); to ready or done, checked lists what holds of the team's definition and the rest is logged", body: wi.transitionWorkItemSchema },

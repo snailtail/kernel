@@ -9,6 +9,8 @@ export const PRIORITY_LABEL: Record<number, string> = {
 };
 
 export const LEVEL_LABEL: Record<number, string> = { 1: 'High', 2: 'Medium', 3: 'Low' };
+/** How a problem's permanent fix is made (#167). */
+export const FIX_TYPE_LABEL: Record<string, string> = { code: 'Code (a bug)', configuration: 'Configuration', infrastructure: 'Infrastructure', supplier: 'Supplier', process: 'Process', accept_risk: 'Accept the risk' };
 
 export const ROLE_LABEL: Record<Role, string> = {
   admin: 'Administrator',

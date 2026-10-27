@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { idempotent } from '../idempotency.js';
 import * as sp from '../development/sprints.js';
 import * as wi from '../development/work-items.js';
+import * as itsm from '../development/itsm.js';
 import { resolveAssignee, type McpContext } from './registrar.js';
 
 export function registerDevelopmentTools({ user, tool }: McpContext) {
@@ -60,6 +61,20 @@ export function registerDevelopmentTools({ user, tool }: McpContext) {
     { ...optional, title: editable.title, item_type: editable.item_type, idempotency_key: z.string().max(200).optional() },
     false,
     async ({ idempotency_key, ...args }) => idempotent(user.id, idempotency_key, 'create_work_item', args, async () => itemForAgent(await wi.createWorkItem(user, wi.createWorkItemSchema.parse(await input(args))))),
+  );
+  tool(
+    'create_work_item_from',
+    'Make a work item from a service management record and link them: a bug from a problem (when its fix type is code) or an incident, a story (or an epic) from an improvement or a request. It starts as narrow as the record and carries only the text you may read. Supports idempotency_key.',
+    {
+      ref: z.string().describe('The PRB…, INC…, IMP… or REQ… it is made from'),
+      item_type: z.enum(['bug', 'story', 'epic']).optional().describe('Default: bug from a problem or an incident, story from an improvement or a request'),
+      title: z.string().optional().describe('Default: the record\'s title'),
+      team_id: editable.team_id.optional(), assignee: editable.assignee.optional(), points: editable.points.optional(), labels: editable.labels.optional(),
+      idempotency_key: z.string().max(200).optional(),
+    },
+    false,
+    async ({ idempotency_key, ref, ...args }) => idempotent(user.id, idempotency_key, 'create_work_item_from', { ref, ...args }, async () =>
+      itemForAgent(await itsm.createWorkItemFrom(user, ref, itsm.workItemFromSchema.parse(await input(args))))),
   );
   tool('update_work_item', 'Update a work item: title, description, type, points, team (it goes to the bottom of that backlog), assignee, parent, acceptance criteria, labels, a bug\'s report.', { ref: z.string(), ...optional }, false, async ({ ref, ...fields }) =>
     itemForAgent(await wi.updateWorkItem(user, ref, wi.updateWorkItemSchema.parse(await input(fields)))),
