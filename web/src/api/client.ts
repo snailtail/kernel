@@ -1,4 +1,4 @@
-import type { WorkItemType } from './types/development';
+import type { LinkedWorkItem, WorkItemType } from './types/development';
 import type { WorkItemStatus } from '../statuses';
 export type Role = 'admin' | 'manager' | 'analyst' | 'viewer' | 'integration';
 export type Status = 'new' | 'analysis' | 'known_error' | 'resolved' | 'closed';
@@ -158,11 +158,11 @@ export interface Analysis {
   confirmed_at?: string | null;
 }
 
-export type FixType = 'code' | 'configuration' | 'infrastructure' | 'supplier' | 'process' | 'accept_risk';
+type FixType = 'code' | 'configuration' | 'infrastructure' | 'supplier' | 'process' | 'accept_risk';
 
 export interface ProblemDetail extends Problem {
   /** Its bugs and stories, with the development module on (#167). */
-  work_items?: import('./types/development').LinkedWorkItem[];
+  work_items?: LinkedWorkItem[];
   /** Improvements that came from it or are linked to it (#52). */
   improvements?: { ref: string; title: string; status: string }[];
   knowledge_article?: { ref: string; status: string } | null;

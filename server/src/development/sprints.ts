@@ -16,7 +16,8 @@ import { authorize, can } from '../security/policy.js';
 import { teamScoped } from '../security/visibility.js';
 import { validTeam } from '../people/teams.js';
 import { logActivity } from '../records/activity.js';
-import { BOARD_COLUMNS, leaveSprint, seeingAll, WORK_ITEM_TRANSITIONS, wipLimitsOf, workItemUrl, type WorkItemStatus } from './work-items.js';
+import { seeingAll } from '../security/visibility.js';
+import { BOARD_COLUMNS, leaveSprint, WORK_ITEM_TRANSITIONS, wipLimitsOf, workItemUrl, type WorkItemStatus } from './work-items.js';
 
 export const SPRINT_STATUSES = ['planned', 'active', 'completed'] as const;
 const RETRO_KINDS = ['went_well', 'hard', 'to_change'] as const;

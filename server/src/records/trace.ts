@@ -8,16 +8,17 @@ import type { User } from '../security/auth.js';
 import { query } from '../core/db.js';
 import { moduleEnabled } from '../core/modules.js';
 import { can } from '../security/policy.js';
-import { seeingAll } from '../development/work-items.js';
+import { seeingAll } from '../security/visibility.js';
 import { getRecord } from './generic.js';
 import { recordType, recordUrl, typeOfPrefix } from './records.js';
+import { recordSummaries } from './summaries.js';
 
 const KINDS = ['incident', 'problem', 'work_item', 'change', 'improvement', 'request'] as const;
 type Kind = (typeof KINDS)[number];
 const MAX_DEPTH = 4;
 const MAX_NODES = 60;
 
-export interface TraceNode {
+interface TraceNode {
   /** The ref, or restricted-N for a record the caller may not see. */
   id: string;
   type: Kind;
@@ -58,19 +59,9 @@ async function edgesOf(refs: string[]): Promise<[string, string][]> {
 
 /** Title, status and date of each ref the caller can see (row-level security), and which ones are hidden from them. */
 async function nodesOf(user: User, refs: string[]) {
-  const { rows } = await query(
-    `SELECT x.*, kernel_ref_hidden(x.ref) AS hidden FROM (
-       SELECT ref, title, status, NULL AS item_type, created_at FROM problems WHERE ref = ANY($1)
-       UNION ALL SELECT ref, title, status, NULL, created_at FROM incidents WHERE ref = ANY($1)
-       UNION ALL SELECT ref, title, status, NULL, created_at FROM changes WHERE ref = ANY($1)
-       UNION ALL SELECT ref, title, status, NULL, created_at FROM improvements WHERE ref = ANY($1)
-       UNION ALL SELECT ref, title, status, NULL, created_at FROM requests WHERE ref = ANY($1)
-       UNION ALL SELECT ref, title, status, type, created_at FROM work_items WHERE ref = ANY($1)
-     ) x`,
-    [refs],
-  );
-  const seen = new Map(rows.filter((r) => !r.hidden).map((r) => [r.ref as string, r]));
-  return (ref: string, type: Kind) => (can(user.role, recordType(type).readAction) ? seen.get(ref) : undefined);
+  const [seen, { rows }] = await Promise.all([recordSummaries(refs, KINDS), query('SELECT r, kernel_ref_hidden(r) AS hidden FROM unnest($1::text[]) r', [refs])]);
+  const hidden = new Set(rows.filter((r) => r.hidden).map((r) => r.r as string));
+  return (ref: string, type: Kind) => (can(user.role, recordType(type).readAction) && !hidden.has(ref) ? seen.get(ref) : undefined);
 }
 
 const kindOf = (ref: string) => {
