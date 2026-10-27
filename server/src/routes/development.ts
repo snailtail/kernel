@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { requireUser } from '../security/auth.js';
 import * as sp from '../development/sprints.js';
 import * as wi from '../development/work-items.js';
+import * as itsm from '../development/itsm.js';
 
 type RefParams = { Params: { ref: string } };
 type TeamParams = { Params: { id: string } };
@@ -13,6 +14,12 @@ export async function developmentRoutes(app: FastifyInstance) {
   app.get('/api/work-items', async (req) => wi.listWorkItems(requireUser(req), wi.listWorkItemsSchema.parse(req.query)));
   app.post('/api/work-items', { config: { idempotent: 'work.write' } }, async (req, reply) => {
     const created = await wi.createWorkItem(requireUser(req), wi.createWorkItemSchema.parse(req.body));
+    reply.code(201);
+    return created;
+  });
+  // A bug from a problem or an incident, a story from an improvement or a request (#167).
+  app.post<RefParams>('/api/records/:ref/work-items', { config: { idempotent: 'work.write' } }, async (req, reply) => {
+    const created = await itsm.createWorkItemFrom(requireUser(req), req.params.ref, itsm.workItemFromSchema.parse(req.body ?? {}));
     reply.code(201);
     return created;
   });

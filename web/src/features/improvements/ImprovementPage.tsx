@@ -6,6 +6,7 @@ import { StatusBadge } from '../../components/Badges';
 import { CommentBox } from '../../components/CommentBox';
 import { GuidePanel } from '../../components/Guide';
 import { HistoryPanel } from '../../components/History';
+import { TraceCard } from '../../components/Trace';
 import { Markdown } from '../../components/Markdown';
 import { Presence } from '../../components/Presence';
 import { TransitionButtons } from '../../components/TransitionButtons';
@@ -74,6 +75,7 @@ export function ImprovementPage() {
           {(m.status === 'done' || m.benefit) && <section className="card"><h2>Benefit</h2>{m.benefit ? <Markdown text={m.benefit} /> : <p className="placeholder">Confidential.</p>}</section>}
           {m.status === 'rejected' && <section className="card"><h2>Why it was rejected</h2>{m.reject_reason ? <Markdown text={m.reject_reason} /> : <p className="placeholder">Confidential.</p>}{m.decided_by_name && <p className="muted small">{m.decided_by_name}, {m.decided_at && formatDate(m.decided_at)}</p>}</section>}
           <LinksCard m={m} editable={editable} onChange={run} />
+          <TraceCard recordRef={m.ref} version={m} create={editable && ['approved', 'in_progress'].includes(m.status) ? 'Create a story' : undefined} />
           <ActionsCard parent={m.ref} actions={m.actions} editable={editable} onChanged={reload}
             placeholder="No follow-up actions. Add the steps that carry the improvement out, each with an owner and a date." />
           <section className="card">

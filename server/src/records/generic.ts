@@ -25,7 +25,7 @@ import { attentionCount, incidentRefOf, myReviews } from '../incidents/post-inci
 import { addImprovementLink, improvementLinkSchema, myImprovements } from '../improvements/improvements.js';
 import { addRequestLink, myRequestWork, requestLinkSchema, teamRequestTasks } from '../requests/requests.js';
 import { actionCounts, myActions } from '../problems/actions.js';
-import { addWorkItemLink, myWorkItems, workItemLinkSchema } from '../development/work-items.js';
+import { addWorkItemLink, ITSM_LINK_KINDS, myWorkItems, workItemLinkSchema } from '../development/work-items.js';
 
 export const searchSchema = z.object({
   q: z.string().trim().min(1).max(200),
@@ -98,11 +98,16 @@ export async function linkRecords(user: User, from: string, to: string, options:
   }
   // A post-incident review shares its incident's links (#35): linking from or to a review links its incident.
   const kernelRef = !options.system || options.system === 'Kernel';
+  // A work item (#167) keeps its links to problems, incidents, changes, improvements and requests, whichever side the
+  // link starts from.
+  if (kind === 'work_item' && kernelRef && (ITSM_LINK_KINDS as readonly string[]).includes(source.type)) {
+    return (await addWorkItemLink(user, to, workItemLinkSchema.parse({ kind: source.type, reference: from, note: options.note }))).links;
+  }
   // An improvement (#52) keeps the links to what carries it out, whichever side the link starts from.
   if (source.type === 'improvement') {
     return (await addImprovementLink(user, from, improvementLinkSchema.parse({ kind, reference: to, system: options.system, url: options.url, note: options.note }))).links;
   }
-  // A work item (#165) links related work items and documents; the links to ITSM records come with #167.
+  // A work item (#165, #167) links related work items, documents and the service management records it belongs to.
   if (source.type === 'work_item') {
     return (await addWorkItemLink(user, from, workItemLinkSchema.parse({ kind, reference: to, system: options.system, url: options.url, note: options.note }))).links;
   }

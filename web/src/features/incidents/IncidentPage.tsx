@@ -24,6 +24,7 @@ import { useRecord } from '../../hooks';
 import { useSession } from '../../session';
 import { SeverityBadge, SlaBadge } from '../../components/Badges';
 import { HistoryPanel } from '../../components/History';
+import { TraceCard } from '../../components/Trace';
 import type { Incident } from '../../api/types/incidents';
 import { LEVEL } from './common';
 import { ResolveModal } from './components/ResolveModal';
@@ -128,6 +129,7 @@ export function IncidentPage() {
             </section>
           )}
           {i.status === 'on_hold' && <p className="warn-box">On hold: {i.hold_reason}</p>}
+          <TraceCard recordRef={i.ref} version={i} create={editable ? 'Needs a code fix? Create a bug' : undefined} />
           <section className="card">
             <h2>Work notes &amp; history</h2>
             <div className="tabs" role="group" aria-label="View">

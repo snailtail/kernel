@@ -44,7 +44,7 @@ export interface Guidance {
   steps: { id: string; label: string; hint: string; done: boolean | null; suggestion?: { outcome?: string; to?: string; reason: string } }[];
   next: string;
   /** The hand-over to the next practice in the flow (#37). */
-  handover?: { label: string; hint: string; action?: 'raise_change' | 'create_problem' | 'link_problem' | 'resolve_problem'; target?: string } | null;
+  handover?: { label: string; hint: string; action?: 'raise_change' | 'create_bug' | 'create_problem' | 'link_problem' | 'resolve_problem'; target?: string } | null;
 }
 
 export interface Problem {
@@ -69,6 +69,8 @@ export interface Problem {
   resolution: string;
   closure_code: string | null;
   major_review: string;
+  /** How the permanent fix is made (#167): only code becomes a bug. */
+  fix_type: FixType | null;
   known_error_at: string | null;
   resolved_at: string | null;
   closed_at: string | null;
@@ -156,7 +158,11 @@ export interface Analysis {
   confirmed_at?: string | null;
 }
 
+export type FixType = 'code' | 'configuration' | 'infrastructure' | 'supplier' | 'process' | 'accept_risk';
+
 export interface ProblemDetail extends Problem {
+  /** Its bugs and stories, with the development module on (#167). */
+  work_items?: import('./types/development').LinkedWorkItem[];
   /** Improvements that came from it or are linked to it (#52). */
   improvements?: { ref: string; title: string; status: string }[];
   knowledge_article?: { ref: string; status: string } | null;

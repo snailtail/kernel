@@ -13,12 +13,16 @@ import { type Db, query, tx } from '../core/db.js';
 import { badRequest, conflict, notFound } from '../core/errors.js';
 import { authorize, can } from '../security/policy.js';
 import { checkAssigneeInTeam, validTeam } from '../people/teams.js';
-import { recordUrl, registerRecordType, type RecordType } from '../records/records.js';
+import { recordUrl, registerRecordType, typeOfPrefix, type RecordType } from '../records/records.js';
+import { assertVisibleRef } from '../security/visibility.js';
 import type { StartNarrow } from '../problems/problems.js';
 
 export const WORK_ITEM_TYPES = ['epic', 'story', 'bug', 'task'] as const;
 export const WORK_ITEM_STATUSES = ['new', 'ready', 'in_progress', 'in_review', 'done', 'removed'] as const;
-const WORK_ITEM_LINK_KINDS = ['work_item', 'document'] as const;
+/** The service management records a work item belongs to (#167), linked from either side. */
+export const ITSM_LINK_KINDS = ['problem', 'incident', 'change', 'improvement', 'request'] as const;
+const WORK_ITEM_LINK_KINDS = ['work_item', 'document', ...ITSM_LINK_KINDS] as const;
+type ItsmKind = (typeof ITSM_LINK_KINDS)[number];
 type Type = (typeof WORK_ITEM_TYPES)[number];
 export type WorkItemStatus = (typeof WORK_ITEM_STATUSES)[number];
 type Status = WorkItemStatus;
@@ -283,10 +287,20 @@ export async function getWorkItem(user: User, ref: string) {
   return { ...detail, next_steps: workItemGuidance(detail) };
 }
 
+/** The title and status of a linked Kernel record, as the caller sees it (a link to one they cannot see is hidden). */
+const LINKED = `LEFT JOIN LATERAL (
+    SELECT title, status, type AS item_type FROM work_items WHERE l.kind = 'work_item' AND ref = l.reference
+    UNION ALL SELECT title, status, NULL FROM problems WHERE l.kind = 'problem' AND ref = l.reference
+    UNION ALL SELECT title, status, NULL FROM incidents WHERE l.kind = 'incident' AND ref = l.reference
+    UNION ALL SELECT title, status, NULL FROM changes WHERE l.kind = 'change' AND ref = l.reference
+    UNION ALL SELECT title, status, NULL FROM improvements WHERE l.kind = 'improvement' AND ref = l.reference
+    UNION ALL SELECT title, status, NULL FROM requests WHERE l.kind = 'request' AND ref = l.reference
+  ) o ON l.system IN ('', 'Kernel')`;
+
 async function linksOf(workItemId: number) {
   const { rows } = await query(
-    `SELECT l.id, l.kind, l.reference, l.system, l.url, l.note, l.created_at, o.title, o.status, o.type AS item_type
-     FROM work_item_links l LEFT JOIN work_items o ON l.kind = 'work_item' AND o.ref = l.reference
+    `SELECT l.id, l.kind, l.reference, l.system, l.url, l.note, l.created_at, o.title, o.status, o.item_type
+     FROM work_item_links l ${LINKED}
      WHERE l.work_item_id = $1 ORDER BY l.kind, l.created_at`,
     [workItemId],
   );
@@ -352,11 +366,18 @@ export async function listWorkItems(user: User, f: z.infer<typeof listWorkItemsS
 
 // ---- Changing --------------------------------------------------------------------------------
 
-export async function createWorkItem(user: User, input: z.infer<typeof createWorkItemSchema>) {
+/**
+ * A work item made from a service management record (#167): it starts as narrow as that record, links back to it, and
+ * `log` notes it on the record's side in the same transaction.
+ */
+export interface WorkItemOrigin { kind: ItsmKind; narrow: StartNarrow & { from: string }; log: (db: Db, ref: string) => Promise<void> }
+
+export async function createWorkItem(user: User, input: z.infer<typeof createWorkItemSchema>, origin?: WorkItemOrigin) {
   authorize(user, 'work.write');
   checkBugFields(input.type, input);
+  if (origin && input.parent) throw badRequest('An item made from another record starts without a parent: put it under an epic afterwards');
   // A child starts as narrow as its parent, so nothing under a restricted epic reaches more people than the epic.
-  let narrow: StartNarrow | undefined;
+  let narrow: StartNarrow | undefined = origin?.narrow;
   if (input.parent) {
     await visibleId(input.parent);
     narrow = startNarrow(await audienceOf(null, input.parent));
@@ -379,7 +400,12 @@ export async function createWorkItem(user: User, input: z.infer<typeof createWor
       ],
     );
     const w = rows[0] as { id: number; ref: string };
-    await logWorkItem(db, w.id, user.id, 'created', narrow?.from ? `Created under ${narrow.from}` : `Created ${input.type}`, { type: input.type, parent: input.parent?.toUpperCase() ?? null, restricted: narrow?.restricted ?? false });
+    const how = origin ? `Created from ${origin.narrow.from}` : narrow?.from ? `Created under ${narrow.from}` : `Created ${input.type}`;
+    await logWorkItem(db, w.id, user.id, 'created', how, { type: input.type, parent: input.parent?.toUpperCase() ?? null, from: origin?.narrow.from ?? null, restricted: narrow?.restricted ?? false });
+    if (origin) {
+      await db.query("INSERT INTO work_item_links (work_item_id, kind, reference, system, created_by) VALUES ($1, $2, $3, 'Kernel', $4)", [w.id, origin.kind, origin.narrow.from, user.id]);
+      await origin.log(db, w.ref);
+    }
     if (narrow?.classification === 'confidential') forgetExists();
     return w.ref;
   }));
@@ -496,12 +522,16 @@ export async function addWorkItemComment(user: User, ref: string, body: string) 
 
 export async function addWorkItemLink(user: User, ref: string, input: z.infer<typeof workItemLinkSchema>) {
   authorize(user, 'work.write');
-  const kernel = input.kind === 'work_item' && (!input.system || input.system === 'Kernel');
+  const kernel = input.kind !== 'document' && (!input.system || input.system === 'Kernel');
   const reference = kernel ? input.reference.toUpperCase() : input.reference;
-  if (kernel) {
+  if (kernel && input.kind === 'work_item') {
     if (!/^WI\d{6}$/.test(reference)) throw badRequest(`${reference} is not a work item`);
     if (reference === ref.toUpperCase()) throw badRequest('An item cannot be linked to itself');
     await visibleId(reference);
+  } else if (kernel) {
+    // A problem, incident, change, improvement or request in Kernel: of that kind, and one the caller can see.
+    if (typeOfPrefix(reference) !== input.kind) throw badRequest(`${reference} is not ${input.kind === 'incident' || input.kind === 'improvement' ? 'an' : 'a'} ${input.kind}`);
+    await assertVisibleRef(reference);
   }
   await tx(async (db) => {
     const w = await loadWorkItem(db, ref);

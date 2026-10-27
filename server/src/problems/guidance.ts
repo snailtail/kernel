@@ -19,6 +19,9 @@ interface GuidanceInput {
   ec_decision: string | null;
   ec_review_date: string | null;
   workaround_effectiveness: string | null;
+  fix_type?: string | null;
+  /** Its bugs and stories, with the development module on (#167). */
+  work_items?: { status: string }[];
   links: { kind: string }[];
   actions: { status: string }[];
   analyses: unknown[];
@@ -38,7 +41,7 @@ interface Handover {
   label: string;
   hint: string;
   /** What the button does; absent for advice only. */
-  action?: 'raise_change' | 'create_problem' | 'link_problem' | 'resolve_problem';
+  action?: 'raise_change' | 'create_bug' | 'create_problem' | 'link_problem' | 'resolve_problem';
   /** The record the action concerns, e.g. the problem to link to. */
   target?: string;
 }
@@ -61,6 +64,12 @@ export function guidanceFor(p: GuidanceInput): Guidance {
 /** Where the problem hands over to another practice, given which modules are on. */
 function handoverFor(p: GuidanceInput): Handover | null {
   const changes = p.links.filter((l) => l.kind === 'change').length;
+  // A code fix is made as a bug in a team's backlog first (#167); its release goes out as a change later.
+  const bugs = p.work_items?.filter((w) => w.status !== 'removed') ?? [];
+  if (p.status === 'known_error' && p.ec_decision === 'fix' && p.fix_type === 'code' && moduleEnabled('development')) {
+    if (!bugs.length) return { label: 'A code fix? Create a bug', hint: 'The bug goes to a team\'s backlog with the root cause and the workaround, and links back here.', action: 'create_bug' };
+    if (bugs.some((w) => w.status !== 'done')) return { label: 'The fix is planned', hint: 'Its bug is in a team\'s backlog; the known error stays in the KEDB with its workaround until the fix is deployed.' };
+  }
   if (p.status === 'known_error' && p.ec_decision === 'fix' && changes === 0 && moduleEnabled('change')) {
     return { label: 'Ready to fix? Raise a change', hint: 'The permanent fix is implemented through a change; it is prefilled from the root cause and the affected CIs.', action: 'raise_change' };
   }
@@ -121,7 +130,8 @@ function phaseGuidance(p: GuidanceInput): Guidance {
         { id: 'decide', label: 'Decide: fix, accept the risk, or defer', hint: 'A permanent fix is not always worth it. Accepting the risk is a decision for the problem manager.', done: decided },
       ];
       if (p.ec_decision === 'fix') {
-        steps.push({ id: 'plan', label: 'Plan the fix', hint: 'Link the change that implements it, and track remaining work as actions.', done: count('change') > 0 || p.actions.length > 0 });
+        steps.push({ id: 'fix_type', label: 'Say how it is fixed', hint: 'Code, configuration, infrastructure, a supplier or a process: a code fix becomes a bug, the others a change.', done: !!p.fix_type });
+        steps.push({ id: 'plan', label: 'Plan the fix', hint: 'Link the change or the bug that implements it, and track remaining work as actions.', done: count('change') > 0 || p.actions.length > 0 || (p.work_items?.length ?? 0) > 0 });
       }
       if (p.ec_decision === 'accept' || p.ec_decision === 'defer') {
         steps.push({ id: 'review_date', label: 'Set a date to review the decision', hint: 'Accepted risks should be reconsidered as circumstances change.', done: p.ec_review_date !== null });

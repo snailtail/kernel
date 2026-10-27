@@ -17,6 +17,7 @@ import { Presence } from '../../components/Presence';
 import { useRecord } from '../../hooks';
 import { useSession } from '../../session';
 import { HistoryPanel } from '../../components/History';
+import { TraceCard } from '../../components/Trace';
 import { CHANGE_STATUS, type ChangeStatus } from '../../statuses';
 import type { Change } from '../../api/types/changes';
 import { OUTCOME, fmtWindow } from './common';
@@ -111,6 +112,7 @@ export function ChangePage() {
             <h3>Backout</h3>{c.backout_plan ? <Markdown text={c.backout_plan} /> : <p className="placeholder">Not written.</p>}
           </section>
           {c.review && <section className="card"><h2>Post-implementation review</h2><Markdown text={c.review} /></section>}
+          <TraceCard recordRef={c.ref} version={c} />
           <section className="card">
             <h2>Notes &amp; history</h2>
             {editable && (

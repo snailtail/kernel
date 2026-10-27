@@ -34,6 +34,8 @@ describe('copying text between records (#117)', { skip }, () => {
   before(async () => {
     k = await startKernel();
     pm = await k.login('pm');
+    // Work items made from service management records (#167).
+    ok(await (await k.login('admin')).put('/api/admin/modules', { development: true, reason: 'Copy-text check' }));
     await ownerQuery("INSERT INTO webhooks (name, url, secret, events) VALUES ('Probe', 'https://hooks.example.com/x', 'unused', '{}')");
     // People outside (#46) are the broadest audience of all: status webhooks are checked with the others below.
     await ownerQuery("INSERT INTO webhooks (name, url, secret, events) VALUES ('Status probe', 'https://hooks.example.com/s', 'unused', '{status.published}')");
@@ -76,6 +78,32 @@ describe('copying text between records (#117)', { skip }, () => {
         const p = await knownError(text, narrow);
         const c = (await pm.post(`/api/problems/${p}/change`, {})).body.ref;
         return { target: c, readable: JSON.stringify((await ownerQuery('SELECT title, description FROM changes WHERE ref = $1', [c])).rows[0]) };
+      },
+    },
+    {
+      path: 'problem → bug (create a bug for the code fix, #167)',
+      run: async (narrow, text) => {
+        const p = await knownError(text, narrow);
+        const w = (await pm.post(`/api/records/${p}/work-items`, {})).body.ref;
+        return { target: w, readable: JSON.stringify((await ownerQuery('SELECT title, description, actual_result FROM work_items WHERE ref = $1', [w])).rows[0]) };
+      },
+    },
+    {
+      path: 'incident → bug (a code fix for an incident, #167)',
+      run: async (narrow, text) => {
+        const inc = (await pm.post('/api/incidents', { title: 'Payslip render', description: text })).body.ref;
+        await narrowTo(inc, narrow);
+        const w = (await pm.post(`/api/records/${inc}/work-items`, {})).body.ref;
+        return { target: w, readable: JSON.stringify((await ownerQuery('SELECT title, description, actual_result FROM work_items WHERE ref = $1', [w])).rows[0]) };
+      },
+    },
+    {
+      path: 'improvement → story (#167)',
+      run: async (narrow, text) => {
+        const imp = (await pm.post('/api/improvements', { title: 'Self-service payslips', description: text })).body.ref;
+        await narrowTo(imp, narrow);
+        const w = (await pm.post(`/api/records/${imp}/work-items`, {})).body.ref;
+        return { target: w, readable: JSON.stringify((await ownerQuery('SELECT title, description FROM work_items WHERE ref = $1', [w])).rows[0]) };
       },
     },
     {
@@ -279,7 +307,7 @@ describe('copying text between records (#117)', { skip }, () => {
           continue;
         }
         if (out.target) {
-          const table = { PRB: 'problems', INC: 'incidents', CHG: 'changes' }[out.target.slice(0, 3)]!;
+          const table = { PRB: 'problems', INC: 'incidents', CHG: 'changes', WI: 'work_items' }[out.target.match(/^[A-Z]+/)![0]]!;
           const t = (await ownerQuery(`SELECT restricted, classification FROM ${table} WHERE ref = $1`, [out.target])).rows[0];
           const inherited = narrow === 'restricted' ? t.restricted : t.classification === 'confidential';
           assert.ok(inherited || !out.readable.includes(text), `${row.path}: ${out.target} must start ${narrow} or not hold the text`);
@@ -314,17 +342,19 @@ describe('copying text between records (#117)', { skip }, () => {
       // Two, plus a problem reported in the portal (#45, insertPortalIncident): the person's own words, not text from
       // another record.
       'incidents/incidents.ts': 3,
+      // Work items (#165): a new one, and one made from a problem, incident, improvement or request (#167).
+      'routes/development.ts': 1, 'mcp/development.ts': 1, 'development/itsm.ts': 1,
     };
     const dir = new URL('../../src/', import.meta.url);
     const found: Record<string, number> = {};
     for (const f of (readdirSync(dir, { recursive: true }) as string[]).filter((x) => x.endsWith('.ts'))) {
       const src = readFileSync(new URL(f, dir), 'utf8');
-      const calls = [...src.matchAll(/(?<!function )\b(createProblem|createProblemInTx|createArticle|createChange|insertAction|insertIncident)\(/g)].length;
+      const calls = [...src.matchAll(/(?<!function )\b(createProblem|createProblemInTx|createArticle|createChange|insertAction|insertIncident|createWorkItem)\(/g)].length;
       if (calls) found[f] = calls;
     }
     assert.deepEqual(found, expected);
     // The files that copy between records use the shared rule.
-    for (const f of ['problems/candidates.ts', 'changes/changes.ts', 'incidents/incidents.ts', 'reporting/knowledge.ts', 'incidents/major-incidents.ts', 'requests/requests.ts', 'incidents/post-incident-reviews.ts']) {
+    for (const f of ['problems/candidates.ts', 'changes/changes.ts', 'incidents/incidents.ts', 'reporting/knowledge.ts', 'incidents/major-incidents.ts', 'requests/requests.ts', 'incidents/post-incident-reviews.ts', 'development/itsm.ts']) {
       assert.match(readFileSync(new URL(f, dir), 'utf8'), /from '\.\.\/security\/audience\.js'/, `${f} copies between records without audience.ts`);
     }
   });
