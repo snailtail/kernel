@@ -40,6 +40,7 @@ const editable = {
   resolution: z.string().describe('Permanent solution'),
   major_review: z.string().describe('Major problem review: what went well, what to improve, follow-ups'),
   fix_type: z.enum(problems.FIX_TYPES).nullable().describe('How the permanent fix is made: only code suggests a bug (development module); configuration, infrastructure, supplier and process go to a change; accept_risk is the risk decision'),
+  fix_observation_days: z.number().int().min(1).max(90).nullable().describe('Days a deployed fix is watched for new incidents before resolving is suggested (empty: 7)'),
 };
 
 export const optionalEditable = Object.fromEntries(Object.entries(editable).map(([k, v]) => [k, v.optional()])) as {

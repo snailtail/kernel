@@ -12,7 +12,7 @@ import { type Db, query, tx } from '../core/db.js';
 import { badRequest, conflict, notFound } from '../core/errors.js';
 import { authorize, can } from '../security/policy.js';
 import { checkAssigneeInTeam, validTeam } from '../people/teams.js';
-import { recordUrl, registerRecordType, typeOfPrefix, type RecordType } from '../records/records.js';
+import { recordType, recordUrl, registerRecordType, typeOfPrefix, type RecordType } from '../records/records.js';
 import { assertVisibleRef, seeingAll } from '../security/visibility.js';
 import { recordSummaries } from '../records/summaries.js';
 import type { StartNarrow } from '../problems/problems.js';
@@ -513,6 +513,13 @@ export async function addWorkItemComment(user: User, ref: string, body: string) 
   return getWorkItem(user, ref);
 }
 
+/** A link to a problem, incident, change, improvement or request is in that record's history too, whichever side made it. */
+async function logOnOtherSide(db: Db, user: User, kind: string, reference: string, workItem: string, act: 'add' | 'remove') {
+  if (!(ITSM_LINK_KINDS as readonly string[]).includes(kind)) return;
+  const { rows } = await db.query(`SELECT id FROM ${recordType(kind).table} WHERE ref = $1`, [reference]);
+  if (rows[0]) await logActivity(db, kind, rows[0].id, user.id, 'link', `${act === 'add' ? 'Linked' : 'Unlinked'} work item ${workItem}`, { kind: 'work_item', reference: workItem, action: act });
+}
+
 export async function addWorkItemLink(user: User, ref: string, input: z.infer<typeof workItemLinkSchema>) {
   authorize(user, 'work.write');
   const kernel = input.kind !== 'document' && (!input.system || input.system === 'Kernel');
@@ -534,6 +541,7 @@ export async function addWorkItemLink(user: User, ref: string, input: z.infer<ty
     );
     if (!rowCount) throw conflict(`${words(input.kind)} ${reference} is already linked`);
     await logWorkItem(db, w.id, user.id, 'link', `Linked ${words(input.kind)} ${reference}`, { kind: input.kind, reference, system: input.system, action: 'add' });
+    if (kernel) await logOnOtherSide(db, user, input.kind, reference, w.ref, 'add');
   });
   return getWorkItem(user, ref);
 }
@@ -542,9 +550,10 @@ export async function removeWorkItemLink(user: User, ref: string, linkId: number
   authorize(user, 'work.write');
   await tx(async (db) => {
     const w = await loadWorkItem(db, ref);
-    const { rows } = await db.query('DELETE FROM work_item_links WHERE id = $1 AND work_item_id = $2 RETURNING kind, reference', [linkId, w.id]);
+    const { rows } = await db.query('DELETE FROM work_item_links WHERE id = $1 AND work_item_id = $2 RETURNING kind, reference, system', [linkId, w.id]);
     if (!rows[0]) throw notFound('Link not found');
     await logWorkItem(db, w.id, user.id, 'link', `Unlinked ${words(rows[0].kind)} ${rows[0].reference}`, { ...rows[0], action: 'remove' });
+    if (['', 'Kernel'].includes(rows[0].system)) await logOnOtherSide(db, user, rows[0].kind, rows[0].reference, w.ref, 'remove');
   });
   return getWorkItem(user, ref);
 }

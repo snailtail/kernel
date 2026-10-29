@@ -1,6 +1,7 @@
 // Process guidance: what the current phase is for and which steps remain, derived from the record itself.
 // Shown in the UI in guided mode and returned to MCP clients as next_steps.
 import { moduleEnabled } from '../core/modules.js';
+import type { ProblemFix } from '../changes/problem-fix.js';
 
 interface GuidanceInput {
   status: string;
@@ -22,6 +23,8 @@ interface GuidanceInput {
   fix_type?: string | null;
   /** Its bugs and stories, with the development module on (#167). */
   work_items?: { status: string }[];
+  /** The changes that carry its fix, and what happened after the fix went out (#167). */
+  fix?: ProblemFix;
   links: { kind: string }[];
   actions: { status: string }[];
   analyses: unknown[];
@@ -55,6 +58,7 @@ export interface Guidance {
 }
 
 const has = (s: string) => s.trim().length > 0;
+const day = (iso: string) => iso.slice(0, 10);
 
 export function guidanceFor(p: GuidanceInput): Guidance {
   const g = phaseGuidance(p);
@@ -64,11 +68,33 @@ export function guidanceFor(p: GuidanceInput): Guidance {
 /** Where the problem hands over to another practice, given which modules are on. */
 function handoverFor(p: GuidanceInput): Handover | null {
   const changes = p.links.filter((l) => l.kind === 'change').length;
+  const fix = moduleEnabled('change') ? p.fix : undefined;
+  // Closing the loop (#167): once the fix is deployed, watch for new incidents, then suggest resolving. A person decides.
+  if (p.status === 'known_error' && fix?.deployed) {
+    const { change, at } = fix.deployed;
+    if (fix.recurred.length) {
+      const n = fix.recurred.length;
+      return { label: `${n} incident${n === 1 ? '' : 's'} since the fix`, hint: `${fix.recurred.map((i) => i.ref).join(', ')} came in after ${change} was deployed on ${day(at)}: check whether the fix works before resolving.` };
+    }
+    if (Date.now() < Date.parse(fix.watch_until!)) {
+      return { label: `The fix is deployed: watch until ${day(fix.watch_until!)}`, hint: `${change} went out on ${day(at)}. If no new incidents come in for ${fix.observation_days} days, Kernel suggests resolving the problem.` };
+    }
+    return { label: 'Verify the fix and resolve', hint: `No new incidents in ${fix.observation_days} days since ${change} was deployed on ${day(at)}. Resolve the problem, then its open incidents.`, action: 'resolve_problem', target: change };
+  }
+  if (p.status === 'known_error' && fix?.failed) {
+    return { label: `The fix in ${fix.failed.change} ${fix.failed.outcome === 'rolled_back' ? 'was rolled back' : 'failed'}`, hint: 'The known error stays in the KEDB with its workaround. Move its bugs back to in progress if they need more work, and plan a new change.' };
+  }
   // A code fix is made as a bug in a team's backlog first (#167); its release goes out as a change later.
   const bugs = p.work_items?.filter((w) => w.status !== 'removed') ?? [];
   if (p.status === 'known_error' && p.ec_decision === 'fix' && p.fix_type === 'code' && moduleEnabled('development')) {
     if (!bugs.length) return { label: 'A code fix? Create a bug', hint: 'The bug goes to a team\'s backlog with the root cause and the workaround, and links back here.', action: 'create_bug' };
     if (bugs.some((w) => w.status !== 'done')) return { label: 'The fix is planned', hint: 'Its bug is in a team\'s backlog; the known error stays in the KEDB with its workaround until the fix is deployed.' };
+  }
+  if (p.status === 'known_error' && fix?.pending.length) {
+    return { label: `The fix goes out with ${fix.pending.map((c) => c.change).join(', ')}`, hint: 'Once the change is implemented, Kernel watches for new incidents and then suggests resolving the problem.' };
+  }
+  if (p.status === 'known_error' && p.fix_type === 'code' && bugs.length && moduleEnabled('change')) {
+    return { label: 'The bug is done: deploy it through a change', hint: 'Link the bug to the change that ships it, from the change or the bug, or raise one here.', action: 'raise_change' };
   }
   if (p.status === 'known_error' && p.ec_decision === 'fix' && changes === 0 && moduleEnabled('change')) {
     return { label: 'Ready to fix? Raise a change', hint: 'The permanent fix is implemented through a change; it is prefilled from the root cause and the affected CIs.', action: 'raise_change' };

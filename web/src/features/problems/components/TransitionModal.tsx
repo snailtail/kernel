@@ -5,12 +5,19 @@ import { CLOSURE_LABEL } from '../../../format';
 import { useSession } from '../../../session';
 import { PROBLEM_LIFECYCLE, TRANSITION_LABEL } from '../../../statuses';
 
+/** The resolution a deployed fix suggests (#167): the change and the bugs it shipped. */
+const fixedBy = (p: ProblemDetail) => {
+  if (!p.fix?.deployed) return '';
+  const bugs = (p.work_items ?? []).filter((w) => w.status === 'done').map((w) => w.ref);
+  return `Fixed in ${p.fix.deployed.change}${bugs.length ? ` (${bugs.join(', ')})` : ''}, deployed ${p.fix.deployed.at.slice(0, 10)}.`;
+};
+
 export function TransitionModal({ problem: p, to, onClose, onDone }: { problem: ProblemDetail; to: Status; onClose: () => void; onDone: (p: ProblemDetail) => void }) {
   const { meta } = useSession();
   const [form, setForm] = useState({
     root_cause: p.root_cause,
     workaround: p.workaround,
-    resolution: p.resolution,
+    resolution: p.resolution || fixedBy(p),
     major_review: p.major_review,
     closure_code: to === 'closed' ? (p.status === 'resolved' ? 'resolved' : p.status === 'new' ? 'duplicate' : '') : '',
     comment: '',

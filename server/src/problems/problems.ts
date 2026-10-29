@@ -49,6 +49,8 @@ export const problemFields = {
   resolution: z.string().max(20000),
   major_review: z.string().max(20000),
   fix_type: z.enum(FIX_TYPES).nullable(),
+  /** Days a deployed fix is watched for new incidents before resolving is suggested; empty is the default, 7. */
+  fix_observation_days: z.number().int().min(1).max(90).nullable(),
 };
 
 export const createProblemSchema = z.object({
@@ -106,7 +108,7 @@ const SELECT_PROBLEM = `
   SELECT p.id, p.ref, p.title, p.description, p.status, p.category_id, c.name AS category,
          p.affected_service, p.detection, p.impact, p.urgency, p.priority, p.is_major,
          p.assignee_id, a.display_name AS assignee, p.restricted, p.restricted_teams, p.team_id, (SELECT name FROM teams WHERE id = p.team_id) AS team, p.created_by, cb.display_name AS created_by_name,
-         p.root_cause, p.workaround, p.resolution, p.closure_code, p.major_review, p.fix_type,
+         p.root_cause, p.workaround, p.resolution, p.closure_code, p.major_review, p.fix_type, p.fix_observation_days,
          p.known_error_at, p.resolved_at, p.closed_at, p.created_at, p.updated_at, p.contains_personal_data, p.classification,
          p.ec_risk_level, p.ec_risk, p.ec_fix_cost, p.ec_decision, p.ec_decision_note, p.ec_decided_by,
          db.display_name AS ec_decided_by_name, p.ec_decided_at, p.ec_review_date::text AS ec_review_date,
@@ -242,7 +244,7 @@ export async function listProblems(filter: z.infer<typeof listSchema>) {
 export const linkUrls = provided<[links: any[]], any[]>((links) => links);
 
 /** Related data other modules add to a problem (affected CIs…), registered at startup. */
-type ProblemExtra = (problem: { id: number; impact: number }) => Promise<Record<string, unknown>>;
+type ProblemExtra = (problem: { id: number; impact: number; fix_observation_days: number | null }) => Promise<Record<string, unknown>>;
 const problemExtras: ProblemExtra[] = [];
 export const registerProblemExtra = (fn: ProblemExtra) => problemExtras.push(fn);
 

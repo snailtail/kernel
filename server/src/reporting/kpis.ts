@@ -8,7 +8,7 @@ import { moduleEnabled } from '../core/modules.js';
 import { authorize, can } from '../security/policy.js';
 import { hiddenRecordsExist } from '../security/visibility.js';
 
-export const TILES = ['mttr', 'sla', 'change_success', 'recurring', 'problems_resolved', 'major_open', 'requests_fulfilled', 'satisfaction', 'points_done', 'unplanned_work'] as const;
+export const TILES = ['mttr', 'sla', 'change_success', 'recurring', 'problems_resolved', 'major_open', 'requests_fulfilled', 'satisfaction', 'points_done', 'unplanned_work', 'fix_lead_time', 'recurred_after_fix'] as const;
 type TileId = (typeof TILES)[number];
 const PERIODS = 6;
 
@@ -50,7 +50,9 @@ export async function kpis(user: User, { period }: z.infer<typeof kpiSchema>) {
   const portal = moduleEnabled('portal') && (incident || request);
   // Development work (#166): only with the module on.
   const development = moduleEnabled('development') && can(user.role, 'work.read');
-  const [periods, resolved, changes, recurring, problems, knownErrors, major, requests, ratings, done, sprints] = await Promise.all([
+  // Closing the loop between a problem and its fix (#167): changes carry the fix, through the problem's bugs or not.
+  const fixes = development && change && problem;
+  const [periods, resolved, changes, recurring, problems, knownErrors, major, requests, ratings, done, sprints, fixed, recurred] = await Promise.all([
     query(`${P} SELECT start::date::text AS start FROM p ORDER BY start`, [period]),
     incident
       ? query(
@@ -142,6 +144,27 @@ export async function kpis(user: User, { period }: z.infer<typeof kpiSchema>) {
              coalesce(sum(si.points) FILTER (WHERE si.outcome IS NOT NULL AND si.unplanned), 0)::int AS unplanned
            FROM p LEFT JOIN sprints s ON s.status = 'completed' AND s.completed_at >= p.start AND s.completed_at < p.stop
            LEFT JOIN sprint_items si ON si.sprint_id = s.id
+           GROUP BY 1`,
+          [period],
+        )
+      : none,
+    // Problems whose fix was deployed in the period (migration 161), from the known error to the deploy.
+    fixes
+      ? query(
+          `${P} SELECT p.start::date::text AS start, count(x.id)::int AS fixed,
+             avg(extract(epoch FROM d.deployed_at - x.known_error_at) / 60)::float AS minutes
+           FROM p LEFT JOIN (problem_fix_deployed d JOIN problems x ON x.id = d.problem_id AND x.known_error_at IS NOT NULL)
+             ON d.deployed_at >= p.start AND d.deployed_at < p.stop
+           GROUP BY 1`,
+          [period],
+        )
+      : none,
+    // Incidents logged in the period on a problem whose fix was already deployed.
+    fixes && incident
+      ? query(
+          `${P} SELECT p.start::date::text AS start, count(i.id)::int AS incidents, count(DISTINCT i.problem_id)::int AS problems
+           FROM p LEFT JOIN (incidents i JOIN problem_fix_deployed d ON d.problem_id = i.problem_id AND i.created_at > d.deployed_at)
+             ON i.created_at >= p.start AND i.created_at < p.stop
            GROUP BY 1`,
           [period],
         )
@@ -251,6 +274,26 @@ export async function kpis(user: User, { period }: z.infer<typeof kpiSchema>) {
       basis: `Sprints completed in the ${unit}: the share of their points that were added after the sprint started.`,
       link: '/work',
     });
+  }
+  if (fixes) {
+    const lead = per(fixed.rows, (rs) => (rs[0]?.fixed ? Math.round(rs[0].minutes) : null));
+    const now = fixed.rows.find((r) => r.start === last(starts));
+    tiles.push({
+      id: 'fix_lead_time', label: 'Time to deploy a fix', value: last(lead), unit: 'minutes', trend: lead, trend_label: `per ${unit}`, lower_is_better: true,
+      detail: now?.fixed ? `${now.fixed} problem${now.fixed === 1 ? '' : 's'} got the fix deployed this ${unit}.` : `No fixes deployed this ${unit}.`,
+      basis: `Problems whose fix was deployed in the ${unit}: the mean time from the known error to the last successful change that carries the fix, once its bugs and stories are done.`,
+      link: '/problems?status=resolved',
+    });
+    if (incident) {
+      const again = per(recurred.rows, (rs) => rs[0]?.incidents ?? 0);
+      const now = recurred.rows.find((r) => r.start === last(starts));
+      tiles.push({
+        id: 'recurred_after_fix', label: 'Incidents after the fix', value: last(again), unit: 'count', trend: again, trend_label: `per ${unit}`, lower_is_better: true,
+        detail: now?.incidents ? `On ${now.problems} problem${now.problems === 1 ? '' : 's'} whose fix was already deployed.` : `No incidents on fixed problems this ${unit}.`,
+        basis: `Incidents logged in the ${unit} and linked to a problem whose fix had already been deployed: the fix did not hold, or the problem was wider.`,
+        link: '/problems',
+      });
+    }
   }
   return {
     period: { unit: period, starts },

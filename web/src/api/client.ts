@@ -71,6 +71,8 @@ export interface Problem {
   major_review: string;
   /** How the permanent fix is made (#167): only code becomes a bug. */
   fix_type: FixType | null;
+  /** Days a deployed fix is watched for new incidents before resolving is suggested; null is 7. */
+  fix_observation_days: number | null;
   known_error_at: string | null;
   resolved_at: string | null;
   closed_at: string | null;
@@ -158,11 +160,22 @@ export interface Analysis {
   confirmed_at?: string | null;
 }
 
+interface ProblemFix {
+  deployed: { change: string; at: string } | null;
+  failed: { change: string; outcome: string } | null;
+  pending: { change: string; status: string }[];
+  observation_days: number;
+  watch_until: string | null;
+  recurred: { ref: string; title: string; created_at: string }[];
+}
+
 type FixType = 'code' | 'configuration' | 'infrastructure' | 'supplier' | 'process' | 'accept_risk';
 
 export interface ProblemDetail extends Problem {
   /** Its bugs and stories, with the development module on (#167). */
   work_items?: LinkedWorkItem[];
+  /** The changes that carry its fix and what came after it was deployed (#167). */
+  fix?: ProblemFix;
   /** Improvements that came from it or are linked to it (#52). */
   improvements?: { ref: string; title: string; status: string }[];
   knowledge_article?: { ref: string; status: string } | null;
