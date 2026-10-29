@@ -21,7 +21,8 @@ describe('process guidance across practices (#37)', { skip }, () => {
     const decided = (await pm.put(`/api/problems/${p.ref}/assessment`, { ec_decision: 'fix', ec_risk_level: 2 })).body;
     assert.deepEqual([decided.next_steps.handover.action, decided.next_steps.handover.label], ['raise_change', 'Ready to fix? Raise a change']);
     const change = (await analyst.post(`/api/problems/${p.ref}/change`, { implementation_plan: 'Add the index', backout_plan: 'Drop it' })).body;
-    assert.equal((await analyst.get(`/api/problems/${p.ref}`)).body.next_steps.handover, null, 'the hand-over is done');
+    const waiting = (await analyst.get(`/api/problems/${p.ref}`)).body.next_steps.handover;
+    assert.deepEqual([waiting.action, waiting.label], [undefined, `The fix goes out with ${change.ref}`], 'the hand-over is done: it waits for the change (#167)');
     await db(`UPDATE changes SET status = 'closed', outcome = 'successful' WHERE ref = '${change.ref}'`);
     const closed = (await analyst.get(`/api/changes/${change.ref}`)).body;
     assert.deepEqual([closed.next_steps.handover.action, closed.next_steps.handover.target], ['resolve_problem', p.ref]);
