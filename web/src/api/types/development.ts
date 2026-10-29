@@ -24,6 +24,8 @@ export interface WorkItem extends Omit<WorkItemRow, 'parent_ref' | 'parent_title
   definitions: { ready: string[]; done: string[] };
   links: WorkItemLink[];
   transitions: WorkItemStatus[];
+  /** Mirrored from a dev platform (#168): these fields change there. */
+  mirror: { source: string; label: string; url: string; iteration: string; read_only: string[] } | null;
   activity: { id: number; kind: string; body: string; data: any; channel: string; created_at: string; user_name: string | null }[];
   next_steps: Guidance;
 }

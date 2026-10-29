@@ -17,7 +17,7 @@ import { teamScoped } from '../security/visibility.js';
 import { validTeam } from '../people/teams.js';
 import { logActivity } from '../records/activity.js';
 import { seeingAll } from '../security/visibility.js';
-import { BOARD_COLUMNS, leaveSprint, WORK_ITEM_TRANSITIONS, wipLimitsOf, workItemUrl, type WorkItemStatus } from './work-items.js';
+import { BOARD_COLUMNS, leaveSprint, refuseSourceOwned, WORK_ITEM_TRANSITIONS, wipLimitsOf, workItemUrl, type WorkItemStatus } from './work-items.js';
 
 export const SPRINT_STATUSES = ['planned', 'active', 'completed'] as const;
 const RETRO_KINDS = ['went_well', 'hard', 'to_change'] as const;
@@ -298,9 +298,11 @@ export async function planSprint(user: User, id: number, input: z.infer<typeof s
     const s = await loadSprint(db, id);
     if (s.status === 'completed') throw conflict('The sprint is completed');
     const refs = [...input.add, ...input.remove].map((r) => r.toUpperCase());
-    const { rows } = await db.query('SELECT id, ref, type, status, team_id, sprint_id, points FROM work_items WHERE ref = ANY($1) FOR UPDATE', [refs]);
+    const { rows } = await db.query('SELECT id, ref, type, status, team_id, sprint_id, points, source, mirror_id FROM work_items WHERE ref = ANY($1) FOR UPDATE', [refs]);
     const byRef = new Map(rows.map((w) => [w.ref as string, w]));
     for (const r of refs) if (!byRef.has(r)) throw badRequest(`Work item ${r} not found`);
+    // A mirrored item's sprint is its iteration in the source (#168).
+    for (const w of rows) refuseSourceOwned(w, ['sprint']);
     for (const r of input.add.map((x) => x.toUpperCase())) {
       const w = byRef.get(r)!;
       if (w.sprint_id === s.id) continue;

@@ -65,6 +65,12 @@ export function WorkItemPage() {
           {w.labels.map((l) => <Link key={l} to={`/work?team=${w.team_id ?? 'none'}&label=${encodeURIComponent(l)}`} className="tag">{l}</Link>)}
           <span className="muted small">Added by {w.created_by_name ?? 'someone'} {relativeTime(w.created_at)}</span>
         </div>
+        {w.mirror && (
+          <p className="muted small">
+            Mirrored from {w.mirror.label}{w.mirror.iteration ? <>, iteration <span className="mono">{w.mirror.iteration}</span></> : null}: its title, type, status, points, assignee, parent and sprint change there.{' '}
+            {w.mirror.url && <a href={w.mirror.url} target="_blank" rel="noreferrer">Open in {w.mirror.label}</a>}
+          </p>
+        )}
         {editable && (
           <TransitionButtons buttons={[
             ...w.transitions.map((to) => ({
