@@ -25,7 +25,47 @@ export interface EventContext {
   setChecks(repo: string, prKey: string, checks: string): Promise<void>;
   /** A deployment to an environment: dev.ts finds what it contains, maps it to CIs and may register a change. */
   deployed(d: Deployment): Promise<string[]>;
+  /** A work item as the source has it now (#168): mirrored when a team mirrors the place it is in. */
+  mirrored(item: MirroredItem | { external_id: string; deleted: true }): Promise<void>;
 }
+
+/**
+ * A work item in the source, in the source's own words (its type and state names): the fields a mirror copies (#168).
+ * Pointers, not copies: never the description.
+ */
+export interface MirroredItem {
+  /** Unique per platform: "organisation#12" on Azure DevOps. */
+  external_id: string;
+  url: string;
+  title: string;
+  type: string;
+  state: string;
+  /** Where it is in the source, matched against a mirror's area (an Azure DevOps area path). */
+  area: string;
+  iteration: string;
+  points: number | null;
+  assignee_email: string | null;
+  parent_external_id: string | null;
+}
+
+/** How a mirror's place is named in its source. */
+export interface MirrorPlace { base: string; scope: string; area: string }
+
+/** A platform whose work items a team can mirror (#168). The mapping to Kernel's types and statuses is per platform. */
+export interface Mirroring {
+  /** The default mapping, keyed by the source's names in lower case; a mirror can adjust it. */
+  types: Record<string, string>;
+  states: Record<string, string>;
+  /** Whether an item at `area` belongs to a mirror of `place`. */
+  covers(place: MirrorPlace, area: string): boolean;
+  /** Every item of the place now, the complete list (throws when it cannot be read: nothing is then marked removed). */
+  list(place: MirrorPlace, token: string | null, call: CallJson): Promise<MirroredItem[]>;
+  /** These items as they are now; one that was deleted in the source is missing from the result. */
+  lookup(place: MirrorPlace, externalIds: string[], token: string | null, call: CallJson): Promise<MirroredItem[]>;
+}
+
+/** An outbound JSON request that throws on any failure, for reads whose absence must not look like an empty list. */
+export type CallJson = (url: string, init?: { method?: 'GET' | 'POST'; headers?: Record<string, string>; body?: unknown }) => Promise<any>;
 
 /** One deployment as the platform reports it, on one scale: success, failure, cancelled, in_progress, queued. */
 interface Deployment {
@@ -140,6 +180,23 @@ export function getJsonVia(privateAllow: string[], ca: string | null): GetJson {
       return res.ok ? JSON.parse(res.body) : null;
     } catch {
       return null;
+    }
+  };
+}
+
+/** Makes a CallJson for one source: its network settings, longer timeouts and a larger limit than a status lookup. */
+export function callJsonVia(privateAllow: string[], ca: string | null): CallJson {
+  return async (url, init = {}) => {
+    const res = await outboundFetch(url, {
+      method: init.method ?? 'GET', body: init.body === undefined ? undefined : JSON.stringify(init.body),
+      headers: { 'User-Agent': 'Kernel', Accept: 'application/json', ...(init.body === undefined ? {} : { 'Content-Type': 'application/json' }), ...init.headers },
+      timeoutMs: 30_000, maxBytes: 20_000_000, privateAllow: privateAllow.length ? privateAllow : undefined, ca: ca ?? undefined,
+    });
+    if (!res.ok) throw Object.assign(new Error(`HTTP ${res.status} from ${new URL(url).host}`), { status: res.status });
+    try {
+      return JSON.parse(res.body);
+    } catch {
+      throw new Error(`The answer from ${new URL(url).host} is not JSON`);
     }
   };
 }

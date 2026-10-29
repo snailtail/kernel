@@ -3,10 +3,10 @@
 // weaker than GitHub's HMAC (whoever sees one delivery can send others), so they are only accepted over HTTPS, from an
 // allowlisted organisation/project, and replays are refused on notificationId + id.
 import { badRequest } from '../core/errors.js';
-import { ciState, firstLine, iso, isRollback, pushCommits, sameSecret, type Adapter, type ParsedItem } from './dev-platform.js';
+import { ciState, firstLine, iso, isRollback, pushCommits, sameSecret, type Adapter, type CallJson, type MirroredItem, type Mirroring, type MirrorPlace, type ParsedItem } from './dev-platform.js';
 
 export const AZURE_DEVOPS = 'https://dev.azure.com';
-const HANDLED = new Set(['git.pullrequest.created', 'git.pullrequest.updated', 'git.pullrequest.merged', 'workitem.created', 'workitem.updated', 'git.push', 'build.complete', 'ms.vss-release.deployment-completed-event']);
+const HANDLED = new Set(['git.pullrequest.created', 'git.pullrequest.updated', 'git.pullrequest.merged', 'workitem.created', 'workitem.updated', 'workitem.deleted', 'workitem.restored', 'git.push', 'build.complete', 'ms.vss-release.deployment-completed-event']);
 const enc = encodeURIComponent;
 const web = (org: string, project: string) => `${AZURE_DEVOPS}/${enc(org)}/${enc(project)}`;
 
@@ -28,6 +28,76 @@ const person = (p: any) => (typeof p === 'string' ? p.replace(/\s*<[^>]*>\s*$/, 
 const buildState = (r: any) => (r.status === 'completed' ? ciState(r.result) : ciState(r.status));
 const branchName = (ref: unknown) => String(ref ?? '').replace(/^refs\/heads\//, '');
 
+// ---- Mirrored backlogs (#168) ------------------------------------------------------------------------------------
+
+const split = (scope: string) => ({ org: scope.slice(0, scope.indexOf('/')), project: scope.slice(scope.indexOf('/') + 1) });
+const basic = (token: string | null): Record<string, string> => (token ? { Authorization: `Basic ${Buffer.from(`:${token}`).toString('base64')}` } : {});
+/** Work item ids are unique per organisation. */
+const externalId = (org: string, id: unknown) => `${org.toLowerCase()}#${id}`;
+// Identities come as an object or as "Name <email>"; the e-mail address matches a Kernel user.
+const emailOf = (p: any) => {
+  const v = typeof p === 'string' ? p.match(/<([^>]+@[^>]+)>\s*$/)?.[1] : p?.uniqueName;
+  return typeof v === 'string' && v.includes('@') ? v.toLowerCase() : null;
+};
+const numberOf = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : typeof v === 'string' && v.trim() && Number.isFinite(Number(v)) ? Number(v) : null);
+const MIRROR_FIELDS = ['System.Id', 'System.Title', 'System.WorkItemType', 'System.State', 'System.AreaPath', 'System.IterationPath', 'System.AssignedTo', 'System.Parent', 'Microsoft.VSTS.Scheduling.StoryPoints', 'Microsoft.VSTS.Scheduling.Effort'];
+
+/** A work item's fields (a delivery's revision, or the API's) in the source's words. Agile has story points, Scrum effort. */
+function mirroredFrom(base: string, org: string, project: string, id: unknown, f: Record<string, any>): MirroredItem {
+  return {
+    external_id: externalId(org, id),
+    url: `${base}/${enc(org)}/${enc(project)}/_workitems/edit/${id}`,
+    title: String(f['System.Title'] ?? ''),
+    type: String(f['System.WorkItemType'] ?? ''),
+    state: String(f['System.State'] ?? ''),
+    area: String(f['System.AreaPath'] ?? ''),
+    iteration: String(f['System.IterationPath'] ?? ''),
+    points: numberOf(f['Microsoft.VSTS.Scheduling.StoryPoints'] ?? f['Microsoft.VSTS.Scheduling.Effort']),
+    assignee_email: emailOf(f['System.AssignedTo']),
+    parent_external_id: f['System.Parent'] ? externalId(org, f['System.Parent']) : null,
+  };
+}
+
+/** The items by id, 200 a request (the API's limit); deleted ones are left out. */
+async function batch(place: MirrorPlace, ids: (string | number)[], token: string | null, call: CallJson) {
+  const { org, project } = split(place.scope);
+  const out: MirroredItem[] = [];
+  for (let i = 0; i < ids.length; i += 200) {
+    const j = await call(`${place.base}/${enc(org)}/${enc(project)}/_apis/wit/workitemsbatch?api-version=7.1`, {
+      method: 'POST', headers: basic(token), body: { ids: ids.slice(i, i + 200).map(Number), fields: MIRROR_FIELDS, errorPolicy: 'omit' },
+    });
+    for (const w of j?.value ?? []) if (w?.id) out.push(mirroredFrom(place.base, org, project, w.id, w.fields ?? {}));
+  }
+  return out;
+}
+
+/**
+ * Azure DevOps backlogs: the items under an area path. The default mapping covers the Agile, Scrum, CMMI and Basic
+ * processes; a Feature sits between an epic and its stories there, and becomes an epic here (Kernel has three levels).
+ */
+export const azureMirror: Mirroring = {
+  types: { epic: 'epic', feature: 'epic', 'user story': 'story', 'product backlog item': 'story', requirement: 'story', issue: 'story', bug: 'bug', task: 'task' },
+  states: {
+    new: 'new', proposed: 'new', 'to do': 'new', approved: 'ready', ready: 'ready', active: 'in_progress', committed: 'in_progress', doing: 'in_progress',
+    'in progress': 'in_progress', resolved: 'in_review', closed: 'done', done: 'done', completed: 'done', removed: 'removed',
+  },
+  covers(place, area) {
+    if (!place.area) return true;
+    const [a, p] = [area.toLowerCase(), place.area.toLowerCase()];
+    return a === p || a.startsWith(`${p}\\`);
+  },
+  async list(place, token, call) {
+    const { org, project } = split(place.scope);
+    const under = place.area ? ` AND [System.AreaPath] UNDER '${place.area.replaceAll("'", "''")}'` : '';
+    const j = await call(`${place.base}/${enc(org)}/${enc(project)}/_apis/wit/wiql?api-version=7.1`, {
+      method: 'POST', headers: basic(token), body: { query: `SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project${under}` },
+    });
+    if (!Array.isArray(j?.workItems)) throw new Error('Azure DevOps did not return a list of work items');
+    return batch(place, j.workItems.map((w: any) => w.id), token, call);
+  },
+  lookup: (place, externalIds, token, call) => batch(place, externalIds.map((e) => e.slice(e.indexOf('#') + 1)), token, call),
+};
+
 /** The project of a delivery's resource, wherever this event type keeps it. */
 function projectOf(b: any): string {
   const r = b?.resource ?? {};
@@ -39,7 +109,7 @@ export const azureDevOps: Adapter = {
   label: 'Azure DevOps',
   scopePattern: /^[\w.-]+\/[\w .-]+$/,
   scopeExample: 'organisation/project',
-  events: ['Pull request created', 'Pull request updated', 'Pull request merge attempted', 'Work item created', 'Work item updated', 'Code pushed', 'Build completed', 'Release deployment completed'],
+  events: ['Pull request created', 'Pull request updated', 'Pull request merge attempted', 'Work item created', 'Work item updated', 'Work item deleted', 'Work item restored', 'Code pushed', 'Build completed', 'Release deployment completed'],
   httpsOnly: true,
 
   parseUrl(u): ParsedItem | null {
@@ -133,6 +203,11 @@ export const azureDevOps: Adapter = {
       const itemId = r.workItemId ?? r.id;
       const fields = r.revision?.fields ?? r.fields ?? {};
       if (!itemId) return [];
+      if (event === 'workitem.deleted') {
+        await ctx.mirrored({ external_id: externalId(org, itemId), deleted: true });
+        return [];
+      }
+      await ctx.mirrored(mirroredFrom(AZURE_DEVOPS, org, project, itemId, fields));
       const id = await ctx.upsert({
         ...base, item_type: 'issue', key: String(itemId), url: `${root}/_workitems/edit/${itemId}`, title: fields['System.Title'],
         state: fields['System.State'] ? String(fields['System.State']).toLowerCase() : undefined, author: person(fields['System.CreatedBy']),

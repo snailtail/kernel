@@ -23,9 +23,10 @@ export const WORK_ITEM_STATUSES = ['new', 'ready', 'in_progress', 'in_review', '
 export const ITSM_LINK_KINDS = ['problem', 'incident', 'change', 'improvement', 'request'] as const;
 const WORK_ITEM_LINK_KINDS = ['work_item', 'document', ...ITSM_LINK_KINDS] as const;
 type ItsmKind = (typeof ITSM_LINK_KINDS)[number];
-type Type = (typeof WORK_ITEM_TYPES)[number];
+type Type = WorkItemType;
 export type WorkItemStatus = (typeof WORK_ITEM_STATUSES)[number];
 type Status = WorkItemStatus;
+export type WorkItemType = (typeof WORK_ITEM_TYPES)[number];
 
 /** Where an item can go from each status. Kanban teams may skip ready and review. */
 export const WORK_ITEM_TRANSITIONS: Record<Status, Status[]> = {
@@ -116,6 +117,19 @@ export const workDefinitionsSchema = z.object({ ready: definition, done: definit
 const logWorkItem = (db: Db, id: number, userId: number | null, kind: string, body = '', data: object = {}) => logActivity(db, 'work_item', id, userId, kind, body, data);
 const words = (s: string) => s.replace('_', ' ');
 
+// ---- Mirrored items (#168) ----------------------------------------------------------------------
+
+const SOURCE_LABELS: Record<string, string> = { azure_devops: 'Azure DevOps', github: 'GitHub', gitlab: 'GitLab' };
+/** What a mirror's source owns: read-only here, the same over REST, MCP and the web. Its status and sprint too. */
+const SOURCE_OWNED = ['title', 'type', 'points', 'team_id', 'assignee_id', 'parent'] as const;
+
+/** Refuses a change to fields the source of a mirrored item owns, saying where to make it. */
+export function refuseSourceOwned(w: { ref: string; source: string | null; mirror_id: number | null }, fields: string[]) {
+  if (!w.mirror_id || !fields.length) return;
+  const names = fields.map((f) => words(f.replace(/_id$/, '')));
+  throw conflict(`${w.ref} is mirrored from ${SOURCE_LABELS[w.source ?? ''] ?? w.source}, which owns its ${names.join(', ')}: change ${names.length > 1 ? 'them' : 'it'} there`);
+}
+
 async function loadWorkItem(db: Db, ref: string) {
   const { rows } = await db.query('SELECT * FROM work_items WHERE ref = $1 FOR UPDATE', [ref.toUpperCase()]);
   if (!rows[0]) throw notFound(`Work item ${ref.toUpperCase()} not found`);
@@ -168,10 +182,10 @@ async function checkChildren(db: Db, id: number, type: Type) {
 // after the caller's own access was checked.
 
 const GAP = 1024;
-const lockBacklog = (db: Db, teamId: number | null) => db.query("SELECT pg_advisory_xact_lock(hashtext('kernel.backlog'), $1)", [teamId ?? 0]);
+export const lockBacklog = (db: Db, teamId: number | null) => db.query("SELECT pg_advisory_xact_lock(hashtext('kernel.backlog'), $1)", [teamId ?? 0]);
 const inBacklog = 'coalesce(team_id, 0) = coalesce($1::int, 0)';
 
-async function bottomRank(db: Db, teamId: number | null) {
+export async function bottomRank(db: Db, teamId: number | null) {
   const { rows } = await db.query(`SELECT coalesce(max(rank), 0) + ${GAP} AS rank FROM work_items WHERE ${inBacklog}`, [teamId]);
   return rows[0].rank as number;
 }
@@ -280,7 +294,11 @@ export async function getWorkItem(user: User, ref: string) {
     definitions,
     links,
     activity,
-    transitions: WORK_ITEM_TRANSITIONS[w.status as Status],
+    // A mirrored item (#168): where it lives, and what only the source changes.
+    mirror: w.mirror_id
+      ? { source: w.source, label: SOURCE_LABELS[w.source] ?? w.source, url: w.external_url, iteration: w.external_iteration, read_only: [...SOURCE_OWNED, 'status', 'sprint'] }
+      : null,
+    transitions: w.mirror_id ? [] : WORK_ITEM_TRANSITIONS[w.status as Status],
     url: workItemUrl(w.ref),
   };
   return { ...detail, next_steps: workItemGuidance(detail) };
@@ -413,6 +431,12 @@ export async function updateWorkItemLean(user: User, ref: string, input: z.infer
   if (input.parent) await visibleId(input.parent);
   await seeingAll(() => tx(async (db) => {
     const w = await loadWorkItem(db, ref);
+    if (w.mirror_id) {
+      const parentRef = w.parent_id ? (await db.query('SELECT ref FROM work_items WHERE id = $1', [w.parent_id])).rows[0].ref : null;
+      const now: Record<string, unknown> = { ...w, parent: parentRef };
+      const given = (f: (typeof SOURCE_OWNED)[number]) => (f === 'parent' && input.parent ? input.parent.toUpperCase() : input[f]);
+      refuseSourceOwned(w, SOURCE_OWNED.filter((f) => input[f] !== undefined && (given(f) ?? null) !== (now[f] ?? null)));
+    }
     const { parent, ...rest } = input;
     const next: Record<string, unknown> = { ...rest };
     const type = (input.type ?? w.type) as Type;
@@ -457,6 +481,7 @@ export async function transitionWorkItemLean(user: User, ref: string, input: z.i
     const w = await loadWorkItem(db, ref);
     const from = w.status as Status;
     if (from === input.to) return;
+    refuseSourceOwned(w, ['status']);
     if (!WORK_ITEM_TRANSITIONS[from].includes(input.to)) throw conflict(`A work item cannot go from ${words(from)} to ${words(input.to)}`);
     if (input.to === 'removed' && !input.reason) throw badRequest('Give a reason for removing it from the backlog, so it is not lost');
     // The team's definition for this step: guidance, so moving on without it is allowed and logged.

@@ -18,6 +18,7 @@ import * as ch from './changes/changes.js';
 import * as imp from './improvements/improvements.js';
 import * as sp from './development/sprints.js';
 import * as wi from './development/work-items.js';
+import * as mirror from './development/mirror.js';
 import * as itsm from './development/itsm.js';
 import * as rq from './requests/requests.js';
 import * as portal from './requests/portal.js';
@@ -373,6 +374,10 @@ export const OPERATIONS: Op[] = [
   { method: 'delete', path: '/api/work-items/:ref/links/:id', tag: 'Work items', summary: 'Remove a link' },
   { method: 'get', path: '/api/teams/:id/work-definitions', tag: 'Work items', summary: "A team's Definition of Ready and Definition of Done" },
   { method: 'put', path: '/api/teams/:id/work-definitions', tag: 'Work items', summary: "Change a team's Definition of Ready and Definition of Done and its WIP limits per board column (managers); kept in the audit trail", body: wi.workDefinitionsSchema },
+  { method: 'get', path: '/api/teams/:id/mirror', tag: 'Work items', summary: "Whether the team's backlog is mirrored from a dev platform (#168), with the mapping and the last reconciliation" },
+  { method: 'put', path: '/api/teams/:id/mirror', tag: 'Work items', summary: "Mirror the team's backlog from Azure DevOps (managers): the dev source, organisation/project and area path, and adjustments to the type and state mapping", body: mirror.mirrorSchema },
+  { method: 'delete', path: '/api/teams/:id/mirror', tag: 'Work items', summary: "Stop mirroring (managers): the items stay, with their link to the source, and become editable" },
+  { method: 'post', path: '/api/teams/:id/mirror/sync', tag: 'Work items', summary: 'Reconcile the mirror now (managers): new and changed items are applied, deleted ones marked removed' },
   { method: 'get', path: '/api/teams/:id/board', tag: 'Work items', summary: "The team's board: the active sprint's items, or a Kanban team's open items, in status columns with WIP limits", query: sp.boardSchema },
   { method: 'get', path: '/api/sprints', tag: 'Work items', summary: 'Sprints per team: planned, active (one per team) and completed, with their points', query: sp.listSprintsSchema },
   { method: 'post', path: '/api/sprints', tag: 'Work items', summary: 'Plan a sprint for a team: name, goal, dates and capacity in points', body: sp.createSprintSchema },

@@ -16,7 +16,10 @@ export function registerDevelopmentTools({ user, tool }: McpContext) {
     progress: w.progress, transitions: w.transitions, definitions: w.definitions,
     links: w.links.map((l: any) => ({ kind: l.kind, reference: l.reference, system: l.system, status: l.status })),
     next_steps: w.next_steps,
+    // Mirrored from a dev platform (#168): these fields change there, never here.
+    mirror: w.mirror ? { source: w.mirror.source, read_only: w.mirror.read_only } : null,
     untrusted_content: {
+      ...(w.mirror ? { source_url: w.mirror.url, iteration: w.mirror.iteration } : {}),
       title: w.title, description: w.description, acceptance_criteria: w.acceptance_criteria, remove_reason: w.remove_reason,
       ...(w.item_type === 'bug' ? { found_in: w.found_in, steps_to_reproduce: w.steps_to_reproduce, expected_result: w.expected_result, actual_result: w.actual_result } : {}),
       parent_title: w.parent?.title ?? null,

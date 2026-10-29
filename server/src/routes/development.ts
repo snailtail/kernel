@@ -4,6 +4,7 @@ import { requireUser } from '../security/auth.js';
 import * as sp from '../development/sprints.js';
 import * as wi from '../development/work-items.js';
 import * as itsm from '../development/itsm.js';
+import * as mirror from '../development/mirror.js';
 
 type RefParams = { Params: { ref: string } };
 type TeamParams = { Params: { id: string } };
@@ -34,6 +35,11 @@ export async function developmentRoutes(app: FastifyInstance) {
   app.delete<{ Params: { ref: string; id: string } }>('/api/work-items/:ref/links/:id', async (req) => wi.removeWorkItemLink(requireUser(req), req.params.ref, Number(req.params.id)));
   app.get<TeamParams>('/api/teams/:id/work-definitions', async (req) => wi.getWorkDefinitions(requireUser(req), Number(req.params.id)));
   app.put<TeamParams>('/api/teams/:id/work-definitions', async (req) => wi.saveWorkDefinitions(requireUser(req), Number(req.params.id), wi.workDefinitionsSchema.parse(req.body)));
+  // A backlog mirrored from Azure DevOps (#168): the settings, and a reconciliation now.
+  app.get<TeamParams>('/api/teams/:id/mirror', async (req) => mirror.getMirror(requireUser(req), Number(req.params.id)));
+  app.put<TeamParams>('/api/teams/:id/mirror', async (req) => mirror.saveMirror(requireUser(req), Number(req.params.id), mirror.mirrorSchema.parse(req.body)));
+  app.delete<TeamParams>('/api/teams/:id/mirror', async (req) => mirror.deleteMirror(requireUser(req), Number(req.params.id)));
+  app.post<TeamParams>('/api/teams/:id/mirror/sync', async (req) => mirror.syncMirror(requireUser(req), Number(req.params.id)));
   app.get<TeamParams>('/api/teams/:id/board', async (req) => sp.getBoard(requireUser(req), Number(req.params.id), sp.boardSchema.parse(req.query)));
 
   // Sprints (#166).

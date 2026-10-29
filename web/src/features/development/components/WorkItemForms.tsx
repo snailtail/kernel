@@ -96,22 +96,31 @@ export function EditWorkItem({ w, onClose, onDone }: { w: WorkItem; onClose: () 
   const type = form.type as WorkItemType;
   const submit = async () => {
     onDone(await api.patch<WorkItem>(`/api/work-items/${w.ref}`, {
-      type, title: form.title, labels: labelsOf(form.labels), points: form.points ? Number(form.points) : null,
-      team_id: form.team_id ? Number(form.team_id) : null, assignee_id: form.assignee_id ? Number(form.assignee_id) : null, parent: form.parent || null,
+      labels: labelsOf(form.labels),
+      // A mirrored item's own fields change in its source (#168).
+      ...(w.mirror ? {} : {
+        type, title: form.title, points: form.points ? Number(form.points) : null,
+        team_id: form.team_id ? Number(form.team_id) : null, assignee_id: form.assignee_id ? Number(form.assignee_id) : null, parent: form.parent || null,
+      }),
       // A confidential item's text is only sent by people who may read it.
       ...(masked ? {} : { description: form.description, ...(type === 'bug' ? { steps_to_reproduce: form.steps_to_reproduce, expected_result: form.expected_result, actual_result: form.actual_result, found_in: form.found_in } : {}) }),
     }));
   };
   return (
     <FormModal title={`Edit ${w.ref}`} submitLabel="Save" onClose={onClose} onSubmit={submit}>
-      <label>Type<select value={form.type} onChange={(e) => set('type', e.target.value)}>{TYPES.map((t) => <option key={t} value={t}>{TYPE_LABEL[t]}</option>)}</select></label>
-      <label>Story points<select value={form.points} onChange={(e) => set('points', e.target.value)}><option value="">Not estimated</option>{POINTS.map((p) => <option key={p} value={p}>{p}</option>)}</select></label>
-      <label className="full">Title<input required value={form.title} onChange={(e) => set('title', e.target.value)} /></label>
+      {w.mirror && <p className="muted small full">Mirrored from {w.mirror.label}: change the title, type, points, team, assignee and parent there.</p>}
+      {!w.mirror && <>
+        <label>Type<select value={form.type} onChange={(e) => set('type', e.target.value)}>{TYPES.map((t) => <option key={t} value={t}>{TYPE_LABEL[t]}</option>)}</select></label>
+        <label>Story points<select value={form.points} onChange={(e) => set('points', e.target.value)}><option value="">Not estimated</option>{POINTS.map((p) => <option key={p} value={p}>{p}</option>)}</select></label>
+        <label className="full">Title<input required value={form.title} onChange={(e) => set('title', e.target.value)} /></label>
+      </>}
       {!masked && <label className="full">Description<textarea rows={5} value={form.description} onChange={(e) => set('description', e.target.value)} /></label>}
       {!masked && type === 'bug' && <BugFields form={form} set={set} />}
-      <TeamSelect value={form.team_id} onChange={(v) => set('team_id', v)} />
-      <label>Assignee<select value={form.assignee_id} onChange={(e) => set('assignee_id', e.target.value)}><option value="">Nobody</option>{meta.assignees.map((a) => <option key={a.id} value={a.id}>{a.display_name}</option>)}</select></label>
-      <ParentSelect type={type} value={form.parent} self={w.ref} onChange={(v) => set('parent', v)} />
+      {!w.mirror && <>
+        <TeamSelect value={form.team_id} onChange={(v) => set('team_id', v)} />
+        <label>Assignee<select value={form.assignee_id} onChange={(e) => set('assignee_id', e.target.value)}><option value="">Nobody</option>{meta.assignees.map((a) => <option key={a.id} value={a.id}>{a.display_name}</option>)}</select></label>
+        <ParentSelect type={type} value={form.parent} self={w.ref} onChange={(v) => set('parent', v)} />
+      </>}
       <label className="full">Labels <span className="muted small">(comma-separated)</span><input value={form.labels} onChange={(e) => set('labels', e.target.value)} /></label>
       {form.team_id !== (w.team_id ? String(w.team_id) : '') && <p className="muted small full">It goes to the bottom of that team's backlog.</p>}
     </FormModal>

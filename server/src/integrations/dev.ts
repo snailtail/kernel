@@ -16,6 +16,7 @@ import { typeForRef } from '../records/records.js';
 import { addEntry } from '../records/activity.js';
 import { decryptSecret, encryptSecret } from '../security/secrets.js';
 import { registerDeploymentChange } from '../changes/changes.js';
+import { mirrorDelivered } from '../development/mirror.js';
 import { azureDevOps, AZURE_DEVOPS } from './dev-azure.js';
 import { github } from './dev-github.js';
 import { gitlab, GITLAB_COM } from './dev-gitlab.js';
@@ -369,7 +370,7 @@ export async function receiveDevHook(req: FastifyRequest, sourceId: number, raw:
     if (event.startsWith('unhandled:')) return { ok: true, event: event.slice(10), ignored: 'event not handled' };
     const after: (() => Promise<void>)[] = [];
     const touched = new Set<number>();
-    const linked = await tx((db) => adapter.handle(eventContext(db, source, delivery, after, touched), event, body, scope));
+    const linked = await tx((db) => adapter.handle(eventContext(db, source, scope, delivery, after, touched), event, body, scope));
     // Once the delivery is committed: changes registered by production deploys, then the status on pull requests.
     for (const job of after) await job();
     if (touched.size) await postStatusForItems([...touched]);
@@ -383,7 +384,7 @@ export async function pruneDeliveries() {
   await query("DELETE FROM dev_deliveries WHERE received_at < now() - interval '1 day'");
 }
 
-function eventContext(db: Db, source: { id: number; platform: Platform }, delivery: string, after: (() => Promise<void>)[], touched: Set<number>): EventContext {
+function eventContext(db: Db, source: { id: number; platform: Platform }, scope: string, delivery: string, after: (() => Promise<void>)[], touched: Set<number>): EventContext {
   const platform = source.platform;
   const upsert = async (item: UpsertItem) => {
     const id = await upsertItem(db, { ...item, data: { ...item.data, source_id: source.id } });
@@ -416,6 +417,7 @@ function eventContext(db: Db, source: { id: number; platform: Platform }, delive
     async setChecks(repo, prKey, checks) {
       await db.query("UPDATE dev_items SET checks = $4, updated_at = now() WHERE platform = $1 AND repo = $2 AND item_type = 'pull_request' AND key = $3", [platform, repo, prKey, checks]);
     },
+    mirrored: (item) => mirrorDelivered(db, source.id, scope, item),
     async deployed(d) {
       const { rows: targets } = await db.query(
         'SELECT * FROM dev_deploy_targets WHERE source_id = $1 AND lower(repo) = lower($2) AND lower(environment) = lower($3)',
