@@ -50,8 +50,9 @@ export async function kpis(user: User, { period }: z.infer<typeof kpiSchema>) {
   const portal = moduleEnabled('portal') && (incident || request);
   // Development work (#166): only with the module on.
   const development = moduleEnabled('development') && can(user.role, 'work.read');
-  // Closing the loop between a problem and its fix (#167): changes carry the fix, through the problem's bugs or not.
-  const fixes = development && change && problem;
+  // Closing the loop between a problem and its fix (#167, #171): changes carry the fix, through the problem's bugs or
+  // directly (path D), so the tiles need only problems and changes.
+  const fixes = change && problem;
   const [periods, resolved, changes, recurring, problems, knownErrors, major, requests, ratings, done, sprints, fixed, recurred] = await Promise.all([
     query(`${P} SELECT start::date::text AS start FROM p ORDER BY start`, [period]),
     incident

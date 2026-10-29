@@ -116,7 +116,7 @@ describe('service reports (#54)', { skip }, () => {
     const d = (await viewer.get('/api/dashboard/kpis')).body;
     assert.equal(d.period.unit, 'month');
     assert.equal(d.period.starts.length, 6);
-    assert.deepEqual(d.tiles.map((t: any) => t.id), ['mttr', 'sla', 'change_success', 'recurring', 'problems_resolved', 'major_open']);
+    assert.deepEqual(d.tiles.map((t: any) => t.id), ['mttr', 'sla', 'change_success', 'recurring', 'problems_resolved', 'major_open', 'fix_lead_time', 'recurred_after_fix']);
     for (const t of d.tiles) {
       assert.equal(t.trend.length, 6, t.id);
       assert.ok(t.basis.length > 20 && t.link.startsWith('/'), t.id);
@@ -140,7 +140,7 @@ describe('service reports (#54)', { skip }, () => {
     assert.equal((await admin.put('/api/admin/modules', { change: false, reason: 'Testing' })).status, 200);
     try {
       const without = (await viewer.get('/api/dashboard/kpis')).body.tiles.map((t: any) => t.id);
-      assert.ok(!without.includes('change_success') && without.includes('mttr'));
+      assert.ok(!without.includes('change_success') && !without.includes('fix_lead_time') && without.includes('mttr'));
     } finally {
       await admin.put('/api/admin/modules', { change: true, reason: 'Back on' });
     }
