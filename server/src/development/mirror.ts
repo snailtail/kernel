@@ -9,7 +9,7 @@ import type { User } from '../security/auth.js';
 import { audit } from '../security/audit.js';
 import { contextStore } from '../core/context.js';
 import { type Db, query, tx } from '../core/db.js';
-import { badRequest, conflict, forbidden, notFound } from '../core/errors.js';
+import { badRequest, conflict, forbidden, HttpError, notFound } from '../core/errors.js';
 import { logger } from '../core/log.js';
 import { moduleEnabled } from '../core/modules.js';
 import { authorize } from '../security/policy.js';
@@ -322,12 +322,26 @@ async function reconcileMirror(id: number, trigger: 'schedule' | 'manual') {
       await finish('succeeded', message);
       return { status: 'succeeded', counts, message };
     } catch (err) {
-      const message = (err as Error).message;
+      const message = runError(err, label);
       logger.warn({ event: { dataset: 'kernel.dev' }, mirror: id, err: message }, 'work item mirror failed');
       await finish('failed', message);
       return { status: 'failed', counts, message };
     }
   });
+}
+
+/**
+ * What a failed run says, in the log and on the mirror (which everyone with work.read sees): built from the error's
+ * kind, never its own text, which could carry what the request held (the token). Kernel's own errors are kept.
+ */
+function runError(err: unknown, label: string) {
+  if (err instanceof HttpError) return err.message;
+  const e = err as { status?: unknown; host?: unknown; kind?: unknown };
+  const host = typeof e.host === 'string' ? e.host : label;
+  if (typeof e.status === 'number') return `HTTP ${e.status} from ${host}`;
+  if (e.kind === 'not_json') return `The answer from ${host} is not JSON`;
+  if (e.kind === 'not_a_list') return `${label} did not return a list of work items`;
+  return `${label} could not be read: a network, TLS or credential problem`;
 }
 
 /** Every due mirror, one at a time (each holds its own lease, so replicas share the work). */

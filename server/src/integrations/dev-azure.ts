@@ -92,7 +92,7 @@ export const azureMirror: Mirroring = {
     const j = await call(`${place.base}/${enc(org)}/${enc(project)}/_apis/wit/wiql?api-version=7.1`, {
       method: 'POST', headers: basic(token), body: { query: `SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project${under}` },
     });
-    if (!Array.isArray(j?.workItems)) throw new Error('Azure DevOps did not return a list of work items');
+    if (!Array.isArray(j?.workItems)) throw Object.assign(new Error('Azure DevOps did not return a list of work items'), { kind: 'not_a_list' });
     return batch(place, j.workItems.map((w: any) => w.id), token, call);
   },
   lookup: (place, externalIds, token, call) => batch(place, externalIds.map((e) => e.slice(e.indexOf('#') + 1)), token, call),
