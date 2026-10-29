@@ -192,11 +192,13 @@ export function callJsonVia(privateAllow: string[], ca: string | null): CallJson
       headers: { 'User-Agent': 'Kernel', Accept: 'application/json', ...(init.body === undefined ? {} : { 'Content-Type': 'application/json' }), ...init.headers },
       timeoutMs: 30_000, maxBytes: 20_000_000, privateAllow: privateAllow.length ? privateAllow : undefined, ca: ca ?? undefined,
     });
-    if (!res.ok) throw Object.assign(new Error(`HTTP ${res.status} from ${new URL(url).host}`), { status: res.status });
+    const host = new URL(url).host;
+    // The status and host are what a caller may show; an error's own text never is (it may hold what the request did).
+    if (!res.ok) throw Object.assign(new Error(`HTTP ${res.status} from ${host}`), { status: res.status, host });
     try {
       return JSON.parse(res.body);
     } catch {
-      throw new Error(`The answer from ${new URL(url).host} is not JSON`);
+      throw Object.assign(new Error(`The answer from ${host} is not JSON`), { kind: 'not_json', host });
     }
   };
 }
