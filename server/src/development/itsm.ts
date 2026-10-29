@@ -13,6 +13,7 @@ import { moduleEnabled } from '../core/modules.js';
 import { authorize } from '../security/policy.js';
 import { recordType, typeOfPrefix } from '../records/records.js';
 import { registerProblemExtra } from '../problems/problems.js';
+import { registerChangeExtra } from '../changes/changes.js';
 import { createWorkItem, createWorkItemSchema, workItemUrl } from './work-items.js';
 
 /** Which work item each kind of record becomes, and which other types it may become. */
@@ -89,3 +90,6 @@ registerProblemExtra(async (p) => {
   const { rows } = await query('SELECT ref FROM problems WHERE id = $1', [p.id]);
   return { work_items: await workItemsLinkedTo('problem', rows[0].ref) };
 });
+
+// A change lists the bugs and stories it delivers: its manifest (#167).
+registerChangeExtra(async (c) => (moduleEnabled('development') ? { work_items: await workItemsLinkedTo('change', c.ref) } : {}));

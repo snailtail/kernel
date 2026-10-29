@@ -22,6 +22,7 @@ import { CHANGE_STATUS, type ChangeStatus } from '../../statuses';
 import type { Change } from '../../api/types/changes';
 import { OUTCOME, fmtWindow } from './common';
 import { FinishChange } from './components/FinishChange';
+import { DeliversCard } from './components/DeliversCard';
 import { EditChange } from './components/EditChange';
 
 export function ChangePage() {
@@ -151,6 +152,7 @@ export function ChangePage() {
           </section>
           <AffectedCisPanel record={{ ...c, impact_hint: null, impact_incomplete: false }} basePath={path} editable={editable && draftish} onChange={(n) => setData(n as Change)} />
           {c.problem_ref && <section className="card"><h2>Fixes problem</h2><p><Link to={`/problems/${c.problem_ref}`} className="mono">{c.problem_ref}</Link> {c.problem_title} <span className="muted small">{c.problem_status?.replace('_', ' ')}</span></p></section>}
+          {c.work_items && <DeliversCard change={c} editable={user.role !== 'viewer' && !['rejected', 'cancelled'].includes(c.status)} onChange={reload} />}
           {c.related_incidents.length > 0 && (
             <section className="card">
               <h2>Incidents after this change</h2>

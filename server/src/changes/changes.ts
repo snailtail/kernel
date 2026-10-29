@@ -16,6 +16,7 @@ import { type Db, inPeriod, query, tx } from '../core/db.js';
 import { badRequest, conflict, forbidden, notFound } from '../core/errors.js';
 import { authorize, can } from '../security/policy.js';
 import { getProblem, loadForUpdate, logProblem, registerProblemExtra } from '../problems/problems.js';
+import { problemFix, problemsFixedThroughWork } from './problem-fix.js';
 import { managers, notify } from '../notifications/notifications.js';
 import { recordUrl, registerRecordType, type RecordType } from '../records/records.js';
 import { event } from '../core/hooks.js';
@@ -214,6 +215,11 @@ export async function listChanges(user: User, f: z.infer<typeof listChangesSchem
   return rows.map((r) => ({ ...r, url: changeUrl(r.ref) }));
 }
 
+/** What other practices add to a change's detail, e.g. the bugs and stories it delivers (#167). */
+type ChangeExtra = (change: { id: number; ref: string }) => Promise<Record<string, unknown>>;
+const changeExtras: ChangeExtra[] = [];
+export const registerChangeExtra = (fn: ChangeExtra) => changeExtras.push(fn);
+
 export async function getChange(user: User, ref: string) {
   authorize(user, 'change.read');
   const { rows } = await query(`${SELECT_CHANGE} WHERE c.ref = $1`, [ref.toUpperCase()]);
@@ -251,6 +257,7 @@ export async function getChange(user: User, ref: string) {
     related_incidents: incidents,
     pull_requests: await pullRequestSummary(c.ref),
     deployments: await deploymentSummary(c.ref),
+    ...Object.assign({}, ...(await Promise.all(changeExtras.map((fn) => fn(c))))),
   };
   return { type: 'change', ...detail, url: changeUrl(c.ref), next_steps: changeGuidance(detail) };
 }
@@ -508,8 +515,11 @@ export async function transitionChangeLean(user: User, ref: string, input: z.inf
     if (input.to === 'authorize') {
       await notify(db, { users: await managers(db, [c.created_by, c.assignee_id]), event: 'approval_needed', ref: c.ref, title: c.title, summary: `A ${c.change_type} change waits for authorisation.`, path, dedupe: `approve:${c.ref}:${Date.now()}`, actorId: user.id });
     }
-    if (c.problem_id && input.to === 'review') {
-      await logProblem(db, c.problem_id, user.id, 'link', `Change ${c.ref} implemented: ${input.outcome?.replace('_', ' ')}`, { kind: 'change', reference: c.ref, outcome: input.outcome });
+    if (input.to === 'review') {
+      // The problem it was raised for, and those whose bugs or stories it delivers (#167).
+      for (const id of [...(c.problem_id ? [c.problem_id] : []), ...(await problemsFixedThroughWork(db, c.id))]) {
+        await logProblem(db, id, user.id, 'link', `Change ${c.ref} implemented: ${input.outcome?.replace('_', ' ')}`, { kind: 'change', reference: c.ref, outcome: input.outcome });
+      }
     }
   });  await statusOnPullRequests(ref);
   // A standard change for a service request (#44): its outcome completes the request's task.
@@ -801,8 +811,11 @@ export async function changeSchedule(user: User, f: z.infer<typeof scheduleSchem
 // ---- Elsewhere ---------------------------------------------------------------------------------
 
 registerProblemExtra(async (p) => {
-  const { rows } = await query('SELECT ref, title, status, change_type, outcome, planned_start FROM changes WHERE problem_id = $1 ORDER BY created_at DESC LIMIT 50', [p.id]);
-  return { changes: rows };
+  const [{ rows }, fix] = await Promise.all([
+    query('SELECT ref, title, status, change_type, outcome, planned_start FROM changes WHERE problem_id = $1 ORDER BY created_at DESC LIMIT 50', [p.id]),
+    problemFix(p.id, p.fix_observation_days),
+  ]);
+  return { changes: rows, fix };
 });
 
 registerCiExtra(async (ciId) => {

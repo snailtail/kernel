@@ -135,6 +135,7 @@ export function ProblemPage() {
               const c = await api.post<{ ref: string }>(`/api/problems/${p.ref}/change`, {}).catch((err) => { alert((err as Error).message); return null; });
               if (c) navigate(`/changes/${c.ref}`);
             }
+            if (h.action === 'resolve_problem') setTransition('resolved');
             if (h.action === 'create_bug') {
               const w = await createWorkItemFrom(p.ref).catch((err) => { alert((err as Error).message); return null; });
               if (w) navigate(`/work/${w}`);

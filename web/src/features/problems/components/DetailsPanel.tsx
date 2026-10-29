@@ -14,7 +14,7 @@ export function DetailsPanel({ problem: p, editable, onSave }: { problem: Proble
   );
   const select = (key: string, value: string | number | null, options: [string | number, string][], allowEmpty?: string) =>
     editable ? (
-      <select value={value ?? ''} onChange={(e) => onSave({ [key]: e.target.value === '' ? null : typeof value === 'number' || key.endsWith('_id') || key === 'impact' || key === 'urgency' ? Number(e.target.value) : e.target.value }, { [key]: value }).catch(() => {})}>
+      <select value={value ?? ''} onChange={(e) => onSave({ [key]: e.target.value === '' ? null : typeof value === 'number' || key.endsWith('_id') || key.endsWith('_days') || key === 'impact' || key === 'urgency' ? Number(e.target.value) : e.target.value }, { [key]: value }).catch(() => {})}>
         {allowEmpty !== undefined && <option value="">{allowEmpty}</option>}
         {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
       </select>
@@ -40,6 +40,7 @@ export function DetailsPanel({ problem: p, editable, onSave }: { problem: Proble
           <label className="check"><input type="checkbox" checked={p.is_major} onChange={(e) => onSave({ is_major: e.target.checked }, { is_major: p.is_major }).catch(() => {})} /> {p.is_major ? 'Yes' : 'No'}</label>
         ) : p.is_major ? 'Yes' : 'No')}
         {p.status !== 'new' && field('Fix', select('fix_type', p.fix_type, Object.entries(FIX_TYPE_LABEL), 'Not decided'))}
+        {p.status === 'known_error' && p.fix_type !== 'accept_risk' && (p.fix_type || p.fix?.deployed) && field('Watch the fix', select('fix_observation_days', p.fix_observation_days, [...new Set([1, 3, 14, 30, p.fix_observation_days ?? 14])].sort((a, b) => a - b).map((d) => [d, `${d} day${d === 1 ? '' : 's'}`]), '7 days'))}
         {p.closure_code && field('Closure code', CLOSURE_LABEL[p.closure_code])}
       </dl>
       <dl className="dates">
