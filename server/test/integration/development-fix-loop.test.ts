@@ -1,6 +1,6 @@
 // Development and service management (#167, part 2): a change delivers bugs and stories, a link made from either side
 // is in both histories, and the problem's loop is closed on a verified fix: watched for new incidents after the deploy,
-// then a suggestion to resolve. A failed or rolled back fix is never suggested. The fix KPIs.
+// then a suggestion to resolve. A failed or rolled back fix is never suggested. The fix KPIs, with or without the module.
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
 import { ownerQuery, skip, startKernel, type Client, type Harness } from './harness.js';
@@ -126,11 +126,17 @@ describe('closing the loop between a problem and its fix (#167)', { skip }, () =
     assert.equal(r.next_steps.handover.action, undefined);
   });
 
-  test('without the development module the fix tiles are gone', async () => {
+  test('without the development module the fix tiles stay, and a change raised on the problem closes the loop (path D)', async () => {
     ok(await admin.put('/api/admin/modules', { development: false, reason: 'Off' }));
     try {
+      const p = await knownError('Expense approvals go to a former manager', 'configuration');
+      const chg = await change(ok(await analyst.post(`/api/problems/${p}/change`, {}), 201).ref);
+      await finish(chg, 'successful');
+      const r = await problem(p);
+      assert.equal(r.fix.deployed.change, chg);
+      assert.match(r.next_steps.handover.label, /^The fix is deployed: watch until/);
       const ids = ok(await pm.get('/api/dashboard/kpis')).tiles.map((t: any) => t.id);
-      assert.ok(!ids.includes('fix_lead_time') && !ids.includes('recurred_after_fix'));
+      assert.ok(ids.includes('fix_lead_time') && ids.includes('recurred_after_fix'));
     } finally {
       ok(await admin.put('/api/admin/modules', { development: true, reason: 'On' }));
     }
