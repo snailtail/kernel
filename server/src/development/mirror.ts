@@ -9,7 +9,7 @@ import type { User } from '../security/auth.js';
 import { audit } from '../security/audit.js';
 import { contextStore } from '../core/context.js';
 import { type Db, query, tx } from '../core/db.js';
-import { badRequest, conflict, forbidden, HttpError, notFound } from '../core/errors.js';
+import { badRequest, conflict, notFound } from '../core/errors.js';
 import { logger } from '../core/log.js';
 import { moduleEnabled } from '../core/modules.js';
 import { authorize } from '../security/policy.js';
@@ -287,9 +287,13 @@ async function reconcileMirror(id: number, trigger: 'schedule' | 'manual') {
   const counts = { created: 0, updated: 0, unchanged: 0, skipped: 0, removed: 0 };
   const finish = (status: string, message: string) =>
     query('UPDATE work_item_mirrors SET last_run = $2, running_until = NULL WHERE id = $1 AND running_until = $3::timestamptz', [id, JSON.stringify({ status, counts, message: message.slice(0, 1000), at: new Date().toISOString(), trigger }), lease]);
+  if (!m.source_enabled) {
+    const message = `${m.source_name} is disabled`;
+    await finish('failed', message);
+    return { status: 'failed', counts, message };
+  }
   return contextStore.run(ctx, async () => {
     try {
-      if (!m.source_enabled) throw forbidden(`${m.source_name} is disabled`);
       const p = PLATFORMS[m.platform]!;
       const token = m.api_token ? decryptSecret(m.api_token) : null;
       const http = callJsonVia(m.private_allow, m.ca_pem);
@@ -322,7 +326,7 @@ async function reconcileMirror(id: number, trigger: 'schedule' | 'manual') {
       await finish('succeeded', message);
       return { status: 'succeeded', counts, message };
     } catch (err) {
-      const message = runError(err, label);
+      const message = runError(err, label, m.base_url);
       logger.warn({ event: { dataset: 'kernel.dev' }, mirror: id, err: message }, 'work item mirror failed');
       await finish('failed', message);
       return { status: 'failed', counts, message };
@@ -331,16 +335,18 @@ async function reconcileMirror(id: number, trigger: 'schedule' | 'manual') {
 }
 
 /**
- * What a failed run says, in the log and on the mirror (which everyone with work.read sees): built from the error's
- * kind, never its own text, which could carry what the request held (the token). Kernel's own errors are kept.
+ * What a failed run says, in the log and on the mirror (which everyone with work.read sees). The error only picks one
+ * of these texts; nothing of its own is shown, since it could carry what the request held (the token).
  */
-function runError(err: unknown, label: string) {
-  if (err instanceof HttpError) return err.message;
-  const e = err as { status?: unknown; host?: unknown; kind?: unknown };
-  const host = typeof e.host === 'string' ? e.host : label;
-  if (typeof e.status === 'number') return `HTTP ${e.status} from ${host}`;
-  if (e.kind === 'not_json') return `The answer from ${host} is not JSON`;
-  if (e.kind === 'not_a_list') return `${label} did not return a list of work items`;
+function runError(err: unknown, label: string, base: string) {
+  const host = new URL(base).host;
+  const status = (err as { status?: unknown }).status;
+  const kind = (err as { kind?: unknown }).kind;
+  if (status === 401 || status === 403) return `${host} rejected the token`;
+  if (status === 404) return `${host} answered not found: check the organisation and project`;
+  if (typeof status === 'number') return `${host} answered with an HTTP error`;
+  if (kind === 'not_json') return `The answer from ${host} is not JSON`;
+  if (kind === 'not_a_list') return `${label} did not return a list of work items`;
   return `${label} could not be read: a network, TLS or credential problem`;
 }
 

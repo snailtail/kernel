@@ -219,7 +219,7 @@ describe('mirrored backlogs from Azure DevOps (part 1 of #168)', { skip }, () =>
     ado.fail(true);
     const failed = await sync();
     assert.equal(failed.status, 'failed');
-    assert.match(failed.message, /HTTP 401/);
+    assert.match(failed.message, /^127\.0\.0\.1:\d+ rejected the token$/);
     ado.fail(false);
     const saved = new Map(ado.items);
     for (let id = 100; id < 112; id++) ado.items.delete(id);
