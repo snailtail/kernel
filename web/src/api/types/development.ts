@@ -84,4 +84,4 @@ export type TeamMirror = (MirrorBase & { mirrored: false }) | (MirrorBase & {
   last_run: MirrorRun | null; next_run_at: string; items: number;
 });
 /** A dev source the mirror settings offer a manager. */
-export interface DevSourceChoice { id: number; name: string; platform: MirrorPlatform; repositories: string[]; has_token: boolean; enabled: boolean }
+interface DevSourceChoice { id: number; name: string; platform: MirrorPlatform; repositories: string[]; has_token: boolean; enabled: boolean }
