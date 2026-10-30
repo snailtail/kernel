@@ -108,6 +108,17 @@ export async function outsideNames(db: Queryable | null, refs: string[]) {
 }
 
 /**
+ * A dev platform where a mirrored item lives (#168), which may be public (an open-source GitHub repository): it hears
+ * only that the item was linked to a Kernel record, by ref, never a title or text. A restricted record, or one that is
+ * gone, is not announced at all (null): its ref alone tells the platform it exists. Checked when the comment is queued
+ * and again when it is sent, since a record can be restricted in between.
+ */
+export async function forDevSource(db: Queryable | null, ref: string) {
+  const a = await audienceOf(db, ref);
+  return a.restricted ? null : `Linked to ${a.ref ?? ref.toUpperCase()} in Kernel`;
+}
+
+/**
  * The requester of a service request (#44), who may have no Kernel account: they hear only their request's own ref,
  * title and whether it needs an approval, never notes, answers or who works on it. A restricted request goes out as
  * its ref only. Everything Kernel mails a requester is built from this.

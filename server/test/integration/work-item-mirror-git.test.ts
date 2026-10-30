@@ -156,7 +156,15 @@ describe('mirrored backlogs from GitHub and GitLab (part 2 of #168)', { skip }, 
     assert.equal(native.mirrored, false);
     assert.equal(native.may_manage, true);
     assert.deepEqual([native.platforms.github.area_name, native.platforms.azure_devops.area_name], ['label', 'area path']);
-    assert.equal(ok(await analyst.get(`/api/teams/${shop.id}/mirror`)).may_manage, false);
+    assert.deepEqual(native.sources.map((x: any) => [x.name, x.has_token]), [['GitHub', true], ['GitLab', true]], 'the sources to choose from, without secrets');
+    assert.equal(native.sources[0].api_token, undefined);
+    // Dev sources are administered under changes; a manager sets up a mirror with the change module off too.
+    ok(await admin.put('/api/admin/modules', { change: false, reason: 'Only development here' }));
+    assert.equal(ok(await pm.get(`/api/teams/${shop.id}/mirror`)).sources.length, 2);
+    ok(await admin.put('/api/admin/modules', { change: true, reason: 'Back on' }));
+    const viewer = ok(await analyst.get(`/api/teams/${shop.id}/mirror`));
+    assert.equal(viewer.may_manage, false);
+    assert.deepEqual(viewer.sources, [], 'only managers see the sources');
     assert.equal((await pm.put(`/api/teams/${shop.id}/mirror`, { source_id: gh.id, scope: 'acme/other' })).status, 400);
     const m = ok(await pm.put(`/api/teams/${shop.id}/mirror`, { source_id: gh.id, scope: 'acme/shop', area: 'team-shop' }));
     assert.equal(m.source_label, 'GitHub');
@@ -229,6 +237,16 @@ describe('mirrored backlogs from GitHub and GitLab (part 2 of #168)', { skip }, 
     ok(await analyst.put(`/api/records/${hidden}/visibility`, { restricted: true, reason: 'Security investigation' }));
     ok(await analyst.post(`/api/work-items/${story.ref}/links`, { kind: 'problem', reference: hidden }));
     assert.equal(await sendSourceComments(), 0, 'a restricted record is not announced');
+
+    // Restricted after the comment was queued (a retry can wait two hours): checked again when it is sent.
+    const later = ok(await analyst.post('/api/problems', { title: 'Card numbers in the logs' }), 201).ref;
+    ok(await analyst.post(`/api/work-items/${story.ref}/links`, { kind: 'problem', reference: later }));
+    assert.equal((await ownerQuery('SELECT status FROM work_item_source_comments WHERE reference = $1', [later])).rows[0]?.status, 'pending');
+    ok(await analyst.put(`/api/records/${later}/visibility`, { restricted: true, reason: 'Security investigation' }));
+    const before = fake.comments.length;
+    assert.equal(await sendSourceComments(), 0, 'restricted before it was sent');
+    assert.equal(fake.comments.length, before);
+    assert.equal((await ownerQuery('SELECT status FROM work_item_source_comments WHERE reference = $1', [later])).rows[0].status, 'skipped');
 
     const inc = ok(await analyst.post('/api/incidents', { title: 'Runners stall', impact: 3, urgency: 3 }), 201).ref;
     const runnerTask = await platformItem(2);
