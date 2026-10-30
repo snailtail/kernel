@@ -4,7 +4,7 @@
 // gate, but what was not confirmed is logged. Shared by REST, MCP and the web UI; off unless the module is on.
 import { z } from 'zod';
 import { historyOf, logActivity, touchAndAudit } from '../records/activity.js';
-import { audienceOf, startNarrow } from '../security/audience.js';
+import { audienceOf, forDevSource, startNarrow } from '../security/audience.js';
 import { audit } from '../security/audit.js';
 import type { User } from '../security/auth.js';
 import { assertMayWriteText, forgetExists, textFilterSql } from '../security/confidential.js';
@@ -138,7 +138,7 @@ export function refuseSourceOwned(w: { ref: string; source: string | null; mirro
 async function queueSourceComment(db: Db, w: { id: number; mirror_id: number | null }, reference: string) {
   if (!w.mirror_id) return;
   const { rows } = await db.query('SELECT comment_links FROM work_item_mirrors WHERE id = $1', [w.mirror_id]);
-  if (!rows[0]?.comment_links || (await audienceOf(db, reference)).restricted) return;
+  if (!rows[0]?.comment_links || !(await forDevSource(db, reference))) return;
   await db.query('INSERT INTO work_item_source_comments (work_item_id, reference) VALUES ($1, $2) ON CONFLICT DO NOTHING', [w.id, reference]);
 }
 

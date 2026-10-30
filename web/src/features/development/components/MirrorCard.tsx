@@ -5,7 +5,7 @@ import { api } from '../../../api/client';
 import { FormModal } from '../../../components/Modal';
 import { relativeTime } from '../../../format';
 import { useApi } from '../../../hooks';
-import type { DevSourceChoice, TeamMirror } from '../../../api/types/development';
+import type { TeamMirror } from '../../../api/types/development';
 
 /** "Source name = kernel value" lines, the way the settings show a mapping. */
 const toLines = (map: Record<string, string>) => Object.entries(map).map(([k, v]) => `${k} = ${v}`).join('\n');
@@ -72,7 +72,7 @@ export function MirrorCard({ teamId, onChange }: { teamId: number; onChange: () 
 }
 
 function EditMirror({ m, onClose, onDone }: { m: TeamMirror; onClose: () => void; onDone: () => void }) {
-  const { data: sources } = useApi<DevSourceChoice[]>('/api/dev-sources');
+  const sources = m.sources;
   const [sourceId, setSourceId] = useState<number | ''>(m.mirrored ? m.source_id : '');
   const [scope, setScope] = useState(m.mirrored ? m.scope : '');
   const [area, setArea] = useState(m.mirrored ? m.area : '');
@@ -81,11 +81,11 @@ function EditMirror({ m, onClose, onDone }: { m: TeamMirror; onClose: () => void
   const [minutes, setMinutes] = useState(String(m.mirrored ? m.schedule_minutes : 60));
   const [enabled, setEnabled] = useState(m.mirrored ? m.enabled : true);
   const [comment, setComment] = useState(m.mirrored ? m.comment_links : true);
-  const source = sources?.find((s) => s.id === sourceId);
+  const source = sources.find((s) => s.id === sourceId);
   const p = source ? m.platforms[source.platform] : undefined;
   const pick = (id: number) => {
     setSourceId(id);
-    const s = sources?.find((x) => x.id === id);
+    const s = sources.find((x) => x.id === id);
     if (s && !s.repositories.includes(scope)) setScope(s.repositories[0] ?? '');
   };
   const submit = () => api.put(`/api/teams/${m.team_id}/mirror`, {
@@ -97,7 +97,7 @@ function EditMirror({ m, onClose, onDone }: { m: TeamMirror; onClose: () => void
       <label>Dev source
         <select value={sourceId} onChange={(e) => pick(Number(e.target.value))} required>
           <option value="">Choose…</option>
-          {(sources ?? []).filter((s) => s.enabled).map((s) => <option key={s.id} value={s.id}>{s.name}{s.name === m.platforms[s.platform]?.label ? '' : ` (${m.platforms[s.platform]?.label ?? s.platform})`}</option>)}
+          {sources.filter((s) => s.enabled).map((s) => <option key={s.id} value={s.id}>{s.name}{s.name === m.platforms[s.platform]?.label ? '' : ` (${m.platforms[s.platform]?.label ?? s.platform})`}</option>)}
         </select>
       </label>
       <label>{p ? p.scope_example : 'Project'}
@@ -105,7 +105,7 @@ function EditMirror({ m, onClose, onDone }: { m: TeamMirror; onClose: () => void
           {(source?.repositories ?? []).map((r) => <option key={r} value={r}>{r}</option>)}
         </select>
       </label>
-      {sources && !sources.some((s) => s.enabled) && <p className="muted small full">No dev source yet: a manager adds one under Admin → Dev platforms.</p>}
+      {!sources.some((s) => s.enabled) && <p className="muted small full">No dev source yet: a manager adds one under Admin → Dev platforms.</p>}
       {source && !source.has_token && <p className="warn small full">{source.name} has no API token: the webhook keeps items current, but reconciliation and comments need one.</p>}
       <label className="full">{p ? `${p.area_name[0].toUpperCase()}${p.area_name.slice(1)}` : 'Area'} <span className="muted small">(empty for all of it)</span>
         <input value={area} onChange={(e) => setArea(e.target.value)} placeholder={p?.area_name === 'label' ? 'team-shop' : 'Project\\Team'} />

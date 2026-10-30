@@ -15,6 +15,7 @@ import { badRequest, conflict, notFound } from '../core/errors.js';
 import { logger } from '../core/log.js';
 import { moduleEnabled } from '../core/modules.js';
 import { authorize, can } from '../security/policy.js';
+import { forDevSource } from '../security/audience.js';
 import { decryptSecret } from '../security/secrets.js';
 import { logActivity } from '../records/activity.js';
 import { validTeam } from '../people/teams.js';
@@ -89,9 +90,12 @@ export async function getMirror(user: User, teamId: number) {
   // What each platform calls a mirror's area, and its default mapping: for the settings, before and after a mirror exists.
   const platforms = Object.fromEntries(Object.entries(PLATFORMS).map(([k, p]) => [k, { label: p.adapter.label, scope_example: p.adapter.scopeExample, area_name: p.mirror.areaName, default_types: p.mirror.types, default_statuses: p.mirror.states }]));
   const may_manage = can(user.role, 'work.manage');
-  if (!m) return { team_id: teamId, team: team[0].name, mirrored: false as const, platforms, may_manage };
+  // The dev sources a manager can choose from (without their secrets): the settings need them whether or not the
+  // change module, where dev sources are administered, is on.
+  const sources = may_manage ? (await query('SELECT id, name, platform, repositories, api_token IS NOT NULL AS has_token, enabled FROM dev_sources ORDER BY name')).rows : [];
+  if (!m) return { team_id: teamId, team: team[0].name, mirrored: false as const, platforms, may_manage, sources };
   const p = PLATFORMS[m.platform as Platform];
-  return { team_id: teamId, team: team[0].name, mirrored: true as const, ...m, source_label: p.adapter.label, area_name: p.mirror.areaName, default_types: p.mirror.types, default_statuses: p.mirror.states, platforms, may_manage };
+  return { team_id: teamId, team: team[0].name, mirrored: true as const, ...m, source_label: p.adapter.label, area_name: p.mirror.areaName, default_types: p.mirror.types, default_statuses: p.mirror.states, platforms, may_manage, sources };
 }
 
 export async function saveMirror(user: User, teamId: number, input: z.infer<typeof mirrorSchema>) {
@@ -394,9 +398,12 @@ export async function sendSourceComments(limit = 20) {
       if (!c) throw new SkipDelivery('The item is no longer mirrored');
       if (!c.comment_links || !c.enabled || !c.source_enabled) throw new SkipDelivery('The mirror does not comment now');
       if (!c.api_token) throw new SkipDelivery('The source has no API token');
+      // The record may have been restricted since the link was made.
+      const body = await forDevSource(null, row.reference);
+      if (!body) throw new SkipDelivery('The record is restricted');
       const platform = c.platform as Platform;
       try {
-        await PLATFORMS[platform].mirror.comment({ base: c.base_url, scope: c.scope, area: c.area }, c.external_id, `Linked to ${row.reference} in Kernel`, decryptSecret(c.api_token), callJsonVia(c.private_allow, c.ca_pem));
+        await PLATFORMS[platform].mirror.comment({ base: c.base_url, scope: c.scope, area: c.area }, c.external_id, body, decryptSecret(c.api_token), callJsonVia(c.private_allow, c.ca_pem));
       } catch (err) {
         const message = runError(err, platform, c.base_url);
         const status = (err as { status?: unknown }).status;
