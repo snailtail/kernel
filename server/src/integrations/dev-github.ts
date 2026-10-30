@@ -2,7 +2,10 @@
 // X-Hub-Signature-256 (HMAC-SHA256 of the raw body), the strongest verification of the three platforms.
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { badRequest } from '../core/errors.js';
-import { ciState, firstLine, iso, isRollback, pushCommits, type Adapter, type ItemType, type ParsedItem } from './dev-platform.js';
+import {
+  allPages, ciState, firstLine, hasLabel, isGone, iso, isRollback, labelArea, PLATFORM_LABELS, pushCommits, typeFromLabels,
+  type Adapter, type CallJson, type ItemType, type MirroredItem, type Mirroring, type MirrorPlace, type ParsedItem,
+} from './dev-platform.js';
 
 /** GitHub signs each delivery: X-Hub-Signature-256 = sha256=HMAC(secret, raw body). */
 function verifyGitHubSignature(secret: string, raw: string, header: string | undefined) {
@@ -14,8 +17,67 @@ function verifyGitHubSignature(secret: string, raw: string, header: string | und
 
 const HANDLED = new Set(['pull_request', 'issues', 'push', 'workflow_run', 'check_suite', 'release', 'deployment_status']);
 
+// ---- Mirrored backlogs (#168) ------------------------------------------------------------------------------------
+
+/** github.com's API, or a GitHub Enterprise Server's under its own address. */
+const apiOf = (base: string) => (base === 'https://github.com' ? 'https://api.github.com' : `${base}/api/v3`);
+const apiHeaders = (token: string | null): Record<string, string> => ({ Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', ...(token ? { Authorization: `Bearer ${token}` } : {}) });
+/** Issue numbers are unique per repository. */
+const externalId = (repo: string, n: unknown) => `${repo.toLowerCase()}#${n}`;
+const numberOf = (externalId: string) => externalId.slice(externalId.lastIndexOf('#') + 1);
+const labelsOf = (i: any): string[] => (i.labels ?? []).map((l: any) => String(typeof l === 'string' ? l : l?.name ?? '')).filter(Boolean);
+/** Closed as completed, or as not planned or a duplicate (dropped from the backlog). */
+const issueState = (i: any) => (i.state === 'open' ? 'open' : i.state_reason === 'not_planned' ? 'not planned' : i.state_reason === 'duplicate' ? 'duplicate' : 'closed');
+
+/** An issue (a delivery's or the API's) in the source's words. GitHub has no points, and shares no e-mail addresses. */
+function mirroredFrom(repo: string, i: any): MirroredItem {
+  const labels = labelsOf(i);
+  return {
+    external_id: externalId(repo, i.number),
+    url: String(i.html_url ?? ''),
+    title: String(i.title ?? ''),
+    type: typeFromLabels(i.type?.name, labels, githubMirror.types),
+    state: issueState(i),
+    area: labelArea(labels),
+    iteration: String(i.milestone?.title ?? ''),
+    points: null,
+    assignee_email: null,
+    parent_external_id: null,
+  };
+}
+
+/**
+ * GitHub backlogs: a repository's issues, or those with a label (a team's). The type is the issue type, or a label
+ * such as bug; the milestone names the sprint. Pull requests are not work items here.
+ */
+export const githubMirror: Mirroring = {
+  areaName: 'label',
+  types: { epic: 'epic', feature: 'story', enhancement: 'story', story: 'story', 'user story': 'story', issue: 'story', bug: 'bug', task: 'task' },
+  states: { open: 'new', closed: 'done', 'not planned': 'removed', duplicate: 'removed' },
+  covers: hasLabel,
+  async list(place: MirrorPlace, token, call: CallJson) {
+    const label = place.area ? `&labels=${encodeURIComponent(place.area)}` : '';
+    const issues = await allPages((page) => `${apiOf(place.base)}/repos/${place.scope}/issues?state=all&per_page=100&page=${page}${label}`, 100, 10_000, (url) => call(url, { headers: apiHeaders(token) }));
+    return issues.filter((i) => !i.pull_request).map((i) => mirroredFrom(place.scope, i));
+  },
+  async lookup(place, externalIds, token, call) {
+    const out: MirroredItem[] = [];
+    for (const e of externalIds) {
+      const i = await call(`${apiOf(place.base)}/repos/${place.scope}/issues/${numberOf(e)}`, { headers: apiHeaders(token) }).catch((err) => {
+        if (isGone(err)) return null;
+        throw err;
+      });
+      if (i && !i.pull_request) out.push(mirroredFrom(place.scope, i));
+    }
+    return out;
+  },
+  async comment(place, externalId, body, token, call) {
+    await call(`${apiOf(place.base)}/repos/${place.scope}/issues/${numberOf(externalId)}/comments`, { method: 'POST', headers: apiHeaders(token), body: { body } });
+  },
+};
+
 export const github: Adapter = {
-  label: 'GitHub',
+  label: PLATFORM_LABELS.github,
   scopePattern: /^[\w.-]+\/[\w.-]+$/,
   scopeExample: 'owner/repo',
   events: ['Pull requests', 'Issues', 'Pushes', 'Workflow runs', 'Check suites', 'Releases', 'Deployment statuses'],
@@ -72,6 +134,9 @@ export const github: Adapter = {
     }
     if (event === 'issues' && b.issue) {
       const i = b.issue;
+      // Deleted, or transferred to another repository: either way no longer an item of this one.
+      await ctx.mirrored(b.action === 'deleted' || b.action === 'transferred' ? { external_id: externalId(repo, i.number), deleted: true } : mirroredFrom(repo, i));
+      if (b.action === 'deleted') return [];
       const id = await ctx.upsert({ ...base, item_type: 'issue', key: String(i.number), url: i.html_url, title: i.title, state: i.state, author: i.user?.login });
       return ctx.mention(id, `${i.title}\n${i.body ?? ''}`);
     }

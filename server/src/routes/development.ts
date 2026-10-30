@@ -35,7 +35,7 @@ export async function developmentRoutes(app: FastifyInstance) {
   app.delete<{ Params: { ref: string; id: string } }>('/api/work-items/:ref/links/:id', async (req) => wi.removeWorkItemLink(requireUser(req), req.params.ref, Number(req.params.id)));
   app.get<TeamParams>('/api/teams/:id/work-definitions', async (req) => wi.getWorkDefinitions(requireUser(req), Number(req.params.id)));
   app.put<TeamParams>('/api/teams/:id/work-definitions', async (req) => wi.saveWorkDefinitions(requireUser(req), Number(req.params.id), wi.workDefinitionsSchema.parse(req.body)));
-  // A backlog mirrored from Azure DevOps (#168): the settings, and a reconciliation now.
+  // A backlog mirrored from Azure DevOps, GitHub or GitLab (#168): the settings, and a reconciliation now.
   app.get<TeamParams>('/api/teams/:id/mirror', async (req) => mirror.getMirror(requireUser(req), Number(req.params.id)));
   app.put<TeamParams>('/api/teams/:id/mirror', async (req) => mirror.saveMirror(requireUser(req), Number(req.params.id), mirror.mirrorSchema.parse(req.body)));
   app.delete<TeamParams>('/api/teams/:id/mirror', async (req) => mirror.deleteMirror(requireUser(req), Number(req.params.id)));

@@ -113,7 +113,7 @@ describe('mirrored backlogs from Azure DevOps (part 1 of #168)', { skip }, () =>
     assert.equal((await analyst.put(`/api/teams/${team.id}/mirror`, body)).status, 403);
     assert.equal((await pm.put(`/api/teams/${team.id}/mirror`, { ...body, scope: 'contoso/Other' })).status, 400);
     const gh = ok(await pm.post('/api/dev-sources', { name: 'GitHub', platform: 'github', repositories: ['acme/shop'] }), 201);
-    assert.equal((await pm.put(`/api/teams/${team.id}/mirror`, { ...body, source_id: gh.id, scope: 'acme/shop' })).status, 400, 'GitHub comes in part 2');
+    assert.equal((await pm.put(`/api/teams/${team.id}/mirror`, { ...body, source_id: gh.id, scope: 'acme/other' })).status, 400, 'a repository the source does not have');
     const m = ok(await pm.put(`/api/teams/${team.id}/mirror`, body));
     assert.equal(m.mirrored, true);
     assert.equal(m.default_types['user story'], 'story');

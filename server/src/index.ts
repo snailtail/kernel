@@ -19,7 +19,7 @@ import { processStatusDeliveries, pruneStatusSubscriptions } from './status/stat
 import { processRequestMail } from './requests/requests.js';
 import { processPortalMail, prunePortal } from './requests/portal.js';
 import { runDueConnectors } from './integrations/connectors.js';
-import { reconcileDueMirrors } from './development/mirror.js';
+import { reconcileDueMirrors, sendSourceComments } from './development/mirror.js';
 import { checkOverdueUpdates } from './incidents/major-incidents.js';
 import { deliverPages } from './people/oncall.js';
 import { processReportDeliveries, queueScheduledReports } from './reporting/report-schedules.js';
@@ -65,6 +65,7 @@ asSystem(() => {
   // Checks.
   every(MINUTE, 'connector scheduler', () => runDueConnectors());
   every(MINUTE, 'work item mirrors', () => reconcileDueMirrors(), { when: on('development') });
+  every(MINUTE, 'work item source comments', () => sendSourceComments(), { when: on('development') });
   every(MINUTE, 'event auto-resolve', () => autoResolveIncidents(), { when: () => moduleEnabled('event') && moduleEnabled('incident') });
   every(MINUTE, 'SLA check', () => checkSlaEvents(), { when: on('sla') });
   every(MINUTE, 'major incident check', () => checkOverdueUpdates(), { when: on('incident') });

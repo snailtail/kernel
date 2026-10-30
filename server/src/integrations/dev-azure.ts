@@ -3,7 +3,7 @@
 // weaker than GitHub's HMAC (whoever sees one delivery can send others), so they are only accepted over HTTPS, from an
 // allowlisted organisation/project, and replays are refused on notificationId + id.
 import { badRequest } from '../core/errors.js';
-import { ciState, firstLine, iso, isRollback, pushCommits, sameSecret, type Adapter, type CallJson, type MirroredItem, type Mirroring, type MirrorPlace, type ParsedItem } from './dev-platform.js';
+import { ciState, firstLine, iso, isRollback, pushCommits, sameSecret, PLATFORM_LABELS, type Adapter, type CallJson, type MirroredItem, type Mirroring, type MirrorPlace, type ParsedItem } from './dev-platform.js';
 
 export const AZURE_DEVOPS = 'https://dev.azure.com';
 const HANDLED = new Set(['git.pullrequest.created', 'git.pullrequest.updated', 'git.pullrequest.merged', 'workitem.created', 'workitem.updated', 'workitem.deleted', 'workitem.restored', 'git.push', 'build.complete', 'ms.vss-release.deployment-completed-event']);
@@ -34,6 +34,7 @@ const split = (scope: string) => ({ org: scope.slice(0, scope.indexOf('/')), pro
 const basic = (token: string | null): Record<string, string> => (token ? { Authorization: `Basic ${Buffer.from(`:${token}`).toString('base64')}` } : {});
 /** Work item ids are unique per organisation. */
 const externalId = (org: string, id: unknown) => `${org.toLowerCase()}#${id}`;
+const idOf = (externalId: string) => externalId.slice(externalId.indexOf('#') + 1);
 // Identities come as an object or as "Name <email>"; the e-mail address matches a Kernel user.
 const emailOf = (p: any) => {
   const v = typeof p === 'string' ? p.match(/<([^>]+@[^>]+)>\s*$/)?.[1] : p?.uniqueName;
@@ -76,6 +77,7 @@ async function batch(place: MirrorPlace, ids: (string | number)[], token: string
  * processes; a Feature sits between an epic and its stories there, and becomes an epic here (Kernel has three levels).
  */
 export const azureMirror: Mirroring = {
+  areaName: 'area path',
   types: { epic: 'epic', feature: 'epic', 'user story': 'story', 'product backlog item': 'story', requirement: 'story', issue: 'story', bug: 'bug', task: 'task' },
   states: {
     new: 'new', proposed: 'new', 'to do': 'new', approved: 'ready', ready: 'ready', active: 'in_progress', committed: 'in_progress', doing: 'in_progress',
@@ -95,7 +97,11 @@ export const azureMirror: Mirroring = {
     if (!Array.isArray(j?.workItems)) throw Object.assign(new Error('Azure DevOps did not return a list of work items'), { kind: 'not_a_list' });
     return batch(place, j.workItems.map((w: any) => w.id), token, call);
   },
-  lookup: (place, externalIds, token, call) => batch(place, externalIds.map((e) => e.slice(e.indexOf('#') + 1)), token, call),
+  lookup: (place, externalIds, token, call) => batch(place, externalIds.map(idOf), token, call),
+  async comment(place, externalId, body, token, call) {
+    const { org, project } = split(place.scope);
+    await call(`${place.base}/${enc(org)}/${enc(project)}/_apis/wit/workItems/${idOf(externalId)}/comments?api-version=7.1-preview.4`, { method: 'POST', headers: basic(token), body: { text: body } });
+  },
 };
 
 /** The project of a delivery's resource, wherever this event type keeps it. */
@@ -106,7 +112,7 @@ function projectOf(b: any): string {
 }
 
 export const azureDevOps: Adapter = {
-  label: 'Azure DevOps',
+  label: PLATFORM_LABELS.azure_devops,
   scopePattern: /^[\w.-]+\/[\w .-]+$/,
   scopeExample: 'organisation/project',
   events: ['Pull request created', 'Pull request updated', 'Pull request merge attempted', 'Work item created', 'Work item updated', 'Work item deleted', 'Work item restored', 'Code pushed', 'Build completed', 'Release deployment completed'],
