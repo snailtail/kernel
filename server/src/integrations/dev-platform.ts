@@ -7,6 +7,8 @@ import { sha256 } from '../core/hash.js';
 
 export const PLATFORMS = ['github', 'gitlab', 'azure_devops'] as const;
 export type Platform = (typeof PLATFORMS)[number];
+/** Each platform's name, the one place it is spelled: adapters, mirrored items and their errors use it. */
+export const PLATFORM_LABELS: Record<Platform, string> = { github: 'GitHub', gitlab: 'GitLab', azure_devops: 'Azure DevOps' };
 const ITEM_TYPES = ['pull_request', 'issue', 'commit', 'workflow_run', 'release', 'deployment'] as const;
 export type ItemType = (typeof ITEM_TYPES)[number];
 
@@ -34,18 +36,21 @@ export interface EventContext {
  * Pointers, not copies: never the description.
  */
 export interface MirroredItem {
-  /** Unique per platform: "organisation#12" on Azure DevOps. */
+  /** Unique per platform: "organisation#12" on Azure DevOps, "owner/repo#12" on GitHub and GitLab. */
   external_id: string;
   url: string;
   title: string;
   type: string;
   state: string;
-  /** Where it is in the source, matched against a mirror's area (an Azure DevOps area path). */
+  /** Where it is in the source, matched against a mirror's area: an Azure DevOps area path, or an issue's labels (one per line). */
   area: string;
-  iteration: string;
+  /** The iteration or milestone; undefined when the source did not say (a GitLab delivery names only its id): kept as it was. */
+  iteration: string | undefined;
   points: number | null;
   assignee_email: string | null;
   parent_external_id: string | null;
+  /** Hidden in the source (a confidential GitLab issue): never mirrored, its title would reach everyone who sees the team's items. */
+  confidential?: boolean;
 }
 
 /** How a mirror's place is named in its source. */
@@ -53,6 +58,8 @@ export interface MirrorPlace { base: string; scope: string; area: string }
 
 /** A platform whose work items a team can mirror (#168). The mapping to Kernel's types and statuses is per platform. */
 export interface Mirroring {
+  /** What a mirror's area is called in this source, for the settings. */
+  areaName: string;
   /** The default mapping, keyed by the source's names in lower case; a mirror can adjust it. */
   types: Record<string, string>;
   states: Record<string, string>;
@@ -62,7 +69,38 @@ export interface Mirroring {
   list(place: MirrorPlace, token: string | null, call: CallJson): Promise<MirroredItem[]>;
   /** These items as they are now; one that was deleted in the source is missing from the result. */
   lookup(place: MirrorPlace, externalIds: string[], token: string | null, call: CallJson): Promise<MirroredItem[]>;
+  /** Posts a comment on the item in the source (only Kernel's link comment, never a status change). */
+  comment(place: MirrorPlace, externalId: string, body: string, token: string, call: CallJson): Promise<void>;
 }
+
+/** The labels of a GitHub or GitLab issue, as its area: one per line. */
+export const labelArea = (labels: string[]) => labels.join('\n');
+/** Whether an issue with these labels (its area) carries the mirror's label; no label is the whole repository. */
+export const hasLabel = (place: MirrorPlace, area: string) => !place.area || area.split('\n').some((l) => l.toLowerCase() === place.area.toLowerCase());
+
+/**
+ * A GitHub or GitLab issue's type: the platform's own issue type when it has one other than a plain issue, otherwise
+ * the first label the mapping knows as a type (bug, feature…), otherwise "issue".
+ */
+export function typeFromLabels(own: unknown, labels: string[], types: Record<string, string>) {
+  if (typeof own === 'string' && own && own.toLowerCase() !== 'issue') return own;
+  return labels.find((l) => l.toLowerCase() !== 'issue' && l.toLowerCase() in types) ?? 'issue';
+}
+
+/** The pages of a list, `perPage` at a time, until a short page; more than `max` items is refused (a partial list removes nothing). */
+export async function allPages(url: (page: number) => string, perPage: number, max: number, get: (url: string) => Promise<unknown>) {
+  const out: any[] = [];
+  for (let page = 1; ; page++) {
+    const j = await get(url(page));
+    if (!Array.isArray(j)) throw Object.assign(new Error('Not a list'), { kind: 'not_a_list' });
+    out.push(...j);
+    if (j.length < perPage) return out;
+    if (out.length >= max) throw Object.assign(new Error('Too many items'), { kind: 'too_many', max });
+  }
+}
+
+/** A lookup's answer for an item that is no longer there: deleted, moved to another repository or hidden from the token. */
+export const isGone = (err: unknown) => [301, 404, 410].includes((err as { status?: number }).status as number);
 
 /** An outbound JSON request that throws on any failure, for reads whose absence must not look like an empty list. */
 export type CallJson = (url: string, init?: { method?: 'GET' | 'POST'; headers?: Record<string, string>; body?: unknown }) => Promise<any>;

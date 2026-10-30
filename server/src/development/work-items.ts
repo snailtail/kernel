@@ -16,6 +16,7 @@ import { recordType, recordUrl, registerRecordType, typeOfPrefix, type RecordTyp
 import { assertVisibleRef, seeingAll } from '../security/visibility.js';
 import { recordSummaries } from '../records/summaries.js';
 import type { StartNarrow } from '../problems/problems.js';
+import { PLATFORM_LABELS, type Platform } from '../integrations/dev-platform.js';
 
 export const WORK_ITEM_TYPES = ['epic', 'story', 'bug', 'task'] as const;
 export const WORK_ITEM_STATUSES = ['new', 'ready', 'in_progress', 'in_review', 'done', 'removed'] as const;
@@ -119,7 +120,7 @@ const words = (s: string) => s.replace('_', ' ');
 
 // ---- Mirrored items (#168) ----------------------------------------------------------------------
 
-const SOURCE_LABELS: Record<string, string> = { azure_devops: 'Azure DevOps', github: 'GitHub', gitlab: 'GitLab' };
+const sourceLabel = (source: string | null) => PLATFORM_LABELS[source as Platform] ?? source;
 /** What a mirror's source owns: read-only here, the same over REST, MCP and the web. Its status and sprint too. */
 const SOURCE_OWNED = ['title', 'type', 'points', 'team_id', 'assignee_id', 'parent'] as const;
 
@@ -127,7 +128,18 @@ const SOURCE_OWNED = ['title', 'type', 'points', 'team_id', 'assignee_id', 'pare
 export function refuseSourceOwned(w: { ref: string; source: string | null; mirror_id: number | null }, fields: string[]) {
   if (!w.mirror_id || !fields.length) return;
   const names = fields.map((f) => words(f.replace(/_id$/, '')));
-  throw conflict(`${w.ref} is mirrored from ${SOURCE_LABELS[w.source ?? ''] ?? w.source}, which owns its ${names.join(', ')}: change ${names.length > 1 ? 'them' : 'it'} there`);
+  throw conflict(`${w.ref} is mirrored from ${sourceLabel(w.source)}, which owns its ${names.join(', ')}: change ${names.length > 1 ? 'them' : 'it'} there`);
+}
+
+/**
+ * A mirrored item linked to a Kernel record: the source gets a comment saying so, once per record, unless its mirror
+ * turned that off. A restricted record is not announced (its reference alone tells the source it exists).
+ */
+async function queueSourceComment(db: Db, w: { id: number; mirror_id: number | null }, reference: string) {
+  if (!w.mirror_id) return;
+  const { rows } = await db.query('SELECT comment_links FROM work_item_mirrors WHERE id = $1', [w.mirror_id]);
+  if (!rows[0]?.comment_links || (await audienceOf(db, reference)).restricted) return;
+  await db.query('INSERT INTO work_item_source_comments (work_item_id, reference) VALUES ($1, $2) ON CONFLICT DO NOTHING', [w.id, reference]);
 }
 
 async function loadWorkItem(db: Db, ref: string) {
@@ -296,7 +308,7 @@ export async function getWorkItem(user: User, ref: string) {
     activity,
     // A mirrored item (#168): where it lives, and what only the source changes.
     mirror: w.mirror_id
-      ? { source: w.source, label: SOURCE_LABELS[w.source] ?? w.source, url: w.external_url, iteration: w.external_iteration, read_only: [...SOURCE_OWNED, 'status', 'sprint'] }
+      ? { source: w.source, label: sourceLabel(w.source), url: w.external_url, iteration: w.external_iteration, read_only: [...SOURCE_OWNED, 'status', 'sprint'] }
       : null,
     transitions: w.mirror_id ? [] : WORK_ITEM_TRANSITIONS[w.status as Status],
     url: workItemUrl(w.ref),
@@ -567,6 +579,7 @@ export async function addWorkItemLink(user: User, ref: string, input: z.infer<ty
     if (!rowCount) throw conflict(`${words(input.kind)} ${reference} is already linked`);
     await logWorkItem(db, w.id, user.id, 'link', `Linked ${words(input.kind)} ${reference}`, { kind: input.kind, reference, system: input.system, action: 'add' });
     if (kernel) await logOnOtherSide(db, user, input.kind, reference, w.ref, 'add');
+    if (kernel && (ITSM_LINK_KINDS as readonly string[]).includes(input.kind)) await queueSourceComment(db, w, reference);
   });
   return getWorkItem(user, ref);
 }

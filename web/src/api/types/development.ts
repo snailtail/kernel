@@ -72,3 +72,16 @@ export interface TraceNode {
   ref?: string; title?: string; status?: string; item_type?: WorkItemType; created_at?: string;
 }
 export interface RecordTrace { ref: string; nodes: TraceNode[]; edges: { from: string; to: string }[]; truncated: boolean }
+
+/** /api/teams/:id/mirror (#168): a backlog mirrored from a dev platform, and what each platform offers. */
+type MirrorPlatform = 'azure_devops' | 'github' | 'gitlab';
+interface MirrorPlatformInfo { label: string; scope_example: string; area_name: string; default_types: Record<string, string>; default_statuses: Record<string, string> }
+interface MirrorRun { status: 'succeeded' | 'failed' | 'refused'; message: string; at: string; trigger: string; counts: Record<string, number> }
+interface MirrorBase { team_id: number; team: string; platforms: Record<MirrorPlatform, MirrorPlatformInfo>; may_manage: boolean }
+export type TeamMirror = (MirrorBase & { mirrored: false }) | (MirrorBase & {
+  mirrored: true; id: number; source_id: number; source: string; platform: MirrorPlatform; source_label: string; area_name: string; scope: string; area: string;
+  type_map: Record<string, string>; status_map: Record<string, string>; schedule_minutes: number; enabled: boolean; comment_links: boolean;
+  last_run: MirrorRun | null; next_run_at: string; items: number;
+});
+/** /api/dev-sources, as the mirror settings need it. */
+export interface DevSourceChoice { id: number; name: string; platform: MirrorPlatform; repositories: string[]; has_token: boolean; enabled: boolean }

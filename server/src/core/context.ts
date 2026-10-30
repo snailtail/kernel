@@ -29,6 +29,13 @@ export const currentContext = (): RequestContext => contextStore.getStore() ?? S
 export const asSystem = <T>(fn: () => T) => contextStore.run(SYSTEM, fn);
 
 /**
+ * Runs work an integration does (a dev source's delivery, a mirror's reconciliation) as that integration: audited
+ * under its name and channel, and seeing every row, since what it may touch was decided when it was configured.
+ */
+export const asIntegration = <T>(who: { name: string; channel: string; requestId: string; ip?: string }, fn: () => T) =>
+  contextStore.run({ ...SYSTEM, userName: who.name, actorType: 'integration', channel: who.channel, requestId: who.requestId, ip: who.ip ?? '' }, fn);
+
+/**
  * A bulk request (#125): one change to many records, each through its own service function. Pages and notifications
  * read this to send one summary per target and per person instead of one per record.
  */

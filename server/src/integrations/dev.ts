@@ -6,7 +6,7 @@ import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { User } from '../security/auth.js';
 import { audit } from '../security/audit.js';
-import { asSystem, contextStore } from '../core/context.js';
+import { asIntegration, asSystem } from '../core/context.js';
 import { type Db, query, tx } from '../core/db.js';
 import { badRequest, forbidden, HttpError, notFound, unauthorized } from '../core/errors.js';
 import { logger } from '../core/log.js';
@@ -361,8 +361,7 @@ export async function receiveDevHook(req: FastifyRequest, sourceId: number, raw:
   if (!d) return reject(badRequest('The delivery id is missing'));
   const { event, delivery, scope } = d;
   if (!d.ping && !adapter.inScope(source.repositories, scope)) return reject(forbidden(`Repository ${scope || '(none)'} is not configured for this source`));
-  const ctx = { userId: null, userName: source.name, actorType: 'integration' as const, channel: source.platform, tokenPrefix: '', ip: req.ip, userAgent: '', requestId: delivery, viewer: 'system' };
-  return contextStore.run(ctx, async () => {
+  return asIntegration({ name: source.name, channel: source.platform, requestId: delivery, ip: req.ip }, async () => {
     const fresh = await query('INSERT INTO dev_deliveries (source_id, delivery_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [source.id, delivery]);
     await query('UPDATE dev_sources SET received_count = received_count + 1, last_received_at = now() WHERE id = $1', [source.id]);
     if (!fresh.rowCount) return { ok: true, event, ignored: 'replayed delivery' };

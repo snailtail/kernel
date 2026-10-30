@@ -2,7 +2,10 @@
 // the source's secret in X-Gitlab-Token (no signature over the body), compared in constant time; replays are refused
 // on X-Gitlab-Event-UUID.
 import { badRequest } from '../core/errors.js';
-import { ciState, firstLine, iso, pushCommits, sameSecret, type Adapter, type ItemType, type ParsedItem } from './dev-platform.js';
+import {
+  allPages, ciState, firstLine, hasLabel, isGone, iso, labelArea, PLATFORM_LABELS, pushCommits, sameSecret, typeFromLabels,
+  type Adapter, type ItemType, type MirroredItem, type Mirroring, type ParsedItem,
+} from './dev-platform.js';
 
 export const GITLAB_COM = 'https://gitlab.com';
 const SEGMENT: Record<ItemType, string> = { pull_request: 'merge_requests', issue: 'issues', commit: 'commit', workflow_run: 'pipelines', release: 'releases', deployment: 'environments' };
@@ -13,8 +16,77 @@ const HANDLED: Record<string, string> = { 'Merge Request Hook': 'merge_request',
 const mrState = (state: unknown, draft: unknown) => (state === 'opened' ? (draft ? 'draft' : 'open') : state === 'locked' ? 'closed' : String(state ?? 'unknown'));
 const issueState = (state: unknown) => (state === 'opened' ? 'open' : String(state ?? 'unknown'));
 
+// ---- Mirrored backlogs (#168) ------------------------------------------------------------------------------------
+
+const projectApi = (base: string, scope: string) => `${base}/api/v4/projects/${encodeURIComponent(scope)}`;
+const tokenHeader = (token: string | null): Record<string, string> => (token ? { 'PRIVATE-TOKEN': token } : {});
+/** Issue iids are unique per project. */
+const externalId = (scope: string, iid: unknown) => `${scope.toLowerCase()}#${iid}`;
+const iidOf = (externalId: string) => externalId.slice(externalId.lastIndexOf('#') + 1);
+const labelsOf = (raw: unknown): string[] => (Array.isArray(raw) ? raw : []).map((l: any) => String(typeof l === 'string' ? l : l?.title ?? l?.name ?? '')).filter(Boolean);
+/** An open issue's workflow label (workflow::Doing, status::In review) is its state; otherwise opened or closed. */
+function mirrorState(state: unknown, labels: string[]) {
+  if (state !== 'opened') return 'closed';
+  const scoped = labels.map((l) => l.match(/^(?:workflow|status)::\s*(.+)$/i)?.[1]).find(Boolean);
+  return scoped ?? 'opened';
+}
+
+/**
+ * An issue in the source's words, from the API or a delivery (`iteration` undefined: a delivery names its milestone
+ * only by id). The weight is its points; GitLab shares no e-mail addresses.
+ */
+function mirroredFrom(scope: string, i: any, labels: string[], iteration: string | undefined): MirroredItem {
+  return {
+    external_id: externalId(scope, i.iid),
+    url: String(i.web_url ?? i.url ?? ''),
+    title: String(i.title ?? ''),
+    type: typeFromLabels(i.issue_type ?? i.type, labels, gitlabMirror.types),
+    state: mirrorState(i.state, labels),
+    area: labelArea(labels),
+    iteration,
+    points: typeof i.weight === 'number' ? i.weight : null,
+    assignee_email: null,
+    parent_external_id: null,
+    confidential: !!i.confidential,
+  };
+}
+
+/**
+ * GitLab backlogs: a project's issues, or those with a label (a team's). The type is the issue type (task) or a label
+ * such as bug, a workflow:: or status:: label the state, the iteration or milestone the sprint, the weight the points.
+ * Confidential issues are never mirrored.
+ */
+export const gitlabMirror: Mirroring = {
+  areaName: 'label',
+  types: { epic: 'epic', feature: 'story', story: 'story', 'user story': 'story', issue: 'story', bug: 'bug', task: 'task' },
+  states: {
+    opened: 'new', closed: 'done', 'to do': 'new', todo: 'new', ready: 'ready', doing: 'in_progress', 'in progress': 'in_progress', 'in dev': 'in_progress',
+    review: 'in_review', 'in review': 'in_review', done: 'done',
+  },
+  covers: hasLabel,
+  async list(place, token, call) {
+    const label = place.area ? `&labels=${encodeURIComponent(place.area)}` : '';
+    const issues = await allPages((page) => `${projectApi(place.base, place.scope)}/issues?scope=all&per_page=100&page=${page}${label}`, 100, 10_000, (url) => call(url, { headers: tokenHeader(token) }));
+    return issues.map((i) => mirroredFrom(place.scope, i, labelsOf(i.labels), String(i.iteration?.title ?? i.milestone?.title ?? '')));
+  },
+  async lookup(place, externalIds, token, call) {
+    const out: MirroredItem[] = [];
+    for (const e of externalIds) {
+      const i = await call(`${projectApi(place.base, place.scope)}/issues/${iidOf(e)}`, { headers: tokenHeader(token) }).catch((err) => {
+        if (isGone(err)) return null;
+        throw err;
+      });
+      if (i) out.push(mirroredFrom(place.scope, i, labelsOf(i.labels), String(i.iteration?.title ?? i.milestone?.title ?? '')));
+    }
+    return out;
+  },
+  async comment(place, externalId, body, token, call) {
+    await call(`${projectApi(place.base, place.scope)}/issues/${iidOf(externalId)}/notes`, { method: 'POST', headers: tokenHeader(token), body: { body } });
+  },
+};
+
 export const gitlab: Adapter = {
-  label: 'GitLab',
+  label: PLATFORM_LABELS.gitlab,
   scopePattern: /^[\w.-]+(\/[\w.-]+)+$/,
   scopeExample: 'group/project',
   events: ['Merge request events', 'Issues events', 'Push events', 'Pipeline events', 'Releases events', 'Deployment events'],
@@ -74,6 +146,7 @@ export const gitlab: Adapter = {
       });
       return ctx.mention(id, `${a.title ?? ''}\n${a.description ?? ''}\n${a.source_branch ?? ''}`);
     }
+    if (event === 'issue' && a.iid) await ctx.mirrored(mirroredFrom(repo, a, labelsOf(b.labels ?? a.labels), undefined));
     if (event === 'issue' && a.iid && !a.confidential) {
       const id = await ctx.upsert({ ...base, item_type: 'issue', key: String(a.iid), url: a.url, title: a.title, state: issueState(a.state), author: b.user?.username });
       return ctx.mention(id, `${a.title ?? ''}\n${a.description ?? ''}`);

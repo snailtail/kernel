@@ -1,5 +1,5 @@
 // Development work (#165): a team's backlog in rank order, with drag and drop and the keyboard to reorder it, filters
-// on type, label and epic, and the team's Definition of Ready and Done.
+// on type, label and epic, the team's Definition of Ready and Done, and where a mirrored backlog comes from (#168).
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { api } from '../../api/client';
@@ -12,6 +12,7 @@ import type { WorkItemRow } from '../../api/types/development';
 import { TYPE_LABEL, TYPES, useTeamParam } from './common';
 import { BacklogList, type Place } from './components/BacklogList';
 import { DefinitionsCard } from './components/DefinitionsCard';
+import { MirrorCard } from './components/MirrorCard';
 import { NewWorkItem } from './components/WorkItemForms';
 
 export function BacklogPage() {
@@ -67,7 +68,7 @@ export function BacklogPage() {
       {error && <div className="error">{error}</div>}
       <div className="wi-layout">
         <div>{loading && !data ? <p className="muted">Loading…</p> : data && <BacklogList rows={data} movable={editable && status === 'open'} onMove={move} />}</div>
-        {team && team !== 'none' && <aside><DefinitionsCard teamId={Number(team)} /></aside>}
+        {team && team !== 'none' && <aside><DefinitionsCard teamId={Number(team)} /><MirrorCard teamId={Number(team)} onChange={reload} /></aside>}
       </div>
       {creating && <NewWorkItem team={team ?? undefined} onClose={() => setCreating(false)} onDone={(ref) => navigate(`/work/${ref}`)} />}
     </>
