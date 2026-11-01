@@ -280,10 +280,18 @@ describe('connector framework and push contract (#18)', { skip }, () => {
       assert.equal((await connectors.runConnector(c.id, 'schedule')).status, 'succeeded');
       await assert.rejects(connectors.runConnector(c.id, 'schedule'), /no longer due/);
       assert.equal((await connectors.runConnector(c.id, 'manual')).status, 'succeeded', 'Run now is not bound to the schedule');
+      // Ticks that race for it: the lease and the due check are one statement, so exactly one of them runs it.
+      await db.query("UPDATE connectors SET next_run_at = now() - interval '1 minute' WHERE id = $1", [c.id]);
+      const racing = await Promise.allSettled(Array.from({ length: 5 }, () => connectors.runConnector(c.id, 'schedule')));
+      assert.equal(racing.filter((r) => r.status === 'fulfilled').length, 1);
 
       // A fetch that ignores the signal: the run fails at the timeout, but the lease holds until the fetch is done.
       const op5 = connectors.CONNECTOR_TYPES.op5;
       const original = op5.fetch;
+      // Waits on the condition, not on a fixed time: how long a run takes depends on the database's latency.
+      const until = async (cond: () => Promise<boolean>) => {
+        for (const deadline = Date.now() + 10_000; !(await cond()) && Date.now() < deadline;) await new Promise((r) => setTimeout(r, 20));
+      };
       let finish!: () => void;
       op5.fetch = () => new Promise((resolve) => { finish = () => resolve({ cis: [] }); });
       try {
@@ -293,20 +301,22 @@ describe('connector framework and push contract (#18)', { skip }, () => {
         assert.equal(await lease(), true, 'still fetching: no second run beside it');
         await assert.rejects(connectors.runConnector(c.id, 'manual'), /already running/);
         finish();
-        for (let i = 0; i < 50 && (await lease()); i++) await new Promise((r) => setTimeout(r, 20));
+        await until(async () => !(await lease()));
         assert.equal(await lease(), false, 'released once the fetch settled');
 
         // A fetch that outlives its 30-minute lease must not release the next run's lease when it finally settles.
         const settle: (() => void)[] = [];
-        op5.fetch = () => new Promise((resolve) => { settle.push(() => resolve({ cis: [] })); });
+        let fetchStarted = () => {};
+        op5.fetch = () => new Promise((resolve) => { settle.push(() => resolve({ cis: [] })); fetchStarted(); });
         await db.query("UPDATE connectors SET next_run_at = now() - interval '1 minute' WHERE id = $1", [c.id]);
         assert.equal((await connectors.runConnector(c.id, 'schedule', undefined, 200)).status, 'failed');
         await db.query("UPDATE connectors SET running_until = now() - interval '1 minute' WHERE id = $1", [c.id]); // A's lease expired
+        const bFetching = new Promise<void>((r) => { fetchStarted = r; });
         const b = connectors.runConnector(c.id, 'manual', undefined, 60_000);
-        for (let i = 0; i < 50 && settle.length < 2; i++) await new Promise((r) => setTimeout(r, 20));
+        await Promise.race([bFetching, b]); // a claim B lost ends the wait with its error
         assert.equal(settle.length, 2, 'B is fetching');
         settle[0](); // the zombie A settles
-        await new Promise((r) => setTimeout(r, 200));
+        await new Promise((r) => setTimeout(r, 200)); // a release A wrongly made would land within this
         assert.equal(await lease(), true, "A did not release B's lease");
         settle[1]();
         assert.equal((await b).status, 'succeeded');
