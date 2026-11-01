@@ -21,6 +21,9 @@
     "knip": "6.41.0"
   },
   "overrides": {
+    "@fastify/static": {
+      "glob": "14.0.2"
+    },
     "mailparser": {
       "nodemailer": "10.1.4"
     }
