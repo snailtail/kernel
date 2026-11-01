@@ -109,7 +109,8 @@ describe('service reports (#54)', { skip }, () => {
     // Three incidents on one CI within 30 days and no problem: recurring.
     const nas = (await pm.post('/api/cis', { name: 'nas-01', ci_type: 'virtual_machine' })).body.ref;
     for (const t of ['NAS full', 'NAS full again', 'NAS full once more']) await analyst.post('/api/incidents', { title: t, impact: 3, urgency: 3, cis: [nas] });
-    const quick = (await analyst.post('/api/incidents', { title: 'Printer jam', impact: 2, urgency: 2 })).body.ref;
+    // The P2 the MTTR detail shows is resolved here, now: one set up days ago would fall in last month on the 1st–3rd.
+    const quick = (await analyst.post('/api/incidents', { title: 'Payroll export stuck', impact: 1, urgency: 2 })).body.ref;
     await db.query("UPDATE incidents SET created_at = now() - interval '90 minutes' WHERE ref = $1", [quick]);
     await analyst.post(`/api/incidents/${quick}/transition`, { to: 'resolved', resolution_code: 'fixed', resolution: 'Cleared' });
 
