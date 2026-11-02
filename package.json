@@ -23,9 +23,6 @@
   "overrides": {
     "@fastify/static": {
       "glob": "14.0.2"
-    },
-    "mailparser": {
-      "nodemailer": "10.1.4"
     }
   }
 }
