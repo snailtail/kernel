@@ -4,7 +4,7 @@
 import { query } from '../core/db.js';
 import { aRestricted, recordTypes, typeOfPrefix } from './records.js';
 
-const REF = () => `\\b(?:${recordTypes().map((t) => t.prefix).join('|')})\\d{6}\\b`;
+const REF = () => `\\b(?:${recordTypes().map((t) => t.prefix).join('|')})\\d{6,}\\b`;
 
 /** A ref with the word for its kind before it, if any, so "Linked incident INC000123" reads "Linked a restricted incident". */
 const WORDS = ['problem', 'incident', 'change', 'improvement', 'request', 'work item', 'bug', 'story', 'epic', 'task'];
