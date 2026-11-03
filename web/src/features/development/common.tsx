@@ -9,7 +9,6 @@ import type { Progress, WorkItemType } from '../../api/types/development';
 import './styles.css';
 
 export const TYPES: WorkItemType[] = ['epic', 'story', 'bug', 'task'];
-export const TYPE_LABEL: Record<WorkItemType, string> = { epic: 'Epic', story: 'Story', bug: 'Bug', task: 'Task' };
 /** Story points: the server's fixed scale. */
 export const POINTS = [1, 2, 3, 5, 8, 13];
 const NO_PARENTS: Record<WorkItemType, WorkItemType[]> = { epic: [], story: [], bug: [], task: [] };
@@ -46,10 +45,6 @@ const TRANSITION_LABEL: Record<WorkItemStatus, string> = { new: 'Back to new', r
 /** A move back says so: "Back to ready" pauses work, "Reopen" picks done work up again. */
 export const transitionLabel = (from: WorkItemStatus, to: WorkItemStatus) =>
   from === 'done' && to === 'in_progress' ? 'Reopen' : from === 'removed' && to === 'new' ? 'Restore' : from === 'in_progress' && to === 'ready' ? 'Back to ready' : from === 'in_review' && to === 'in_progress' ? 'Back to in progress' : TRANSITION_LABEL[to];
-
-export function TypeBadge({ type }: { type: WorkItemType }) {
-  return <span className={`wi-type wi-type-${type}`}>{TYPE_LABEL[type]}</span>;
-}
 
 /** An epic's progress in points (items when nothing is estimated). */
 export function ProgressBar({ p }: { p: Progress }) {

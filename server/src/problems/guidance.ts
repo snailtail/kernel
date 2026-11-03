@@ -59,6 +59,8 @@ export interface Guidance {
 
 const has = (s: string) => s.trim().length > 0;
 const day = (iso: string) => iso.slice(0, 10);
+/** A fix change the reader cannot see still counts (#225), by what it is rather than its ref. */
+const named = (ref: string | null) => ref ?? 'a restricted change';
 
 export function guidanceFor(p: GuidanceInput): Guidance {
   const g = phaseGuidance(p);
@@ -71,27 +73,28 @@ function handoverFor(p: GuidanceInput): Handover | null {
   const fix = moduleEnabled('change') ? p.fix : undefined;
   // Closing the loop (#167): once the fix is deployed, watch for new incidents, then suggest resolving. A person decides.
   if (p.status === 'known_error' && fix?.deployed) {
-    const { change, at } = fix.deployed;
+    const { at } = fix.deployed;
+    const change = named(fix.deployed.change);
     if (fix.recurred.length) {
       const n = fix.recurred.length;
-      return { label: `${n} incident${n === 1 ? '' : 's'} since the fix`, hint: `${fix.recurred.map((i) => i.ref).join(', ')} came in after ${change} was deployed on ${day(at)}: check whether the fix works before resolving.` };
+      return { label: `${n} incident${n === 1 ? '' : 's'} since the fix`, hint: `${fix.recurred.map((i) => (i.restricted ? 'a restricted incident' : i.ref)).join(', ')} came in after ${change} was deployed on ${day(at)}: check whether the fix works before resolving.` };
     }
     if (Date.now() < Date.parse(fix.watch_until!)) {
-      return { label: `The fix is deployed: watch until ${day(fix.watch_until!)}`, hint: `${change} went out on ${day(at)}. If no new incidents come in for ${fix.observation_days} days, Kernel suggests resolving the problem.` };
+      return { label: `The fix is deployed: watch until ${day(fix.watch_until!)}`, hint: `${change[0].toUpperCase()}${change.slice(1)} went out on ${day(at)}. If no new incidents come in for ${fix.observation_days} days, Kernel suggests resolving the problem.` };
     }
-    return { label: 'Verify the fix and resolve', hint: `No new incidents in ${fix.observation_days} days since ${change} was deployed on ${day(at)}. Resolve the problem, then its open incidents.`, action: 'resolve_problem', target: change };
+    return { label: 'Verify the fix and resolve', hint: `No new incidents in ${fix.observation_days} days since ${change} was deployed on ${day(at)}. Resolve the problem, then its open incidents.`, action: 'resolve_problem', ...(fix.deployed.change ? { target: fix.deployed.change } : {}) };
   }
   if (p.status === 'known_error' && fix?.failed) {
-    return { label: `The fix in ${fix.failed.change} ${fix.failed.outcome === 'rolled_back' ? 'was rolled back' : 'failed'}`, hint: 'The known error stays in the KEDB with its workaround. Move its bugs back to in progress if they need more work, and plan a new change.' };
+    return { label: `The fix in ${named(fix.failed.change)} ${fix.failed.outcome === 'rolled_back' ? 'was rolled back' : 'failed'}`, hint: 'The known error stays in the KEDB with its workaround. Move its bugs back to in progress if they need more work, and plan a new change.' };
   }
   // A code fix is made as a bug in a team's backlog first (#167); its release goes out as a change later.
   const bugs = p.work_items?.filter((w) => w.status !== 'removed') ?? [];
   if (p.status === 'known_error' && p.ec_decision === 'fix' && p.fix_type === 'code' && moduleEnabled('development')) {
-    if (!bugs.length) return { label: 'A code fix? Create a bug', hint: 'The bug goes to a team\'s backlog with the root cause and the workaround, and links back here.', action: 'create_bug' };
-    if (bugs.some((w) => w.status !== 'done')) return { label: 'The fix is planned', hint: 'Its bug is in a team\'s backlog; the known error stays in the KEDB with its workaround until the fix is deployed.' };
+    if (!bugs.length && !p.fix?.open_work) return { label: 'A code fix? Create a bug', hint: 'The bug goes to a team\'s backlog with the root cause and the workaround, and links back here.', action: 'create_bug' };
+    if (bugs.some((w) => w.status !== 'done') || p.fix?.open_work) return { label: 'The fix is planned', hint: 'Its bug is in a team\'s backlog; the known error stays in the KEDB with its workaround until the fix is deployed.' };
   }
   if (p.status === 'known_error' && fix?.pending.length) {
-    return { label: `The fix goes out with ${fix.pending.map((c) => c.change).join(', ')}`, hint: 'Once the change is implemented, Kernel watches for new incidents and then suggests resolving the problem.' };
+    return { label: `The fix goes out with ${fix.pending.map((c) => named(c.change)).join(', ')}`, hint: 'Once the change is implemented, Kernel watches for new incidents and then suggests resolving the problem.' };
   }
   if (p.status === 'known_error' && p.fix_type === 'code' && bugs.length && moduleEnabled('change')) {
     return { label: 'The bug is done: deploy it through a change', hint: 'Link the bug to the change that ships it, from the change or the bug, or raise one here.', action: 'raise_change' };

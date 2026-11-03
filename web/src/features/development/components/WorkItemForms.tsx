@@ -5,7 +5,8 @@ import { useApi } from '../../../hooks';
 import { useSession } from '../../../session';
 import type { Team } from '../../../api/types/teams';
 import type { WorkItem, WorkItemRow, WorkItemType } from '../../../api/types/development';
-import { POINTS, TYPE_LABEL, TYPES, useParentTypes } from '../common';
+import { POINTS, TYPES, useParentTypes } from '../common';
+import { TYPE_LABEL } from '../../../components/TypeBadge';
 
 const labelsOf = (text: string) => [...new Set(text.split(',').map((l) => l.trim()).filter(Boolean))];
 

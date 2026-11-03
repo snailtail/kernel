@@ -1,7 +1,3 @@
-.wi-type { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; border: 1px solid var(--border-strong); color: var(--text-2); }
-.wi-type-epic { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
-.wi-type-bug { color: var(--danger); border-color: var(--danger); background: var(--danger-soft); }
-.wi-type-story { color: var(--success); border-color: var(--success); background: var(--success-soft); }
 .wi-progress { display: inline-flex; align-items: center; gap: 6px; }
 .wi-progress-bar { width: 80px; height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
 .wi-progress-bar > span { display: block; height: 100%; background: var(--success); }

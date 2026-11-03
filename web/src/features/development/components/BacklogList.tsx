@@ -2,7 +2,8 @@ import { useEffect, useState, type DragEvent, type KeyboardEvent } from 'react';
 import { Link } from 'react-router';
 import { StatusBadge } from '../../../components/Badges';
 import type { WorkItemRow } from '../../../api/types/development';
-import { ProgressBar, TypeBadge } from '../common';
+import { ProgressBar } from '../common';
+import { TypeBadge } from '../../../components/TypeBadge';
 
 export type Place = { before: string } | { after: string } | { position: 'top' | 'bottom' };
 
