@@ -15,6 +15,7 @@ import { currentContext } from '../core/context.js';
 import { type Db, inPeriod, query, tx } from '../core/db.js';
 import { badRequest, conflict, forbidden, notFound } from '../core/errors.js';
 import { authorize, can } from '../security/policy.js';
+import { seeingAllIn } from '../security/visibility.js';
 import { getProblem, loadForUpdate, logProblem, registerProblemExtra } from '../problems/problems.js';
 import { problemFix, problemsFixedThroughWork } from './problem-fix.js';
 import { managers, notify } from '../notifications/notifications.js';
@@ -516,10 +517,13 @@ export async function transitionChangeLean(user: User, ref: string, input: z.inf
       await notify(db, { users: await managers(db, [c.created_by, c.assignee_id]), event: 'approval_needed', ref: c.ref, title: c.title, summary: `A ${c.change_type} change waits for authorisation.`, path, dedupe: `approve:${c.ref}:${Date.now()}`, actorId: user.id });
     }
     if (input.to === 'review') {
-      // The problem it was raised for, and those whose bugs or stories it delivers (#167).
-      for (const id of [...(c.problem_id ? [c.problem_id] : []), ...(await problemsFixedThroughWork(db, c.id))]) {
-        await logProblem(db, id, user.id, 'link', `Change ${c.ref} implemented: ${input.outcome?.replace('_', ' ')}`, { kind: 'change', reference: c.ref, outcome: input.outcome });
-      }
+      // The problem it was raised for, and those whose bugs or stories it delivers (#167), also the ones the
+      // implementer cannot see (#225): the entry holds only this change's ref and outcome.
+      await seeingAllIn(db, async () => {
+        for (const id of [...(c.problem_id ? [c.problem_id] : []), ...(await problemsFixedThroughWork(db, c.id))]) {
+          await logProblem(db, id, user.id, 'link', `Change ${c.ref} implemented: ${input.outcome?.replace('_', ' ')}`, { kind: 'change', reference: c.ref, outcome: input.outcome });
+        }
+      });
     }
   });  await statusOnPullRequests(ref);
   // A standard change for a service request (#44): its outcome completes the request's task.

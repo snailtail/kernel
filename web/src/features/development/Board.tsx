@@ -11,7 +11,8 @@ import { useLive } from '../../hooks/useLive';
 import { canEdit, useSession } from '../../session';
 import { WORK_ITEM_STATUS } from '../../statuses';
 import type { Board, BoardCard, BoardColumn, WorkDefinitions } from '../../api/types/development';
-import { DefinitionCheck, TYPE_LABEL, TYPES, TypeBadge, useTeamParam } from './common';
+import { DefinitionCheck, TYPES, useTeamParam } from './common';
+import { TYPE_LABEL, TypeBadge } from '../../components/TypeBadge';
 
 export function BoardPage() {
   const { user } = useSession();

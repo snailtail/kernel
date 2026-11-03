@@ -3,7 +3,7 @@ import { Link } from 'react-router';
 import { api } from '../../../api/client';
 import type { Change } from '../../../api/types/changes';
 import { StatusBadge } from '../../../components/Badges';
-import { TypeBadge } from '../../development/common';
+import { TypeBadge } from '../../../components/TypeBadge';
 
 /**
  * The bugs and stories a change delivers: its manifest (#167). Linked from here or from the work item; once the change

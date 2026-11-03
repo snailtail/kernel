@@ -17,7 +17,8 @@ import { useLive } from '../../hooks/useLive';
 import { canEdit, useSession } from '../../session';
 import { WORK_ITEM_STATUS, type WorkItemStatus } from '../../statuses';
 import type { Criterion, WorkItem } from '../../api/types/development';
-import { DefinitionCheck, ProgressBar, useParentTypes, transitionLabel, TYPE_LABEL, TypeBadge } from './common';
+import { DefinitionCheck, ProgressBar, useParentTypes, transitionLabel } from './common';
+import { TYPE_LABEL, TypeBadge } from '../../components/TypeBadge';
 import { EditWorkItem, NewWorkItem } from './components/WorkItemForms';
 import './styles.css';
 

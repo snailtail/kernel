@@ -1,6 +1,7 @@
 // Development and service management (#167, part 2): a change delivers bugs and stories, a link made from either side
 // is in both histories, and the problem's loop is closed on a verified fix: watched for new incidents after the deploy,
 // then a suggestion to resolve. A failed or rolled back fix is never suggested. The fix KPIs, with or without the module.
+// The decision does not depend on who looks (#225): records the reader cannot see count without being named.
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
 import { ownerQuery, skip, startKernel, type Client, type Harness } from './harness.js';
@@ -13,7 +14,7 @@ const at = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOStr
 
 describe('closing the loop between a problem and its fix (#167)', { skip }, () => {
   let k: Harness;
-  let admin: Client, pm: Client, analyst: Client;
+  let admin: Client, pm: Client, analyst: Client, analyst2: Client;
   let ci: string;
   let n = 0;
 
@@ -41,7 +42,7 @@ describe('closing the loop between a problem and its fix (#167)', { skip }, () =
 
   before(async () => {
     k = await startKernel();
-    [admin, pm, analyst] = await Promise.all([k.login('admin'), k.login('pm'), k.login('analyst')]);
+    [admin, pm, analyst, analyst2] = await Promise.all([k.login('admin'), k.login('pm'), k.login('analyst'), k.login('analyst2')]);
     ok(await admin.put('/api/admin/modules', { development: true, reason: 'Teams build what they run' }));
     ci = ok(await pm.post('/api/cis', { name: 'payroll-app', ci_type: 'application', criticality: 3 }), 201).ref;
   });
@@ -124,6 +125,66 @@ describe('closing the loop between a problem and its fix (#167)', { skip }, () =
     assert.deepEqual(r.fix.failed, { change: chg, outcome: 'rolled_back' });
     assert.equal(r.next_steps.handover.label, `The fix in ${chg} was rolled back`);
     assert.equal(r.next_steps.handover.action, undefined);
+  });
+
+  /** Analyst's bug, done and shipped by a successful change that ended `days` ago. */
+  const shipped = async (p: string, days: number) => {
+    const bug = ok(await analyst.post(`/api/records/${p}/work-items`, {}), 201).ref;
+    for (const to of ['in_progress', 'done']) ok(await analyst.post(`/api/work-items/${bug}/transition`, { to }));
+    const chg = await change();
+    ok(await analyst.post(`/api/records/${chg}/links`, { to: bug }));
+    await finish(chg, 'successful');
+    await ownerQuery(`UPDATE changes SET actual_end = now() - interval '${days} days' WHERE ref = $1`, [chg]);
+    return chg;
+  };
+  const restrict = async (by: Client, ref: string) => ok(await by.put(`/api/records/${ref}/visibility`, { restricted: true, reason: 'Security investigation' }));
+
+  test('a bug the reader cannot see is still open: no suggestion to resolve, for anyone (#225)', async () => {
+    const p = await knownError('Payslips miss the tax line', 'code');
+    await shipped(p, 8);
+    const hidden = ok(await analyst2.post(`/api/records/${p}/work-items`, {}), 201).ref;
+    await restrict(analyst2, hidden);
+    assert.equal((await analyst.get(`/api/work-items/${hidden}`)).status, 404, 'the analyst cannot see the second bug');
+
+    const r = await problem(p);
+    assert.equal(r.fix.deployed, null);
+    assert.equal(r.fix.open_work, true);
+    assert.equal(r.next_steps.handover.label, 'The fix is planned');
+    assert.ok(!JSON.stringify(r.fix).includes(hidden));
+    const seen = ok(await analyst2.get(`/api/problems/${p}`));
+    assert.equal(seen.next_steps.handover.label, r.next_steps.handover.label, 'the same guidance for a reader who sees everything');
+  });
+
+  test('a restricted incident after the deploy blocks the suggestion without showing its ref (#225)', async () => {
+    const p = await knownError('Payslips go to the old address', 'code');
+    const chg = await shipped(p, 8);
+    assert.equal((await problem(p)).next_steps.handover.action, 'resolve_problem');
+
+    const inc = ok(await analyst2.post('/api/incidents', { title: 'Payslip sent to a former address' }), 201).ref;
+    ok(await analyst2.post(`/api/records/${inc}/links`, { to: p, kind: 'problem' }));
+    await restrict(analyst2, inc);
+    const r = await problem(p);
+    assert.equal(r.fix.deployed.change, chg);
+    assert.equal(r.fix.recurred.length, 1);
+    assert.equal(r.fix.recurred[0].restricted, true);
+    assert.equal(r.next_steps.handover.label, '1 incident since the fix');
+    assert.equal(r.next_steps.handover.action, undefined);
+    assert.match(r.next_steps.handover.hint, /^a restricted incident came in after/);
+    assert.ok(!JSON.stringify([r.fix, r.next_steps]).includes(inc), 'the incident ref is not in the fix or the guidance');
+  });
+
+  test('implementing a change logs on a problem the implementer cannot see, with only the change (#225)', async () => {
+    const p = ok(await analyst2.post('/api/problems', { title: 'Payroll export drops rows' }), 201).ref;
+    const bug = ok(await analyst2.post(`/api/records/${p}/work-items`, {}), 201).ref;
+    await restrict(analyst2, p);
+    assert.equal((await analyst.get(`/api/problems/${p}`)).status, 404);
+
+    const chg = await change();
+    ok(await analyst.post(`/api/records/${chg}/links`, { to: bug }));
+    await finish(chg, 'successful');
+    const entry = ok(await analyst2.get(`/api/problems/${p}`)).activity.find((a: any) => a.body === `Change ${chg} implemented: successful`);
+    assert.ok(entry, 'logged on the restricted problem');
+    assert.deepEqual(entry.data, { kind: 'change', reference: chg, outcome: 'successful' });
   });
 
   test('without the development module the fix tiles stay, and a change raised on the problem closes the loop (path D)', async () => {

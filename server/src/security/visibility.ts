@@ -3,7 +3,7 @@
 import { z } from 'zod';
 import type { User } from './auth.js';
 import { audit } from './audit.js';
-import { query, tx } from '../core/db.js';
+import { type Db, query, tx } from '../core/db.js';
 import { contextStore, currentContext } from '../core/context.js';
 import { badRequest, notFound } from '../core/errors.js';
 import { managers, notify } from '../notifications/notifications.js';
@@ -147,6 +147,24 @@ export async function saveVisibilitySettings(actor: User, value: { team_scoped: 
  * the caller's own access was checked. What comes out must be filtered by the caller's visibility again.
  */
 export const seeingAll = <T>(fn: () => Promise<T>) => contextStore.run({ ...currentContext(), viewer: 'system' }, fn);
+
+const VIEWER_SETTINGS = ['kernel.viewer', 'kernel.uid', 'kernel.teams', 'kernel.scoped'];
+
+/**
+ * The same inside a transaction that is already open (its connection keeps the viewer it was borrowed with): `fn`'s
+ * statements on `db` see every row, and the caller's viewer is back afterwards. Only for writes the system makes on
+ * the caller's behalf, such as a log entry on a problem they cannot see (#225), that carry nothing from that record.
+ */
+export async function seeingAllIn<T>(db: Db, fn: () => Promise<T>) {
+  const set = (values: string[]) => db.query(`SELECT ${VIEWER_SETTINGS.map((k, i) => `set_config('${k}', $${i + 1}, true)`).join(', ')}`, values);
+  const { rows } = await db.query(`SELECT ${VIEWER_SETTINGS.map((k, i) => `coalesce(current_setting('${k}', true), '') AS s${i}`).join(', ')}`);
+  await set(['system', '', '', '']);
+  try {
+    return await fn();
+  } finally {
+    await set(VIEWER_SETTINGS.map((_, i) => rows[0][`s${i}`]));
+  }
+}
 
 /** A Kernel ref the caller may not see answers exactly like one that does not exist (no existence oracle). */
 export async function assertVisibleRef(ref: string) {
