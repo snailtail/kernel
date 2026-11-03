@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { after, before, describe, test } from 'node:test';
-import { skip, startKernel, type Client, type Harness } from './harness.js';
+import { ownerQuery, skip, startKernel, type Client, type Harness } from './harness.js';
 
 const ok = (r: { status: number; body: any }, status = 200) => {
   assert.equal(r.status, status, JSON.stringify(r.body));
@@ -46,6 +46,20 @@ describe('history and records restricted later (#227)', { skip }, () => {
     assert.ok(trail.some((e: any) => e.action === 'link' && e.changes.restricted === true && e.changes.reference === null));
     assert.ok(!JSON.stringify(trail).includes(inc));
     assert.ok(JSON.stringify(ok(await analyst2.get(`/api/records/${p}/history`))).includes(inc));
+  });
+
+  test('a seven-digit ref, once the sequence passes 999 999, is hidden too', async () => {
+    // The rest of Kernel does not take seven-digit refs yet, so the incident and its link entry are made directly.
+    const six = ok(await analyst2.post('/api/incidents', { title: 'Payslips sent twice' }), 201).ref;
+    ok(await analyst2.put(`/api/records/${six}/visibility`, { restricted: true, reason: 'Security investigation' }));
+    await ownerQuery("UPDATE incidents SET ref = 'INC1000000' WHERE ref = $1", [six]);
+    await ownerQuery(
+      `INSERT INTO problem_activity (problem_id, kind, body, data) SELECT id, 'link', 'Linked incident INC1000000', $2 FROM problems WHERE ref = $1`,
+      [p, JSON.stringify({ kind: 'incident', reference: 'INC1000000', system: 'Kernel', action: 'add' })],
+    );
+    const r = ok(await analyst.get(`/api/problems/${p}`));
+    assert.ok(!JSON.stringify(r.activity).includes('INC1000000'));
+    assert.ok(JSON.stringify(ok(await analyst2.get(`/api/problems/${p}`)).activity).includes('Linked incident INC1000000'));
   });
 
   test('MCP gives the same as REST', async () => {
