@@ -21,6 +21,9 @@ export function runtimeUrl() {
 // this module: every statement goes through query() or tx(), which tell the database who is asking (#53).
 const rawPool = new pg.Pool({ connectionString: runtimeUrl() });
 
+/** The settings that tell the database who is asking, in this order: the viewer string, then its parts. */
+export const VIEWER_SETTINGS = ['kernel.viewer', 'kernel.uid', 'kernel.teams', 'kernel.scoped'];
+
 /**
  * Row-level security reads kernel.viewer. It is set on a connection whenever the borrower's viewer differs from what
  * that connection last had, so a statement can never run with another request's viewer (and, at ~0.2 ms per round
@@ -33,10 +36,7 @@ async function borrow() {
   if (viewerOf.get(client) !== viewer) {
     // Parts of the viewer also go into their own settings, which the policies read inline without parsing.
     const [, uid = '', , teams = '', scoped = ''] = viewer.startsWith('u:') ? viewer.split(':') : [];
-    await client.query(
-      "SELECT set_config('kernel.viewer', $1, false), set_config('kernel.uid', $2, false), set_config('kernel.teams', $3, false), set_config('kernel.scoped', $4, false)",
-      [viewer, uid, teams, scoped],
-    );
+    await client.query(`SELECT ${VIEWER_SETTINGS.map((k, i) => `set_config('${k}', $${i + 1}, false)`).join(', ')}`, [viewer, uid, teams, scoped]);
     viewerOf.set(client, viewer);
   }
   return client;

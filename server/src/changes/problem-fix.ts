@@ -16,6 +16,8 @@ export interface ProblemFix {
   pending: { change: string | null; status: string }[];
   /** A bug or story of the problem is still open, seen or not. */
   open_work: boolean;
+  /** The problem has a bug or story that is not removed, open or done, seen or not. */
+  has_work: boolean;
   observation_days: number;
   watch_until: string | null;
   /** The problem's incidents logged after the fix was deployed; one the caller cannot see only counts. */
@@ -28,8 +30,8 @@ export interface ProblemFix {
  */
 export async function problemFix(problemId: number, observationDays: number | null): Promise<ProblemFix> {
   const days = observationDays ?? DEFAULT_OBSERVATION_DAYS;
-  const { deployed, changes, openWork, recurred } = await seeingAll(async () => {
-    const [deployed, changes, openWork] = await Promise.all([
+  const { deployed, changes, work, recurred } = await seeingAll(async () => {
+    const [deployed, changes, work] = await Promise.all([
       query('SELECT change_ref, deployed_at FROM problem_fix_deployed WHERE problem_id = $1', [problemId]),
       query(
         `SELECT DISTINCT c.ref, c.status, c.outcome, c.actual_end, c.created_at FROM problem_fixes f JOIN changes c ON c.id = f.change_id
@@ -37,8 +39,9 @@ export async function problemFix(problemId: number, observationDays: number | nu
         [problemId],
       ),
       query(
-        `SELECT EXISTS (SELECT 1 FROM problems p JOIN work_item_links l ON l.kind = 'problem' AND l.system IN ('', 'Kernel') AND l.reference = p.ref
-         JOIN work_items w ON w.id = l.work_item_id WHERE p.id = $1 AND w.status NOT IN ('done', 'removed')) AS open`,
+        `SELECT coalesce(bool_or(w.status <> 'done'), false) AS open, count(*) > 0 AS has
+         FROM problems p JOIN work_item_links l ON l.kind = 'problem' AND l.system IN ('', 'Kernel') AND l.reference = p.ref
+         JOIN work_items w ON w.id = l.work_item_id WHERE p.id = $1 AND w.status <> 'removed'`,
         [problemId],
       ),
     ]);
@@ -46,7 +49,7 @@ export async function problemFix(problemId: number, observationDays: number | nu
     const recurred = at
       ? (await query('SELECT ref, title, created_at FROM incidents WHERE problem_id = $1 AND created_at > $2 ORDER BY created_at', [problemId, at])).rows
       : [];
-    return { deployed: deployed.rows[0], changes: changes.rows, openWork: openWork.rows[0].open as boolean, recurred };
+    return { deployed: deployed.rows[0], changes: changes.rows, work: work.rows[0] as { open: boolean; has: boolean }, recurred };
   });
   const refs = [...changes.map((c) => c.ref), ...recurred.map((i) => i.ref)];
   const { rows } = await query('SELECT r, kernel_ref_hidden(r) AS hidden FROM unnest($1::text[]) r', [refs]);
@@ -58,7 +61,8 @@ export async function problemFix(problemId: number, observationDays: number | nu
     deployed: deployed ? { change: seen(deployed.change_ref), at: at!.toISOString() } : null,
     failed: !deployed && last && last.outcome !== 'successful' ? { change: seen(last.ref), outcome: last.outcome } : null,
     pending: changes.filter((c) => !c.outcome).map((c) => ({ change: seen(c.ref), status: c.status })),
-    open_work: openWork,
+    open_work: work.open,
+    has_work: work.has,
     observation_days: days,
     watch_until: at ? new Date(at.getTime() + days * 86400_000).toISOString() : null,
     recurred: recurred.map((i) => (hidden.has(i.ref) ? { restricted: true, created_at: i.created_at } : { restricted: false, ref: i.ref, title: i.title, created_at: i.created_at })),

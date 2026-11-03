@@ -6,6 +6,7 @@ import { currentContext } from '../core/context.js';
 import { type Db, query } from '../core/db.js';
 import { recordType, type ActivityEntry } from './records.js';
 import { queueRuleRuns, type RuleKind } from '../automation/rule-queue.js';
+import { hideRestrictedRefs } from './hidden-refs.js';
 
 function logOf(type: string) {
   const t = recordType(type);
@@ -45,7 +46,7 @@ export async function touchAndAudit(db: Db, type: string, e: ActivityEntry, opti
   return rows[0].ref as string;
 }
 
-/** A record's history, newest first: who (or which automation rule) did what. */
+/** A record's history, newest first: who (or which automation rule) did what, without the refs the caller may not see (#227). */
 export async function historyOf(type: string, recordId: number) {
   const { log } = logOf(type);
   const extra = (log.columns ?? []).map((c) => `a.${c}, `).join('');
@@ -54,7 +55,7 @@ export async function historyOf(type: string, recordId: number) {
      FROM ${log.table} a LEFT JOIN users u ON u.id = a.user_id WHERE a.${log.fk} = $1 ORDER BY a.created_at DESC, a.id DESC${log.limit ? ` LIMIT ${log.limit}` : ''}`,
     [recordId],
   );
-  return rows;
+  return hideRestrictedRefs(rows, ['body', 'data']);
 }
 
 /** A record's comments that carry this data value (e.g. those about one review), oldest first, with who wrote them. */

@@ -26,6 +26,7 @@ import { addImprovementLink, improvementLinkSchema, myImprovements } from '../im
 import { addRequestLink, myRequestWork, requestLinkSchema, teamRequestTasks } from '../requests/requests.js';
 import { actionCounts, myActions } from '../problems/actions.js';
 import { addWorkItemLink, ITSM_LINK_KINDS, myWorkItems, workItemLinkSchema } from '../development/work-items.js';
+import { hideRestrictedRefs } from './hidden-refs.js';
 
 export const searchSchema = z.object({
   q: z.string().trim().min(1).max(200),
@@ -57,7 +58,7 @@ export async function recordHistory(user: User, ref: string, limit = 100) {
   authorize(user, t.readAction);
   const record = await t.get(user, ref.toUpperCase());
   const refs = t.history?.refs?.(record) ?? [String(record.ref)];
-  const rows = await queryAudit({ record: { entity_type: t.history?.entityType ?? t.type, refs, mentions: t.history?.mentions?.(record) ?? [] }, limit });
+  const rows = await hideRestrictedRefs(await queryAudit({ record: { entity_type: t.history?.entityType ?? t.type, refs, mentions: t.history?.mentions?.(record) ?? [] }, limit }), ['changes']);
   // A confidential record's masked fields show that they changed, not to what (short values are kept readable in the
   // trail). Agents never read confidential text.
   const masked = (await maskedRefs(currentContext().channel === 'mcp' ? null : user, [String(record.ref)])).size > 0;
