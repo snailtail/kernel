@@ -121,6 +121,9 @@ export const typeOfPrefix = (ref: string) => recordTypes().find((t) => t.prefix 
 /** A text kind by its ref, or undefined (no throwing: callers decide what other refs mean). */
 export const textKindOfRef = (ref: string) => textKinds().find((t) => t.prefix === prefixOf(ref));
 
+/** How a record the reader may not see is named instead of its ref (#225, #227): "a restricted change". */
+export const aRestricted = (type: string) => `a restricted ${type === 'review' ? 'post-incident review' : type.replace('_', ' ')}`;
+
 /** Matches a ref (exactly six digits) of one of these types, e.g. for the text kinds' prefixes. */
 export const refRegex = (types: RecordType[], flags = 'i') => new RegExp(`^(${types.map((t) => t.prefix).join('|')})\\d{6}$`, flags);
 

@@ -2,6 +2,7 @@
 // Shown in the UI in guided mode and returned to MCP clients as next_steps.
 import { moduleEnabled } from '../core/modules.js';
 import type { ProblemFix } from '../changes/problem-fix.js';
+import { aRestricted } from '../records/records.js';
 
 interface GuidanceInput {
   status: string;
@@ -60,7 +61,7 @@ export interface Guidance {
 const has = (s: string) => s.trim().length > 0;
 const day = (iso: string) => iso.slice(0, 10);
 /** A fix change the reader cannot see still counts (#225), by what it is rather than its ref. */
-const named = (ref: string | null) => ref ?? 'a restricted change';
+const named = (ref: string | null) => ref ?? aRestricted('change');
 
 export function guidanceFor(p: GuidanceInput): Guidance {
   const g = phaseGuidance(p);
@@ -77,7 +78,7 @@ function handoverFor(p: GuidanceInput): Handover | null {
     const change = named(fix.deployed.change);
     if (fix.recurred.length) {
       const n = fix.recurred.length;
-      return { label: `${n} incident${n === 1 ? '' : 's'} since the fix`, hint: `${fix.recurred.map((i) => (i.restricted ? 'a restricted incident' : i.ref)).join(', ')} came in after ${change} was deployed on ${day(at)}: check whether the fix works before resolving.` };
+      return { label: `${n} incident${n === 1 ? '' : 's'} since the fix`, hint: `${fix.recurred.map((i) => (i.restricted ? aRestricted('incident') : i.ref)).join(', ')} came in after ${change} was deployed on ${day(at)}: check whether the fix works before resolving.` };
     }
     if (Date.now() < Date.parse(fix.watch_until!)) {
       return { label: `The fix is deployed: watch until ${day(fix.watch_until!)}`, hint: `${change[0].toUpperCase()}${change.slice(1)} went out on ${day(at)}. If no new incidents come in for ${fix.observation_days} days, Kernel suggests resolving the problem.` };
@@ -90,7 +91,7 @@ function handoverFor(p: GuidanceInput): Handover | null {
   // A code fix is made as a bug in a team's backlog first (#167); its release goes out as a change later.
   const bugs = p.work_items?.filter((w) => w.status !== 'removed') ?? [];
   if (p.status === 'known_error' && p.ec_decision === 'fix' && p.fix_type === 'code' && moduleEnabled('development')) {
-    if (!bugs.length && !p.fix?.open_work) return { label: 'A code fix? Create a bug', hint: 'The bug goes to a team\'s backlog with the root cause and the workaround, and links back here.', action: 'create_bug' };
+    if (!bugs.length && !p.fix?.has_work) return { label: 'A code fix? Create a bug', hint: 'The bug goes to a team\'s backlog with the root cause and the workaround, and links back here.', action: 'create_bug' };
     if (bugs.some((w) => w.status !== 'done') || p.fix?.open_work) return { label: 'The fix is planned', hint: 'Its bug is in a team\'s backlog; the known error stays in the KEDB with its workaround until the fix is deployed.' };
   }
   if (p.status === 'known_error' && fix?.pending.length) {

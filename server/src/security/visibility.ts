@@ -3,7 +3,7 @@
 import { z } from 'zod';
 import type { User } from './auth.js';
 import { audit } from './audit.js';
-import { type Db, query, tx } from '../core/db.js';
+import { type Db, query, tx, VIEWER_SETTINGS } from '../core/db.js';
 import { contextStore, currentContext } from '../core/context.js';
 import { badRequest, notFound } from '../core/errors.js';
 import { managers, notify } from '../notifications/notifications.js';
@@ -147,8 +147,6 @@ export async function saveVisibilitySettings(actor: User, value: { team_scoped: 
  * the caller's own access was checked. What comes out must be filtered by the caller's visibility again.
  */
 export const seeingAll = <T>(fn: () => Promise<T>) => contextStore.run({ ...currentContext(), viewer: 'system' }, fn);
-
-const VIEWER_SETTINGS = ['kernel.viewer', 'kernel.uid', 'kernel.teams', 'kernel.scoped'];
 
 /**
  * The same inside a transaction that is already open (its connection keeps the viewer it was borrowed with): `fn`'s

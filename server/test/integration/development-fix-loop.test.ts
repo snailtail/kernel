@@ -173,6 +173,20 @@ describe('closing the loop between a problem and its fix (#167)', { skip }, () =
     assert.ok(!JSON.stringify([r.fix, r.next_steps]).includes(inc), 'the incident ref is not in the fix or the guidance');
   });
 
+  test('a done bug the reader cannot see still counts: no suggestion to create one (#227)', async () => {
+    const p = await knownError('Payslips round the hours down', 'code');
+    assert.equal((await problem(p)).next_steps.handover.action, 'create_bug');
+    const hidden = ok(await analyst2.post(`/api/records/${p}/work-items`, {}), 201).ref;
+    for (const to of ['in_progress', 'done']) ok(await analyst2.post(`/api/work-items/${hidden}/transition`, { to }));
+    await restrict(analyst2, hidden);
+
+    const r = await problem(p);
+    assert.equal(r.fix.open_work, false);
+    assert.equal(r.fix.has_work, true);
+    assert.notEqual(r.next_steps.handover?.action, 'create_bug');
+    assert.ok(!JSON.stringify([r.fix, r.next_steps, r.activity]).includes(hidden));
+  });
+
   test('implementing a change logs on a problem the implementer cannot see, with only the change (#225)', async () => {
     const p = ok(await analyst2.post('/api/problems', { title: 'Payroll export drops rows' }), 201).ref;
     const bug = ok(await analyst2.post(`/api/records/${p}/work-items`, {}), 201).ref;

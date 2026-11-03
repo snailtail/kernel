@@ -1,6 +1,7 @@
 // Problem record service. Shared by the REST API and the MCP server so both
 // enforce the same rules, permissions and audit trail.
 import { historyOf, logActivity } from '../records/activity.js';
+import { hideRestrictedRefs } from '../records/hidden-refs.js';
 import { actionCounts, actionsOf, myActions, openActionCount } from './actions.js';
 import { assertMayWriteText, forgetExists, onlyTitleMatches, textFilterSql } from '../security/confidential.js';
 import { z } from 'zod';
@@ -534,6 +535,7 @@ export async function dashboard(user: User) {
            WHERE a.user_id IS DISTINCT FROM $1 AND a.created_at > now() - interval '14 days'
            ORDER BY a.created_at DESC, a.id DESC LIMIT 10`, [user.id]),
   ]);
+  const [watchedActivity, recentActivity] = await Promise.all([hideRestrictedRefs(watched.rows, ['body', 'data']), hideRestrictedRefs(recent.rows, ['body', 'data'])]);
   return {
     problems: true as const,
     by_status: Object.fromEntries(byStatus.rows.map((r) => [r.status, r.count])),
@@ -543,8 +545,8 @@ export async function dashboard(user: User) {
     my_problems: mine.rows,
     my_actions: myOpenActions,
     actions: { open: actionSummary.open, overdue: actionSummary.overdue },
-    watched_activity: watched.rows,
-    recent_activity: recent.rows,
+    watched_activity: watchedActivity,
+    recent_activity: recentActivity,
   };
 }
 
@@ -731,6 +733,6 @@ export async function myProblemWork(userId: number, decide: boolean) {
       ? query(`SELECT ref, title, priority, known_error_at FROM problems WHERE status = 'known_error' AND coalesce(ec_decision, 'pending') = 'pending' ORDER BY priority, known_error_at LIMIT 30`)
       : Promise.resolve({ rows: [] as any[] }),
   ]);
-  return { problems: problems.rows, watched: watched.rows, decisions: decisions.rows };
+  return { problems: problems.rows, watched: await hideRestrictedRefs(watched.rows, ['body']), decisions: decisions.rows };
 }
 

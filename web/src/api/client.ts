@@ -166,6 +166,7 @@ interface ProblemFix {
   failed: { change: string | null; outcome: string } | null;
   pending: { change: string | null; status: string }[];
   open_work: boolean;
+  has_work: boolean;
   observation_days: number;
   watch_until: string | null;
   recurred: ({ restricted: false; ref: string; title: string; created_at: string } | { restricted: true; created_at: string })[];
