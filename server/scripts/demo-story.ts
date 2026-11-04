@@ -22,6 +22,7 @@ import * as problems from '../src/problems/problems.js';
 import * as improvements from '../src/improvements/improvements.js';
 import * as workItems from '../src/development/work-items.js';
 import * as requests from '../src/requests/requests.js';
+import * as catalogue from '../src/requests/catalogue.js';
 import * as rules from '../src/automation/rules.js';
 import { contextStore, currentContext } from '../src/core/context.js';
 import * as reviews from '../src/incidents/post-incident-reviews.js';
@@ -333,8 +334,8 @@ export async function seedStory(p: People) {
   await query("UPDATE people SET manager_id = $1 WHERE email IN ('maria.svensson@example.com', 'johan.ek@example.com')", [annaPerson]);
   const karin = (await people.createPerson(admin, { name: 'Karin Holm', email: 'karin.holm@example.com', title: 'New hire', department: 'Customer service', manager_id: annaPerson } as any)).id as number;
   const personId = async (email: string) => (await query('SELECT id FROM people WHERE email = $1', [email])).rows[0].id as number;
-  const item = (input: Partial<Parameters<typeof requests.saveRequestItem>[2]> & { name: string; fulfilment_tasks: { title: string; team_id: number | null }[] }) =>
-    requests.saveRequestItem(anna, null, requests.requestItemSchema.parse({ service: webshop, ...input }));
+  const item = (input: Partial<Parameters<typeof catalogue.saveRequestItem>[2]> & { name: string; fulfilment_tasks: { title: string; team_id: number | null }[] }) =>
+    catalogue.saveRequestItem(anna, null, catalogue.requestItemSchema.parse({ service: webshop, ...input }));
   const account = await item({
     name: 'New account', description: 'An account for the shop admin and the order system, for a new colleague.',
     form: [{ key: 'full_name', label: 'Full name', type: 'text', required: true }, { key: 'start', label: 'Start date', type: 'date', required: true }, { key: 'role', label: 'Role', type: 'choice', required: true, choices: ['Customer service', 'Content editor', 'Warehouse'] }],
