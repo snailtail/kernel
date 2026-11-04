@@ -23,6 +23,8 @@ import * as improvements from '../src/improvements/improvements.js';
 import * as workItems from '../src/development/work-items.js';
 import * as requests from '../src/requests/requests.js';
 import * as catalogue from '../src/requests/catalogue.js';
+// Standard change and webhook tasks run through hooks that fulfilment.ts provides when it is loaded (the app loads it).
+import '../src/requests/fulfilment.js';
 import * as rules from '../src/automation/rules.js';
 import { contextStore, currentContext } from '../src/core/context.js';
 import * as reviews from '../src/incidents/post-incident-reviews.js';
@@ -372,7 +374,9 @@ export async function seedStory(p: People) {
   for (const t of (await requests.getRequest(erik, done.ref)).tasks) await requests.completeRequestTask(erik, done.ref, t.id, { note: t.position === 1 ? 'Editor role in the CMS.' : '' });
   // A VM: approved by Anna (the Webshop's owner), so its standard change waits to be scheduled.
   const vm = await requests.createRequest(erik, { item_id: newVm.id, requester: { id: await personId('maria.svensson@example.com') }, answers: { size: 'Medium (4 vCPU)', purpose: 'A staging copy of the search service for the spring sale.' }, priority: 3 });
-  await requests.decideRequest(anna, vm.ref, { decision: 'approve', comment: '' });
+  const vmApproved = await requests.decideRequest(anna, vm.ref, { decision: 'approve', comment: '' });
+  // The demo check in CI: the approval made the standard change.
+  if (!vmApproved.tasks.some((t) => t.kind === 'change' && t.change_ref)) throw new Error(`${vm.ref}: no standard change was made for its change task`);
   // Rejected, with the reason.
   const rejected = await requests.createRequest(sara, { item_id: access.id, requester: { id: await personId('johan.ek@example.com') }, answers: { system: db, level: 'Write', why: 'Fix prices directly in the database.' }, priority: 4 });
   await requests.decideRequest(anna, rejected.ref, { decision: 'reject', comment: 'Prices are changed in the shop admin, which keeps the history. Ask for the price editor role there.' });
