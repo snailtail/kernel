@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import { idempotent } from '../idempotency.js';
 import * as requests from '../requests/requests.js';
+import * as catalogue from '../requests/catalogue.js';
 import { portalMark, type McpContext } from './registrar.js';
 
 export function registerRequestsTools({ user, tool }: McpContext) {
@@ -24,7 +25,7 @@ export function registerRequestsTools({ user, tool }: McpContext) {
     },
   });
   tool('list_request_items', 'The service request catalogue: what people can ask for, per service, with each item\'s form (fields, types, choices), approval and fulfilment tasks.', { service: z.string().optional().describe('Service ref') }, true, async (args) =>
-    (await requests.listRequestItems(user, requests.listItemsSchema.parse(args))).map((i: any) => ({
+    (await catalogue.listRequestItems(user, catalogue.listItemsSchema.parse(args))).map((i: any) => ({
       id: i.id, service: i.service.ref, approval: i.approval, sla: i.sla, form: i.form, tasks: i.fulfilment_tasks.length, untrusted_content: { name: i.name, description: i.description, service_name: i.service.name },
     })),
   );

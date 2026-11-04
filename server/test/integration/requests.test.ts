@@ -386,7 +386,7 @@ describe('service request management (#44)', { skip }, () => {
     const r = (await analyst.post('/api/requests', { item_id: accessItem, requester: { id: person }, answers: { system: vm, level: 'read', why: 'Secret project Falcon' } })).body;
     ok(await analyst.post(`/api/requests/${r.ref}/comments`, { body: 'Internal note: double-check her badge' }));
     ok(await pm.post(`/api/requests/${r.ref}/approval`, { decision: 'reject', comment: 'Internal: budget freeze' }));
-    const { processRequestMail } = await import('../../src/requests/requests.js');
+    const { processRequestMail } = await import('../../src/requests/fulfilment.js');
     await processRequestMail();
     const mails = n.capturedMail.filter((m) => m.to === 'cecilia@example.org');
     assert.deepEqual(mails.map((m) => m.subject), [`Your request ${r.ref}: we have received it`, `Your request ${r.ref}: not approved`]);

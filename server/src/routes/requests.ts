@@ -2,21 +2,23 @@ import type { FastifyInstance } from 'fastify';
 import { requireUser } from '../security/auth.js';
 import { forbidden } from '../core/errors.js';
 import * as rq from '../requests/requests.js';
+import * as catalogue from '../requests/catalogue.js';
+import * as fulfilment from '../requests/fulfilment.js';
 
 type RefParams = { Params: { ref: string } };
 type TaskParams = { Params: { ref: string; id: string } };
 
 export async function requestRoutes(app: FastifyInstance) {
   // The catalogue.
-  app.get('/api/request-items', async (req) => rq.listRequestItems(requireUser(req), rq.listItemsSchema.parse(req.query)));
-  app.get('/api/request-items/options', async (req) => rq.itemOptions(requireUser(req)));
-  app.get<{ Params: { id: string } }>('/api/request-items/:id', async (req) => rq.getRequestItem(requireUser(req), Number(req.params.id)));
+  app.get('/api/request-items', async (req) => catalogue.listRequestItems(requireUser(req), catalogue.listItemsSchema.parse(req.query)));
+  app.get('/api/request-items/options', async (req) => catalogue.itemOptions(requireUser(req)));
+  app.get<{ Params: { id: string } }>('/api/request-items/:id', async (req) => catalogue.getRequestItem(requireUser(req), Number(req.params.id)));
   app.post('/api/request-items', async (req, reply) => {
-    const created = await rq.saveRequestItem(requireUser(req), null, rq.requestItemSchema.parse(req.body));
+    const created = await catalogue.saveRequestItem(requireUser(req), null, catalogue.requestItemSchema.parse(req.body));
     reply.code(201);
     return created;
   });
-  app.put<{ Params: { id: string } }>('/api/request-items/:id', async (req) => rq.saveRequestItem(requireUser(req), Number(req.params.id), rq.requestItemSchema.parse(req.body)));
+  app.put<{ Params: { id: string } }>('/api/request-items/:id', async (req) => catalogue.saveRequestItem(requireUser(req), Number(req.params.id), catalogue.requestItemSchema.parse(req.body)));
 
   // Requests.
   app.get('/api/requests', async (req) => rq.listRequests(requireUser(req), rq.listRequestsSchema.parse(req.query)));
@@ -41,7 +43,7 @@ export async function requestRoutes(app: FastifyInstance) {
   app.post<TaskParams>('/api/requests/:ref/tasks/:id/complete', async (req) => {
     // A webhook task's receiver calls back with the task's token instead of signing in (#44).
     const token = req.headers['x-kernel-task-token'];
-    if (!req.user && typeof token === 'string') return rq.completeTaskByToken(req, req.params.ref, Number(req.params.id), token, rq.callbackSchema.parse(req.body ?? {}));
+    if (!req.user && typeof token === 'string') return fulfilment.completeTaskByToken(req, req.params.ref, Number(req.params.id), token, fulfilment.callbackSchema.parse(req.body ?? {}));
     return rq.completeRequestTask(requireUser(req), req.params.ref, Number(req.params.id), rq.completeTaskSchema.parse(req.body ?? {}));
   });
   app.patch<TaskParams>('/api/requests/:ref/tasks/:id', async (req) => rq.assignRequestTask(requireUser(req), req.params.ref, Number(req.params.id), rq.assignTaskSchema.parse(req.body)));

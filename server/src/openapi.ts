@@ -21,6 +21,7 @@ import * as wi from './development/work-items.js';
 import * as mirror from './development/mirror.js';
 import * as itsm from './development/itsm.js';
 import * as rq from './requests/requests.js';
+import * as catalogue from './requests/catalogue.js';
 import * as portal from './requests/portal.js';
 import * as slaMod from './reporting/sla.js';
 import * as notif from './notifications/notifications.js';
@@ -399,11 +400,11 @@ export const OPERATIONS: Op[] = [
   { method: 'post', path: '/api/improvements/:ref/links', tag: 'Improvements', summary: 'Link a change, problem, action (by id), incident, review or document that carries it out', body: imp.improvementLinkSchema },
   { method: 'delete', path: '/api/improvements/:ref/links/:id', tag: 'Improvements', summary: 'Remove a link' },
   { method: 'post', path: '/api/problems/:ref/improvement', tag: 'Improvements', summary: 'Lessons learned → improvement, from a resolved or closed problem', body: imp.fromProblemSchema },
-  { method: 'get', path: '/api/request-items', tag: 'Service requests', summary: 'The request catalogue: items per service with their form, approval, fulfilment tasks and SLA', query: rq.listItemsSchema },
+  { method: 'get', path: '/api/request-items', tag: 'Service requests', summary: 'The request catalogue: items per service with their form, approval, fulfilment tasks and SLA', query: catalogue.listItemsSchema },
   { method: 'get', path: '/api/request-items/options', tag: 'Service requests', summary: 'For the catalogue editor (managers): standard change templates and JSON webhooks that tasks can use' },
   { method: 'get', path: '/api/request-items/:id', tag: 'Service requests', summary: 'One catalogue item' },
-  { method: 'post', path: '/api/request-items', tag: 'Service requests', summary: 'Add a catalogue item (managers): a form of at most 10 fields, an approval and ordered fulfilment tasks', body: rq.requestItemSchema },
-  { method: 'put', path: '/api/request-items/:id', tag: 'Service requests', summary: 'Change a catalogue item (managers); kept in the audit trail', body: rq.requestItemSchema },
+  { method: 'post', path: '/api/request-items', tag: 'Service requests', summary: 'Add a catalogue item (managers): a form of at most 10 fields, an approval and ordered fulfilment tasks', body: catalogue.requestItemSchema },
+  { method: 'put', path: '/api/request-items/:id', tag: 'Service requests', summary: 'Change a catalogue item (managers); kept in the audit trail', body: catalogue.requestItemSchema },
   { method: 'get', path: '/api/requests', tag: 'Service requests', summary: 'Service requests (open by default); task=mine|my_teams for the work waiting on you', query: rq.listRequestsSchema },
   { method: 'post', path: '/api/requests', tag: 'Service requests', summary: 'Submit a request for a person: the answers are checked against the item\'s form. Supports Idempotency-Key', body: rq.createRequestSchema },
   { method: 'get', path: '/api/requests/:ref', tag: 'Service requests', summary: 'A request with its answers, approval, tasks in order, SLA clock, history and next steps' },
