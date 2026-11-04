@@ -18,7 +18,7 @@ import { createArticle } from '../reporting/knowledge.js';
 import { timeline } from './major-incidents.js';
 import { authorize, can } from '../security/policy.js';
 import { createProblemInTx, loadForUpdate, logProblem, registerProblemExtra } from '../problems/problems.js';
-import { recordUrl, registerRecordType, type RecordType, type SearchHit } from '../records/records.js';
+import { recordUrl, refPattern, registerRecordType, type RecordType, type SearchHit } from '../records/records.js';
 import { loadCalendar } from '../reporting/sla.js';
 import { runTask } from '../reporting/ai.js';
 import { commentsTagged } from '../records/activity.js';
@@ -652,7 +652,7 @@ async function searchReviews(user: User, q: string, limit: number): Promise<Sear
 const REVIEW_TYPE: RecordType = {
   type: 'review',
   prefix: 'PIR',
-  pattern: /^PIR\d{6}$/,
+  pattern: refPattern('PIR'),
   readAction: 'incident.read',
   uiPath: (ref) => `/reviews/${ref}`,
   get: getReview,

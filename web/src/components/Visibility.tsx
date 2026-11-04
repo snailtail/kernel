@@ -197,7 +197,7 @@ export function RecordNotFound({ refId, error, onOpened }: { refId: string; erro
   return (
     <section className="card">
       <div className="error">{error}</div>
-      {user.role === 'admin' && /^(PRB|INC|CHG)\d{6}$/i.test(refId) && (
+      {user.role === 'admin' && /^(PRB|INC|CHG)\d{6,}$/i.test(refId) && (
         <p className="muted small">If the record is restricted, you can <button type="button" className="link-btn" onClick={breakGlass}>open it with break-glass</button>.</p>
       )}
       {message && <div className="error small">{message}</div>}

@@ -8,7 +8,7 @@ import { contextStore, currentContext } from '../core/context.js';
 import { badRequest, notFound } from '../core/errors.js';
 import { managers, notify } from '../notifications/notifications.js';
 import { authorize } from './policy.js';
-import { refRegex, textKinds, textKindOfRef, typeForRef } from '../records/records.js';
+import { refPattern, refRegex, textKindOfRef, textKinds, typeForRef } from '../records/records.js';
 import { addEntry } from '../records/activity.js';
 import type { Role } from '../problems/workflow.js';
 
@@ -168,5 +168,5 @@ export async function seeingAllIn<T>(db: Db, fn: () => Promise<T>) {
 export async function assertVisibleRef(ref: string) {
   const { rows } = await query('SELECT (SELECT kind FROM kernel_record_lookup($1)) AS kind, kernel_ref_hidden($1) AS hidden', [ref.toUpperCase()]);
   if (rows[0].hidden || (refRegex(textKinds()).test(ref) && !rows[0].kind)) throw notFound(`${ref.toUpperCase()} not found`);
-  if (/^PIR\d{6}$/i.test(ref) && !(await query('SELECT 1 FROM incident_reviews WHERE ref = $1', [ref.toUpperCase()])).rows[0]) throw notFound(`${ref.toUpperCase()} not found`);
+  if (refPattern('PIR', 'i').test(ref) && !(await query('SELECT 1 FROM incident_reviews WHERE ref = $1', [ref.toUpperCase()])).rows[0]) throw notFound(`${ref.toUpperCase()} not found`);
 }

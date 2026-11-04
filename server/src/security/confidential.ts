@@ -10,7 +10,7 @@ import { query, tx } from '../core/db.js';
 import { currentContext } from '../core/context.js';
 import { badRequest, forbidden, notFound } from '../core/errors.js';
 import { authorize } from './policy.js';
-import { recordType, textKindOfRef, textKinds, typeForRef, type People } from '../records/records.js';
+import { recordType, refPattern, textKindOfRef, textKinds, typeForRef, type People } from '../records/records.js';
 import { addEntry } from '../records/activity.js';
 
 // The kinds that can be confidential, and who works on each, come from the record types (records.ts: people).
@@ -33,7 +33,7 @@ export const MASKED_FIELDS = new Set([
 
 const kindOfRef = (ref: string) => textKindOfRef(ref)?.type;
 /** A post-incident review (PIR000012) is as confidential as its incident (#35). */
-const isReviewRef = (ref: string) => /^PIR\d{6}$/i.test(ref);
+const isReviewRef = (ref: string) => refPattern('PIR', 'i').test(ref);
 const maskable = (ref: string) => !!kindOfRef(ref) || isReviewRef(ref);
 
 /**

@@ -79,9 +79,10 @@ describe('dev platform adapters (#32)', () => {
     assert.ok(!github.inScope(['acme/shop'], 'acme/shop2'));
   });
 
-  test('pipeline states share one scale; refs need exactly six digits', () => {
+  test('pipeline states share one scale; only Kernel refs count', () => {
     assert.deepEqual(['succeeded', 'failed', 'canceled', 'inProgress', 'notStarted', 'partiallySucceeded'].map(ciState), ['success', 'failure', 'cancelled', 'in_progress', 'queued', 'failure']);
     assert.deepEqual(refsIn('Fixes chg-000017 and AB#12, not INC0010001'), ['CHG000017']);
+    assert.deepEqual(refsIn('After 999 999: INC1000000 and PRB-1234567'), ['INC1000000', 'PRB1234567']);
     assert.deepEqual(['Roll back 4.2', 'rollback to v3', 'Revert "Raise the pool"', 'Deploy 4.3'].map((t) => isRollback(t)), [true, true, false, false], 'a Revert commit deployed forward is not a rollback');
     assert.deepEqual([iso('2026-10-18T10:00:00+02:00'), iso('yesterday'), iso(undefined)], ['2026-10-18T08:00:00.000Z', undefined, undefined]);
   });

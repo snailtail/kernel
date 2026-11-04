@@ -49,7 +49,7 @@ describe('history and records restricted later (#227)', { skip }, () => {
   });
 
   test('a seven-digit ref, once the sequence passes 999 999, is hidden too', async () => {
-    // The rest of Kernel does not take seven-digit refs yet, so the incident and its link entry are made directly.
+    // The link entry is written directly, as one made before the restriction.
     const six = ok(await analyst2.post('/api/incidents', { title: 'Payslips sent twice' }), 201).ref;
     ok(await analyst2.put(`/api/records/${six}/visibility`, { restricted: true, reason: 'Security investigation' }));
     await ownerQuery("UPDATE incidents SET ref = 'INC1000000' WHERE ref = $1", [six]);

@@ -2,9 +2,9 @@
 // restricted later, its ref must not reach a reader who may not see it (#227, no existence oracle): this redacts it
 // at read time, as the caller, and never rewrites what is stored, so the audit trail stays whole for those who may.
 import { query } from '../core/db.js';
-import { aRestricted, recordTypes, typeOfPrefix } from './records.js';
+import { aRestricted, recordTypes, REF_DIGITS, typeOfPrefix } from './records.js';
 
-const REF = () => `\\b(?:${recordTypes().map((t) => t.prefix).join('|')})\\d{6,}\\b`;
+const REF = () => `\\b(?:${recordTypes().map((t) => t.prefix).join('|')})${REF_DIGITS}\\b`;
 
 /** A ref with the word for its kind before it, if any, so "Linked incident INC000123" reads "Linked a restricted incident". */
 const WORDS = ['problem', 'incident', 'change', 'improvement', 'request', 'work item', 'bug', 'story', 'epic', 'task'];

@@ -25,6 +25,7 @@ import { loadCalendar } from '../reporting/sla.js';
 import { standardSignature } from '../notifications/webhooks.js';
 import { absoluteUrl } from '../core/url.js';
 import { tokenHash } from '../core/hash.js';
+import { REF_DIGITS, refPattern } from '../records/records.js';
 
 export const KINDS = ['pagerduty', 'opsgenie', 'grafana_oncall', 'webhook', 'rotation'] as const;
 type Kind = (typeof KINDS)[number];
@@ -555,7 +556,7 @@ export async function pagesFor(incidentId: number) {
 
 // ---- Inbound: the tool says who acknowledged -----------------------------------------------------
 
-const REF = /\bINC\d{6}\b/gi;
+const REF = new RegExp(`\\bINC${REF_DIGITS}\\b`, 'gi');
 const BULK_KEY = /\bbulk:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
 const ACK = new Set(['incident.acknowledged', 'acknowledge', 'acknowledged', 'ack']);
 const RESOLVE = new Set(['incident.resolved', 'resolve', 'resolved', 'close', 'closed', 'ok']);
@@ -567,7 +568,7 @@ const RESOLVE = new Set(['incident.resolved', 'resolve', 'resolved', 'close', 'c
  */
 export function parseInbound(body: any): { refs: string[]; bulk: string | null; action: 'acknowledge' | 'resolve'; by: string } | null {
   const explicit = [body?.ref, body?.alert?.alias, body?.alert_uid, body?.event?.data?.incident_key, body?.dedup_key].filter((x) => typeof x === 'string');
-  const found = [...explicit, ...(JSON.stringify(body ?? {}).match(REF) ?? [])].map((r) => r.toUpperCase()).filter((r) => /^INC\d{6}$/.test(r));
+  const found = [...explicit, ...(JSON.stringify(body ?? {}).match(REF) ?? [])].map((r) => r.toUpperCase()).filter((r) => refPattern('INC').test(r));
   const refs = [...new Set(found)];
   // A bulk page (#125) is known to the tool by its key.
   const bulk = [...explicit, ...(JSON.stringify(body ?? {}).match(BULK_KEY) ?? [])].find((x) => new RegExp(`^${BULK_KEY.source}$`, 'i').test(x))?.toLowerCase() ?? null;
