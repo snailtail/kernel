@@ -16,7 +16,7 @@ import { runSecurityAlerting } from './events/security-alerts.js';
 import { backfillSla, checkSlaEvents } from './reporting/sla.js';
 import { processNotificationDeliveries, pruneNotifications, queueDigests } from './notifications/notifications.js';
 import { processStatusDeliveries, pruneStatusSubscriptions } from './status/status-subscriptions.js';
-import { processRequestMail } from './requests/requests.js';
+import { processRequestMail } from './requests/fulfilment.js';
 import { processPortalMail, prunePortal } from './requests/portal.js';
 import { runDueConnectors } from './integrations/connectors.js';
 import { reconcileDueMirrors, sendSourceComments } from './development/mirror.js';
