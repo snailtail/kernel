@@ -214,7 +214,7 @@ describe('connector framework and push contract (#18)', { skip }, () => {
     const mcp = new McpClient({ name: 'retire-test', version: '1' });
     await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('pm')}` } } }));
     try {
-      const call = async (name: string, args: object) => (await mcp.callTool({ name, arguments: args as any })) as any;
+      const call = async (name: string, args: Record<string, unknown>) => (await mcp.callTool({ name, arguments: args as any })) as any;
       assert.ok(JSON.parse((await call('list_retire_proposals', {})).content[0].text).some((p: any) => p.ref === ref));
       const unconfirmed = await call('retire_cis', { refs: [ref] });
       assert.equal(unconfirmed.isError, true);

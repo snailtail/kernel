@@ -86,7 +86,7 @@ describe('knowledge (#47)', { skip }, () => {
   test('agents search, read and draft, but cannot publish', async () => {
     const mcp = new McpClient({ name: 'kb', version: '1' });
     await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('pm')}` } } }));
-    const call = async (name: string, args: object) => (await mcp.callTool({ name, arguments: args })) as any;
+    const call = async (name: string, args: Record<string, unknown>) => (await mcp.callTool({ name, arguments: args })) as any;
     const found = JSON.parse((await call('search_knowledge', { q: 'payroll login' })).content[0].text);
     assert.ok(found.articles.length > 0 && found.articles[0].title_untrusted && !found.articles[0].title);
     const one = JSON.parse((await call('get_article', { ref: found.articles[0].ref })).content[0].text);

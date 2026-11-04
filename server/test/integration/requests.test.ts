@@ -25,7 +25,7 @@ describe('service request management (#44)', { skip }, () => {
     await c.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor(who)}` } } }));
     return c;
   };
-  const call = async (c: McpClient, name: string, args: object) => {
+  const call = async (c: McpClient, name: string, args: Record<string, unknown>) => {
     const r: any = await c.callTool({ name, arguments: args });
     return { isError: !!r.isError, body: r.isError ? r.content[0].text : JSON.parse(r.content[0].text) };
   };
@@ -223,7 +223,7 @@ describe('service request management (#44)', { skip }, () => {
     await n.processNotificationDeliveries(100);
     const mail = n.capturedMail.filter((m) => m.to === 'pm@example.com' && m.subject.includes(r.ref)).at(-1);
     const url = mail?.text.match(/Approve: (\S+)/)?.[1];
-    assert.ok(url, mail?.text);
+    assert.ok(url, mail?.text ?? 'no approval mail');
     const path = url.slice(url.indexOf('/api/'));
     const page = await fetch(k.base + path);
     const text = await page.text();

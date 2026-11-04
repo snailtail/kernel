@@ -288,7 +288,7 @@ describe('sprints, the board, burndown and retrospectives (#166)', { skip }, () 
     const w = ok(await analyst.post('/api/work-items', { type: 'story', title: 'Offline mode <b>', team_id: t.id, points: 3 }), 201);
     const mcp = new McpClient({ name: 'sp', version: '1' });
     await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
-    const call = async (name: string, args: object) => {
+    const call = async (name: string, args: Record<string, unknown>) => {
       const r: any = await mcp.callTool({ name, arguments: args });
       assert.ok(!r.isError, JSON.stringify(r.content));
       return JSON.parse(r.content[0].text);

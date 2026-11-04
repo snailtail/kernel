@@ -94,7 +94,7 @@ describe('service levels (#43)', { skip }, () => {
     assert.ok(r.by_priority.length >= 1);
     const mcp = new McpClient({ name: 'sla', version: '1' });
     await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
-    const call = async (name: string, args: object) => JSON.parse(((await mcp.callTool({ name, arguments: args })) as any).content[0].text);
+    const call = async (name: string, args: Record<string, unknown>) => JSON.parse(((await mcp.callTool({ name, arguments: args })) as any).content[0].text);
     const soon = await call('list_incidents', { breaching_within: 0 });
     assert.ok(soon.length >= 1 && soon.every((x: any) => x.sla_state === 'breached'));
     const one = await call('get_incident', { ref: soon[0].ref });
