@@ -265,7 +265,7 @@ export async function loadCi(db: Db, ref: string) {
 }
 
 async function newRef(db: Db, cls: 'ci' | 'service') {
-  const { rows } = await db.query(cls === 'service' ? "SELECT 'SVC' || lpad(nextval('service_ref_seq')::text, 6, '0') AS ref" : "SELECT 'CI' || lpad(nextval('ci_ref_seq')::text, 6, '0') AS ref");
+  const { rows } = await db.query(cls === 'service' ? "SELECT kernel_ref('SVC', nextval('service_ref_seq')) AS ref" : "SELECT kernel_ref('CI', nextval('ci_ref_seq')) AS ref");
   return rows[0].ref as string;
 }
 
@@ -513,7 +513,7 @@ export async function upsertCis(user: User, input: z.infer<typeof upsertSchema>)
         if (!batch.length) continue;
         // Allocate refs first so every new row is matched to its source by ref, not by row order.
         const { rows: refRows } = await db.query(
-          `SELECT $1 || lpad(nextval($2::regclass)::text, 6, '0') AS ref FROM generate_series(1, $3)`,
+          `SELECT kernel_ref($1, nextval($2::regclass)) AS ref FROM generate_series(1, $3)`,
           [cls === 'service' ? 'SVC' : 'CI', cls === 'service' ? 'service_ref_seq' : 'ci_ref_seq', batch.length],
         );
         const refs = refRows.map((r) => r.ref as string);

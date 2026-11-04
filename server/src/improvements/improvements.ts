@@ -14,7 +14,7 @@ import { kpis, TILES } from '../reporting/kpis.js';
 import { notify } from '../notifications/notifications.js';
 import { authorize, can } from '../security/policy.js';
 import { logProblem, registerProblemExtra, type StartNarrow } from '../problems/problems.js';
-import { recordType, recordUrl, refRegex, registerRecordType, typeForRef, typeOfPrefix, type RecordType } from '../records/records.js';
+import { recordType, recordUrl, refPattern, refRegex, registerRecordType, typeForRef, typeOfPrefix, type RecordType } from '../records/records.js';
 import { assertVisibleRef } from '../security/visibility.js';
 
 export const IMPROVEMENT_STATUSES = ['idea', 'approved', 'in_progress', 'done', 'rejected'] as const;
@@ -437,7 +437,7 @@ registerProblemExtra(async (p) => {
 const IMPROVEMENT_TYPE: RecordType = {
   type: 'improvement',
   prefix: 'IMP',
-  pattern: /^IMP\d{6}$/,
+  pattern: refPattern('IMP'),
   readAction: 'improvement.read',
   uiPath: (ref) => `/improvements/${ref}`,
   get: getImprovement,

@@ -14,7 +14,7 @@ import { authorize, can } from '../security/policy.js';
 import { affectedFrom } from '../problems/problem-cis.js';
 import { possibleCausesForIncident } from '../changes/changes.js';
 import { createProblemInTx, createProblemSchema, getProblem, problemFields, loadForUpdate, logProblem, registerProblemExtra } from '../problems/problems.js';
-import { recordUrl, registerRecordType, type RecordType } from '../records/records.js';
+import { recordUrl, refPattern, registerRecordType, type RecordType } from '../records/records.js';
 import { afterIncidentLog, logIncident } from './incident-log.js';
 import { queueReply } from '../requests/portal.js';
 import { recomputeSla, slaClock, slaOnTransition } from '../reporting/sla.js';
@@ -649,7 +649,7 @@ const INCIDENT_TYPE: RecordType = {
   type: 'incident',
   prefix: 'INC',
   // Exactly six digits, so references to other tools (ServiceNow INC0009001…) are not mistaken for Kernel incidents.
-  pattern: /^INC\d{6}$/,
+  pattern: refPattern('INC'),
   readAction: 'incident.read',
   uiPath: (ref) => `/incidents/${ref}`,
   get: getIncident,

@@ -23,7 +23,7 @@ import { securityEvent } from '../security/security-events.js';
 import { unsubscribeUrl } from '../status/status-subscriptions.js';
 import { queueReply } from './portal.js';
 import { authorize, can } from '../security/policy.js';
-import { recordUrl, registerRecordType, typeForRef, typeOfPrefix, type RecordType } from '../records/records.js';
+import { recordUrl, refPattern, registerRecordType, typeForRef, typeOfPrefix, type RecordType } from '../records/records.js';
 import { recomputeSla, slaClock, slaOnTransition } from '../reporting/sla.js';
 import { checkAssigneeInTeam, requestTasksOf, teamMembers } from '../people/teams.js';
 import { assertVisibleRef } from '../security/visibility.js';
@@ -1083,7 +1083,7 @@ export async function teamRequestTasks(teamIds: number[]) {
 const REQUEST_TYPE: RecordType = {
   type: 'request',
   prefix: 'REQ',
-  pattern: /^REQ\d{6}$/,
+  pattern: refPattern('REQ'),
   readAction: 'request.read',
   uiPath: (ref) => `/requests/${ref}`,
   get: getRequest,

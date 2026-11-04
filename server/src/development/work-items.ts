@@ -12,7 +12,7 @@ import { type Db, query, tx } from '../core/db.js';
 import { badRequest, conflict, notFound } from '../core/errors.js';
 import { authorize, can } from '../security/policy.js';
 import { checkAssigneeInTeam, validTeam } from '../people/teams.js';
-import { recordType, recordUrl, registerRecordType, typeOfPrefix, type RecordType } from '../records/records.js';
+import { recordType, recordUrl, refPattern, registerRecordType, typeOfPrefix, type RecordType } from '../records/records.js';
 import { assertVisibleRef, seeingAll } from '../security/visibility.js';
 import { recordSummaries } from '../records/summaries.js';
 import type { StartNarrow } from '../problems/problems.js';
@@ -562,7 +562,7 @@ export async function addWorkItemLink(user: User, ref: string, input: z.infer<ty
   const kernel = input.kind !== 'document' && (!input.system || input.system === 'Kernel');
   const reference = kernel ? input.reference.toUpperCase() : input.reference;
   if (kernel && input.kind === 'work_item') {
-    if (!/^WI\d{6}$/.test(reference)) throw badRequest(`${reference} is not a work item`);
+    if (!refPattern('WI').test(reference)) throw badRequest(`${reference} is not a work item`);
     if (reference === ref.toUpperCase()) throw badRequest('An item cannot be linked to itself');
     await visibleId(reference);
   } else if (kernel) {
@@ -643,7 +643,7 @@ export async function myWorkItems(userId: number) {
 const WORK_ITEM_TYPE: RecordType = {
   type: 'work_item',
   prefix: 'WI',
-  pattern: /^WI\d{6}$/,
+  pattern: refPattern('WI'),
   readAction: 'work.read',
   uiPath: (ref) => `/work/${ref}`,
   get: getWorkItem,

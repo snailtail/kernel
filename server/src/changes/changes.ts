@@ -19,7 +19,7 @@ import { seeingAllIn } from '../security/visibility.js';
 import { getProblem, loadForUpdate, logProblem, registerProblemExtra } from '../problems/problems.js';
 import { problemFix, problemsFixedThroughWork } from './problem-fix.js';
 import { managers, notify } from '../notifications/notifications.js';
-import { recordUrl, registerRecordType, type RecordType } from '../records/records.js';
+import { recordUrl, refPattern, registerRecordType, type RecordType } from '../records/records.js';
 import { event } from '../core/hooks.js';
 
 /** A change reached review or was cancelled: a service request waiting on it (#44) takes its outcome. */
@@ -835,7 +835,7 @@ const CHANGE_TYPE: RecordType = {
   type: 'change',
   prefix: 'CHG',
   // Exactly six digits, so ServiceNow and Jira references (CHG0030012…) stay external.
-  pattern: /^CHG\d{6}$/,
+  pattern: refPattern('CHG'),
   readAction: 'change.read',
   uiPath: (ref) => `/changes/${ref}`,
   get: getChange,
