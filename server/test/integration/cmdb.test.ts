@@ -93,7 +93,7 @@ describe('CMDB core (#16)', { skip }, () => {
   test('MCP tools for CIs, and generic comment/link on CI refs', async () => {
     const mcp = new McpClient({ name: 'cmdb', version: '1' });
     await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('pm')}` } } }));
-    const call = async (name: string, args: object) => JSON.parse(((await mcp.callTool({ name, arguments: args })) as any).content[0].text);
+    const call = async (name: string, args: Record<string, unknown>) => JSON.parse(((await mcp.callTool({ name, arguments: args })) as any).content[0].text);
     const hits = await call('search_cis', { q: 'db01' });
     assert.equal(hits[0].name, 'db01');
     const ci = await call('get_ci', { ref: hits[0].ref });

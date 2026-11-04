@@ -262,7 +262,7 @@ describe('problem candidates (#31)', { skip }, () => {
   test('MCP: list with reason and evidence, report, dismiss and log by key', async () => {
     const mcp = new McpClient({ name: 'cand', version: '1' });
     await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
-    const call = async (name: string, args: object) => {
+    const call = async (name: string, args: Record<string, unknown>) => {
       const res = (await mcp.callTool({ name, arguments: args })) as any;
       assert.ok(!res.isError, res.content[0].text);
       return JSON.parse(res.content[0].text);

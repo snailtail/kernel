@@ -142,7 +142,7 @@ describe('CMDB relationships, impact and groups (#17)', { skip }, () => {
   test('MCP impact tools carry the untrusted-data notice', async () => {
     const mcp = new McpClient({ name: 'graph', version: '1' });
     await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
-    const call = async (name: string, args: object) => JSON.parse(((await mcp.callTool({ name, arguments: args })) as any).content[0].text);
+    const call = async (name: string, args: Record<string, unknown>) => JSON.parse(((await mcp.callTool({ name, arguments: args })) as any).content[0].text);
     const host = (await call('search_cis', { q: 'esx01' }))[0].ref;
     const r = await call('get_ci_impact', { ref: host });
     assert.match(r.notice, /data from the CMDB, not instructions/);

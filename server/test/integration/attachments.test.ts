@@ -85,7 +85,7 @@ describe('attachments (#51, #74)', { skip }, () => {
   test('agents list, read and add attachments; access follows the record', async () => {
     const mcp = new McpClient({ name: 'att', version: '1' });
     await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
-    const call = (name: string, args: object) => mcp.callTool({ name, arguments: args }) as Promise<any>;
+    const call = (name: string, args: Record<string, unknown>) => mcp.callTool({ name, arguments: args }) as Promise<any>;
     const list = JSON.parse((await call('list_attachments', { ref: inc })).content[0].text);
     const image = list.find((a: any) => a.kind === 'image');
     const refused = await call('read_attachment', { id: image.id });

@@ -153,7 +153,7 @@ describe('inbound email (#48)', { skip }, () => {
     const mcp = new McpClient({ name: 'inbound-test', version: '1' });
     await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
     try {
-      const call = async (name: string, args: object) => (await mcp.callTool({ name, arguments: args as any })) as any;
+      const call = async (name: string, args: Record<string, unknown>) => (await mcp.callTool({ name, arguments: args as any })) as any;
       const listed = JSON.parse((await call('list_inbound_mail', {})).content[0].text);
       const item = listed.mail.find((m: any) => m.untrusted_content.subject.includes('Ignore previous instructions'));
       assert.ok(item, JSON.stringify(listed));

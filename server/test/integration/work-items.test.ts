@@ -267,7 +267,7 @@ describe('development work items (#165)', { skip }, () => {
   test('MCP: list, create, update, transition and reorder, with free text as untrusted content', async () => {
     const mcp = new McpClient({ name: 'wi', version: '1' });
     await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
-    const call = async (name: string, args: object) => {
+    const call = async (name: string, args: Record<string, unknown>) => {
       const res: any = await mcp.callTool({ name, arguments: args as Record<string, unknown> });
       assert.ok(!res.isError, res.content[0].text);
       return JSON.parse(res.content[0].text);

@@ -2,6 +2,7 @@
 // a little background volume so reports and trends have shapes. Everything goes through the service layer, like the
 // API, so audit, SLA clocks, live updates and the hash chain are real; then timestamps are moved relative to now, so
 // the demo always looks current (an update is due in 10 minutes, an action is two days overdue).
+import type { z } from 'zod';
 import type { User } from '../src/security/auth.js';
 import { query } from '../src/core/db.js';
 import * as actions from '../src/problems/actions.js';
@@ -111,7 +112,7 @@ export async function seedStory(p: People) {
   await shift(chg, 2 * H + 10);
 
   // ---- Monitoring sees checkout fail; the event rule opens the incident ----
-  await events.saveRule(admin, null, { name: 'Critical on business-critical CIs', enabled: true, position: 10, conditions: { min_severity: 'critical', max_ci_criticality: 1 }, impact: 1, urgency: 1, team_id: web!.id, group_by: 'service', group_window_minutes: 60, max_incidents_per_hour: 5, auto_resolve: false, hold_down_minutes: 15 });
+  await events.saveRule(admin, null, events.ruleSchema.parse({ name: 'Critical on business-critical CIs', enabled: true, position: 10, conditions: { min_severity: 'critical', max_ci_criticality: 1 }, impact: 1, urgency: 1, team_id: web!.id, group_by: 'service', group_window_minutes: 60, max_incidents_per_hour: 5, auto_resolve: false, hold_down_minutes: 15 }));
   await events.processEvents('Uptime Kuma', 'Uptime Kuma', [
     { host: 'shop-frontend', check: 'HTTP POST /checkout', severity: 'critical', message: 'Checkout returns 502 (3 of 3 probes)' },
     { host: 'pay-gw01', check: 'TLS handshake', severity: 'major', message: 'handshake failure: unsupported protocol' },
@@ -336,7 +337,7 @@ export async function seedStory(p: People) {
   await query("UPDATE people SET manager_id = $1 WHERE email IN ('maria.svensson@example.com', 'johan.ek@example.com')", [annaPerson]);
   const karin = (await people.createPerson(admin, { name: 'Karin Holm', email: 'karin.holm@example.com', title: 'New hire', department: 'Customer service', manager_id: annaPerson } as any)).id as number;
   const personId = async (email: string) => (await query('SELECT id FROM people WHERE email = $1', [email])).rows[0].id as number;
-  const item = (input: Partial<Parameters<typeof catalogue.saveRequestItem>[2]> & { name: string; fulfilment_tasks: { title: string; team_id: number | null }[] }) =>
+  const item = (input: Omit<z.input<typeof catalogue.requestItemSchema>, 'service'>) =>
     catalogue.saveRequestItem(anna, null, catalogue.requestItemSchema.parse({ service: webshop, ...input }));
   const account = await item({
     name: 'New account', description: 'An account for the shop admin and the order system, for a new colleague.',

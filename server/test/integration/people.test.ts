@@ -64,7 +64,7 @@ describe('people, organisations and affected users (#39)', { skip }, () => {
   test('agents see who people are, not how to reach them, and cannot create contacts', async () => {
     const mcp = new McpClient({ name: 'people', version: '1' });
     await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
-    const raw = async (name: string, args: object) => (await mcp.callTool({ name, arguments: args })) as any;
+    const raw = async (name: string, args: Record<string, unknown>) => (await mcp.callTool({ name, arguments: args })) as any;
     const found = JSON.parse((await raw('search_people', { q: 'anna' })).content[0].text);
     assert.equal(found[0].name, 'Anna Berg');
     assert.ok(!JSON.stringify(found).includes('@'), 'no email to the AI provider');

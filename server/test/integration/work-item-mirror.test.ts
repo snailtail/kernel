@@ -181,7 +181,7 @@ describe('mirrored backlogs from Azure DevOps (part 1 of #168)', { skip }, () =>
     const mcp = new McpClient({ name: 'mirror', version: '1' });
     await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
     try {
-      const call = (name: string, args: object) => mcp.callTool({ name, arguments: args as Record<string, unknown> }) as Promise<any>;
+      const call = (name: string, args: Record<string, unknown>) => mcp.callTool({ name, arguments: args as Record<string, unknown> }) as Promise<any>;
       const got = JSON.parse((await call('get_work_item', { ref: story.ref })).content[0].text);
       assert.equal(got.mirror.source, 'azure_devops');
       assert.equal(got.untrusted_content.title, 'Pay with one tap', 'the source\'s title is untrusted content');
