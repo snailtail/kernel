@@ -2,15 +2,13 @@
 // and the generic cross-practice operations must work for it (docs/api-conventions.md).
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
-import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { Client, skip, startKernel, type Harness } from './harness.js';
+import { Client, skip, startKernel, type Harness, type Mcp } from './harness.js';
 
 describe('API and MCP parity', { skip }, () => {
   let k: Harness;
   let analyst: Client;
   let pm: Client;
-  let mcp: McpClient;
+  let mcp: Mcp;
   let doc: any;
 
   before(async () => {
@@ -21,9 +19,8 @@ describe('API and MCP parity', { skip }, () => {
     // covers them.
     await (await k.login('admin')).put('/api/admin/modules', { request: true, development: true, reason: 'Parity' });
     doc = (await analyst.get('/api/openapi.json')).body;
-    mcp = new McpClient({ name: 'parity', version: '1' });
     // An administrator sees every tool, so the parity check covers all of them.
-    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('admin')}` } } }));
+    mcp = await k.mcp('admin');
   });
   after(async () => {
     await mcp?.close();
@@ -34,7 +31,7 @@ describe('API and MCP parity', { skip }, () => {
     const { recordTypes } = await import('../../src/records/records.js');
     const types = recordTypes();
     assert.ok(types.length >= 1);
-    const tools = (await mcp.listTools()).tools.map((t) => t.name);
+    const tools = await mcp.tools();
     const routes = new Set(k.routes.map((r) => `${r.method} ${r.url}`));
     for (const t of types) {
       const expectRoute = (method: string, path: string) => {
@@ -89,7 +86,7 @@ describe('API and MCP parity', { skip }, () => {
       const ref = await MAKE[t.type]();
       assert.ok(t.pattern ? t.pattern.test(ref) : ref.startsWith(t.prefix), `${t.type}: ${ref} has the ${t.prefix} prefix`);
       const viaRest = (await analyst.get(t.rest.get.replace(':ref', ref))).body;
-      const viaMcp: any = JSON.parse(((await mcp.callTool({ name: t.mcp.get, arguments: { ref } })) as any).content[0].text);
+      const viaMcp: any = await mcp.call(t.mcp.get, { ref });
       for (const [surface, r] of [['REST', viaRest], ['MCP', viaMcp]] as const) {
         assert.equal(r.ref, ref, `${t.type} ${surface}: ref`);
         assert.equal(r.type, t.type, `${t.type} ${surface}: type`);
@@ -105,7 +102,7 @@ describe('API and MCP parity', { skip }, () => {
       const history = await analyst.get(`/api/records/${ref}/history`);
       assert.equal(history.status, 200, `${t.type}: history`);
       assert.ok(history.body.length >= 1 && history.body.every((e: any) => !('user_agent' in e)), `${t.type}: history has entries`);
-      const viaTool: any = JSON.parse(((await mcp.callTool({ name: 'get_history', arguments: { ref } })) as any).content[0].text);
+      const viaTool: any = await mcp.call('get_history', { ref });
       assert.equal(viaTool.length, history.body.length, `${t.type}: get_history matches REST`);
     }
   });
@@ -128,8 +125,8 @@ describe('API and MCP parity', { skip }, () => {
     const work = (await analyst.get('/api/my-work')).body;
     assert.ok(Array.isArray(work.problems) && Array.isArray(work.actions));
 
-    const res: any = await mcp.callTool({ name: 'get_record', arguments: { ref: a.ref } });
-    assert.equal(JSON.parse(res.content[0].text).ref, a.ref);
+    const res = await mcp.call('get_record', { ref: a.ref });
+    assert.equal(res.ref, a.ref);
   });
 
   test('get_impact is for CIs and services; history follows visibility', async () => {
@@ -137,15 +134,15 @@ describe('API and MCP parity', { skip }, () => {
     const vm = (await pm.post('/api/cis', { name: `impact-vm-${Date.now()}`, ci_type: 'virtual_machine' })).body.ref;
     await pm.post(`/api/cis/${svc}/relationships`, { type: 'depends_on', target: vm });
     const viaRest = (await analyst.get(`/api/records/${vm}/impact`)).body;
-    const viaMcp: any = JSON.parse(((await mcp.callTool({ name: 'get_impact', arguments: { ref: vm } })) as any).content[0].text);
-    const old: any = JSON.parse(((await mcp.callTool({ name: 'get_ci_impact', arguments: { ref: vm } })) as any).content[0].text);
+    const viaMcp: any = await mcp.call('get_impact', { ref: vm });
+    const old: any = await mcp.call('get_ci_impact', { ref: vm });
     assert.deepEqual(viaMcp.services, old.services, 'get_impact is get_ci_impact under the generic name');
     assert.deepEqual(viaRest.services, old.services);
     const p = (await analyst.post('/api/problems', { title: 'No impact graph' })).body.ref;
     const bad = await analyst.get(`/api/records/${p}/impact`);
     assert.equal(bad.status, 400);
     assert.match(bad.body.error, /CIs and services/);
-    const tool: any = await mcp.callTool({ name: 'get_impact', arguments: { ref: p } });
+    const tool = await mcp.raw('get_impact', { ref: p });
     assert.ok(tool.isError);
 
     // A restricted record's history answers like one that does not exist for someone who cannot see it.

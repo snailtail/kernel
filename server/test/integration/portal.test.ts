@@ -1,6 +1,4 @@
 import assert from 'node:assert/strict';
-import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { after, before, describe, test } from 'node:test';
 import { Client, ownerQuery, skip, startKernel, type Harness } from './harness.js';
 
@@ -188,10 +186,8 @@ describe('self-service portal (#45)', { skip }, () => {
     const inc = (await analyst.get(`/api/incidents/${ref}`)).body;
     const a = inc.activity.find((x: any) => x.body === 'It shows error E-42.');
     assert.deepEqual([a.kind, a.data.from_requester, a.channel], ['comment', true, 'portal']);
-    const mcp = new McpClient({ name: 'portal', version: '1' });
-    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
-    const r: any = await mcp.callTool({ name: 'get_incident', arguments: { ref } });
-    const forAgent = JSON.parse(r.content[0].text);
+    const mcp = await k.mcp('analyst');
+    const forAgent = await mcp.call('get_incident', { ref });
     const note = forAgent.untrusted_content.notes.find((x: any) => x.note === 'It shows error E-42.');
     assert.deepEqual([note.by, note.from_requester], ['the caller (portal)', true]);
     assert.ok(forAgent.untrusted_content.notes.some((x: any) => x.to_requester), 'replies sent to the caller are marked too');

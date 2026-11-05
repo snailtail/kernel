@@ -1,6 +1,4 @@
 import assert from 'node:assert/strict';
-import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { after, before, describe, test } from 'node:test';
 import { ownerQuery, PASSWORD, skip, startKernel, type Client, type Harness } from './harness.js';
 
@@ -57,9 +55,8 @@ describe('confidential records (#61)', { skip }, () => {
   });
 
   test("agents and exports always get the masked text, even for the record's own people", async () => {
-    const mcp = new McpClient({ name: 'conf', version: '1' });
-    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
-    const res: any = await mcp.callTool({ name: 'get_record', arguments: { ref } });
+    const mcp = await k.mcp('analyst');
+    const res: any = await mcp.raw('get_record', { ref });
     const text = res.content[0].text;
     assert.ok(text.includes('Mailbox incident follow-up'), 'positive control: the agent gets the record');
     assert.equal(text.includes(SECRET_TEXT), false);
@@ -93,9 +90,8 @@ describe('confidential records (#61)', { skip }, () => {
     // Agents never read the text, so they cannot change it, even with the creator's token.
     const plain = await analyst.post('/api/problems', { title: 'Printer queue stuck', description: 'first' });
     ok(plain);
-    const mcp = new McpClient({ name: 'conf-write', version: '1' });
-    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
-    const call = async (name: string, args: Record<string, unknown>) => (await mcp.callTool({ name, arguments: args })) as any;
+    const mcp = await k.mcp('analyst');
+    const call = mcp.raw;
     assert.equal((await call('update_problem', { ref: plain.body.ref, description: 'second' })).isError, undefined, 'positive control: a normal record');
     for (const [name, args] of [['update_problem', { description: 'overwritten' }], ['transition_problem', { to: 'analysis', resolution: 'overwritten' }]] as const) {
       const res = await call(name, { ref, ...args });
@@ -128,9 +124,8 @@ describe('confidential records (#61)', { skip }, () => {
       assert.ok(await found(analyst2, `${url}mailbox`, r), `${url}: an outsider finds it by its title`);
     }
     // Agents never read confidential text, so they cannot search it either, even as the record's creator.
-    const mcp = new McpClient({ name: 'conf-lists', version: '1' });
-    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
-    const call = async (name: string, args: Record<string, unknown>) => ((await mcp.callTool({ name, arguments: args })) as any).content[0].text as string;
+    const mcp = await k.mcp('analyst');
+    const call = async (name: string, args: Record<string, unknown>) => (await mcp.raw(name, args)).content[0].text as string;
     assert.ok((await call('list_incidents', { q: 'mailbox', status: 'all' })).includes(inc.body.ref), 'positive control: by title');
     assert.equal((await call('list_incidents', { q: 'forwarding', status: 'all' })).includes(inc.body.ref), false);
     assert.equal((await call('search_known_errors', { q: 'forwarding' })).includes(ref), false);
@@ -180,9 +175,8 @@ describe('confidential records (#61)', { skip }, () => {
     assert.equal(JSON.stringify(change.body).includes(SECRET_TEXT), false);
     assert.equal((await ownerQuery('SELECT description FROM changes WHERE ref = $1', [change.body.ref])).rows[0].description.includes(SECRET_TEXT), false);
     // Agents never read confidential text, so they never copy it either, even with the creator's token.
-    const mcp = new McpClient({ name: 'conf-copy', version: '1' });
-    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
-    const call = async (name: string, args: Record<string, unknown>) => JSON.parse(((await mcp.callTool({ name, arguments: args })) as any).content[0].text);
+    const mcp = await k.mcp('analyst');
+    const call = mcp.call;
     const viaAgent = [(await call('create_problem_from_incident', { ref: inc.body.ref })).ref, (await call('raise_change_for_problem', { problem: prb.body.ref })).ref];
     await mcp.close();
     const copied = await ownerQuery('SELECT description FROM problems WHERE ref = $1 UNION ALL SELECT description FROM changes WHERE ref = $2', viaAgent);

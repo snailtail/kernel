@@ -293,11 +293,8 @@ describe('on-call and paging (#111)', { skip }, () => {
   });
 
   test('agents see who is on call (MCP)', async () => {
-    const { Client: McpClient } = await import('@modelcontextprotocol/sdk/client/index.js');
-    const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/sdk/client/streamableHttp.js');
-    const mcp = new McpClient({ name: 'oncall', version: '1' });
-    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
-    const res: any = await mcp.callTool({ name: 'get_on_call', arguments: { team_id: network } });
+    const mcp = await k.mcp('analyst');
+    const res = await mcp.raw('get_on_call', { team_id: network });
     assert.match(res.content[0].text, /Nora Network/);
     await mcp.close();
   });

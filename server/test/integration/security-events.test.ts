@@ -1,7 +1,5 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
-import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { Client, ownerQuery, skip, startKernel, type Harness } from './harness.js';
 
 describe('security events (#64)', { skip }, () => {
@@ -100,16 +98,12 @@ describe('security events (#64)', { skip }, () => {
   });
 
   test('MCP writes and failures are stored, reads only logged', async () => {
-    const mcp = new McpClient({ name: 'kernel-tests', version: '1.0.0' });
-    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
-    try {
-      const made: any = await mcp.callTool({ name: 'create_problem', arguments: { title: 'Via an agent', impact: 3, urgency: 3 } });
-      assert.ok(!made.isError, made.content?.[0]?.text);
-      await mcp.callTool({ name: 'get_problem', arguments: { ref: 'PRB999999' } });
-      await mcp.callTool({ name: 'list_reference_data', arguments: {} });
-    } finally {
-      await mcp.close();
-    }
+    const mcp = await k.mcp('analyst');
+    const made: any = await mcp.raw('create_problem', { title: 'Via an agent', impact: 3, urgency: 3 });
+    assert.ok(!made.isError, made.content?.[0]?.text);
+    await mcp.raw('get_problem', { ref: 'PRB999999' });
+    await mcp.raw('list_reference_data', {});
+    await mcp.close();
     const calls = await events('action=mcp.tool_call');
     assert.ok(calls.some((e) => e.detail.tool === 'create_problem' && e.outcome === 'success' && e.channel === 'mcp'));
     assert.ok(calls.some((e) => e.detail.tool === 'get_problem' && e.outcome === 'failure' && e.target === 'PRB999999'));

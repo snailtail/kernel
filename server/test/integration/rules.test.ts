@@ -1,7 +1,5 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
-import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { Client, skip, startKernel, type Harness } from './harness.js';
 
 describe('automation rules (#49)', { skip }, () => {
@@ -337,14 +335,13 @@ describe('automation rules (#49)', { skip }, () => {
   });
 
   test('agents propose rules over MCP; they never enable one', async () => {
-    const mcp = new McpClient({ name: 'rules-test', version: '1' });
     const token = await k.tokenFor('pm');
-    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${token}` } } }));
+    const mcp = await k.mcp({ token });
     const call = async (name: string, args: Record<string, unknown>) => {
-      const res: any = await mcp.callTool({ name, arguments: args });
+      const res: any = await mcp.raw(name, args);
       return { isError: !!res.isError, data: res.isError ? res.content[0].text : JSON.parse(res.content[0].text) };
     };
-    const tools = (await mcp.listTools()).tools.map((t) => t.name);
+    const tools = await mcp.tools();
     for (const t of ['list_rules', 'get_rule', 'dry_run_rule', 'propose_rule']) assert.ok(tools.includes(t), t);
     assert.ok(!tools.some((t) => /enable|save_rule/.test(t)), 'no tool enables or writes a rule');
     const draft = { name: 'Agent idea', kind: 'incident', trigger: { type: 'status_changed', to: 'on_hold' }, conditions: [{ field: 'priority', op: 'lt', value: 3 }], actions: [{ type: 'add_comment', text: 'High priority on hold: check the reason' }] };

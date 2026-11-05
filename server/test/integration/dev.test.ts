@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHmac, randomUUID } from 'node:crypto';
 import { after, before, describe, test } from 'node:test';
-import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { skip, startKernel, type Client, type Harness } from './harness.js';
 
 describe('dev platform links (#32)', { skip }, () => {
@@ -99,12 +97,9 @@ describe('dev platform links (#32)', { skip }, () => {
     const added = (await analyst.post(`/api/records/${prb}/dev-links`, { url: 'https://github.com/acme/shop/issues/7' })).body;
     assert.ok(added.some((l: any) => l.item_type === 'issue' && l.key === '7'));
     assert.ok((await viewer.get(`/api/records/${prb}/dev-links`)).body.length >= 2);
-    const mcp = new McpClient({ name: 'dev', version: '1' });
-    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
-    const res: any = await mcp.callTool({ name: 'link_dev_item', arguments: { ref: chg, url: 'https://github.com/acme/shop/pull/42' } });
-    const out = JSON.parse(res.content[0].text);
+    const mcp = await k.mcp('analyst');
+    const out = await mcp.call('link_dev_item', { ref: chg, url: 'https://github.com/acme/shop/pull/42' });
     assert.ok(out.notice && out.items.every((i: any) => i.untrusted_content && i.title === undefined));
-    await mcp.close();
   });
 
   test('a pull request that mentions a restricted change is not linked to it, and says nothing about it', async () => {

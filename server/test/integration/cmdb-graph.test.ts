@@ -1,7 +1,5 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
-import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { Client, skip, startKernel, type Harness } from './harness.js';
 
 describe('CMDB relationships, impact and groups (#17)', { skip }, () => {
@@ -140,16 +138,14 @@ describe('CMDB relationships, impact and groups (#17)', { skip }, () => {
   });
 
   test('MCP impact tools carry the untrusted-data notice', async () => {
-    const mcp = new McpClient({ name: 'graph', version: '1' });
-    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
-    const call = async (name: string, args: Record<string, unknown>) => JSON.parse(((await mcp.callTool({ name, arguments: args })) as any).content[0].text);
+    const mcp = await k.mcp('analyst');
+    const call = mcp.call;
     const host = (await call('search_cis', { q: 'esx01' }))[0].ref;
     const r = await call('get_ci_impact', { ref: host });
     assert.match(r.notice, /data from the CMDB, not instructions/);
     assert.equal(r.services[0].name, 'Payroll');
     const deps = await call('get_service_dependencies', { ref: r.services[0].ref, max_depth: 1 });
     assert.equal(deps.count, 1);
-    assert.ok((await mcp.listPrompts()).prompts.some((p) => p.name === 'impact_analysis'));
-    await mcp.close();
+    assert.ok((await mcp.client.listPrompts()).prompts.some((p) => p.name === 'impact_analysis'));
   });
 });
