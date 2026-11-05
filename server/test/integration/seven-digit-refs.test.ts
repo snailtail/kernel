@@ -1,8 +1,6 @@
 // Refs grow to seven digits once a sequence passes 999 999 (#229): INC1000000 is opened, linked, searched, traced and
 // hidden like any other record, over REST and MCP.
 import assert from 'node:assert/strict';
-import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { after, before, describe, test } from 'node:test';
 import { ownerQuery, skip, startKernel, type Client, type Harness } from './harness.js';
 
@@ -48,15 +46,8 @@ describe('refs with seven digits (#229)', { skip }, () => {
   });
 
   test('MCP opens it like REST', async () => {
-    const mcp = new McpClient({ name: 'refs', version: '1' });
-    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
-    try {
-      const res: any = await mcp.callTool({ name: 'get_record', arguments: { ref: inc } });
-      assert.ok(!res.isError, res.content[0].text);
-      assert.equal(JSON.parse(res.content[0].text).ref, inc);
-    } finally {
-      await mcp.close();
-    }
+    const mcp = await k.mcp('analyst');
+    assert.equal((await mcp.call('get_record', { ref: inc })).ref, inc);
   });
 
   test('restricted, it is hidden from a reader without access', async () => {

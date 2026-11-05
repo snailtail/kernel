@@ -1,5 +1,7 @@
 // Starts Kernel against a throwaway PostgreSQL database for integration tests.
 // Requires TEST_DATABASE_URL; the database is wiped on every run.
+import { Client as SdkMcpClient } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { AddressInfo } from 'node:net';
 
 export const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
@@ -66,11 +68,26 @@ export class Client {
   del = <T = any>(path: string) => this.request<T>('DELETE', path);
 }
 
+/** An MCP session against the test server, as an agent would hold one. */
+export interface Mcp {
+  /** Calls a tool and parses its JSON answer; a tool error fails with the tool's text. */
+  call<T = any>(name: string, args?: Record<string, unknown>): Promise<T>;
+  /** Calls a tool and returns the result unchanged, for tests of `isError` or the text itself. */
+  raw(name: string, args?: Record<string, unknown>): Promise<any>;
+  /** The names of the tools this session is offered. */
+  tools(): Promise<string[]>;
+  /** The SDK client, for what the helpers above do not cover (tool annotations, resources, prompts). */
+  client: SdkMcpClient;
+  close(): Promise<void>;
+}
+
 export interface Harness {
   base: string;
   routes: { method: string; url: string }[];
   login(user: keyof typeof USERS): Promise<Client>;
   tokenFor(user: keyof typeof USERS): Promise<string>;
+  /** Connects to /mcp as the user, or with a given token; `close()` of the harness closes it if the test did not. */
+  mcp(as: keyof typeof USERS | { token: string }): Promise<Mcp>;
   close(): Promise<void>;
 }
 
@@ -122,15 +139,44 @@ export async function startKernel(): Promise<Harness> {
     return client;
   };
 
+  const tokenFor = async (user: keyof typeof USERS) => {
+    const client = await login(user);
+    return (await client.post('/api/tokens', { name: 'test', scopes: ['read', 'write', 'mcp'] })).body.token as string;
+  };
+
+  const open = new Set<SdkMcpClient>();
+  const mcp = async (as: keyof typeof USERS | { token: string }): Promise<Mcp> => {
+    const token = typeof as === 'string' ? await tokenFor(as) : as.token;
+    const client = new SdkMcpClient({ name: 'kernel-tests', version: '1' });
+    await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${token}` } } }));
+    open.add(client);
+    const raw = (name: string, args: Record<string, unknown> = {}) => client.callTool({ name, arguments: args }) as Promise<any>;
+    return {
+      client,
+      raw,
+      async call(name, args) {
+        const res = await raw(name, args);
+        if (res.isError) throw new Error(`${name}: ${res.content[0]?.text}`);
+        return JSON.parse(res.content[0].text);
+      },
+      async tools() {
+        return (await client.listTools()).tools.map((t) => t.name);
+      },
+      async close() {
+        open.delete(client);
+        await client.close();
+      },
+    };
+  };
+
   return {
     base,
     routes: app.kernelRoutes,
     login,
-    async tokenFor(user) {
-      const client = await login(user);
-      return (await client.post('/api/tokens', { name: 'test', scopes: ['read', 'write', 'mcp'] })).body.token;
-    },
+    tokenFor,
+    mcp,
     async close() {
+      await Promise.all([...open].map((c) => c.close()));
       await app.close();
       await pool.end();
     },

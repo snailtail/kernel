@@ -1,7 +1,5 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
-import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { ownerQuery, skip, startKernel, type Client, type Harness } from './harness.js';
 
 describe('service reports (#54)', { skip }, () => {
@@ -161,14 +159,10 @@ describe('service reports (#54)', { skip }, () => {
     }
 
     // MCP parity: get_dashboard carries the same KPIs.
-    const mcp = new McpClient({ name: 'kpi', version: '1' });
-    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('viewer')}` } } }));
-    const res = (await mcp.callTool({ name: 'get_dashboard', arguments: {} })) as any;
-    assert.ok(!res.isError, res.content[0].text);
-    const viaMcp = JSON.parse(res.content[0].text);
+    const mcp = await k.mcp('viewer');
+    const viaMcp = await mcp.call('get_dashboard', {});
     assert.deepEqual(viaMcp.kpis.tiles.map((t: any) => [t.id, t.value]), d.tiles.map((t: any) => [t.id, t.value]));
     assert.ok(viaMcp.by_status, 'the backlog summary is still there');
-    await mcp.close();
   });
 
   test('scheduled reports: the owner or a manager, once per period, by email without restricted records', async () => {

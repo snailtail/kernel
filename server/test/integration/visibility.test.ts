@@ -5,8 +5,6 @@
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { after, before, describe, test } from 'node:test';
-import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { ownerQuery, skip, startKernel, type Client, type Harness } from './harness.js';
 
 const MARKER = `LEAK-${randomBytes(4).toString('hex')}`;
@@ -148,9 +146,8 @@ describe('visibility and restricted records (#53)', { skip }, () => {
 
   test('LEAK HARNESS: no read-only MCP tool or resource shows the marker, even to the record\'s own team through an agent', async () => {
     for (const user of ['pm', 'analyst2', 'admin', 'analyst'] as const) {
-      const mcp = new McpClient({ name: 'leak', version: '1' });
-      await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor(user)}` } } }));
-      const { tools } = await mcp.listTools();
+      const mcp = await k.mcp(user);
+      const { tools } = await mcp.client.listTools();
       const readOnly = tools.filter((t) => t.annotations?.readOnlyHint);
       assert.ok(readOnly.length > 20);
       for (const t of readOnly) {
@@ -165,15 +162,15 @@ describe('visibility and restricted records (#53)', { skip }, () => {
             else if (type === 'boolean') args[name] = false;
             else if (type === 'array') args[name] = [ref];
           }
-          const res: any = await mcp.callTool({ name: t.name, arguments: args }).catch((err) => ({ content: [{ text: String(err) }] }));
+          const res: any = await mcp.raw(t.name, args).catch((err) => ({ content: [{ text: String(err) }] }));
           assert.ok(!leaks(res), `MCP ${t.name} leaked to ${user} (restricted records are not for agents by default): …${around(res)}`);
         }
       }
-      for (const r of (await mcp.listResources()).resources) {
-        assert.ok(!leaks(await mcp.readResource({ uri: r.uri })), `resource ${r.uri} leaked`);
+      for (const r of (await mcp.client.listResources()).resources) {
+        assert.ok(!leaks(await mcp.client.readResource({ uri: r.uri })), `resource ${r.uri} leaked`);
       }
       // Positive control: the tools do return record text – an ordinary record's marker comes through.
-      const seen: any = await mcp.callTool({ name: 'get_record', arguments: { ref: openWithMarker } });
+      const seen: any = await mcp.raw('get_record', { ref: openWithMarker });
       assert.ok(JSON.stringify(seen).includes(OPEN_MARKER), `get_record returns an ordinary record's text to ${user}`);
       await mcp.close();
     }

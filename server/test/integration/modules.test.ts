@@ -1,7 +1,5 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
-import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { Client, skip, startKernel, type Harness } from './harness.js';
 
 describe('modules and first-run setup (#36)', { skip }, () => {
@@ -68,13 +66,12 @@ describe('modules and first-run setup (#36)', { skip }, () => {
     assert.ok(openapi.paths['/api/problems']);
     assert.equal((await analyst.get('/api/reports')).body.incidents, null);
     assert.equal((await analyst.get('/api/meta')).body.modules.incident, false);
-    const mcp = new McpClient({ name: 'mods', version: '1' });
-    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
-    const tools = (await mcp.listTools()).tools.map((t) => t.name);
+    const mcp = await k.mcp('analyst');
+    const tools = await mcp.tools();
     assert.ok(!tools.includes('create_incident') && !tools.includes('list_incidents'));
     assert.ok(!tools.includes('get_review') && !tools.includes('transition_review'));
     assert.ok(tools.includes('create_problem'));
-    assert.ok(!(await mcp.listPrompts()).prompts.some((p) => p.name === 'triage_incident'));
+    assert.ok(!(await mcp.client.listPrompts()).prompts.some((p) => p.name === 'triage_incident'));
     await mcp.close();
     // Rules do not open incidents while incidents are off; the alert is still recorded.
     await pm.post('/api/event-rules', { name: 'All', conditions: {} });
@@ -124,17 +121,16 @@ describe('modules and first-run setup (#36)', { skip }, () => {
       assert.equal((await analyst.post(`/api/incidents/${inc}/review/items/${item.id}/action`, { problem: prb })).status, 409, 'already an action');
       assert.equal((await analyst.get(`/api/incidents/${inc}`)).body.next_steps.handover, null, 'no hand-over to problem management');
 
-      const mcp = new McpClient({ name: 'mods', version: '1' });
-      await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
-      const tools = (await mcp.listTools()).tools.map((t) => t.name);
+      const mcp = await k.mcp('analyst');
+      const tools = await mcp.tools();
       for (const gone of ['create_problem', 'search_problems', 'get_problem', 'search_known_errors', 'list_problem_candidates', 'get_review_agenda', 'start_analysis']) {
         assert.ok(!tools.includes(gone), `${gone} is listed`);
       }
       for (const kept of ['add_action', 'list_actions', 'update_action', 'my_work', 'add_comment', 'link_records', 'get_review', 'create_incident', 'get_dashboard', 'get_report']) {
         assert.ok(tools.includes(kept), `${kept} is missing`);
       }
-      assert.ok(!(await mcp.listPrompts()).prompts.some((p) => p.name === 'five_whys' || p.name === 'problem_review_board'));
-      const dash: any = await mcp.callTool({ name: 'get_dashboard', arguments: {} });
+      assert.ok(!(await mcp.client.listPrompts()).prompts.some((p) => p.name === 'five_whys' || p.name === 'problem_review_board'));
+      const dash = await mcp.raw('get_dashboard');
       const board = JSON.parse(dash.content[0].text);
       assert.ok(!dash.isError && Array.isArray(board.kpis.tiles), 'the KPIs are there');
       assert.equal(board.by_status, undefined, 'without the problem backlog');

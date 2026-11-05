@@ -1,7 +1,5 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
-import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { ownerQuery, skip, startKernel, type Client, type Harness } from './harness.js';
 
 describe('bulk actions on lists (#110)', { skip }, () => {
@@ -183,23 +181,14 @@ describe('bulk actions on lists (#110)', { skip }, () => {
   });
 
   test('MCP bulk_update previews by default and leaves decisions to their own tools', async () => {
-    const mcp = new McpClient({ name: 'bulk', version: '1' });
-    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('pm')}` } } }));
-    const call = async (args: Record<string, unknown>) => {
-      const res: any = await mcp.callTool({ name: 'bulk_update', arguments: args });
-      if (res.isError) throw new Error(res.content[0].text);
-      return JSON.parse(res.content[0].text);
-    };
-    try {
-      const p = (await pm.post('/api/problems', { title: 'Agent bulk target', impact: 3 })).body.ref;
-      const preview = await call({ practice: 'problems', ids: [p], operation: { op: 'priority', impact: 2 } });
-      assert.equal(preview.dry_run, true);
-      assert.equal(preview.summary.would_change, 1);
-      assert.equal((await pm.get(`/api/problems/${p}`)).body.impact, 3, 'nothing changed without apply');
-      assert.equal((await call({ practice: 'problems', ids: [p], operation: { op: 'priority', impact: 2 }, apply: true })).summary.changed, 1);
-      await assert.rejects(call({ practice: 'problems', ids: [p], operation: { op: 'status', to: 'closed' }, apply: true }), /decision/);
-    } finally {
-      await mcp.close();
-    }
+    const mcp = await k.mcp('pm');
+    const call = (args: Record<string, unknown>) => mcp.call('bulk_update', args);
+    const p = (await pm.post('/api/problems', { title: 'Agent bulk target', impact: 3 })).body.ref;
+    const preview = await call({ practice: 'problems', ids: [p], operation: { op: 'priority', impact: 2 } });
+    assert.equal(preview.dry_run, true);
+    assert.equal(preview.summary.would_change, 1);
+    assert.equal((await pm.get(`/api/problems/${p}`)).body.impact, 3, 'nothing changed without apply');
+    assert.equal((await call({ practice: 'problems', ids: [p], operation: { op: 'priority', impact: 2 }, apply: true })).summary.changed, 1);
+    await assert.rejects(call({ practice: 'problems', ids: [p], operation: { op: 'status', to: 'closed' }, apply: true }), /decision/);
   });
 });

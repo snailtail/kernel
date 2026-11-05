@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { after, before, describe, test } from 'node:test';
-import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { ownerQuery, skip, startKernel, type Client, type Harness } from './harness.js';
 
 describe('saved list views (#110)', { skip }, () => {
@@ -121,23 +119,14 @@ describe('saved list views (#110)', { skip }, () => {
   });
 
   test('MCP tools list, save and pin views', async () => {
-    const mcp = new McpClient({ name: 'views', version: '1' });
-    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
-    const call = async (name: string, args: Record<string, unknown>) => {
-      const res: any = await mcp.callTool({ name, arguments: args });
-      if (res.isError) throw new Error(res.content[0].text);
-      return JSON.parse(res.content[0].text);
-    };
-    try {
-      const saved = await call('save_view', { list: 'alerts', name: 'Database alerts', query: 'q=database' });
-      assert.equal(saved.scope, 'personal');
-      assert.ok((await call('list_views', { list: 'alerts' })).views.some((v: any) => v.id === saved.id));
-      assert.equal((await call('save_view', { id: saved.id, name: 'DB alerts' })).name, 'DB alerts');
-      assert.equal((await call('set_default_view', { list: 'alerts', view: saved.id })).default, String(saved.id));
-      await call('delete_view', { id: saved.id });
-      await assert.rejects(call('save_view', { name: 'No list' }), /list/);
-    } finally {
-      await mcp.close();
-    }
+    const mcp = await k.mcp('analyst');
+    const call = mcp.call;
+    const saved = await call('save_view', { list: 'alerts', name: 'Database alerts', query: 'q=database' });
+    assert.equal(saved.scope, 'personal');
+    assert.ok((await call('list_views', { list: 'alerts' })).views.some((v: any) => v.id === saved.id));
+    assert.equal((await call('save_view', { id: saved.id, name: 'DB alerts' })).name, 'DB alerts');
+    assert.equal((await call('set_default_view', { list: 'alerts', view: saved.id })).default, String(saved.id));
+    await call('delete_view', { id: saved.id });
+    await assert.rejects(call('save_view', { name: 'No list' }), /list/);
   });
 });

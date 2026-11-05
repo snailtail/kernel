@@ -1,6 +1,4 @@
 import assert from 'node:assert/strict';
-import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { after, before, describe, test } from 'node:test';
 import { ownerQuery, skip, startKernel, type Client, type Harness } from './harness.js';
 
@@ -42,9 +40,8 @@ describe('sprints, the board, burndown and retrospectives (#166)', { skip }, () 
       assert.equal((await analyst.post(`/api/sprints/${s.id}/start`, {})).status, 404);
       assert.ok(!(await pm.get('/api/dashboard/kpis')).body.tiles.some((t: any) => ['points_done', 'unplanned_work'].includes(t.id)));
       assert.equal((await analyst.get('/api/meta')).body.work_items, null);
-      const mcp = new McpClient({ name: 'sp', version: '1' });
-      await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
-      const tools = (await mcp.listTools()).tools.map((t) => t.name);
+      const mcp = await k.mcp('analyst');
+      const tools = await mcp.tools();
       await mcp.close();
       for (const t of ['list_sprints', 'get_sprint', 'plan_sprint', 'complete_sprint']) assert.ok(!tools.includes(t), t);
     } finally {
@@ -286,28 +283,19 @@ describe('sprints, the board, burndown and retrospectives (#166)', { skip }, () 
   test('MCP: plan, start, read and complete a sprint', async () => {
     const t = ok(await admin.post('/api/teams', { name: 'Mobile' }), 201);
     const w = ok(await analyst.post('/api/work-items', { type: 'story', title: 'Offline mode <b>', team_id: t.id, points: 3 }), 201);
-    const mcp = new McpClient({ name: 'sp', version: '1' });
-    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
-    const call = async (name: string, args: Record<string, unknown>) => {
-      const r: any = await mcp.callTool({ name, arguments: args });
-      assert.ok(!r.isError, JSON.stringify(r.content));
-      return JSON.parse(r.content[0].text);
-    };
-    try {
-      const planned = await call('plan_sprint', { team_id: t.id, name: 'M1', goal: 'Works on the train', starts_on: day(0), ends_on: day(13), capacity: 5, add: [w.ref], start: true });
-      assert.equal(planned.status, 'active');
-      assert.equal(planned.points.committed, 3);
-      assert.equal(planned.untrusted_content.item_titles[w.ref], 'Offline mode <b>');
-      assert.equal(planned.untrusted_content.goal, 'Works on the train');
-      assert.equal(planned.burndown.length, 14);
-      const listed = await call('list_sprints', { team: t.id });
-      assert.equal(listed[0].sprint_id, planned.sprint_id);
-      assert.equal((await call('get_sprint', { sprint_id: planned.sprint_id })).work_items[0].ref, w.ref);
-      const done = await call('complete_sprint', { sprint_id: planned.sprint_id, unfinished: { [w.ref]: 'backlog' } });
-      assert.equal(done.status, 'completed');
-      assert.equal(done.work_items[0].outcome, 'backlog');
-    } finally {
-      await mcp.close();
-    }
+    const mcp = await k.mcp('analyst');
+    const call = mcp.call;
+    const planned = await call('plan_sprint', { team_id: t.id, name: 'M1', goal: 'Works on the train', starts_on: day(0), ends_on: day(13), capacity: 5, add: [w.ref], start: true });
+    assert.equal(planned.status, 'active');
+    assert.equal(planned.points.committed, 3);
+    assert.equal(planned.untrusted_content.item_titles[w.ref], 'Offline mode <b>');
+    assert.equal(planned.untrusted_content.goal, 'Works on the train');
+    assert.equal(planned.burndown.length, 14);
+    const listed = await call('list_sprints', { team: t.id });
+    assert.equal(listed[0].sprint_id, planned.sprint_id);
+    assert.equal((await call('get_sprint', { sprint_id: planned.sprint_id })).work_items[0].ref, w.ref);
+    const done = await call('complete_sprint', { sprint_id: planned.sprint_id, unfinished: { [w.ref]: 'backlog' } });
+    assert.equal(done.status, 'completed');
+    assert.equal(done.work_items[0].outcome, 'backlog');
   });
 });

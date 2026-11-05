@@ -1,6 +1,4 @@
 import assert from 'node:assert/strict';
-import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { after, before, describe, test } from 'node:test';
 import { ownerQuery, skip, startKernel, type Client, type Harness } from './harness.js';
 
@@ -167,20 +165,15 @@ describe('continual improvement register (#52)', { skip }, () => {
     assert.equal(assigned.summary.changed, 2);
     assert.ok((await analyst.get('/api/my-work')).body.improvements.some((m: any) => m.ref === a.ref), 'My work lists approved ones I own');
 
-    const mcp = new McpClient({ name: 'improvements', version: '1' });
-    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
-    try {
-      const created: any = JSON.parse(((await mcp.callTool({ name: 'create_improvement', arguments: { title: 'Document the payroll runbook', value: 3, effort: 2, owner: 'analyst' } })) as any).content[0].text);
-      assert.match(created.ref, /^IMP/);
-      assert.equal(created.owner, 'Analyst');
-      assert.equal(created.untrusted_content.title, 'Document the payroll runbook', 'free text goes out as untrusted_content');
-      assert.equal(created.title, undefined);
-      const listed: any = JSON.parse(((await mcp.callTool({ name: 'list_improvements', arguments: { owner: 'me' } })) as any).content[0].text);
-      assert.ok(listed.some((m: any) => m.ref === created.ref));
-      const refused: any = await mcp.callTool({ name: 'transition_improvement', arguments: { ref: created.ref, to: 'approved' } });
-      assert.ok(refused.isError, 'an analyst cannot approve, over MCP either');
-    } finally {
-      await mcp.close();
-    }
+    const mcp = await k.mcp('analyst');
+    const created = await mcp.call('create_improvement', { title: 'Document the payroll runbook', value: 3, effort: 2, owner: 'analyst' });
+    assert.match(created.ref, /^IMP/);
+    assert.equal(created.owner, 'Analyst');
+    assert.equal(created.untrusted_content.title, 'Document the payroll runbook', 'free text goes out as untrusted_content');
+    assert.equal(created.title, undefined);
+    const listed = await mcp.call('list_improvements', { owner: 'me' });
+    assert.ok(listed.some((m: any) => m.ref === created.ref));
+    const refused = await mcp.raw('transition_improvement', { ref: created.ref, to: 'approved' });
+    assert.ok(refused.isError, 'an analyst cannot approve, over MCP either');
   });
 });

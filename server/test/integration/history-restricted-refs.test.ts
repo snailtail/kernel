@@ -1,8 +1,6 @@
 // History never shows the ref of a record the reader may not see (#227): an entry written before the record was
 // restricted is redacted at read time, the same in REST, MCP and the audit history, and stays whole for those who may.
 import assert from 'node:assert/strict';
-import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { after, before, describe, test } from 'node:test';
 import { ownerQuery, skip, startKernel, type Client, type Harness } from './harness.js';
 
@@ -64,17 +62,12 @@ describe('history and records restricted later (#227)', { skip }, () => {
 
   test('MCP gives the same as REST', async () => {
     const rest = ok(await analyst.get(`/api/problems/${p}`));
-    const mcp = new McpClient({ name: 'history', version: '1' });
-    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
-    try {
-      const res: any = await mcp.callTool({ name: 'get_record', arguments: { ref: p } });
-      const text = res.content[0].text as string;
-      assert.ok(!text.includes(inc));
-      assert.deepEqual(linkEntry(JSON.parse(text).activity).data, linkEntry(rest.activity).data);
-      const history: any = await mcp.callTool({ name: 'get_history', arguments: { ref: p } });
-      assert.ok(!history.content[0].text.includes(inc));
-    } finally {
-      await mcp.close();
-    }
+    const mcp = await k.mcp('analyst');
+    const res = await mcp.raw('get_record', { ref: p });
+    const text = res.content[0].text as string;
+    assert.ok(!text.includes(inc));
+    assert.deepEqual(linkEntry(JSON.parse(text).activity).data, linkEntry(rest.activity).data);
+    const history = await mcp.raw('get_history', { ref: p });
+    assert.ok(!history.content[0].text.includes(inc));
   });
 });

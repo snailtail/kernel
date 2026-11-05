@@ -1,8 +1,6 @@
 // Development and service management (#167, part 1): a problem's fix type, a bug from a problem or an incident, a
 // story from an improvement, typed links from either side, and the trace with a restricted link.
 import assert from 'node:assert/strict';
-import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { after, before, describe, test } from 'node:test';
 import { ownerQuery, skip, startKernel, type Client, type Harness } from './harness.js';
 
@@ -138,19 +136,13 @@ describe('development and service management (#167)', { skip }, () => {
     assert.ok(all.nodes.some((n: any) => n.ref === secret), 'its own people see it');
     assert.equal((await viewer.get(`/api/records/${secret}/trace`)).status, 404);
 
-    const mcp = new McpClient({ name: 'trace', version: '1' });
-    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
-    try {
-      const res: any = await mcp.callTool({ name: 'get_record_trace', arguments: { ref: p } });
-      const body = JSON.parse(res.content[0].text);
-      assert.equal(body.nodes.length, 5);
-      assert.equal(body.nodes.find((n: any) => n.ref === p).title, undefined, 'titles are untrusted content');
-      assert.equal(body.untrusted_content.titles[p], 'Payroll run failed');
-      const made: any = await mcp.callTool({ name: 'create_work_item_from', arguments: { ref: inc } });
-      assert.equal(JSON.parse(made.content[0].text).item_type, 'bug');
-    } finally {
-      await mcp.close();
-    }
+    const mcp = await k.mcp('analyst');
+    const body = await mcp.call('get_record_trace', { ref: p });
+    assert.equal(body.nodes.length, 5);
+    assert.equal(body.nodes.find((n: any) => n.ref === p).title, undefined, 'titles are untrusted content');
+    assert.equal(body.untrusted_content.titles[p], 'Payroll run failed');
+    const made = await mcp.call('create_work_item_from', { ref: inc });
+    assert.equal(made.item_type, 'bug');
 
     // With the module off, work items leave the trace and making one is gone.
     ok(await admin.put('/api/admin/modules', { development: false, reason: 'Off' }));
