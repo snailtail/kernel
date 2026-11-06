@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireUser } from '../security/auth.js';
 import * as ch from '../changes/changes.js';
+import * as calendar from '../changes/calendar.js';
 import { forbidden } from '../core/errors.js';
 
 type RefParams = { Params: { ref: string } };
@@ -9,7 +10,7 @@ type Id = { Params: { id: string } };
 
 export async function changeRoutes(app: FastifyInstance) {
   app.get('/api/changes', async (req) => ch.listChanges(requireUser(req), ch.listChangesSchema.parse(req.query)));
-  app.get('/api/changes/schedule', async (req) => ch.changeSchedule(requireUser(req), ch.scheduleSchema.parse(req.query)));
+  app.get('/api/changes/schedule', async (req) => calendar.changeSchedule(requireUser(req), calendar.scheduleSchema.parse(req.query)));
   app.post('/api/changes', { config: { idempotent: 'change.create' } }, async (req, reply) => {
     const created = await ch.createChange(requireUser(req), ch.createChangeSchema.parse(req.body));
     reply.code(201);
@@ -38,19 +39,19 @@ export async function changeRoutes(app: FastifyInstance) {
     return ch.raiseChangeForProblem(requireUser(req), req.params.ref, ch.createChangeSchema.partial().parse(req.body ?? {}));
   });
 
-  app.get('/api/change-templates', async (req) => ch.listTemplates(requireUser(req)));
+  app.get('/api/change-templates', async (req) => calendar.listTemplates(requireUser(req)));
   app.post('/api/change-templates', async (req, reply) => {
     reply.code(201);
-    return ch.saveTemplate(requireUser(req), null, ch.templateSchema.parse(req.body));
+    return calendar.saveTemplate(requireUser(req), null, calendar.templateSchema.parse(req.body));
   });
-  app.put<Id>('/api/change-templates/:id', async (req) => ch.saveTemplate(requireUser(req), Number(req.params.id), ch.templateSchema.parse(req.body)));
-  app.get('/api/change-freezes', async (req) => ch.listFreezes(requireUser(req)));
+  app.put<Id>('/api/change-templates/:id', async (req) => calendar.saveTemplate(requireUser(req), Number(req.params.id), calendar.templateSchema.parse(req.body)));
+  app.get('/api/change-freezes', async (req) => calendar.listFreezes(requireUser(req)));
   app.post('/api/change-freezes', async (req, reply) => {
     reply.code(201);
-    return ch.addFreeze(requireUser(req), ch.freezeSchema.parse(req.body));
+    return calendar.addFreeze(requireUser(req), calendar.freezeSchema.parse(req.body));
   });
   app.delete<Id>('/api/change-freezes/:id', async (req) => {
-    await ch.deleteFreeze(requireUser(req), Number(req.params.id));
+    await calendar.deleteFreeze(requireUser(req), Number(req.params.id));
     return { ok: true };
   });
 }

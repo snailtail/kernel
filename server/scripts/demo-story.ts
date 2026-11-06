@@ -9,6 +9,7 @@ import * as actions from '../src/problems/actions.js';
 import * as analyses from '../src/problems/analyses.js';
 import * as candidates from '../src/problems/candidates.js';
 import * as changes from '../src/changes/changes.js';
+import * as calendar from '../src/changes/calendar.js';
 import * as cmdb from '../src/cmdb/cmdb.js';
 import * as connectors from '../src/integrations/connectors.js';
 import * as graph from '../src/cmdb/cmdb-graph.js';
@@ -355,7 +356,7 @@ export async function seedStory(p: People) {
     approval: 'requester_manager', fulfilment_tasks: [{ title: 'Grant the access', team_id: web!.id }, { title: 'Tell the requester', team_id: null }],
   });
   // A new VM is a standard change (part 2 of #44): approved by the service owner, provisioned through the template.
-  const vmTemplate = await changes.saveTemplate(admin, null, changes.templateSchema.parse({
+  const vmTemplate = await calendar.saveTemplate(admin, null, calendar.templateSchema.parse({
     name: 'Provision a webshop VM', max_risk: 'high', description: 'A new VM from the platform image.',
     implementation_plan: 'Run the VM pipeline with the requested size; join it to monitoring.', backout_plan: 'Delete the VM and its DNS record.',
   }));
