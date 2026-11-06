@@ -15,6 +15,7 @@ import * as reviewsMod from './incidents/post-incident-reviews.js';
 import * as oc from './people/oncall.js';
 import * as events from './events/events.js';
 import * as ch from './changes/changes.js';
+import * as calendar from './changes/calendar.js';
 import * as imp from './improvements/improvements.js';
 import * as sp from './development/sprints.js';
 import * as wi from './development/work-items.js';
@@ -345,7 +346,7 @@ export const OPERATIONS: Op[] = [
   { method: 'put', path: '/api/calendars/:id', tag: 'Service levels', summary: 'Update a calendar', body: slaMod.calendarSchema },
   { method: 'get', path: '/api/service-catalogue', tag: 'Service levels', summary: 'Services with SLA, support hours and how to get help' },
   { method: 'get', path: '/api/changes', tag: 'Changes', summary: 'List changes (open by default)', query: ch.listChangesSchema },
-  { method: 'get', path: '/api/changes/schedule', tag: 'Changes', summary: 'Change schedule: planned changes, freezes and collisions', query: ch.scheduleSchema },
+  { method: 'get', path: '/api/changes/schedule', tag: 'Changes', summary: 'Change schedule: planned changes, freezes and collisions', query: calendar.scheduleSchema },
   { method: 'post', path: '/api/changes', tag: 'Changes', summary: 'Request a change (standard changes from a template); supports Idempotency-Key', body: ch.createChangeSchema },
   { method: 'post', path: '/api/changes/register', tag: 'Changes', summary: 'Register a standard change carried out by automation (deployment pipelines); token with ingest scope or an integration account', body: ch.registerSchema },
   { method: 'get', path: '/api/changes/:ref', tag: 'Changes', summary: 'A change with risk, approvals, affected CIs and services, collisions, freezes and related incidents' },
@@ -358,10 +359,10 @@ export const OPERATIONS: Op[] = [
   { method: 'delete', path: '/api/changes/:ref/cis/:ci', tag: 'Changes', summary: 'Unlink a CI or service' },
   { method: 'post', path: '/api/problems/:ref/change', tag: 'Changes', summary: 'Raise a change for the fix of a problem (prefilled, linked)' },
   { method: 'get', path: '/api/change-templates', tag: 'Changes', summary: 'Standard change templates' },
-  { method: 'post', path: '/api/change-templates', tag: 'Changes', summary: 'Create a standard change template (change authority)', body: ch.templateSchema },
-  { method: 'put', path: '/api/change-templates/:id', tag: 'Changes', summary: 'Update a template', body: ch.templateSchema },
+  { method: 'post', path: '/api/change-templates', tag: 'Changes', summary: 'Create a standard change template (change authority)', body: calendar.templateSchema },
+  { method: 'put', path: '/api/change-templates/:id', tag: 'Changes', summary: 'Update a template', body: calendar.templateSchema },
   { method: 'get', path: '/api/change-freezes', tag: 'Changes', summary: 'Change freezes' },
-  { method: 'post', path: '/api/change-freezes', tag: 'Changes', summary: 'Add a change freeze (change authority)', body: ch.freezeSchema },
+  { method: 'post', path: '/api/change-freezes', tag: 'Changes', summary: 'Add a change freeze (change authority)', body: calendar.freezeSchema },
   { method: 'delete', path: '/api/change-freezes/:id', tag: 'Changes', summary: 'Remove a change freeze' },
   { method: 'get', path: '/api/work-items', tag: 'Work items', summary: 'The backlog: open epics, stories, bugs and tasks in rank order per team, or filtered by status, type, team, assignee, label or epic', query: wi.listWorkItemsSchema },
   { method: 'post', path: '/api/work-items', tag: 'Work items', summary: 'Add an epic, story, bug or task to the bottom of a backlog; a child starts as narrow as its parent. Supports Idempotency-Key', body: wi.createWorkItemSchema },
