@@ -51,6 +51,7 @@ import { searchSchema } from './records/generic.js';
 import * as analyses from './problems/analyses.js';
 import * as candidates from './problems/candidates.js';
 import * as config from './problems/candidate-config.js';
+import * as detection from './problems/candidate-detection.js';
 import * as integrations from './integrations/integrations.js';
 import * as problems from './problems/problems.js';
 import * as reports from './reporting/reports.js';
@@ -510,7 +511,7 @@ export const OPERATIONS: Op[] = [
 
   { method: 'post', path: '/api/integrations/records', tag: 'Integrations', summary: 'Report incidents/events from other systems (idempotent; optional problem_ref links them)', body: integrations.ingestSchema },
   { method: 'get', path: '/api/candidates', tag: 'Problem candidates', summary: 'Problem candidates with their rule, reason and evidence, and the rules', query: candidates.listQuerySchema },
-  { method: 'put', path: '/api/candidates/rules/:rule', tag: 'Problem candidates', summary: 'Turn a rule on or off or change its thresholds (managers)', body: candidates.ruleUpdateSchema },
+  { method: 'put', path: '/api/candidates/rules/:rule', tag: 'Problem candidates', summary: 'Turn a rule on or off or change its thresholds (managers)', body: detection.ruleUpdateSchema },
   { method: 'get', path: '/api/candidates/draft', tag: 'Problem candidates', summary: 'The problem a candidate suggests, prefilled from its evidence', query: z.object({ key: z.string() }) },
   { method: 'post', path: '/api/candidates/create', tag: 'Problem candidates', summary: 'Log a problem from a candidate (by key, prefilled) or from records', body: ids.extend({ problem: candidates.problemOverridesSchema.optional() }) },
   { method: 'post', path: '/api/candidates/link', tag: 'Problem candidates', summary: 'Link a candidate or its records to a problem', body: ids.extend({ ref: z.string() }) },

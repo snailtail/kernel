@@ -1,6 +1,7 @@
 // MCP: Problem detection (candidates) and records reported from other systems.
 import { z } from 'zod';
 import * as config from '../problems/candidate-config.js';
+import * as detection from '../problems/candidate-detection.js';
 import * as candidates from '../problems/candidates.js';
 import * as integrations from '../integrations/integrations.js';
 import { compactProblem } from './problems.js';
@@ -12,7 +13,7 @@ export function registerCandidatesTools({ user, tool }: McpContext) {
   tool(
     'list_problem_candidates',
     'Problem detection: groups of records worth a problem, found by rules (recurring records on a CI or service, incidents sharing an underlying CI, a major incident resolved without a problem, the same category and resolution) or reported by external analysis. Each has a key, its rule, a readable reason and evidence (records, CIs). Act on a candidate by its key.',
-    { rule: z.enum(candidates.RULE_IDS).optional().describe('Only this rule'), show: z.enum(['open', 'hidden']).optional().describe('hidden: dismissed or snoozed candidates') },
+    { rule: z.enum(detection.RULE_IDS).optional().describe('Only this rule'), show: z.enum(['open', 'hidden']).optional().describe('hidden: dismissed or snoozed candidates') },
     true,
     (args) => candidates.listCandidates(args),
   );
