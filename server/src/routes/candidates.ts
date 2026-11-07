@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { requireUser } from '../security/auth.js';
 import * as candidates from '../problems/candidates.js';
 import * as config from '../problems/candidate-config.js';
+import * as detection from '../problems/candidate-detection.js';
 
 export async function candidateRoutes(app: FastifyInstance) {
   app.get('/api/candidates', async (req) => {
@@ -10,7 +11,7 @@ export async function candidateRoutes(app: FastifyInstance) {
     return candidates.listCandidates(candidates.listQuerySchema.parse(req.query));
   });
   app.put<{ Params: { rule: string } }>('/api/candidates/rules/:rule', async (req) =>
-    candidates.setRule(requireUser(req, 'candidate.rule'), req.params.rule, candidates.ruleUpdateSchema.parse(req.body)),
+    detection.setRule(requireUser(req, 'candidate.rule'), req.params.rule, detection.ruleUpdateSchema.parse(req.body)),
   );
   app.get('/api/candidates/draft', async (req) => candidates.candidateDraft(requireUser(req), z.object({ key: z.string().max(300) }).parse(req.query).key));
   app.post('/api/candidates/create', { bodyLimit: 2 * 1024 * 1024 }, async (req, reply) => {

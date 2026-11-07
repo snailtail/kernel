@@ -4,7 +4,7 @@
 import { z } from 'zod';
 import type { User } from '../security/auth.js';
 import { audit } from '../security/audit.js';
-import type { EvidenceCi, EvidenceRecord, Raw } from './candidates.js';
+import type { EvidenceCi, EvidenceRecord, Raw } from './candidate-detection.js';
 import { type Db, query, tx } from '../core/db.js';
 import { conflict, notFound } from '../core/errors.js';
 import { authorize } from '../security/policy.js';
