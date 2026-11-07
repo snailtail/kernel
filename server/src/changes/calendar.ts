@@ -1,5 +1,6 @@
 // Standard change templates, change freezes and the change schedule (#29), split out of changes.ts (#237).
 import { z } from 'zod';
+import { instant, longText } from '../core/fields.js';
 import type { User } from '../security/auth.js';
 import { audit } from '../security/audit.js';
 import { query } from '../core/db.js';
@@ -7,8 +8,6 @@ import { badRequest, conflict, notFound } from '../core/errors.js';
 import { authorize } from '../security/policy.js';
 import { RISKS } from './changes.js';
 
-const text = z.string().max(20000);
-const instant = z.iso.datetime({ offset: true });
 
 // ---- Templates and freezes ---------------------------------------------------------------------
 
@@ -18,10 +17,10 @@ export const templateSchema = z.object({
   max_risk: z.enum(RISKS).default('low'),
   /** CI types the template may change; empty means any type (within max_risk). */
   ci_types: z.array(z.string().max(50)).max(30).default([]),
-  description: text.default(''),
-  implementation_plan: text.min(1),
-  test_plan: text.default(''),
-  backout_plan: text.min(1),
+  description: longText.default(''),
+  implementation_plan: longText.min(1),
+  test_plan: longText.default(''),
+  backout_plan: longText.min(1),
   active: z.boolean().default(true),
 });
 

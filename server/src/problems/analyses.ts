@@ -1,5 +1,6 @@
 // Structured root cause analysis techniques attached to problems.
 import { z } from 'zod';
+import { longText } from '../core/fields.js';
 import type { User } from '../security/auth.js';
 import { query, tx } from '../core/db.js';
 import { badRequest, conflict, forbidden, notFound } from '../core/errors.js';
@@ -96,13 +97,13 @@ export const createAnalysisSchema = z.object({
   technique: z.enum(TECHNIQUES),
   title: z.string().trim().max(200).optional(),
   data: z.unknown().optional(),
-  conclusion: z.string().max(20000).optional(),
+  conclusion: longText.optional(),
 });
 
 export const updateAnalysisSchema = z.object({
   title: z.string().trim().max(200).optional(),
   data: z.unknown().optional(),
-  conclusion: z.string().max(20000).optional(),
+  conclusion: longText.optional(),
   /** updated_at of the version the edit started from; a newer save by someone else gives 409. */
   base_updated_at: z.string().optional(),
 });

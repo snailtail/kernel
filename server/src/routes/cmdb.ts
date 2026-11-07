@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { longText } from '../core/fields.js';
 import { requireUser } from '../security/auth.js';
 import * as cmdb from '../cmdb/cmdb.js';
 import * as graph from '../cmdb/cmdb-graph.js';
@@ -28,7 +29,7 @@ export async function cmdbRoutes(app: FastifyInstance) {
   app.patch<RefParams>('/api/cis/:ref', async (req) => cmdb.updateCi(requireUser(req), req.params.ref, cmdb.updateCiSchema.parse(req.body)));
   app.post<RefParams>('/api/cis/:ref/transition', async (req) => cmdb.transitionCi(requireUser(req), req.params.ref, cmdb.transitionCiSchema.parse(req.body)));
   app.post<RefParams>('/api/cis/:ref/comments', { config: { idempotent: 'ci.annotate' } }, async (req) =>
-    cmdb.addCiComment(requireUser(req), req.params.ref, z.object({ body: z.string().max(20000) }).parse(req.body).body),
+    cmdb.addCiComment(requireUser(req), req.params.ref, z.object({ body: longText }).parse(req.body).body),
   );
   app.post<RefParams>('/api/cis/:ref/links', { config: { idempotent: 'ci.annotate' } }, async (req) =>
     cmdb.addCiLink(requireUser(req), req.params.ref, cmdb.ciLinkSchema.parse(req.body)),

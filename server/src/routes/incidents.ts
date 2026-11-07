@@ -6,6 +6,7 @@ import * as major from '../incidents/major-incidents.js';
 import * as reviews from '../incidents/post-incident-reviews.js';
 import * as generic from '../records/generic.js';
 import { z } from 'zod';
+import { longText } from '../core/fields.js';
 
 type RefParams = { Params: { ref: string } };
 
@@ -76,7 +77,7 @@ export async function incidentRoutes(app: FastifyInstance) {
     return generic.linkRecords(user, req.params.ref, body.to, body);
   });
   app.post<RefParams>('/api/reviews/:ref/comments', { config: { idempotent: 'incident.update' } }, async (req) =>
-    reviews.addReviewComment(requireUser(req), req.params.ref, z.object({ body: z.string().max(20000) }).parse(req.body).body),
+    reviews.addReviewComment(requireUser(req), req.params.ref, z.object({ body: longText }).parse(req.body).body),
   );
   type ItemParams = { Params: { ref: string; id: string } };
   app.get<RefParams>('/api/incidents/:ref/review', async (req) => reviews.openReview(requireUser(req), req.params.ref));

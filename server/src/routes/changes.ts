@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { longText } from '../core/fields.js';
 import { requireUser } from '../security/auth.js';
 import * as ch from '../changes/changes.js';
 import * as calendar from '../changes/calendar.js';
@@ -29,7 +30,7 @@ export async function changeRoutes(app: FastifyInstance) {
     return ch.voteOnChange(requireUser(req), req.params.ref, ch.voteSchema.parse(req.body));
   });
   app.post<RefParams>('/api/changes/:ref/comments', { config: { idempotent: 'change.update' } }, async (req) =>
-    ch.addChangeComment(requireUser(req), req.params.ref, z.object({ body: z.string().max(20000) }).parse(req.body).body),
+    ch.addChangeComment(requireUser(req), req.params.ref, z.object({ body: longText }).parse(req.body).body),
   );
   app.post<RefParams>('/api/changes/:ref/links', async (req) => ch.addChangeLink(requireUser(req), req.params.ref, ch.changeLinkSchema.parse(req.body)));
   app.post<RefParams>('/api/changes/:ref/cis', async (req) => ch.setChangeCi(requireUser(req), req.params.ref, z.object({ ci: z.string().max(30) }).parse(req.body).ci, true));

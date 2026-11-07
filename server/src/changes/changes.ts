@@ -5,6 +5,7 @@ import { historyOf, logActivity, touchAndAudit } from '../records/activity.js';
 import { checkAssigneeInTeam, validTeam } from '../people/teams.js';
 import { deploymentSummary, postChangeStatus, pullRequestSummary } from '../integrations/dev.js';
 import { z } from 'zod';
+import { instant, longText, title } from '../core/fields.js';
 import { audienceOf, startNarrow } from '../security/audience.js';
 import type { User } from '../security/auth.js';
 import { computeImpact, impactSchema } from '../cmdb/cmdb-graph.js';
@@ -45,18 +46,16 @@ const TRANSITIONS: Record<Status, Status[]> = {
   cancelled: [],
 };
 
-const text = z.string().max(20000);
-const instant = z.iso.datetime({ offset: true });
 const changeFields = {
-  title: z.string().trim().min(1).max(300),
-  description: text,
+  title,
+  description: longText,
   change_type: z.enum(CHANGE_TYPES),
   risk: z.enum(RISKS).nullable(),
   planned_start: instant.nullable(),
   planned_end: instant.nullable(),
-  implementation_plan: text,
-  test_plan: text,
-  backout_plan: text,
+  implementation_plan: longText,
+  test_plan: longText,
+  backout_plan: longText,
   team_id: z.number().int().nullable(),
   assignee_id: z.number().int().nullable(),
 };
@@ -73,9 +72,9 @@ export const updateChangeSchema = z.object(changeFields).partial().extend({ base
 export const transitionChangeSchema = z.object({
   to: z.enum(CHANGE_STATUSES),
   outcome: z.enum(OUTCOMES).optional(),
-  review: text.optional(),
+  review: longText.optional(),
   cancel_reason: z.string().trim().max(2000).optional(),
-  comment: text.optional(),
+  comment: longText.optional(),
   /** Schedule into a freeze anyway (change authority only), with the reason recorded. */
   override_freeze_reason: z.string().trim().max(1000).optional(),
 });
@@ -93,8 +92,8 @@ export const listChangesSchema = z.object({
 /** A deployment pipeline registers a standard change it has carried out (or is carrying out). */
 export const registerSchema = z.object({
   template_id: z.number().int(),
-  title: z.string().trim().min(1).max(300),
-  description: text.default(''),
+  title,
+  description: longText.default(''),
   cis: z.array(z.string().trim().min(1).max(30)).max(100).default([]),
   actual_start: instant,
   actual_end: instant.optional(),

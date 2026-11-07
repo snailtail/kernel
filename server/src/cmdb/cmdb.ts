@@ -2,6 +2,7 @@
 // links (vCenter, Azure, OP5…); attributes are a small typed set per CI type. Changes are audited like any record.
 import { historyOf, logActivity } from '../records/activity.js';
 import { z } from 'zod';
+import { longText } from '../core/fields.js';
 import type { User } from '../security/auth.js';
 import { audit } from '../security/audit.js';
 import { currentContext } from '../core/context.js';
@@ -28,7 +29,7 @@ const ciFields = {
   criticality: z.number().int().min(1).max(4),
   owner_id: z.number().int().nullable(),
   team: z.string().trim().max(100),
-  description: z.string().max(20000),
+  description: longText,
   tags: z.array(z.string().trim().min(1).max(50)).max(30),
   attributes: z.record(z.string(), z.union([z.string().max(500), z.number(), z.boolean(), z.null()])),
   // Service catalogue (#43), for services.

@@ -5,6 +5,7 @@
 import { actionsById, actionsOf } from '../problems/actions.js';
 import { historyOf, logActivity, touchAndAudit } from '../records/activity.js';
 import { z } from 'zod';
+import { longText, title } from '../core/fields.js';
 import { audienceOf, BROADEST, startNarrow, type Audience } from '../security/audience.js';
 import type { User } from '../security/auth.js';
 import { assertMayWriteText, forgetExists, textFilterSql } from '../security/confidential.js';
@@ -45,15 +46,15 @@ export const IMPROVEMENT_MODEL = [
 
 const rating = z.number().int().min(1).max(5).nullable();
 const fields = {
-  title: z.string().trim().min(1).max(300),
-  description: z.string().max(20000),
+  title,
+  description: longText,
   owner_id: z.number().int().nullable(),
   /** The service (a CI of class service) by ref. */
   service: z.string().trim().max(30).nullable(),
   value: rating,
   effort: rating,
   kpi: z.enum(TILES).nullable(),
-  benefit: z.string().max(20000),
+  benefit: longText,
 };
 export const createImprovementSchema = z.object({
   ...fields,
@@ -389,7 +390,7 @@ export async function removeImprovementLink(user: User, ref: string, linkId: num
  * Lessons learned → improvement, from a resolved or closed problem (optional, never required). It starts as narrow
  * as the problem; the title and description are the person's own words.
  */
-export const fromProblemSchema = z.object({ title: z.string().trim().min(1).max(300), description: z.string().max(20000).default(''), owner_id: z.number().int().nullable().optional() });
+export const fromProblemSchema = z.object({ title, description: longText.default(''), owner_id: z.number().int().nullable().optional() });
 
 export async function improvementFromProblem(user: User, problemRef: string, input: z.infer<typeof fromProblemSchema>) {
   authorize(user, 'improvement.write');
