@@ -3,6 +3,7 @@
 // contributing factors into problems and follow-ups into actions, linked both ways. One per incident: scheduled when
 // a major incident is resolved, optional for any other. Shared by REST, MCP and the web UI.
 import { z } from 'zod';
+import { longText, title } from '../core/fields.js';
 import { actionsOf, insertAction, type Parent } from '../problems/actions.js';
 import { audit } from '../security/audit.js';
 import type { User } from '../security/auth.js';
@@ -25,23 +26,22 @@ import { commentsTagged } from '../records/activity.js';
 
 export const ITEM_KINDS = ['factor', 'follow_up', 'gap'] as const;
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
-const text = z.string().max(20000);
 
 export const createReviewSchema = z.object({ owner_id: z.number().int().nullable().optional(), due: date.nullable().optional() });
 export const updateReviewSchema = z.object({
   owner_id: z.number().int().nullable(),
   due: date.nullable(),
   attendees: z.string().max(2000),
-  what_happened: text,
-  impact_summary: text,
-  went_well: text,
-  was_hard: text,
-  lucky: text,
+  what_happened: longText,
+  impact_summary: longText,
+  went_well: longText,
+  was_hard: longText,
+  lucky: longText,
 }).partial();
 export const itemSchema = z.object({ kind: z.enum(ITEM_KINDS), body: z.string().trim().min(1).max(2000) });
 export const itemProblemSchema = z.object({ problem: z.string().trim().max(20).optional() });
-export const itemImprovementSchema = z.object({ title: z.string().trim().min(1).max(300).optional(), owner_id: z.number().int().nullable().optional() });
-export const itemActionSchema = z.object({ title: z.string().trim().min(1).max(300).optional(), owner_id: z.number().int().nullable().optional(), due_date: date.nullable().optional(), problem: z.string().trim().max(20).optional() });
+export const itemImprovementSchema = z.object({ title: title.optional(), owner_id: z.number().int().nullable().optional() });
+export const itemActionSchema = z.object({ title: title.optional(), owner_id: z.number().int().nullable().optional(), due_date: date.nullable().optional(), problem: z.string().trim().max(20).optional() });
 export const waiveSchema = z.object({ reason: z.string().trim().min(5).max(2000) });
 
 /** The guide shown with the template: what each section is for, and blameless wording. */

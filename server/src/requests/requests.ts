@@ -6,6 +6,7 @@
 // and the web UI; agents may log and follow requests, but only a person approves.
 import { historyOf, logActivity, touchAndAudit } from '../records/activity.js';
 import { z } from 'zod';
+import { longText, title } from '../core/fields.js';
 import type { User } from '../security/auth.js';
 import { assertMayWriteText, textFilterSql } from '../security/confidential.js';
 import { currentContext } from '../core/context.js';
@@ -207,12 +208,12 @@ export const createRequestSchema = z.object({
   /** The person it is for (a contact, #39); by default the person linked to the caller's account. */
   requester: personRefSchema.optional(),
   /** By default "<item> for <requester>". */
-  title: z.string().trim().min(1).max(300).optional(),
+  title: title.optional(),
   answers: z.record(z.string(), z.unknown()).default({}),
   priority: z.number().int().min(1).max(5).default(3),
 });
 export const updateRequestSchema = z.object({
-  title: z.string().trim().min(1).max(300),
+  title,
   priority: z.number().int().min(1).max(5),
   /** The whole form again; only before fulfilment starts. */
   answers: z.record(z.string(), z.unknown()),
@@ -223,7 +224,7 @@ export const transitionRequestSchema = z.object({
   reason: z.string().trim().max(2000).optional(),
 });
 export const decisionSchema = z.object({ decision: z.enum(['approve', 'reject']), comment: z.string().trim().max(2000).default('') });
-export const requestCommentSchema = z.object({ body: z.string().max(20000), to_requester: z.boolean().default(false) });
+export const requestCommentSchema = z.object({ body: longText, to_requester: z.boolean().default(false) });
 export const completeTaskSchema = z.object({ note: z.string().trim().max(5000).default('') });
 export const assignTaskSchema = z.object({ assignee_id: z.number().int().nullable() });
 

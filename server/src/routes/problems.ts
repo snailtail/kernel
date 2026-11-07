@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { longText } from '../core/fields.js';
 import * as flow from '../reporting/flow.js';
 import { requireUser } from '../security/auth.js';
 import { notFound } from '../core/errors.js';
@@ -72,7 +73,7 @@ export async function problemRoutes(app: FastifyInstance) {
 
   app.post<RefParams>('/api/problems/:ref/comments', { config: { idempotent: 'problem.comment' } }, async (req) => {
     const user = requireUser(req);
-    const body = z.object({ body: z.string().max(20000) }).parse(req.body);
+    const body = z.object({ body: longText }).parse(req.body);
     return problems.addComment(user, req.params.ref, body.body);
   });
 
@@ -149,7 +150,7 @@ export async function problemRoutes(app: FastifyInstance) {
   app.get<RefParams>('/api/records/:ref/trace', async (req) => recordTrace(requireUser(req), req.params.ref));
   app.get<RefParams>('/api/records/:ref/impact', async (req) => generic.getImpact(requireUser(req), req.params.ref, z.object({ max_depth: z.coerce.number().int().optional() }).parse(req.query)));
   app.post<RefParams>('/api/records/:ref/comments', { config: { idempotent: 'action.write' } }, async (req, reply) => {
-    await generic.addComment(requireUser(req), req.params.ref, z.object({ body: z.string().max(20000) }).parse(req.body).body);
+    await generic.addComment(requireUser(req), req.params.ref, z.object({ body: longText }).parse(req.body).body);
     return reply.code(201).send({ ok: true });
   });
   app.post<RefParams>('/api/records/:ref/links', { config: { idempotent: 'action.write' } }, async (req) => {

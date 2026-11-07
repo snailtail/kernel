@@ -8,6 +8,7 @@
 // acknowledged, which is the incident's first response for its SLA.
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
+import { instant } from '../core/fields.js';
 import { audienceOf, BROADEST, mayCopyText } from '../security/audience.js';
 import { audit } from '../security/audit.js';
 import type { User } from '../security/auth.js';
@@ -81,7 +82,7 @@ export const rotationSchema = z.object({
   timezone: z.string().refine((tz) => { try { new Intl.DateTimeFormat('en', { timeZone: tz }); return true; } catch { return false; } }, 'Unknown time zone').default('Europe/Stockholm'),
   starts_on: z.iso.date().optional(),
 });
-export const overrideSchema = z.object({ user_id: z.number().int(), starts_at: z.iso.datetime({ offset: true }), ends_at: z.iso.datetime({ offset: true }), reason: z.string().trim().max(500).default('') });
+export const overrideSchema = z.object({ user_id: z.number().int(), starts_at: instant, ends_at: instant, reason: z.string().trim().max(500).default('') });
 
 const PUBLIC = 'id, team_id, kind, config, rule, private_allow, enabled, created_at, updated_at, secret IS NOT NULL AS has_secret, inbound_token_hash IS NOT NULL AS has_inbound_token';
 

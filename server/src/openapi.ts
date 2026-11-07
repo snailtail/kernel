@@ -1,6 +1,7 @@
 // OpenAPI 3.1 description of the REST API, generated from the zod schemas the routes validate with.
 // A test checks that every registered /api route is listed here.
 import { z } from 'zod';
+import { longText } from './core/fields.js';
 import * as actions from './problems/actions.js';
 import * as cmdb from './cmdb/cmdb.js';
 import { MODULE_TAGS, moduleEnabled } from './core/modules.js';
@@ -113,7 +114,7 @@ export const OPERATIONS: Op[] = [
   { method: 'patch', path: '/api/problems/:ref', tag: 'Problems', summary: 'Update problem fields', body: problems.updateProblemSchema },
   { method: 'post', path: '/api/problems/:ref/transition', tag: 'Problems', summary: 'Change status (with the fields the target status requires)', body: problems.transitionSchema },
   { method: 'put', path: '/api/problems/:ref/assessment', tag: 'Problems', summary: 'Error control assessment and decision for a known error', body: problems.assessmentSchema },
-  { method: 'post', path: '/api/problems/:ref/comments', tag: 'Problems', summary: 'Add a work note', body: z.object({ body: z.string().max(20000) }) },
+  { method: 'post', path: '/api/problems/:ref/comments', tag: 'Problems', summary: 'Add a work note', body: z.object({ body: longText }) },
   { method: 'post', path: '/api/problems/:ref/links', tag: 'Problems', summary: 'Link an incident, event, change or problem', body: problems.linkSchema },
   { method: 'delete', path: '/api/problems/:ref/links/:id', tag: 'Problems', summary: 'Remove a link' },
   { method: 'post', path: '/api/problems/:ref/duplicate', tag: 'Problems', summary: 'Close as duplicate of another problem (managers)', body: z.object({ of: z.string() }) },

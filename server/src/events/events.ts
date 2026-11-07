@@ -3,6 +3,7 @@
 // rate limited, so an alert storm becomes one incident, not hundreds. A clear closes the alert; flapping reopens the
 // same alert, and incidents are only auto-resolved after a hold-down period.
 import { z } from 'zod';
+import { instant } from '../core/fields.js';
 import type { User } from '../security/auth.js';
 import { audit } from '../security/audit.js';
 import { computeImpact, getGroup, impactSchema } from '../cmdb/cmdb-graph.js';
@@ -40,7 +41,7 @@ export const eventSchema = z.object({
   check: z.string().trim().min(1).max(200).describe('What is checked, e.g. disk_usage or HTTP /health'),
   severity: z.enum(['clear', ...SEVERITIES]),
   message: z.string().max(2000).default(''),
-  occurred_at: z.iso.datetime({ offset: true }).optional(),
+  occurred_at: instant.optional(),
   url: httpUrl.optional().describe('Link back to the alert in the monitoring tool'),
   /** The source reports the check as under maintenance: record it, but suppress it. */
   maintenance: z.boolean().optional(),
@@ -147,8 +148,8 @@ export const maintenanceSchema = z
     group_id: z.number().int().optional(),
     /** For a CI or service: also everything it depends on (e.g. a service and its VMs, databases, hosts). */
     include_dependencies: z.boolean().default(false),
-    starts_at: z.iso.datetime({ offset: true }),
-    ends_at: z.iso.datetime({ offset: true }),
+    starts_at: instant,
+    ends_at: instant,
     reason: z.string().trim().max(500).default(''),
   })
   .refine((m) => !!m.ci !== (m.group_id !== undefined), 'Give either a CI/service or a group');

@@ -6,6 +6,7 @@
 // velocity and the unplanned share come from what happened, read through row-level security like everything else.
 // Shared by REST, MCP and the web UI; off unless the development module is on.
 import { z } from 'zod';
+import { longText, title } from '../core/fields.js';
 import type { User } from '../security/auth.js';
 import { audit } from '../security/audit.js';
 import { type Db, query, tx } from '../core/db.js';
@@ -37,7 +38,7 @@ const fields = {
   capacity: z.number().int().min(1).max(999).nullable(),
 };
 export const createSprintSchema = z.object({ team_id: z.number().int(), ...fields }).partial().required({ team_id: true, name: true, starts_on: true, ends_on: true });
-export const updateSprintSchema = z.object({ ...fields, review_notes: z.string().max(20000) }).partial();
+export const updateSprintSchema = z.object({ ...fields, review_notes: longText }).partial();
 export const listSprintsSchema = z.object({
   team: z.coerce.number().int().optional(),
   /** open is planned and active. */
@@ -54,7 +55,7 @@ export const completeSprintSchema = z.object({
   next_sprint_id: z.number().int().optional(),
 });
 export const retroItemSchema = z.object({ kind: z.enum(RETRO_KINDS), body: z.string().trim().min(1).max(2000) });
-export const retroImprovementSchema = z.object({ title: z.string().trim().min(1).max(300).optional(), owner_id: z.number().int().nullable().optional() });
+export const retroImprovementSchema = z.object({ title: title.optional(), owner_id: z.number().int().nullable().optional() });
 export const boardSchema = z.object({
   type: z.enum(['epic', 'story', 'bug', 'task']).optional(),
   assignee: z.union([z.literal('me'), z.literal('none'), z.coerce.number().int()]).optional(),

@@ -2,6 +2,7 @@
 // major incidents to problem management. Shared by REST, MCP and the web UI like every other practice.
 import { historyOf } from '../records/activity.js';
 import { z } from 'zod';
+import { longText, title } from '../core/fields.js';
 import { audienceOf, copyText, startNarrow, titleAudience } from '../security/audience.js';
 import type { User } from '../security/auth.js';
 import { loadCi, logCi, registerCiExtra } from '../cmdb/cmdb.js';
@@ -44,8 +45,8 @@ const TRANSITIONS: Record<IncidentStatus, IncidentStatus[]> = {
 
 const level = z.number().int().min(1).max(3);
 const incidentFields = {
-  title: z.string().trim().min(1).max(300),
-  description: z.string().max(20000),
+  title,
+  description: longText,
   impact: level,
   urgency: level,
   category_id: z.number().int().nullable(),
@@ -63,9 +64,9 @@ export const updateIncidentSchema = z.object(incidentFields).partial().extend({ 
 export const transitionIncidentSchema = z.object({
   to: z.enum(INCIDENT_STATUSES),
   resolution_code: z.enum(RESOLUTION_CODES).optional(),
-  resolution: z.string().max(20000).optional(),
+  resolution: longText.optional(),
   hold_reason: z.string().trim().max(1000).optional(),
-  comment: z.string().max(20000).optional(),
+  comment: longText.optional(),
   /** Resolving a major incident (#108): who runs the post-incident review, and by when. */
   pir_owner_id: z.number().int().nullable().optional(),
   pir_due: z.iso.date().nullable().optional(),
@@ -88,7 +89,7 @@ export const listIncidentsSchema = z.object({
   limit: z.coerce.number().int().min(1).max(500).default(200),
 });
 export const incidentCommentSchema = z.object({
-  body: z.string().max(20000),
+  body: longText,
   kind: z.enum(['comment', 'communication']).default('comment'),
   /** A reply to the caller (#45): shown in the portal and mailed to them. Internal notes are the default. */
   to_requester: z.boolean().default(false),
