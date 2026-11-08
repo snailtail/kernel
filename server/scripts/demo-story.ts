@@ -28,6 +28,7 @@ import * as catalogue from '../src/requests/catalogue.js';
 // Standard change and webhook tasks run through hooks that fulfilment.ts provides when it is loaded (the app loads it).
 import '../src/requests/fulfilment.js';
 import * as rules from '../src/automation/rules.js';
+import { processRuleRuns } from '../src/automation/rule-runner.js';
 import { contextStore, currentContext } from '../src/core/context.js';
 import * as reviews from '../src/incidents/post-incident-reviews.js';
 import * as setup from '../src/security/setup.js';
@@ -423,7 +424,7 @@ export async function seedStory(p: People) {
     actions: [{ type: 'add_comment', text: 'A P1 or P2 is on hold: say what it waits for and when work resumes.' }],
   });
   await incidents.createIncident(sara, { title: 'Order history page is blank', description: 'Johan cannot see his orders in the shop admin.', impact: 3, urgency: 3, caller: { email: 'johan.ek@example.com' } });
-  await rules.processRuleRuns();
+  await processRuleRuns();
 
   // ---- Development work (#165): an optional module, on in the demo; the Web platform team's backlog ----
   await setup.setModules(admin, { development: true }, 'Demo story');
