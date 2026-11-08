@@ -6,11 +6,11 @@ describe('automation rules (#49)', { skip }, () => {
   let k: Harness;
   let admin: Client, pm: Client, analyst: Client, analyst2: Client, viewer: Client;
   let db: typeof import('../../src/core/db.js');
-  let rules: typeof import('../../src/automation/rules.js');
+  let runner: typeof import('../../src/automation/rule-runner.js');
   const ids: Record<string, number> = {};
   let payroll: string, payrollDb: string, hr: any, ops: any, cat: number;
 
-  const run = () => rules.processRuleRuns();
+  const run = () => runner.processRuleRuns();
   const ok = (r: { status: number; body: any }, status = 200) => {
     assert.equal(r.status, status, JSON.stringify(r.body));
     return r.body;
@@ -33,7 +33,7 @@ describe('automation rules (#49)', { skip }, () => {
     k = await startKernel();
     [admin, pm, analyst, analyst2, viewer] = await Promise.all([k.login('admin'), k.login('pm'), k.login('analyst'), k.login('analyst2'), k.login('viewer')]);
     db = await import('../../src/core/db.js');
-    rules = await import('../../src/automation/rules.js');
+    runner = await import('../../src/automation/rule-runner.js');
     for (const u of (await db.query('SELECT id, username FROM users')).rows) ids[u.username] = u.id;
     payroll = ok(await pm.post('/api/cis', { name: 'Payroll', ci_type: 'business_service' }), 201).ref;
     payrollDb = ok(await pm.post('/api/cis', { name: 'payroll-db01', ci_type: 'database' }), 201).ref;
@@ -109,10 +109,10 @@ describe('automation rules (#49)', { skip }, () => {
 
   test('a rule can do no more than an analyst, and a failing action never fails the save', async () => {
     const { PERMISSIONS } = await import('../../src/security/policy.js');
-    assert.equal(rules.RULE_ROLE, 'analyst');
+    assert.equal(runner.RULE_ROLE, 'analyst');
     for (const manage of ['problem.close', 'incident.flag_major', 'rule.manage', 'record.restrict', 'record.redact', 'change.approve'] as const) {
       if (manage === 'record.restrict') continue; // analysts restrict their own records; rules have no action for it
-      assert.ok(!PERMISSIONS[rules.RULE_ROLE].has(manage), manage);
+      assert.ok(!PERMISSIONS[runner.RULE_ROLE].has(manage), manage);
     }
     await enabled(rule({ name: 'Bad assignee', actions: [{ type: 'set_field', field: 'assignee', value: ids.viewer }, { type: 'set_field', field: 'priority', value: 2 }] }));
     const i = ok(await analyst.post('/api/incidents', { title: 'Something broke' }), 201);
@@ -274,8 +274,8 @@ describe('automation rules (#49)', { skip }, () => {
     await db.query(`INSERT INTO incident_activity (incident_id, kind, body, data, channel, created_at)
       SELECT id, 'status', 'The caller says it is still a problem (portal)', '{"from": "resolved", "to": "in_progress", "by_requester": true}', 'portal', now() - interval '8 days' FROM incidents WHERE ref = $1`, [reopened]);
     await backdate('incident_activity', 'incident_id', reopened, 'incidents', 6 * 24 * 60);
-    assert.equal(await rules.scanTimeTriggers(), 2, 'the week-old ones, not the fresh one');
-    assert.equal(await rules.scanTimeTriggers(), 0, 'a second scan queues nothing: once per record and window');
+    assert.equal(await runner.scanTimeTriggers(), 2, 'the week-old ones, not the fresh one');
+    assert.equal(await runner.scanTimeTriggers(), 0, 'a second scan queues nothing: once per record and window');
     await run();
     assert.equal(ok(await analyst.get(`/api/incidents/${old}`)).status, 'closed');
     assert.equal(ok(await analyst.get(`/api/incidents/${fresh}`)).status, 'resolved');
@@ -296,8 +296,8 @@ describe('automation rules (#49)', { skip }, () => {
     const p1 = ok(await analyst2.post('/api/incidents', { title: 'Payroll down', impact: 1, urgency: 1, team_id: hr.id }), 201);
     const p1late = ok(await analyst2.post('/api/incidents', { title: 'Payroll slow', impact: 1, urgency: 1, team_id: hr.id }), 201);
     await db.query("UPDATE incidents SET created_at = now() - interval '20 minutes' WHERE ref = $1", [p1late.ref]);
-    await rules.scanTimeTriggers();
-    await rules.scanTimeTriggers();
+    await runner.scanTimeTriggers();
+    await runner.scanTimeTriggers();
     await run();
     const told = (await db.query("SELECT user_id, ref, summary FROM notifications WHERE event = 'automation' AND ref = ANY($1)", [[p.ref, p1.ref, p1late.ref]])).rows;
     assert.deepEqual(told.filter((t: any) => t.ref === p.ref).map((t: any) => t.user_id), [ids.analyst2], 'the owner, once, for the action due tomorrow only');

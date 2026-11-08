@@ -23,7 +23,7 @@ import { reconcileDueMirrors, sendSourceComments } from './development/mirror.js
 import { checkOverdueUpdates } from './incidents/major-incidents.js';
 import { deliverPages } from './people/oncall.js';
 import { processReportDeliveries, queueScheduledReports } from './reporting/report-schedules.js';
-import { pruneRuleRuns, runRules, runTimeTriggers } from './automation/rules.js';
+import { pruneRuleRuns, runRules, runTimeTriggers } from './automation/rule-runner.js';
 import { onRulesQueued } from './automation/rule-queue.js';
 import { every } from './core/workers.js';
 import { moduleEnabled } from './core/modules.js';
