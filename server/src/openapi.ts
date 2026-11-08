@@ -254,6 +254,7 @@ export const OPERATIONS: Op[] = [
   { method: 'post', path: '/api/rules', tag: 'Automation rules', summary: 'Write a rule; it starts disabled (managers)', body: rulesMod.ruleSchema },
   { method: 'post', path: '/api/rules/proposals', tag: 'Automation rules', summary: 'Propose a rule: it lands disabled, marked as proposed, for a manager to enable', body: rulesMod.ruleSchema },
   { method: 'post', path: '/api/rules/dry-run', tag: 'Automation rules', summary: "Which records updated in the last 30 days a rule's conditions match (only those you can see); no action runs", body: rulesMod.dryRunSchema },
+  { method: 'get', path: '/api/rules/vocabulary', tag: 'Automation rules', summary: 'What a rule may say, per kind: statuses, sources, the fields a condition reads and a trigger watches, what a rule may set, who it may notify, the moves it may make, and the operators per field type' },
   { method: 'get', path: '/api/rules/:id', tag: 'Automation rules', summary: 'A rule in a plain sentence, with its latest runs and what each action did' },
   { method: 'put', path: '/api/rules/:id', tag: 'Automation rules', summary: 'Change a rule (managers); audited with before and after', body: rulesMod.ruleSchema },
   { method: 'put', path: '/api/rules/:id/enabled', tag: 'Automation rules', summary: 'Enable or disable a rule; only a person signed in to Kernel enables one, never a token or an agent', body: rulesMod.enableSchema },

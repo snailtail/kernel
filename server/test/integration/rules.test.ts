@@ -334,6 +334,28 @@ describe('automation rules (#49)', { skip }, () => {
     await disableAll();
   });
 
+  test('the vocabulary is the allowlists the server checks, for the editor and agents (#247)', async () => {
+    const rules = await import('../../src/automation/rules.js');
+    const { INCIDENT_STATUSES } = await import('../../src/incidents/incidents.js');
+    const { REQUEST_STATUSES } = await import('../../src/requests/requests.js');
+    const v = ok(await viewer.get('/api/rules/vocabulary'));
+    assert.deepEqual(v, ok(await analyst.get('/api/rules/vocabulary')));
+    for (const kind of ['incident', 'problem', 'change'] as const) {
+      assert.ok(v.kinds.includes(kind), kind);
+      assert.deepEqual(v.by_kind[kind].condition_fields, rules.CONDITION_FIELDS[kind]);
+      assert.deepEqual(v.by_kind[kind].transitions, rules.TRANSITIONS[kind] ?? {});
+      for (const f of v.by_kind[kind].condition_fields) assert.ok(v.operators[v.field_types[f]]?.length, `${kind}.${f} has operators`);
+    }
+    assert.deepEqual(v.by_kind.incident.statuses, INCIDENT_STATUSES);
+    assert.deepEqual(v.by_kind.request.statuses, REQUEST_STATUSES);
+    assert.deepEqual(v.by_kind.incident.notify_roles, ['assignee', 'team_lead', 'owner']);
+    // What the vocabulary offers is accepted, and what it leaves out is not.
+    const inc = v.by_kind.incident;
+    ok(await pm.post('/api/rules', rule({ trigger: { type: 'field_changed', field: inc.trigger_fields[0] }, conditions: [{ field: 'status', op: v.operators.enum[0], value: inc.statuses[0] }], actions: [{ type: 'set_field', field: 'priority', value: 2 }] })), 201);
+    assert.ok(!inc.settable.includes('classification'));
+    assert.equal((await pm.post('/api/rules', rule({ actions: [{ type: 'set_field', field: 'classification', value: 1 }] }))).status, 400);
+  });
+
   test('agents propose rules over MCP; they never enable one', async () => {
     const token = await k.tokenFor('pm');
     const mcp = await k.mcp({ token });
@@ -342,7 +364,7 @@ describe('automation rules (#49)', { skip }, () => {
       return { isError: !!res.isError, data: res.isError ? res.content[0].text : JSON.parse(res.content[0].text) };
     };
     const tools = await mcp.tools();
-    for (const t of ['list_rules', 'get_rule', 'dry_run_rule', 'propose_rule']) assert.ok(tools.includes(t), t);
+    for (const t of ['list_rules', 'get_rule', 'get_rule_vocabulary', 'dry_run_rule', 'propose_rule']) assert.ok(tools.includes(t), t);
     assert.ok(!tools.some((t) => /enable|save_rule/.test(t)), 'no tool enables or writes a rule');
     const draft = { name: 'Agent idea', kind: 'incident', trigger: { type: 'status_changed', to: 'on_hold' }, conditions: [{ field: 'priority', op: 'lt', value: 3 }], actions: [{ type: 'add_comment', text: 'High priority on hold: check the reason' }] };
     const dry = await call('dry_run_rule', { rule: draft });

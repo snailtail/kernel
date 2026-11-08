@@ -64,7 +64,7 @@ const TOOL_ACTIONS: Record<string, Action> = {
   list_sprints: 'work.read', get_sprint: 'work.read', plan_sprint: 'work.write', complete_sprint: 'work.write',
   register_standard_change: 'change.register', approve_change: 'change.approve', link_ci_to_change: 'change.update',
   report_event: 'event.ingest', list_alerts: 'event.read', acknowledge_alert: 'event.ack', close_alert: 'event.ack', list_event_rules: 'event.read',
-  list_rules: 'rule.read', get_rule: 'rule.read', dry_run_rule: 'rule.read', propose_rule: 'rule.propose',
+  list_rules: 'rule.read', get_rule: 'rule.read', get_rule_vocabulary: 'rule.read', dry_run_rule: 'rule.read', propose_rule: 'rule.propose',
   get_ci_impact: 'ci.read', get_service_dependencies: 'ci.read', add_ci_relationship: 'ci.manage', remove_ci_relationship: 'ci.manage',
   sync_ci_relationships: 'ci.ingest', sync_ci_batch: 'ci.ingest', list_ci_groups: 'ci.read', get_ci_group: 'ci.read', save_ci_group: 'ci.manage',
   whoami: 'meta.read', list_reference_data: 'meta.read', search: 'meta.read', get_record: 'meta.read', get_record_trace: 'meta.read', next_steps: 'meta.read',

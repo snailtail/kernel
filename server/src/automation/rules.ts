@@ -19,7 +19,11 @@ import { type Db, query, tx } from '../core/db.js';
 import { badRequest, conflict, forbidden, notFound } from '../core/errors.js';
 import { authorize, can } from '../security/policy.js';
 import { RULE_KINDS, type RuleKind } from './rule-queue.js';
-import { moduleEnabled } from '../core/modules.js';
+import { type Module, moduleEnabled } from '../core/modules.js';
+import { INCIDENT_STATUSES } from '../incidents/incidents.js';
+import { STATUSES as PROBLEM_STATUSES } from '../problems/workflow.js';
+import { CHANGE_STATUSES } from '../changes/changes.js';
+import { REQUEST_STATUSES } from '../requests/requests.js';
 
 export type { RuleKind };
 
@@ -31,12 +35,8 @@ const DRY_RUN_MAX = 2000;
 
 // ---- The format ------------------------------------------------------------------------------
 
-const STATUSES: Record<RuleKind, readonly string[]> = {
-  incident: ['new', 'in_progress', 'on_hold', 'resolved', 'closed'],
-  problem: ['new', 'analysis', 'known_error', 'resolved', 'closed'],
-  change: ['draft', 'assess', 'authorize', 'scheduled', 'implementing', 'review', 'closed', 'rejected', 'cancelled'],
-  request: ['submitted', 'awaiting_approval', 'in_fulfilment', 'fulfilled', 'rejected', 'cancelled'],
-};
+/** The statuses a status trigger or condition may name: each kind's own list. */
+const STATUSES: Record<RuleKind, readonly string[]> = { incident: INCIDENT_STATUSES, problem: PROBLEM_STATUSES, change: CHANGE_STATUSES, request: REQUEST_STATUSES };
 const SOURCES: Partial<Record<RuleKind, readonly string[]>> = {
   incident: ['user', 'event', 'api', 'mcp', 'email', 'portal'],
   change: ['user', 'api', 'mcp', 'pipeline'],
@@ -69,7 +69,7 @@ const OPERATORS: Record<FieldType, readonly string[]> = {
   category: ['is', 'is_not', 'in', 'is_empty'],
   team: ['is', 'is_not', 'in', 'is_empty'],
   user: ['is', 'is_not', 'in', 'is_empty'],
-  priority: ['is', 'is_not', 'in', 'gt', 'lt'],
+  priority: ['is', 'is_not', 'in', 'lt', 'gt'],
   enum: ['is', 'is_not', 'in'],
   bool: ['is'],
 };
@@ -89,6 +89,23 @@ const SETTABLE: Record<RuleKind, readonly string[]> = {
 };
 /** The only moves a rule may make: close what is resolved, take back what was on hold. */
 export const TRANSITIONS: Partial<Record<RuleKind, Record<string, string>>> = { incident: { closed: 'resolved', in_progress: 'on_hold' } };
+/** The module a kind needs; problem management is always on. */
+const KIND_MODULES: Partial<Record<RuleKind, Module>> = { incident: 'incident', change: 'change', request: 'request' };
+
+/** The allowlists above as data, for the rule editor and agents (#247): the only place they are written down. */
+export async function ruleVocabulary(user: User) {
+  authorize(user, 'rule.read');
+  return {
+    kinds: RULE_KINDS.filter((k) => !KIND_MODULES[k] || moduleEnabled(KIND_MODULES[k])),
+    field_types: FIELD_TYPES,
+    operators: OPERATORS,
+    due_kinds: DUE_KINDS,
+    by_kind: Object.fromEntries(RULE_KINDS.map((k) => [k, {
+      statuses: STATUSES[k], sources: SOURCES[k] ?? [], condition_fields: CONDITION_FIELDS[k], trigger_fields: TRIGGER_FIELDS[k],
+      settable: SETTABLE[k], notify_roles: NOTIFY_ROLES[k], transitions: TRANSITIONS[k] ?? {},
+    }])),
+  };
+}
 
 const scalar = z.union([z.string().trim().min(1).max(30), z.number().int(), z.boolean()]);
 const conditionSchema = z.object({
