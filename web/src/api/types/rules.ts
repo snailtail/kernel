@@ -20,3 +20,9 @@ interface RuleRun { id: number; record_ref: string; event: RuleTrigger; depth: n
 export interface RuleDetail extends Rule { runs: RuleRun[]; stats_30d: { matched: number; not_matched: number; skipped: number; failed: number } }
 export interface RuleList { rules: Rule[]; other_rules: { kind: string; label: string; count: number; enabled: number; path: string }[]; can_manage: boolean; webhooks: { id: number; name: string }[] }
 export interface RuleDryRun { days: number; checked: number; matched: number; latest: { ref: string; title: string }[]; note: string }
+/** /api/rules/vocabulary: what a rule may say, per kind, as the server checks it. */
+type RuleFieldType = 'ci' | 'category' | 'team' | 'user' | 'priority' | 'enum' | 'bool';
+export interface RuleVocabulary {
+  kinds: RuleKind[]; field_types: Record<string, RuleFieldType>; operators: Record<RuleFieldType, string[]>; due_kinds: RuleKind[];
+  by_kind: Record<RuleKind, { statuses: string[]; sources: string[]; condition_fields: string[]; trigger_fields: string[]; settable: string[]; notify_roles: NotifyRole[]; transitions: Record<string, string> }>;
+}

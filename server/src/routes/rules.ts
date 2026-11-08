@@ -6,6 +6,7 @@ type Id = { Params: { id: string } };
 
 export async function ruleRoutes(app: FastifyInstance) {
   app.get('/api/rules', async (req) => rules.listRules(requireUser(req)));
+  app.get('/api/rules/vocabulary', async (req) => rules.ruleVocabulary(requireUser(req)));
   app.post('/api/rules', async (req, reply) => {
     reply.code(201);
     return rules.saveRule(requireUser(req), null, req.body);
