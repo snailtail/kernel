@@ -1,6 +1,6 @@
 // Structured root cause analysis techniques attached to problems.
 import { z } from 'zod';
-import { longText } from '../core/fields.js';
+import { longText, title } from '../core/fields.js';
 import type { User } from '../security/auth.js';
 import { query, tx } from '../core/db.js';
 import { badRequest, conflict, forbidden, notFound } from '../core/errors.js';
@@ -20,7 +20,7 @@ const TECHNIQUE_LABEL: Record<Technique, string> = {
   timeline: 'Timeline',
 };
 
-const text = z.string().max(5000).default('');
+const text = longText.default('');
 const isIsNot = z.object({ is: text, is_not: text, distinction: text }).default({ is: '', is_not: '', distinction: '' });
 
 const DATA_SCHEMAS = {
@@ -95,13 +95,13 @@ function emptyData(technique: Technique): unknown {
 
 export const createAnalysisSchema = z.object({
   technique: z.enum(TECHNIQUES),
-  title: z.string().trim().max(200).optional(),
+  title: title.optional(),
   data: z.unknown().optional(),
   conclusion: longText.optional(),
 });
 
 export const updateAnalysisSchema = z.object({
-  title: z.string().trim().max(200).optional(),
+  title: title.optional(),
   data: z.unknown().optional(),
   conclusion: longText.optional(),
   /** updated_at of the version the edit started from; a newer save by someone else gives 409. */

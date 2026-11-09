@@ -62,10 +62,10 @@ const fields = {
   acceptance_criteria: z.array(criterion).max(30),
   labels: z.array(label).max(20).transform((l) => [...new Set(l)]),
   /** Where it happens: the version, browser or environment. */
-  found_in: z.string().max(5000),
+  found_in: longText,
   steps_to_reproduce: longText,
-  expected_result: z.string().max(5000),
-  actual_result: z.string().max(5000),
+  expected_result: longText,
+  actual_result: longText,
 };
 export const createWorkItemSchema = z.object(fields).partial().required({ title: true, type: true });
 export const updateWorkItemSchema = z.object(fields).partial();

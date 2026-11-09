@@ -34,8 +34,8 @@ const ciFields = {
   attributes: z.record(z.string(), z.union([z.string().max(500), z.number(), z.boolean(), z.null()])),
   // Service catalogue (#43), for services.
   sla_id: z.number().int().nullable(),
-  user_description: z.string().max(5000),
-  how_to_get_help: z.string().max(5000),
+  user_description: longText,
+  how_to_get_help: longText,
   in_catalogue: z.boolean(),
   // People (#39): who owns the service, and whether it has end users who can be affected.
   has_end_users: z.boolean(),
@@ -66,7 +66,7 @@ export const listCisSchema = z.object({
   limit: z.coerce.number().int().min(1).max(500).default(200),
 });
 
-export const transitionCiSchema = z.object({ to: z.enum(CI_STATUSES), comment: z.string().max(5000).optional() });
+export const transitionCiSchema = z.object({ to: z.enum(CI_STATUSES), comment: longText.optional() });
 
 export const ciLinkSchema = z.object({
   kind: z.enum(CI_LINK_KINDS),

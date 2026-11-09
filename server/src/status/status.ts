@@ -240,7 +240,7 @@ export async function publicStatus() {
   });
 }
 
-const STYLE = `body{font-family:system-ui,sans-serif;max-width:46rem;margin:2rem auto;padding:0 1rem;color:#1b1f27;background:#f6f7f9}h1{font-size:1.5rem}h2{font-size:1.15rem}
+const STYLE = `body{font-family:system-ui,sans-serif;max-width:46rem;margin:2rem auto;padding:0 1rem;color:#1b1f27;background:#f6f7f9}h1{font-size:1.5rem;overflow-wrap:anywhere}h2{font-size:1.15rem}
 .banner{padding:1rem;border-radius:8px;font-weight:600;margin:1rem 0}.s-operational{background:#e7f6ee;color:#1b7f4b}.s-maintenance{background:#e6eeff;color:#1d4ed8}
 .s-degraded{background:#fff3e0;color:#b45309}.s-partial_outage{background:#fde7d9;color:#c2410c}.s-major_outage{background:#fdecec;color:#c62828}
 ul{list-style:none;padding:0;background:#fff;border:1px solid #e3e6eb;border-radius:8px}li{display:flex;justify-content:space-between;gap:1rem;padding:.75rem 1rem;border-bottom:1px solid #e3e6eb}li:last-child{border-bottom:0}

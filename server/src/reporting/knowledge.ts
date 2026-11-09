@@ -3,6 +3,7 @@
 // drafts; published articles are suggested while incidents are logged, and "used to resolve" measures their value.
 import { historyOf, logActivity } from '../records/activity.js';
 import { z } from 'zod';
+import { title } from '../core/fields.js';
 import { audienceOf, whyNotForEveryone } from '../security/audience.js';
 import type { User } from '../security/auth.js';
 import { audit } from '../security/audit.js';
@@ -18,7 +19,7 @@ export const AUDIENCES = ['internal', 'end_users'] as const;
 const ARTICLE_STATUSES = ['draft', 'published', 'retired'] as const;
 
 const fields = {
-  title: z.string().trim().min(3).max(200),
+  title,
   body: z.string().max(100_000),
   article_type: z.enum(ARTICLE_TYPES),
   audience: z.enum(AUDIENCES),

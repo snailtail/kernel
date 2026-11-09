@@ -1,5 +1,6 @@
 // The service request catalogue (#44): request items per service, their forms and approval rules, how answers are checked and who approves.
 import { z } from 'zod';
+import { longText, title } from '../core/fields.js';
 import type { User } from '../security/auth.js';
 import { audit } from '../security/audit.js';
 import { type Db, query, tx } from '../core/db.js';
@@ -29,13 +30,13 @@ export const requestItemSchema = z.object({
   /** The service (a CI of class service) by ref. */
   service: z.string().trim().min(1).max(30),
   name: z.string().trim().min(1).max(200),
-  description: z.string().max(5000).default(''),
+  description: longText.default(''),
   form: z.array(formFieldSchema).max(10, 'A form has at most 10 fields: keep it short').default([])
     .refine((f) => new Set(f.map((x) => x.key)).size === f.length, 'Each field needs its own key'),
   /** none, requester_manager, service_owner or team:<id>. */
   approval: z.string().regex(/^(none|requester_manager|service_owner|team:\d{1,9})$/, 'Approval is none, requester_manager, service_owner or team:<id>').default('none'),
   fulfilment_tasks: z.array(z.object({
-    title: z.string().trim().min(1).max(200),
+    title,
     team_id: z.number().int().nullable().default(null),
     /** manual: a person does it; change: the standard change from the template, its outcome completes it; webhook: an outgoing webhook does it and calls back. */
     kind: z.enum(TASK_KINDS).default('manual'),

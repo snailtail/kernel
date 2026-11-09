@@ -49,7 +49,7 @@ export function Report() {
           </select>
         </>}
         <label htmlFor="portal-what">{TEXT.whatLabel}</label>
-        <textarea id="portal-what" rows={6} required minLength={5} maxLength={5000} value={what} onChange={(e) => setWhat(e.target.value)} aria-describedby="portal-what-hint" />
+        <textarea id="portal-what" rows={6} required minLength={5} maxLength={20000} value={what} onChange={(e) => setWhat(e.target.value)} aria-describedby="portal-what-hint" />
         <p id="portal-what-hint" className="portal-muted small">{TEXT.whatHint}</p>
         {suggestions.length > 0 && (
           <aside className="portal-suggestions" aria-labelledby="suggestions-title" aria-live="polite">

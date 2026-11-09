@@ -225,7 +225,7 @@ export const transitionRequestSchema = z.object({
 });
 export const decisionSchema = z.object({ decision: z.enum(['approve', 'reject']), comment: z.string().trim().max(2000).default('') });
 export const requestCommentSchema = z.object({ body: longText, to_requester: z.boolean().default(false) });
-export const completeTaskSchema = z.object({ note: z.string().trim().max(5000).default('') });
+export const completeTaskSchema = z.object({ note: longText.trim().default('') });
 export const assignTaskSchema = z.object({ assignee_id: z.number().int().nullable() });
 
 async function findRequester(db: Db, user: User, p: z.infer<typeof personRefSchema> | undefined) {

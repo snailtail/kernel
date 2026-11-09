@@ -2,6 +2,7 @@
 // connector's retire_after_days) → retired, by a person. Never automatic and never a hard delete: a CI that comes back
 // before it is retired returns to active, and a retired CI keeps its history.
 import { z } from 'zod';
+import { longText } from '../core/fields.js';
 import type { User } from '../security/auth.js';
 import { loadCi, logCi } from './cmdb.js';
 import { type Db, query, tx } from '../core/db.js';
@@ -11,7 +12,7 @@ import { recordUrl, typeForRef } from '../records/records.js';
 
 export const retireSchema = z.object({
   refs: z.array(z.string().trim().min(1).max(30)).min(1).max(200),
-  comment: z.string().trim().max(5000).optional(),
+  comment: longText.trim().optional(),
   /** Retire even when open incidents, problems or changes still name the CI. */
   acknowledge_open: z.boolean().default(false),
 });

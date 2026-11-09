@@ -211,7 +211,7 @@ function ArticleModal({ article, onClose, onDone }: { article?: Article; onClose
   };
   return (
     <FormModal title={article ? `Edit ${article.ref}` : 'Write an article'} submitLabel={article ? 'Save' : 'Save draft'} onClose={onClose} onSubmit={submit}>
-      <label className="full">Title<input required minLength={3} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="What the reader wants to do or fix" /></label>
+      <label className="full">Title<input required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="What the reader wants to do or fix" /></label>
       <label>Type<select value={form.article_type} onChange={(e) => setForm({ ...form, article_type: e.target.value as ArticleType })}>{Object.entries(TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
       <label>Audience<select value={form.audience} onChange={(e) => setForm({ ...form, audience: e.target.value as 'internal' })}><option value="internal">Internal (service desk, engineers)</option><option value="end_users">End users</option></select></label>
       <label className="full">Text

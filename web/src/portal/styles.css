@@ -42,3 +42,4 @@
 .portal-status.svc-degraded, .portal-status.svc-partial_outage { color: var(--s-known); background: var(--s-known-bg); }
 .portal-status.svc-major_outage { color: var(--danger); background: var(--danger-soft); }
 .portal-spaced { margin-top: 16px; }
+.portal-main h1, .portal-main h2 { overflow-wrap: anywhere; }

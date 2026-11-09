@@ -55,7 +55,7 @@ export function TicketPage() {
           ) : (
             <form className="portal-form" onSubmit={async (e) => { e.preventDefault(); if (await act(() => api.post<Ticket>(`/api/portal/tickets/${t.ref}/confirm`, { works: false, body: still }), TEXT.thanksReopened)) setStill(null); }}>
               <label htmlFor="portal-still">{TEXT.stillProblemLabel}</label>
-              <textarea id="portal-still" rows={3} maxLength={5000} value={still} onChange={(e) => setStill(e.target.value)} />
+              <textarea id="portal-still" rows={3} maxLength={20000} value={still} onChange={(e) => setStill(e.target.value)} />
               <button className="portal-button primary">{TEXT.stillProblem}</button>
             </form>
           )}
@@ -81,7 +81,7 @@ export function TicketPage() {
       {t.can.add_information ? (
         <form className="portal-card portal-form" onSubmit={async (e) => { e.preventDefault(); if (await act(() => api.post<Ticket>(`/api/portal/tickets/${t.ref}/messages`, { body: info }), '')) setInfo(''); }}>
           <label htmlFor="portal-info">{TEXT.addInfoLabel}</label>
-          <textarea id="portal-info" rows={3} maxLength={5000} value={info} onChange={(e) => setInfo(e.target.value)} aria-describedby="portal-info-hint" />
+          <textarea id="portal-info" rows={3} maxLength={20000} value={info} onChange={(e) => setInfo(e.target.value)} aria-describedby="portal-info-hint" />
           <p id="portal-info-hint" className="portal-muted small">{TEXT.addInfoHint}</p>
           <button className="portal-button primary" disabled={!info.trim()}>{TEXT.addInfoButton}</button>
         </form>
