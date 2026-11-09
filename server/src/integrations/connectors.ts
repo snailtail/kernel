@@ -5,6 +5,7 @@
 // - a full snapshot that failed or shrank implausibly never marks CIs missing.
 import { KUBERNETES } from './connector-kubernetes.js';
 import { OP5 } from './connector-op5.js';
+import { VCENTER } from './connector-vcenter.js';
 import { IMAP, MSGRAPH } from './connector-mailbox.js';
 import { z } from 'zod';
 import type { User } from '../security/auth.js';
@@ -112,7 +113,7 @@ export interface RunContext {
   privateAllow: string[];
   /** Aborted when the run is stopped. */
   signal?: AbortSignal;
-  /** Any HTTPS request through the SSRF-safe client, with the connector's private allowlist and the run's signal. */
+  /** Any HTTPS request through the SSRF-safe client, with the connector's private allowlist, CA and the run's signal. */
   request: (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string }) => Promise<{ status: number; ok: boolean; body: string }>;
 }
 export interface ConnectorType {
@@ -143,12 +144,12 @@ export interface ConnectorType {
   }>;
 }
 
-export const CONNECTOR_TYPES: Record<string, ConnectorType> = { op5: OP5, kubernetes: KUBERNETES, imap: IMAP, msgraph: MSGRAPH };
+export const CONNECTOR_TYPES: Record<string, ConnectorType> = { op5: OP5, vcenter: VCENTER, kubernetes: KUBERNETES, imap: IMAP, msgraph: MSGRAPH };
 
 // ---- Registry ----------------------------------------------------------------------------------
 
 export const connectorSchema = z.object({
-  type: z.enum(['op5', 'kubernetes', 'imap', 'msgraph']),
+  type: z.enum(['op5', 'vcenter', 'kubernetes', 'imap', 'msgraph']),
   name: z.string().trim().min(1).max(100),
   source_system: z.string().trim().min(1).max(100),
   config: z.record(z.string(), z.unknown()),
@@ -255,7 +256,7 @@ function contextFor(c: any, signal?: AbortSignal): RunContext {
     scheduleMinutes: c.schedule_minutes,
     privateAllow: c.private_allow ?? [],
     signal,
-    request: (url, init = {}) => outboundFetch(url, { timeoutMs: 30_000, maxBytes: 60_000_000, privateAllow: c.private_allow, signal, ...init }),
+    request: (url, init = {}) => outboundFetch(url, { timeoutMs: 30_000, maxBytes: 60_000_000, privateAllow: c.private_allow, ca: config.ca_pem || undefined, signal, ...init }),
     fetchJson: (path) => call(path),
     postJson: (path, body) => call(path, body),
   };
