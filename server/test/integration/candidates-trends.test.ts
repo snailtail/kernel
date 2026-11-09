@@ -51,7 +51,10 @@ describe('proactive problem candidates (#31)', { skip }, () => {
     assert.equal(c.proactive, true);
     assert.match(c.reason, new RegExp(`^http_health from mon on flappy-\\d+ \\(${hit}\\) reopened 5 times in 7 days`));
     assert.equal(c.evidence.series[0].points.length, 7);
-    assert.ok(c.evidence.series[0].points.at(-1).value >= 12, 'today has the events');
+    // The events are 13 to 7.5 minutes old, so just after midnight UTC they fall on yesterday, or on both days.
+    const days = new Set([at(-13), at(-7.5)].map((t) => t.slice(0, 10)));
+    const onThoseDays = c.evidence.series[0].points.filter((p: any) => days.has(p.day)).reduce((t: number, p: any) => t + p.value, 0);
+    assert.ok(onThoseDays >= 12, 'the days of the events have them');
     assert.equal(await byCi('flapping', miss), undefined, 'two reopenings are below the threshold');
     assert.equal((await analyst.get(`/api/candidates/draft?key=${encodeURIComponent(c.key)}`)).body.detection, 'proactive');
 
