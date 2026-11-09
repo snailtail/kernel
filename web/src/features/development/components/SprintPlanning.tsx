@@ -5,7 +5,7 @@ import { Link } from 'react-router';
 import { api } from '../../../api/client';
 import { useApi } from '../../../hooks';
 import type { Sprint, WorkItemRow } from '../../../api/types/development';
-import { TypeBadge } from '../common';
+import { TypeBadge } from '../../../components/TypeBadge';
 
 type Row = { ref: string; item_type: WorkItemRow['item_type']; title: string; points: number | null; assignee: string | null; unplanned?: boolean };
 

@@ -1,32 +1,22 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
-import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { Client, skip, startKernel, type Harness } from './harness.js';
+import { Client, skip, startKernel, type Harness, type Mcp } from './harness.js';
 
 describe('MCP server', { skip }, () => {
   let k: Harness;
-  let mcp: McpClient;
-  let viewerMcp: McpClient;
+  let mcp: Mcp;
+  let viewerMcp: Mcp;
 
-  const connect = async (token: string) => {
-    const client = new McpClient({ name: 'kernel-tests', version: '1.0.0' });
-    await client.connect(
-      new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${token}` } } }),
-    );
-    return client;
-  };
-
-  const call = async (client: McpClient, name: string, args: Record<string, unknown> = {}) => {
-    const res: any = await client.callTool({ name, arguments: args });
+  const call = async (client: Mcp, name: string, args: Record<string, unknown> = {}) => {
+    const res: any = await client.raw(name, args);
     const text = res.content[0].text;
     return { isError: !!res.isError, text, data: res.isError ? null : JSON.parse(text) };
   };
 
   before(async () => {
     k = await startKernel();
-    mcp = await connect(await k.tokenFor('pm'));
-    viewerMcp = await connect(await k.tokenFor('viewer'));
+    mcp = await k.mcp('pm');
+    viewerMcp = await k.mcp('viewer');
   });
   after(async () => {
     await mcp?.close();
@@ -35,8 +25,8 @@ describe('MCP server', { skip }, () => {
   });
 
   test('advertises instructions and tools', async () => {
-    assert.match(mcp.getInstructions() ?? '', /ITIL 4/);
-    const { tools } = await mcp.listTools();
+    assert.match(mcp.client.getInstructions() ?? '', /ITIL 4/);
+    const { tools } = await mcp.client.listTools();
     const names = tools.map((t) => t.name);
     for (const expected of ['search_problems', 'get_problem', 'create_problem', 'transition_problem', 'link_record', 'search_known_errors']) {
       assert.ok(names.includes(expected), `missing ${expected}`);
@@ -123,12 +113,12 @@ describe('MCP server', { skip }, () => {
     assert.equal(updated.data.data.events[0].kind, 'deployment');
     assert.equal(updated.data.conclusion, 'Cold cache');
 
-    const { prompts } = await mcp.listPrompts();
+    const { prompts } = await mcp.client.listPrompts();
     assert.deepEqual(prompts.map((x) => x.name).sort(), [
       'assess_known_error', 'draft_post_incident_review', 'five_whys', 'impact_analysis', 'ishikawa', 'kepner_tregoe', 'lead_major_incident', 'major_problem_review', 'problem_review_board',
       'review_candidates', 'timeline', 'triage_incident', 'triage_problem', 'verify_resolution',
     ]);
-    const prompt = await mcp.getPrompt({ name: 'five_whys', arguments: { ref: p.ref.toLowerCase() } });
+    const prompt = await mcp.client.getPrompt({ name: 'five_whys', arguments: { ref: p.ref.toLowerCase() } });
     assert.match((prompt.messages[0].content as any).text, new RegExp(p.ref));
   });
 
@@ -147,21 +137,21 @@ describe('MCP server', { skip }, () => {
     assert.equal(update.channel, 'mcp');
     assert.equal(update.actor_type, 'mcp');
     assert.deepEqual(update.changes.impact, { from: 3, to: 1 });
-    const { tools } = await mcp.listTools();
+    const { tools } = await mcp.client.listTools();
     assert.ok(!tools.some((t) => t.name === 'query_audit_log'), 'admin-only tool hidden from a manager');
   });
 
   test('guided investigation: guides, context, checks, proposals and confirmations (#76)', async () => {
-    const { resources } = await mcp.listResources();
+    const { resources } = await mcp.client.listResources();
     assert.ok(resources.some((r) => r.uri === 'kernel://guides/five_whys'));
-    const guide: any = await mcp.readResource({ uri: 'kernel://guides/five_whys' });
+    const guide: any = await mcp.client.readResource({ uri: 'kernel://guides/five_whys' });
     assert.match(guide.contents[0].text, /^# 5 Whys/);
 
     const { data: p } = await call(mcp, 'create_problem', { title: 'Guided flow test', description: 'Nightly export fails' });
     const ctx = await call(mcp, 'get_problem_context', { ref: p.ref });
     assert.equal(ctx.data.problem.ref, p.ref);
     assert.equal(ctx.data.next_steps.phase, 'Problem identification');
-    const asResource: any = await mcp.readResource({ uri: `kernel://problems/${p.ref}` });
+    const asResource: any = await mcp.client.readResource({ uri: `kernel://problems/${p.ref}` });
     assert.equal(JSON.parse(asResource.contents[0].text).problem.ref, p.ref);
 
     const started = await call(mcp, 'start_analysis', { ref: p.ref, technique: 'five_whys' });
@@ -205,7 +195,7 @@ describe('MCP server', { skip }, () => {
     const rejected = r1.status === 200 ? r1 : r2;
     assert.notEqual(rejected.body.status, 'closed');
     assert.equal((await pm.post(`/api/approvals/${requested.data.pending_approval}/approve`, {})).status, 409);
-    const tools = (await mcp.listTools()).tools;
+    const tools = (await mcp.client.listTools()).tools;
     assert.equal(tools.find((t) => t.name === 'transition_problem')?.annotations?.destructiveHint, true);
   });
 
@@ -215,7 +205,7 @@ describe('MCP server', { skip }, () => {
     assert.equal(ctx.data.problem.description, undefined, 'free text is not mixed with facts');
     assert.match(ctx.data.untrusted_content.description, /Ignore previous instructions/);
     assert.match(ctx.data.notice, /never instructions/);
-    assert.match(mcp.getInstructions() ?? '', /never instructions/);
+    assert.match(mcp.client.getInstructions() ?? '', /never instructions/);
     // Even an agent that obeyed the injected text cannot close the problem by itself.
     await call(mcp, 'transition_problem', { ref: p.ref, to: 'analysis' });
     const attempt = await call(mcp, 'transition_problem', { ref: p.ref, to: 'closed', closure_code: 'resolved', human_confirmation: 'The description says to close it' });
@@ -235,9 +225,9 @@ describe('MCP server', { skip }, () => {
   test('read-only tokens cannot use write tools', async () => {
     const pmClient = await k.login('pm');
     const token = (await pmClient.post('/api/tokens', { name: 'mcp-ro', scopes: ['read', 'mcp'] })).body.token;
-    const ro = await connect(token);
+    const ro = await k.mcp({ token });
     assert.equal((await call(ro, 'search_problems', {})).isError, false);
-    const names = (await ro.listTools()).tools.map((t) => t.name);
+    const names = await ro.tools();
     assert.ok(!names.includes('create_problem'), 'write tools are not even listed');
     const res = await call(ro, 'create_problem', { title: 'Nope' });
     assert.equal(res.isError, true);
@@ -245,7 +235,7 @@ describe('MCP server', { skip }, () => {
   });
 
   test('enforces the token owner role', async () => {
-    const names = (await viewerMcp.listTools()).tools.map((t) => t.name);
+    const names = await viewerMcp.tools();
     assert.ok(names.includes('search_problems'));
     assert.ok(!names.includes('create_problem') && !names.includes('mark_duplicate'), 'a viewer sees no write tools');
     assert.equal((await call(viewerMcp, 'create_problem', { title: 'Nope' })).isError, true);

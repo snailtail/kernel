@@ -1,9 +1,11 @@
 // Problem record service. Shared by the REST API and the MCP server so both
 // enforce the same rules, permissions and audit trail.
 import { historyOf, logActivity } from '../records/activity.js';
+import { hideRestrictedRefs } from '../records/hidden-refs.js';
 import { actionCounts, actionsOf, myActions, openActionCount } from './actions.js';
 import { assertMayWriteText, forgetExists, onlyTitleMatches, textFilterSql } from '../security/confidential.js';
 import { z } from 'zod';
+import { longText, title } from '../core/fields.js';
 import { queueRuleRuns } from '../automation/rule-queue.js';
 import type { User } from '../security/auth.js';
 import { afterCommit, type Db, query, tx } from '../core/db.js';
@@ -34,8 +36,8 @@ const httpUrl = z
   .refine((v) => v === '' || /^https?:\/\//i.test(v), 'URL must start with http:// or https://');
 
 export const problemFields = {
-  title: z.string().trim().min(1).max(300),
-  description: z.string().max(20000),
+  title,
+  description: longText,
   category_id: z.number().int().nullable(),
   affected_service: z.string().trim().max(200),
   detection: z.enum(['reactive', 'proactive']),
@@ -44,10 +46,10 @@ export const problemFields = {
   is_major: z.boolean(),
   team_id: z.number().int().nullable(),
   assignee_id: z.number().int().nullable(),
-  root_cause: z.string().max(20000),
-  workaround: z.string().max(20000),
-  resolution: z.string().max(20000),
-  major_review: z.string().max(20000),
+  root_cause: longText,
+  workaround: longText,
+  resolution: longText,
+  major_review: longText,
   fix_type: z.enum(FIX_TYPES).nullable(),
   /** Days a deployed fix is watched for new incidents before resolving is suggested; empty is the default, 7. */
   fix_observation_days: z.number().int().min(1).max(90).nullable(),
@@ -69,7 +71,7 @@ export const updateProblemSchema = z.object(problemFields).partial().extend({
 export const transitionSchema = z.object({
   to: z.enum(STATUSES),
   closure_code: z.enum(CLOSURE_CODES).optional(),
-  comment: z.string().max(20000).optional(),
+  comment: longText.optional(),
   // Fields that can be completed as part of the transition, e.g. the resolution.
   root_cause: problemFields.root_cause.optional(),
   workaround: problemFields.workaround.optional(),
@@ -534,6 +536,7 @@ export async function dashboard(user: User) {
            WHERE a.user_id IS DISTINCT FROM $1 AND a.created_at > now() - interval '14 days'
            ORDER BY a.created_at DESC, a.id DESC LIMIT 10`, [user.id]),
   ]);
+  const [watchedActivity, recentActivity] = await Promise.all([hideRestrictedRefs(watched.rows, ['body', 'data']), hideRestrictedRefs(recent.rows, ['body', 'data'])]);
   return {
     problems: true as const,
     by_status: Object.fromEntries(byStatus.rows.map((r) => [r.status, r.count])),
@@ -543,17 +546,17 @@ export async function dashboard(user: User) {
     my_problems: mine.rows,
     my_actions: myOpenActions,
     actions: { open: actionSummary.open, overdue: actionSummary.overdue },
-    watched_activity: watched.rows,
-    recent_activity: recent.rows,
+    watched_activity: watchedActivity,
+    recent_activity: recentActivity,
   };
 }
 
 const assessmentFields = {
   ec_risk_level: z.number().int().min(1).max(3).nullable(),
-  ec_risk: z.string().max(20000),
-  ec_fix_cost: z.string().max(20000),
+  ec_risk: longText,
+  ec_fix_cost: longText,
   ec_decision: z.enum(EC_DECISIONS).nullable(),
-  ec_decision_note: z.string().max(20000),
+  ec_decision_note: longText,
   ec_review_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD').nullable(),
   workaround_effectiveness: z.enum(WORKAROUND_EFFECTIVENESS).nullable(),
 };
@@ -731,6 +734,6 @@ export async function myProblemWork(userId: number, decide: boolean) {
       ? query(`SELECT ref, title, priority, known_error_at FROM problems WHERE status = 'known_error' AND coalesce(ec_decision, 'pending') = 'pending' ORDER BY priority, known_error_at LIMIT 30`)
       : Promise.resolve({ rows: [] as any[] }),
   ]);
-  return { problems: problems.rows, watched: watched.rows, decisions: decisions.rows };
+  return { problems: problems.rows, watched: await hideRestrictedRefs(watched.rows, ['body']), decisions: decisions.rows };
 }
 

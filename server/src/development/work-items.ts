@@ -3,6 +3,7 @@
 // A team's Definition of Ready and Definition of Done are guidance shown when an item moves to ready or done: not a
 // gate, but what was not confirmed is logged. Shared by REST, MCP and the web UI; off unless the module is on.
 import { z } from 'zod';
+import { longText, title } from '../core/fields.js';
 import { historyOf, logActivity, touchAndAudit } from '../records/activity.js';
 import { audienceOf, forDevSource, startNarrow } from '../security/audience.js';
 import { audit } from '../security/audit.js';
@@ -12,7 +13,7 @@ import { type Db, query, tx } from '../core/db.js';
 import { badRequest, conflict, notFound } from '../core/errors.js';
 import { authorize, can } from '../security/policy.js';
 import { checkAssigneeInTeam, validTeam } from '../people/teams.js';
-import { recordType, recordUrl, registerRecordType, typeOfPrefix, type RecordType } from '../records/records.js';
+import { recordType, recordUrl, refPattern, registerRecordType, typeOfPrefix, type RecordType } from '../records/records.js';
 import { assertVisibleRef, seeingAll } from '../security/visibility.js';
 import { recordSummaries } from '../records/summaries.js';
 import type { StartNarrow } from '../problems/problems.js';
@@ -49,8 +50,8 @@ const BUG_FIELDS = ['found_in', 'steps_to_reproduce', 'expected_result', 'actual
 const criterion = z.object({ criterion: z.string().trim().min(1).max(500), done: z.boolean().default(false) });
 const label = z.string().trim().min(1).max(50).regex(/^[^,\s][^,]*$/, 'A label has no commas');
 const fields = {
-  title: z.string().trim().min(1).max(300),
-  description: z.string().max(20000),
+  title,
+  description: longText,
   type: z.enum(WORK_ITEM_TYPES),
   /** Story points: a fixed scale, so estimates stay rough on purpose. */
   points: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(5), z.literal(8), z.literal(13)]).nullable(),
@@ -62,7 +63,7 @@ const fields = {
   labels: z.array(label).max(20).transform((l) => [...new Set(l)]),
   /** Where it happens: the version, browser or environment. */
   found_in: z.string().max(5000),
-  steps_to_reproduce: z.string().max(20000),
+  steps_to_reproduce: longText,
   expected_result: z.string().max(5000),
   actual_result: z.string().max(5000),
 };
@@ -562,7 +563,7 @@ export async function addWorkItemLink(user: User, ref: string, input: z.infer<ty
   const kernel = input.kind !== 'document' && (!input.system || input.system === 'Kernel');
   const reference = kernel ? input.reference.toUpperCase() : input.reference;
   if (kernel && input.kind === 'work_item') {
-    if (!/^WI\d{6}$/.test(reference)) throw badRequest(`${reference} is not a work item`);
+    if (!refPattern('WI').test(reference)) throw badRequest(`${reference} is not a work item`);
     if (reference === ref.toUpperCase()) throw badRequest('An item cannot be linked to itself');
     await visibleId(reference);
   } else if (kernel) {
@@ -643,7 +644,7 @@ export async function myWorkItems(userId: number) {
 const WORK_ITEM_TYPE: RecordType = {
   type: 'work_item',
   prefix: 'WI',
-  pattern: /^WI\d{6}$/,
+  pattern: refPattern('WI'),
   readAction: 'work.read',
   uiPath: (ref) => `/work/${ref}`,
   get: getWorkItem,

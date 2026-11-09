@@ -2,6 +2,7 @@
 // links (vCenter, Azure, OP5…); attributes are a small typed set per CI type. Changes are audited like any record.
 import { historyOf, logActivity } from '../records/activity.js';
 import { z } from 'zod';
+import { longText } from '../core/fields.js';
 import type { User } from '../security/auth.js';
 import { audit } from '../security/audit.js';
 import { currentContext } from '../core/context.js';
@@ -28,7 +29,7 @@ const ciFields = {
   criticality: z.number().int().min(1).max(4),
   owner_id: z.number().int().nullable(),
   team: z.string().trim().max(100),
-  description: z.string().max(20000),
+  description: longText,
   tags: z.array(z.string().trim().min(1).max(50)).max(30),
   attributes: z.record(z.string(), z.union([z.string().max(500), z.number(), z.boolean(), z.null()])),
   // Service catalogue (#43), for services.
@@ -265,7 +266,7 @@ export async function loadCi(db: Db, ref: string) {
 }
 
 async function newRef(db: Db, cls: 'ci' | 'service') {
-  const { rows } = await db.query(cls === 'service' ? "SELECT 'SVC' || lpad(nextval('service_ref_seq')::text, 6, '0') AS ref" : "SELECT 'CI' || lpad(nextval('ci_ref_seq')::text, 6, '0') AS ref");
+  const { rows } = await db.query(cls === 'service' ? "SELECT kernel_ref('SVC', nextval('service_ref_seq')) AS ref" : "SELECT kernel_ref('CI', nextval('ci_ref_seq')) AS ref");
   return rows[0].ref as string;
 }
 
@@ -513,7 +514,7 @@ export async function upsertCis(user: User, input: z.infer<typeof upsertSchema>)
         if (!batch.length) continue;
         // Allocate refs first so every new row is matched to its source by ref, not by row order.
         const { rows: refRows } = await db.query(
-          `SELECT $1 || lpad(nextval($2::regclass)::text, 6, '0') AS ref FROM generate_series(1, $3)`,
+          `SELECT kernel_ref($1, nextval($2::regclass)) AS ref FROM generate_series(1, $3)`,
           [cls === 'service' ? 'SVC' : 'CI', cls === 'service' ? 'service_ref_seq' : 'ci_ref_seq', batch.length],
         );
         const refs = refRows.map((r) => r.ref as string);

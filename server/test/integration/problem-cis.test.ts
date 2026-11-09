@@ -1,7 +1,5 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
-import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { Client, skip, startKernel, type Harness } from './harness.js';
 
 describe('problems and known errors on CIs (#26)', { skip }, () => {
@@ -73,9 +71,8 @@ describe('problems and known errors on CIs (#26)', { skip }, () => {
   });
 
   test('MCP: link from either side, and the problem context names affected CIs as data', async () => {
-    const mcp = new McpClient({ name: 'p-ci', version: '1' });
-    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
-    const call = async (name: string, args: object) => JSON.parse(((await mcp.callTool({ name, arguments: args })) as any).content[0].text);
+    const mcp = await k.mcp('analyst');
+    const call = mcp.call;
     const other = (await analyst.post('/api/problems', { title: 'Slow logins' })).body.ref;
     await call('link_records', { from: svc, to: other });
     const linked = await call('link_ci_to_problem', { problem: other, ci: vm });

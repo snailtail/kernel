@@ -11,6 +11,7 @@ import type { User } from '../security/auth.js';
 import { type Db, query, tx } from '../core/db.js';
 import { badRequest, conflict, forbidden, notFound } from '../core/errors.js';
 import { logIncident } from './incident-log.js';
+import { hideRestrictedRefs } from '../records/hidden-refs.js';
 import { syncPaging } from '../people/oncall.js';
 import { attachToProblem, getIncident } from './incidents.js';
 import { managers, notify } from '../notifications/notifications.js';
@@ -324,7 +325,7 @@ export async function timeline(user: User, ref: string, options: { full?: boolea
   // A confidential incident's notes, updates and resolution stay masked for those who may not read them (#61), also in
   // the Markdown export, which the response masking cannot reach. Agents never read them.
   const masked = !options.full && (await maskedRefs(currentContext().channel === 'mcp' ? null : user, [i.ref])).has(i.ref);
-  const { rows } = await query(
+  const { rows: logged } = await query(
     `SELECT a.id, a.kind, a.body, a.data, a.key_moment, a.created_at, u.display_name AS by
      FROM incident_activity a LEFT JOIN users u ON u.id = a.user_id
      WHERE a.incident_id = $1 AND (a.key_moment OR a.kind IN ('created', 'major', 'communication', 'status')
@@ -332,6 +333,7 @@ export async function timeline(user: User, ref: string, options: { full?: boolea
      ORDER BY a.created_at, a.id`,
     [i.id],
   );
+  const rows = await hideRestrictedRefs(logged, ['body', 'data']);
   const entries = rows.map((a) => ({
     activity_id: a.id as number, at: a.created_at as Date, kind: a.kind as string, key_moment: a.key_moment as boolean, by: a.by as string | null,
     label: a.kind === 'status'

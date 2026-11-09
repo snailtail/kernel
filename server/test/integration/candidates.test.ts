@@ -3,8 +3,6 @@
 // settings, the prefilled problem, and row-level security deciding what counts.
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
-import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { Client, ownerQuery, skip, startKernel, type Harness } from './harness.js';
 
 const ok = (r: { status: number; body: unknown }, status?: number) =>
@@ -260,13 +258,8 @@ describe('problem candidates (#31)', { skip }, () => {
   });
 
   test('MCP: list with reason and evidence, report, dismiss and log by key', async () => {
-    const mcp = new McpClient({ name: 'cand', version: '1' });
-    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
-    const call = async (name: string, args: object) => {
-      const res = (await mcp.callTool({ name, arguments: args })) as any;
-      assert.ok(!res.isError, res.content[0].text);
-      return JSON.parse(res.content[0].text);
-    };
+    const mcp = await k.mcp('analyst');
+    const call = mcp.call;
     const reported = await call('report_problem_candidate', { source: 'agent', external_key: 'queue-lag', title: 'Order queue lag grows every evening', reason: 'Consumer lag doubles at 18:00 for a week' });
     const listed = await call('list_problem_candidates', { rule: 'reported' });
     const c = listed.candidates.find((x: any) => x.key === reported.key);
@@ -277,7 +270,6 @@ describe('problem candidates (#31)', { skip }, () => {
     const other = await call('report_problem_candidate', { source: 'agent', external_key: 'cert', title: 'Certificates expire unnoticed', reason: 'Two certificates expired last month' });
     await call('dismiss_problem_candidate', { key: other.key, reason: 'Covered by the certificate change' });
     assert.equal((await call('list_problem_candidates', {})).candidates.some((x: any) => x.key === other.key), false);
-    await mcp.close();
   });
 
   test('detection: reactive when incidents happened, proactive for events only and external analysis; major incidents first', async () => {

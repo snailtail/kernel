@@ -10,7 +10,7 @@ import { useRecord } from '../../hooks';
 import { useLive } from '../../hooks/useLive';
 import { canEdit, useSession } from '../../session';
 import type { Sprint } from '../../api/types/development';
-import { TypeBadge } from './common';
+import { TypeBadge } from '../../components/TypeBadge';
 import { Retrospective } from './components/Retrospective';
 import { Burndown, Velocity } from './components/SprintCharts';
 import { CompleteSprint, SprintForm, SprintStatusTag } from './components/SprintForms';

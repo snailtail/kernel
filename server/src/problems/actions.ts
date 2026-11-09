@@ -3,6 +3,7 @@
 // an improvement or a post-incident review – and is visible to whoever can see that record (row-level security).
 import { notify } from '../notifications/notifications.js';
 import { z } from 'zod';
+import { longText, title } from '../core/fields.js';
 import { logActivity } from '../records/activity.js';
 import type { User } from '../security/auth.js';
 import { type Db, query, tx } from '../core/db.js';
@@ -18,8 +19,8 @@ export type ParentKind = (typeof ACTION_PARENTS)[number];
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
 const actionFields = {
-  title: z.string().trim().min(1).max(300),
-  description: z.string().max(20000),
+  title,
+  description: longText,
   owner_id: z.number().int().nullable(),
   due_date: date.nullable(),
   status: z.enum(ACTION_STATUSES),

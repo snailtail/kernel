@@ -4,6 +4,7 @@ import { timingSafeEqual } from 'node:crypto';
 import type { FastifyRequest } from 'fastify';
 import { outboundFetch } from '../notifications/outbound.js';
 import { sha256 } from '../core/hash.js';
+import { REF_DIGITS } from '../records/records.js';
 
 export const PLATFORMS = ['github', 'gitlab', 'azure_devops'] as const;
 export type Platform = (typeof PLATFORMS)[number];
@@ -182,12 +183,12 @@ export function ciState(s: unknown): string | undefined {
 }
 
 /**
- * Kernel refs mentioned in free text: CHG000017 or CHG-000017, exactly six digits, so another tool's numbers
+ * Kernel refs mentioned in free text: CHG000017 or CHG-000017, with REF_DIGITS, so another tool's numbers
  * (ServiceNow's INC0010001) are never mistaken for Kernel records.
  */
 export function refsIn(text: string) {
   const out = new Set<string>();
-  for (const m of text.matchAll(/\b(PRB|CHG|INC)-?(\d{6})\b/gi)) out.add(`${m[1].toUpperCase()}${m[2]}`);
+  for (const m of text.matchAll(new RegExp(`\\b(PRB|CHG|INC)-?(${REF_DIGITS})\\b`, 'gi'))) out.add(`${m[1].toUpperCase()}${m[2]}`);
   return [...out];
 }
 

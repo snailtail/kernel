@@ -28,7 +28,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     const go = (path: string) => () => { navigate(path); onClose(); };
     const out: Item[] = [];
     const ref = q.trim().toUpperCase();
-    if (/^[A-Z]{2,5}\d{1,9}$/.test(ref)) out.push({ id: 'ref', label: `Open ${ref}`, hint: 'Enter', go: go(/^(CI|SVC)\d/.test(ref) ? `/cis/${ref}` : /^INC\d{6}$/.test(ref) ? `/incidents/${ref}` : /^CHG\d{6}$/.test(ref) ? `/changes/${ref}` : `/problems/${ref}`) });
+    if (/^[A-Z]{2,5}\d{1,9}$/.test(ref)) out.push({ id: 'ref', label: `Open ${ref}`, hint: 'Enter', go: go(/^(CI|SVC)\d/.test(ref) ? `/cis/${ref}` : /^INC\d{6,}$/.test(ref) ? `/incidents/${ref}` : /^CHG\d{6,}$/.test(ref) ? `/changes/${ref}` : `/problems/${ref}`) });
     for (const h of hits) out.push({ id: `${h.type}-${h.ref}`, label: `${h.ref} ${h.title}`, hint: h.status.replace('_', ' '), go: go(new URL(h.url, location.origin).pathname) });
     const needle = q.trim().toLowerCase();
     const commands: Item[] = [

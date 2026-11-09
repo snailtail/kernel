@@ -1,6 +1,4 @@
 import assert from 'node:assert/strict';
-import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { after, before, describe, test } from 'node:test';
 import { ownerQuery, skip, startKernel, type Client, type Harness } from './harness.js';
 
@@ -221,13 +219,8 @@ describe('post-incident reviews (#109)', { skip }, () => {
   });
 
   test('agents draft and contribute over MCP', async () => {
-    const mcp = new McpClient({ name: 'reviews', version: '1' });
-    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
-    const call = async (name: string, args: Record<string, unknown>) => {
-      const res: any = await mcp.callTool({ name, arguments: args });
-      assert.ok(!res.isError, res.content[0].text);
-      return JSON.parse(res.content[0].text);
-    };
+    const mcp = await k.mcp('analyst');
+    const call = mcp.call;
     const ref = (await analyst.post('/api/incidents', { title: 'Mail delayed' })).body.ref;
     let r = await call('create_review', { ref });
     assert.equal(r.status, 'scheduled');

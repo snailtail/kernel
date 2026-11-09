@@ -6,8 +6,6 @@ import { createServer, type Server } from 'node:https';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { ownerQuery, skip, startKernel, type Client, type Harness } from './harness.js';
 
 const ok = (r: { status: number; body: any }, status = 200) => {
@@ -178,21 +176,16 @@ describe('mirrored backlogs from Azure DevOps (part 1 of #168)', { skip }, () =>
     assert.equal(now.description, 'Notes for Kernel');
     assert.ok(now.links.some((l: any) => l.reference === prb), 'linked as for native items (#167)');
 
-    const mcp = new McpClient({ name: 'mirror', version: '1' });
-    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
-    try {
-      const call = (name: string, args: object) => mcp.callTool({ name, arguments: args as Record<string, unknown> }) as Promise<any>;
-      const got = JSON.parse((await call('get_work_item', { ref: story.ref })).content[0].text);
-      assert.equal(got.mirror.source, 'azure_devops');
-      assert.equal(got.untrusted_content.title, 'Pay with one tap', 'the source\'s title is untrusted content');
-      assert.equal(got.title, undefined);
-      const update = await call('update_work_item', { ref: story.ref, title: 'Renamed by an agent' });
-      assert.ok(update.isError && /owns its title/.test(update.content[0].text));
-      const move = await call('transition_work_item', { ref: story.ref, to: 'done' });
-      assert.ok(move.isError && /owns its status/.test(move.content[0].text));
-    } finally {
-      await mcp.close();
-    }
+    const mcp = await k.mcp('analyst');
+    const call = mcp.raw;
+    const got = JSON.parse((await call('get_work_item', { ref: story.ref })).content[0].text);
+    assert.equal(got.mirror.source, 'azure_devops');
+    assert.equal(got.untrusted_content.title, 'Pay with one tap', 'the source\'s title is untrusted content');
+    assert.equal(got.title, undefined);
+    const update = await call('update_work_item', { ref: story.ref, title: 'Renamed by an agent' });
+    assert.ok(update.isError && /owns its title/.test(update.content[0].text));
+    const move = await call('transition_work_item', { ref: story.ref, to: 'done' });
+    assert.ok(move.isError && /owns its status/.test(move.content[0].text));
   });
 
   test('deleted in the source is removed with the reason, moved out of the area too; never deleted', async () => {

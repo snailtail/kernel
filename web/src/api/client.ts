@@ -161,12 +161,15 @@ export interface Analysis {
 }
 
 interface ProblemFix {
-  deployed: { change: string; at: string } | null;
-  failed: { change: string; outcome: string } | null;
-  pending: { change: string; status: string }[];
+  /** `change` is null for a change the reader cannot see (#225). */
+  deployed: { change: string | null; at: string } | null;
+  failed: { change: string | null; outcome: string } | null;
+  pending: { change: string | null; status: string }[];
+  open_work: boolean;
+  has_work: boolean;
   observation_days: number;
   watch_until: string | null;
-  recurred: { ref: string; title: string; created_at: string }[];
+  recurred: ({ restricted: false; ref: string; title: string; created_at: string } | { restricted: true; created_at: string })[];
 }
 
 type FixType = 'code' | 'configuration' | 'infrastructure' | 'supplier' | 'process' | 'accept_risk';

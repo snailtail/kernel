@@ -3,12 +3,12 @@
 import { z } from 'zod';
 import type { User } from './auth.js';
 import { audit } from './audit.js';
-import { query, tx } from '../core/db.js';
+import { type Db, query, tx, VIEWER_SETTINGS } from '../core/db.js';
 import { contextStore, currentContext } from '../core/context.js';
 import { badRequest, notFound } from '../core/errors.js';
 import { managers, notify } from '../notifications/notifications.js';
 import { authorize } from './policy.js';
-import { refRegex, textKinds, textKindOfRef, typeForRef } from '../records/records.js';
+import { refPattern, refRegex, textKindOfRef, textKinds, typeForRef } from '../records/records.js';
 import { addEntry } from '../records/activity.js';
 import type { Role } from '../problems/workflow.js';
 
@@ -148,9 +148,25 @@ export async function saveVisibilitySettings(actor: User, value: { team_scoped: 
  */
 export const seeingAll = <T>(fn: () => Promise<T>) => contextStore.run({ ...currentContext(), viewer: 'system' }, fn);
 
+/**
+ * The same inside a transaction that is already open (its connection keeps the viewer it was borrowed with): `fn`'s
+ * statements on `db` see every row, and the caller's viewer is back afterwards. Only for writes the system makes on
+ * the caller's behalf, such as a log entry on a problem they cannot see (#225), that carry nothing from that record.
+ */
+export async function seeingAllIn<T>(db: Db, fn: () => Promise<T>) {
+  const set = (values: string[]) => db.query(`SELECT ${VIEWER_SETTINGS.map((k, i) => `set_config('${k}', $${i + 1}, true)`).join(', ')}`, values);
+  const { rows } = await db.query(`SELECT ${VIEWER_SETTINGS.map((k, i) => `coalesce(current_setting('${k}', true), '') AS s${i}`).join(', ')}`);
+  await set(['system', '', '', '']);
+  try {
+    return await fn();
+  } finally {
+    await set(VIEWER_SETTINGS.map((_, i) => rows[0][`s${i}`]));
+  }
+}
+
 /** A Kernel ref the caller may not see answers exactly like one that does not exist (no existence oracle). */
 export async function assertVisibleRef(ref: string) {
   const { rows } = await query('SELECT (SELECT kind FROM kernel_record_lookup($1)) AS kind, kernel_ref_hidden($1) AS hidden', [ref.toUpperCase()]);
   if (rows[0].hidden || (refRegex(textKinds()).test(ref) && !rows[0].kind)) throw notFound(`${ref.toUpperCase()} not found`);
-  if (/^PIR\d{6}$/i.test(ref) && !(await query('SELECT 1 FROM incident_reviews WHERE ref = $1', [ref.toUpperCase()])).rows[0]) throw notFound(`${ref.toUpperCase()} not found`);
+  if (refPattern('PIR', 'i').test(ref) && !(await query('SELECT 1 FROM incident_reviews WHERE ref = $1', [ref.toUpperCase()])).rows[0]) throw notFound(`${ref.toUpperCase()} not found`);
 }

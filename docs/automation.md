@@ -137,6 +137,7 @@ They are ordinary rules: change them, or remove them.
 |---|---|---|
 | `GET /api/rules` | `list_rules` | rules with a sentence and 30-day counts, the other rule kinds, and (for managers) the webhooks by name |
 | `GET /api/rules/:id` | `get_rule` | one rule with its latest runs |
+| `GET /api/rules/vocabulary` | `get_rule_vocabulary` | what a rule may say per kind: statuses, sources, condition and trigger fields, operators per field type, what it may set, notify roles, moves; the editor builds its choices from it |
 | `POST /api/rules/dry-run` | `dry_run_rule` | a dry run of a rule id or a draft |
 | `POST /api/rules/proposals` | `propose_rule` | a proposal, disabled |
 | `POST /api/rules`, `PUT /api/rules/:id` | | write (managers) |

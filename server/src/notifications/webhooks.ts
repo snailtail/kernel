@@ -13,7 +13,7 @@ import { absoluteUrl } from '../core/url.js';
 import { GiveUp, processOutbox } from '../core/outbox.js';
 import { provided } from '../core/hooks.js';
 
-/** A request task's payload as it is sent (requests.ts adds its callback), or null when the task is no longer open. */
+/** A request task's payload as it is sent (fulfilment.ts adds its callback), or null when the task is no longer open. */
 export const requestTaskPayload = provided<[payload: any], any>((payload) => payload);
 
 type Db = { query: (sql: string, params?: unknown[]) => Promise<{ rows: any[]; rowCount: number | null }> };

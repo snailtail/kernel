@@ -9,7 +9,7 @@ import { PROBLEM_LIFECYCLE, TRANSITION_LABEL } from '../../../statuses';
 const fixedBy = (p: ProblemDetail) => {
   if (!p.fix?.deployed) return '';
   const bugs = (p.work_items ?? []).filter((w) => w.status === 'done').map((w) => w.ref);
-  return `Fixed in ${p.fix.deployed.change}${bugs.length ? ` (${bugs.join(', ')})` : ''}, deployed ${p.fix.deployed.at.slice(0, 10)}.`;
+  return `Fixed in ${p.fix.deployed.change ?? 'a restricted change'}${bugs.length ? ` (${bugs.join(', ')})` : ''}, deployed ${p.fix.deployed.at.slice(0, 10)}.`;
 };
 
 export function TransitionModal({ problem: p, to, onClose, onDone }: { problem: ProblemDetail; to: Status; onClose: () => void; onDone: (p: ProblemDetail) => void }) {

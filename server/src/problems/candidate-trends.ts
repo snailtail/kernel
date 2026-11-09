@@ -2,7 +2,7 @@
 // model as the rules in candidates.ts (Raw with a finish(records) that gives the reason), plus an evidence series per
 // day. Imports from candidates.ts are types only, so the two modules load in either order.
 import { z } from 'zod';
-import type { EvidenceRecord, Raw, Series } from './candidates.js';
+import type { EvidenceRecord, Raw, Series } from './candidate-detection.js';
 import { plural } from '../core/text.js';
 import type { Db } from '../core/db.js';
 

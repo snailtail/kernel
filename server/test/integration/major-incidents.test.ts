@@ -1,6 +1,4 @@
 import assert from 'node:assert/strict';
-import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { after, before, describe, test } from 'node:test';
 import { ownerQuery, skip, startKernel, type Client, type Harness } from './harness.js';
 
@@ -204,13 +202,8 @@ describe('major incidents (#108)', { skip }, () => {
   });
 
   test('agents have the same contract (MCP)', async () => {
-    const mcp = new McpClient({ name: 'major', version: '1' });
-    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('pm')}` } } }));
-    const call = async (name: string, args: Record<string, unknown>) => {
-      const res: any = await mcp.callTool({ name, arguments: args });
-      assert.ok(!res.isError, res.content[0].text);
-      return JSON.parse(res.content[0].text);
-    };
+    const mcp = await k.mcp('pm');
+    const call = mcp.call;
     const ref = (await pm.post('/api/incidents', { title: 'Mail outage', impact: 1, urgency: 2 })).body.ref;
     const other = (await pm.post('/api/incidents', { title: 'No mail for sales' })).body.ref;
     const d = await call('declare_major', { ref, comms_lead: 'analyst', bridge: 'https://meet.example.com/mail' });

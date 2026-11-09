@@ -121,8 +121,23 @@ export const typeOfPrefix = (ref: string) => recordTypes().find((t) => t.prefix 
 /** A text kind by its ref, or undefined (no throwing: callers decide what other refs mean). */
 export const textKindOfRef = (ref: string) => textKinds().find((t) => t.prefix === prefixOf(ref));
 
-/** Matches a ref (exactly six digits) of one of these types, e.g. for the text kinds' prefixes. */
-export const refRegex = (types: RecordType[], flags = 'i') => new RegExp(`^(${types.map((t) => t.prefix).join('|')})\\d{6}$`, flags);
+/** How a record the reader may not see is named instead of its ref (#225, #227): "a restricted change". */
+export const aRestricted = (type: string) => `a restricted ${type === 'review' ? 'post-incident review' : type.replace('_', ' ')}`;
+
+/**
+ * The number in a Kernel ref: kernel_ref (migration 165) pads it to six digits and writes it in full after 999 999
+ * (INC1000000, #229), so seven or more never start with a zero. Another tool's INC0010001 (ServiceNow) is not one.
+ * Every ref pattern is built from this; ref-digits.test.ts keeps a hand-written \d{6} out of the rest of the code.
+ */
+export const REF_DIGITS = '(?:\\d{6}|[1-9]\\d{6,})';
+
+/** Matches exactly a ref with one of these prefixes, e.g. refPattern('INC') for INC000123. */
+export function refPattern(prefixes: string | string[], flags = '') {
+  return new RegExp(`^(?:${[prefixes].flat().join('|')})${REF_DIGITS}$`, flags);
+}
+
+/** Matches a ref of one of these types, e.g. for the text kinds' prefixes. */
+export const refRegex = (types: RecordType[], flags = 'i') => refPattern(types.map((t) => t.prefix), flags);
 
 /** Deep link to the record in the web UI (absolute when KERNEL_PUBLIC_URL is set). */
 export const recordUrl = (t: RecordType, ref: string) => absoluteUrl(t.uiPath(ref));

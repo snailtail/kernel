@@ -1,7 +1,5 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
-import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { Client, skip, startKernel, type Harness } from './harness.js';
 
 describe('change enablement (#29)', { skip }, () => {
@@ -174,9 +172,8 @@ describe('change enablement (#29)', { skip }, () => {
   });
 
   test('MCP: change tools keep text untrusted and never vote', async () => {
-    const mcp = new McpClient({ name: 'chg', version: '1' });
-    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('pm')}` } } }));
-    const call = async (name: string, args: object) => JSON.parse(((await mcp.callTool({ name, arguments: args })) as any).content[0].text);
+    const mcp = await k.mcp('pm');
+    const call = mcp.call;
     const c = await call('create_change', { title: 'Rotate certificates', cis: [app], idempotency_key: 'chg-1', ...plans });
     assert.equal(c.untrusted_content.title, 'Rotate certificates');
     assert.equal((await call('create_change', { title: 'Rotate certificates', cis: [app], idempotency_key: 'chg-1', ...plans })).ref, c.ref);
@@ -184,6 +181,5 @@ describe('change enablement (#29)', { skip }, () => {
     assert.equal(vote.voted, false);
     const sched = await call('get_change_schedule', {});
     assert.ok(Array.isArray(sched.changes));
-    await mcp.close();
   });
 });

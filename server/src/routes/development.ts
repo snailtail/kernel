@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { longText } from '../core/fields.js';
 import { requireUser } from '../security/auth.js';
 import * as sp from '../development/sprints.js';
 import * as wi from '../development/work-items.js';
@@ -29,7 +30,7 @@ export async function developmentRoutes(app: FastifyInstance) {
   app.post<RefParams>('/api/work-items/:ref/transition', async (req) => wi.transitionWorkItem(requireUser(req), req.params.ref, wi.transitionWorkItemSchema.parse(req.body)));
   app.post<RefParams>('/api/work-items/:ref/move', async (req) => wi.moveWorkItem(requireUser(req), req.params.ref, wi.moveWorkItemSchema.parse(req.body)));
   app.post<RefParams>('/api/work-items/:ref/comments', { config: { idempotent: 'work.write' } }, async (req) =>
-    wi.addWorkItemComment(requireUser(req), req.params.ref, z.object({ body: z.string().max(20000) }).parse(req.body).body),
+    wi.addWorkItemComment(requireUser(req), req.params.ref, z.object({ body: longText }).parse(req.body).body),
   );
   app.post<RefParams>('/api/work-items/:ref/links', async (req) => wi.addWorkItemLink(requireUser(req), req.params.ref, wi.workItemLinkSchema.parse(req.body)));
   app.delete<{ Params: { ref: string; id: string } }>('/api/work-items/:ref/links/:id', async (req) => wi.removeWorkItemLink(requireUser(req), req.params.ref, Number(req.params.id)));

@@ -10,7 +10,7 @@ import { moduleEnabled } from '../core/modules.js';
 import { can } from '../security/policy.js';
 import { seeingAll } from '../security/visibility.js';
 import { getRecord } from './generic.js';
-import { recordType, recordUrl, typeOfPrefix } from './records.js';
+import { recordType, recordUrl, refPattern, typeOfPrefix } from './records.js';
 import { recordSummaries } from './summaries.js';
 
 const KINDS = ['incident', 'problem', 'work_item', 'change', 'improvement', 'request'] as const;
@@ -49,10 +49,10 @@ async function edgesOf(refs: string[]): Promise<[string, string][]> {
        WHERE l.kind IN ('problem', 'incident', 'change', 'improvement', 'request') AND l.system ${kernel} AND (w.ref = ANY($1) OR upper(l.reference) = ANY($1))
      UNION SELECT m.ref, upper(l.reference) FROM improvement_links l JOIN improvements m ON m.id = l.improvement_id
        WHERE l.kind IN ('problem', 'incident', 'change') AND l.system ${kernel} AND (m.ref = ANY($1) OR upper(l.reference) = ANY($1))
-     UNION SELECT m.ref, m.source_ref FROM improvements m WHERE m.source_ref ~ '^(PRB|INC|CHG)\\d{6}$' AND (m.ref = ANY($1) OR m.source_ref = ANY($1))
+     UNION SELECT m.ref, m.source_ref FROM improvements m WHERE m.source_ref ~ $2 AND (m.ref = ANY($1) OR m.source_ref = ANY($1))
      UNION SELECT r.ref, upper(l.reference) FROM request_links l JOIN requests r ON r.id = l.request_id
        WHERE l.kind IN ('problem', 'incident', 'change') AND l.system ${kernel} AND (r.ref = ANY($1) OR upper(l.reference) = ANY($1))`,
-    [refs],
+    [refs, refPattern(['PRB', 'INC', 'CHG']).source],
   );
   return rows.map((r) => [r.a, r.b]);
 }

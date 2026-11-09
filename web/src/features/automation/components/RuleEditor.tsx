@@ -3,30 +3,39 @@ import { api } from '../../../api/client';
 import { Modal } from '../../../components/Modal';
 import { useSession } from '../../../session';
 import { useTeams } from '../../../components/Teams';
-import type { RuleKind, RuleValue, RuleCondition, RuleAction, RuleDraft, Rule } from '../../../api/types/rules';
-import { KINDS, STATUSES, SOURCES, CONDITION_FIELDS, TRIGGER_FIELDS, NOTIFY_ROLES, ROLE_LABEL, DURATIONS, duration, FIELD_LABEL, OPS, typeOf, words, useLookups, Sentence } from '../vocabulary';
+import type { RuleKind, RuleValue, RuleCondition, RuleAction, RuleDraft, Rule, RuleVocabulary } from '../../../api/types/rules';
+import { KIND_LABEL, ROLE_LABEL, DURATIONS, duration, FIELD_LABEL, OP_LABEL, words, useLookups, useRuleVocabulary, Sentence } from '../vocabulary';
 import { DryRunCard } from './DryRunCard';
 import '../styles.css';
 
-const SETTABLE = TRIGGER_FIELDS;
-
 const emptyDraft = (kind: RuleKind): RuleDraft => ({ name: '', kind, trigger: { type: 'created' }, conditions: [], actions: [{ type: 'assign_team', team_id: 0 }] });
 
-export function RuleEditor({ rule, manage, webhooks, onClose, onSaved }: { rule?: Rule; manage: boolean; webhooks: { id: number; name: string }[]; onClose: () => void; onSaved: (id: number) => void }) {
+const TRANSITION_LABEL: Record<string, string> = { closed: 'close it, if it is resolved', in_progress: 'take it off hold' };
+
+type Props = { rule?: Rule; manage: boolean; webhooks: { id: number; name: string }[]; onClose: () => void; onSaved: (id: number) => void };
+
+export function RuleEditor(props: Props) {
+  const vocabulary = useRuleVocabulary();
+  if (!vocabulary) return <Modal title={props.rule ? `Edit ${props.rule.name}` : 'New rule'} onClose={props.onClose}><p className="muted">Loading…</p></Modal>;
+  return <Editor {...props} vocabulary={vocabulary} />;
+}
+
+function Editor({ rule, manage, webhooks, onClose, onSaved, vocabulary }: Props & { vocabulary: RuleVocabulary }) {
   const { meta } = useSession();
   const teams = useTeams().filter((t) => t.active);
   const lookups = useLookups(webhooks);
-  const kinds = KINDS.filter((k) => !k.module || meta.modules[k.module]);
-  const [draft, setDraft] = useState<RuleDraft>(rule ? { name: rule.name, kind: rule.kind, trigger: rule.trigger, conditions: rule.conditions, actions: rule.actions } : emptyDraft(kinds[0].kind));
+  const [draft, setDraft] = useState<RuleDraft>(rule ? { name: rule.name, kind: rule.kind, trigger: rule.trigger, conditions: rule.conditions, actions: rule.actions } : emptyDraft(vocabulary.kinds[0]));
   const [error, setError] = useState<string | null>(null);
   const set = (patch: Partial<RuleDraft>) => setDraft((d) => ({ ...d, ...patch }));
   const k = draft.kind;
+  const allowed = vocabulary.by_kind[k];
+  const typeOf = (field: string) => vocabulary.field_types[field];
 
   const t = draft.trigger;
   const triggerValue = t.type === 'created' ? 'created' : t.type === 'status_changed' ? `status:${t.to ?? ''}` : t.type === 'field_changed' ? `field:${t.field}` : t.type;
   const setTrigger = (v: string) => set({
     trigger: v === 'created' ? { type: 'created' }
-      : v === 'in_status_for' ? { type: 'in_status_for', status: STATUSES[k][0], hours: 24 }
+      : v === 'in_status_for' ? { type: 'in_status_for', status: allowed.statuses[0], hours: 24 }
         : v === 'due_in' ? { type: 'due_in', hours: 24 }
           : v.startsWith('status:') ? { type: 'status_changed', ...(v.slice(7) ? { to: v.slice(7) } : {}) } : { type: 'field_changed', field: v.slice(6) },
   });
@@ -39,8 +48,8 @@ export function RuleEditor({ rule, manage, webhooks, onClose, onSaved }: { rule?
       case 'category': return meta.categories.filter((c) => c.active).map((c) => ({ value: c.id, label: c.name }));
       case 'team': return teams.map((t) => ({ value: t.id, label: t.name }));
       case 'assignee': return meta.assignees.map((u) => ({ value: u.id, label: u.display_name }));
-      case 'status': return STATUSES[k].map((s) => ({ value: s, label: words(s) }));
-      case 'source': return (SOURCES[k] ?? []).map((s) => ({ value: s, label: words(s) }));
+      case 'status': return allowed.statuses.map((s) => ({ value: s, label: words(s) }));
+      case 'source': return allowed.sources.map((s) => ({ value: s, label: words(s) }));
       default: return [{ value: true, label: 'yes' }, { value: false, label: 'no' }];
     }
   };
@@ -56,18 +65,18 @@ export function RuleEditor({ rule, manage, webhooks, onClose, onSaved }: { rule?
   const setAction = (n: number, a: RuleAction) => set({ actions: draft.actions.map((x, i) => (i === n ? a : x)) });
   const newAction = (type: RuleAction['type']): RuleAction => {
     switch (type) {
-      case 'set_field': return { type, field: SETTABLE[k][0], value: SETTABLE[k][0] === 'priority' ? 2 : null };
+      case 'set_field': return { type, field: allowed.settable[0], value: allowed.settable[0] === 'priority' ? 2 : null };
       case 'assign_team': return { type, team_id: teams[0]?.id ?? 0 };
       case 'add_comment': return { type, text: '' };
       case 'notify': return { type, users: [], teams: [], roles: [] };
-      case 'transition': return { type, to: 'closed' };
+      case 'transition': return { type, to: Object.keys(allowed.transitions)[0] };
       case 'webhook': return { type, webhook_id: webhooks[0]?.id ?? 0 };
     }
   };
   const actionTypes: { type: RuleAction['type']; label: string }[] = [
-    ...(SETTABLE[k].includes('team') ? [{ type: 'assign_team' as const, label: 'assign to a team' }] : []),
+    ...(allowed.settable.includes('team') ? [{ type: 'assign_team' as const, label: 'assign to a team' }] : []),
     { type: 'set_field', label: 'set a field' }, { type: 'add_comment', label: 'add an internal note' }, { type: 'notify', label: 'notify' },
-    ...(k === 'incident' ? [{ type: 'transition' as const, label: 'move it' }] : []),
+    ...(Object.keys(allowed.transitions).length ? [{ type: 'transition' as const, label: 'move it' }] : []),
     ...(webhooks.length ? [{ type: 'webhook' as const, label: 'send to a webhook' }] : []),
   ];
 
@@ -94,19 +103,19 @@ export function RuleEditor({ rule, manage, webhooks, onClose, onSaved }: { rule?
           <legend>When</legend>
           <div className="rule-line">
             <select aria-label="Kind of record" value={k} disabled={!!rule} onChange={(e) => changeKind(e.target.value as RuleKind)}>
-              {kinds.map((x) => <option key={x.kind} value={x.kind}>{x.label}</option>)}
+              {(rule && !vocabulary.kinds.includes(rule.kind) ? [rule.kind] : vocabulary.kinds).map((x) => <option key={x} value={x}>{KIND_LABEL[x]}</option>)}
             </select>
             <select aria-label="When" value={triggerValue} onChange={(e) => setTrigger(e.target.value)}>
               <option value="created">is created</option>
               <option value="status:">changes status</option>
-              {STATUSES[k].map((s) => <option key={s} value={`status:${s}`}>moves to {words(s)}</option>)}
-              {TRIGGER_FIELDS[k].map((f) => <option key={f} value={`field:${f}`}>gets a new {FIELD_LABEL[f]}</option>)}
+              {allowed.statuses.map((s) => <option key={s} value={`status:${s}`}>moves to {words(s)}</option>)}
+              {allowed.trigger_fields.map((f) => <option key={f} value={`field:${f}`}>gets a new {FIELD_LABEL[f]}</option>)}
               <option value="in_status_for">has been in a status for a while</option>
-              <option value="due_in">has a follow-up action coming due</option>
+              {vocabulary.due_kinds.includes(k) && <option value="due_in">has a follow-up action coming due</option>}
             </select>
             {t.type === 'in_status_for' && (
               <select aria-label="Status" value={t.status} onChange={(e) => set({ trigger: { ...t, status: e.target.value } })}>
-                {STATUSES[k].map((s) => <option key={s} value={s}>{words(s)}</option>)}
+                {allowed.statuses.map((s) => <option key={s} value={s}>{words(s)}</option>)}
               </select>
             )}
             {(t.type === 'in_status_for' || t.type === 'due_in') && (
@@ -130,7 +139,7 @@ export function RuleEditor({ rule, manage, webhooks, onClose, onSaved }: { rule?
               <div className="rule-line" key={n}>
                 {n > 0 && <span className="muted">and</span>}
                 <select aria-label="Field" value={c.field} onChange={(e) => setCondition(n, newCondition(e.target.value))}>
-                  {CONDITION_FIELDS[k].map((f) => <option key={f} value={f}>{FIELD_LABEL[f]}</option>)}
+                  {allowed.condition_fields.map((f) => <option key={f} value={f}>{FIELD_LABEL[f]}</option>)}
                 </select>
                 {type !== 'bool' && (
                   <select aria-label="Comparison" value={c.op} onChange={(e) => {
@@ -138,7 +147,7 @@ export function RuleEditor({ rule, manage, webhooks, onClose, onSaved }: { rule?
                     const first = Array.isArray(c.value) ? c.value[0] : c.value ?? opts[0]?.value;
                     setCondition(n, op === 'is_empty' ? { field: c.field, op } : op === 'in' ? { field: c.field, op, value: first !== undefined ? [first] : [] } : { field: c.field, op, ...(first !== undefined ? { value: first } : {}) });
                   }}>
-                    {OPS[type].map((o) => <option key={o.op} value={o.op}>{o.label}</option>)}
+                    {vocabulary.operators[type].map((op) => <option key={op} value={op}>{OP_LABEL[op] ?? words(op)}</option>)}
                   </select>
                 )}
                 {c.op === 'in' ? (
@@ -155,7 +164,7 @@ export function RuleEditor({ rule, manage, webhooks, onClose, onSaved }: { rule?
               </div>
             );
           })}
-          {draft.conditions.length < 10 && <button type="button" className="btn-link" onClick={() => set({ conditions: [...draft.conditions, newCondition(CONDITION_FIELDS[k][0])] })}>+ Add a condition</button>}
+          {draft.conditions.length < 10 && <button type="button" className="btn-link" onClick={() => set({ conditions: [...draft.conditions, newCondition(allowed.condition_fields[0])] })}>+ Add a condition</button>}
         </fieldset>
 
         <fieldset className="rule-part">
@@ -175,7 +184,7 @@ export function RuleEditor({ rule, manage, webhooks, onClose, onSaved }: { rule?
               {a.type === 'set_field' && (
                 <>
                   <select aria-label="Field to set" value={a.field} onChange={(e) => setAction(n, { ...a, field: e.target.value, value: e.target.value === 'priority' ? 2 : e.target.value === 'team' ? teams[0]?.id ?? null : null })}>
-                    {SETTABLE[k].map((f) => <option key={f} value={f}>{FIELD_LABEL[f]}</option>)}
+                    {allowed.settable.map((f) => <option key={f} value={f}>{FIELD_LABEL[f]}</option>)}
                   </select>
                   <span className="muted">to</span>
                   <select aria-label="New value" value={a.value ?? ''} onChange={(e) => setAction(n, { ...a, value: e.target.value ? Number(e.target.value) : null })}>
@@ -189,7 +198,7 @@ export function RuleEditor({ rule, manage, webhooks, onClose, onSaved }: { rule?
               )}
               {a.type === 'notify' && (
                 <>
-                  {NOTIFY_ROLES[k].filter((r) => r !== 'owner' || t.type === 'due_in').map((r) => (
+                  {allowed.notify_roles.filter((r) => r !== 'owner' || t.type === 'due_in').map((r) => (
                     <label key={r} className="check small">
                       <input type="checkbox" checked={(a.roles ?? []).includes(r)} onChange={(e) => setAction(n, { ...a, roles: e.target.checked ? [...(a.roles ?? []), r] : (a.roles ?? []).filter((x) => x !== r) })} /> {ROLE_LABEL[r]}
                     </label>
@@ -209,8 +218,7 @@ export function RuleEditor({ rule, manage, webhooks, onClose, onSaved }: { rule?
               )}
               {a.type === 'transition' && (
                 <select aria-label="Move to" value={a.to} onChange={(e) => setAction(n, { ...a, to: e.target.value })}>
-                  <option value="closed">close it, if it is resolved</option>
-                  <option value="in_progress">take it off hold</option>
+                  {Object.keys(allowed.transitions).map((to) => <option key={to} value={to}>{TRANSITION_LABEL[to] ?? `move it to ${words(to)}`}</option>)}
                 </select>
               )}
               {draft.actions.length > 1 && <button type="button" className="btn-link" aria-label="Remove action" onClick={() => set({ actions: draft.actions.filter((_, i) => i !== n) })}>Remove</button>}

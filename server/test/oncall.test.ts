@@ -27,6 +27,7 @@ test('an override wins while it lasts; an empty rotation has nobody', () => {
 test('inbound webhooks: PagerDuty, Opsgenie, Grafana OnCall and the generic form, with anchored actions', () => {
   assert.deepEqual(parseInbound({ event: { event_type: 'incident.acknowledged', agent: { summary: 'Nora' }, data: { title: 'INC000012: router' } } }), { refs: ['INC000012'], bulk: null, action: 'acknowledge', by: 'Nora' });
   assert.deepEqual(parseInbound({ action: 'Acknowledge', alert: { alias: 'INC000012', username: 'dba@example.com' } }), { refs: ['INC000012'], bulk: null, action: 'acknowledge', by: 'dba@example.com' });
+  assert.deepEqual(parseInbound({ action: 'Acknowledge', alert: { alias: 'INC1000000', username: 'dba@example.com' } }), { refs: ['INC1000000'], bulk: null, action: 'acknowledge', by: 'dba@example.com' });
   assert.equal(parseInbound({ alert_uid: 'INC000012', state: 'ok' })?.action, 'resolve');
   assert.equal(parseInbound({ event: { event_type: 'incident.resolved', data: { title: 'INC000012' } } })?.action, 'resolve');
   assert.deepEqual(parseInbound({ ref: 'inc000012', action: 'resolve', by: 'sms-gw' }), { refs: ['INC000012'], bulk: null, action: 'resolve', by: 'sms-gw' });

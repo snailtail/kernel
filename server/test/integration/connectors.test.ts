@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
 import { after, before, describe, test } from 'node:test';
-import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { Client, skip, startKernel, type Harness } from './harness.js';
 
 /** A stand-in for the OP5 Monitor REST API. */
@@ -211,21 +209,16 @@ describe('connector framework and push contract (#18)', { skip }, () => {
     await admin.put(`/api/connectors/${c.id}`, { type: 'op5', name: 'Patient', source_system: 'Patient', retire_after_days: 7, enabled: false, config: { base_url: 'https://op5.example.com' } });
     assert.ok((await proposed()).includes(ref));
 
-    const mcp = new McpClient({ name: 'retire-test', version: '1' });
-    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('pm')}` } } }));
-    try {
-      const call = async (name: string, args: object) => (await mcp.callTool({ name, arguments: args as any })) as any;
-      assert.ok(JSON.parse((await call('list_retire_proposals', {})).content[0].text).some((p: any) => p.ref === ref));
-      const unconfirmed = await call('retire_cis', { refs: [ref] });
-      assert.equal(unconfirmed.isError, true);
-      assert.match(unconfirmed.content[0].text, /is a decision/);
-      const done = await call('retire_cis', { refs: [ref], human_confirmation: 'Yes, retire it' });
-      assert.equal(JSON.parse(done.content[0].text).retired, 1);
-      const { rows: quoted } = await db.query("SELECT entity_ref FROM audit_log WHERE entity_type = 'ci' AND action = 'mcp_human_confirmation' AND reason = 'Yes, retire it'");
-      assert.deepEqual(quoted.map((r: any) => r.entity_ref), [ref], 'the quote lands on the CI itself, so its history shows it');
-    } finally {
-      await mcp.close();
-    }
+    const mcp = await k.mcp('pm');
+    const call = mcp.raw;
+    assert.ok(JSON.parse((await call('list_retire_proposals', {})).content[0].text).some((p: any) => p.ref === ref));
+    const unconfirmed = await call('retire_cis', { refs: [ref] });
+    assert.equal(unconfirmed.isError, true);
+    assert.match(unconfirmed.content[0].text, /is a decision/);
+    const done = await call('retire_cis', { refs: [ref], human_confirmation: 'Yes, retire it' });
+    assert.equal(JSON.parse(done.content[0].text).retired, 1);
+    const { rows: quoted } = await db.query("SELECT entity_ref FROM audit_log WHERE entity_type = 'ci' AND action = 'mcp_human_confirmation' AND reason = 'Yes, retire it'");
+    assert.deepEqual(quoted.map((r: any) => r.entity_ref), [ref], 'the quote lands on the CI itself, so its history shows it');
   });
 
   test('the scheduler runs every due connector in one tick, a few at a time, never one twice, past a hanging one', async () => {

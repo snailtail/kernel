@@ -1,7 +1,5 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
-import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { Client, skip, startKernel, type Harness } from './harness.js';
 
 describe('service levels (#43)', { skip }, () => {
@@ -92,9 +90,8 @@ describe('service levels (#43)', { skip }, () => {
     const r = (await viewer.get('/api/reports?from=2000-01-01&to=2100-01-01')).body.sla;
     assert.ok(r.overall.resolved >= 1);
     assert.ok(r.by_priority.length >= 1);
-    const mcp = new McpClient({ name: 'sla', version: '1' });
-    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
-    const call = async (name: string, args: object) => JSON.parse(((await mcp.callTool({ name, arguments: args })) as any).content[0].text);
+    const mcp = await k.mcp('analyst');
+    const call = mcp.call;
     const soon = await call('list_incidents', { breaching_within: 0 });
     assert.ok(soon.length >= 1 && soon.every((x: any) => x.sla_state === 'breached'));
     const one = await call('get_incident', { ref: soon[0].ref });

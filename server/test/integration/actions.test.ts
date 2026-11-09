@@ -2,8 +2,6 @@
 // it is as visible as its parent.
 import assert from 'node:assert/strict';
 import { readdir, readFile } from 'node:fs/promises';
-import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { after, before, describe, test } from 'node:test';
 import { ownerQuery, skip, startKernel, TEST_DATABASE_URL, type Client, type Harness } from './harness.js';
 
@@ -150,13 +148,8 @@ describe('actions on any record (#184)', { skip }, () => {
   });
 
   test('MCP: add_action and list_actions work for any record', async () => {
-    const client = new McpClient({ name: 'kernel-tests', version: '1.0.0' });
-    await client.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('pm')}` } } }));
-    const call = async (name: string, args: Record<string, unknown>) => {
-      const res: any = await client.callTool({ name, arguments: args });
-      assert.ok(!res.isError, res.content[0].text);
-      return JSON.parse(res.content[0].text);
-    };
+    const mcp = await k.mcp('pm');
+    const call = mcp.call;
     const added = await call('add_action', { ref: pir, title: 'Agent: check the relay runbook', owner: 'analyst' });
     assert.ok(added.some((x: any) => x.title === 'Agent: check the relay runbook' && x.parent_kind === 'review'));
     const id = added.find((x: any) => x.title === 'Agent: check the relay runbook').id;
@@ -164,6 +157,5 @@ describe('actions on any record (#184)', { skip }, () => {
     assert.equal(updated.find((x: any) => x.id === id).status, 'done');
     const listed = await call('list_actions', { parent: inc, status: 'all' });
     assert.ok(listed.every((x: any) => x.ref === inc));
-    await client.close();
   });
 });

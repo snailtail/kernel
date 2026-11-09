@@ -1,7 +1,5 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
-import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { skip, startKernel, type Harness, type Client } from './harness.js';
 
 describe('process guidance across practices (#37)', { skip }, () => {
@@ -58,11 +56,10 @@ describe('process guidance across practices (#37)', { skip }, () => {
     await analyst.post('/api/problems', { title: 'Nobody owns me' });
     const tips = (await viewer.get('/api/health-tips')).body;
     assert.ok(tips.some((t: any) => t.id === 'no_owner'));
-    const mcp = new McpClient({ name: 'flow', version: '1' });
-    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
-    const res = JSON.parse(((await mcp.callTool({ name: 'get_process_map', arguments: {} })) as any).content[0].text);
+    const mcp = await k.mcp('analyst');
+    const res = await mcp.call('get_process_map');
     assert.equal(res.nodes[0].id, 'event');
-    assert.ok((await mcp.listResources()).resources.some((r) => r.uri === 'kernel://guides/change_assessment'));
+    assert.ok((await mcp.client.listResources()).resources.some((r) => r.uri === 'kernel://guides/change_assessment'));
     await mcp.close();
   });
 

@@ -1,5 +1,6 @@
 // External systems (link URL templates) and inbound incident/event records. Problem candidates are in candidates.ts.
 import { z } from 'zod';
+import { instant } from '../core/fields.js';
 import type { User } from '../security/auth.js';
 import { linkRecordCis } from '../problems/problem-cis.js';
 import { audit } from '../security/audit.js';
@@ -57,7 +58,7 @@ export const recordSchema = z.object({
   service: z.string().trim().max(200).default(''),
   category: z.string().trim().max(100).default(''),
   summary: z.string().trim().max(2000).default(''),
-  occurred_at: z.iso.datetime({ offset: true }).optional(),
+  occurred_at: instant.optional(),
   problem_ref: z.string().trim().max(20).optional().describe('Link the record to this problem'),
   ci: z.string().trim().max(30).optional().describe('The CI or service the record concerns (CI000012/SVC000003)'),
   ci_source_system: z.string().trim().max(100).optional().describe('Or identify the CI by its source system and id'),

@@ -1,6 +1,7 @@
 // MCP: Change enablement (#29).
 import { z } from 'zod';
 import * as changes from '../changes/changes.js';
+import * as calendar from '../changes/calendar.js';
 import { idempotent } from '../idempotency.js';
 import { type McpContext } from './registrar.js';
 
@@ -75,7 +76,7 @@ export function registerChangesTools({ user, tool }: McpContext) {
     },
   );
   tool('get_change_schedule', 'Planned changes and change freezes in a period (default the next 30 days), with collisions on the same CI.', { from: z.string().optional().describe('YYYY-MM-DD'), to: z.string().optional() }, true, async (args) => {
-    const s = await changes.changeSchedule(user, changes.scheduleSchema.parse(args));
+    const s = await calendar.changeSchedule(user, calendar.scheduleSchema.parse(args));
     return { ...s, notice: changeNotice, changes: s.changes.map((c: any) => ({ ...c, title: undefined, title_untrusted: c.title })) };
   });
   tool(

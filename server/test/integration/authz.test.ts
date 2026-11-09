@@ -108,13 +108,10 @@ describe('authorisation', { skip }, () => {
   }
 
   test('MCP lists only the tools a role may use', async () => {
-    const { Client: McpClient } = await import('@modelcontextprotocol/sdk/client/index.js');
-    const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/sdk/client/streamableHttp.js');
     const tools = async (role: RoleName) => {
       const token = (await clients[role === 'integration' ? 'admin' : role].post('/api/tokens', { name: 'mcp', scopes: ['read', 'write', 'mcp'] })).body.token;
-      const c = new McpClient({ name: 'authz', version: '1' });
-      await c.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${token}` } } }));
-      const names = (await c.listTools()).tools.map((t) => t.name);
+      const c = await k.mcp({ token });
+      const names = await c.tools();
       await c.close();
       return names;
     };

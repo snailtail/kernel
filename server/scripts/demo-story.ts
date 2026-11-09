@@ -2,12 +2,14 @@
 // a little background volume so reports and trends have shapes. Everything goes through the service layer, like the
 // API, so audit, SLA clocks, live updates and the hash chain are real; then timestamps are moved relative to now, so
 // the demo always looks current (an update is due in 10 minutes, an action is two days overdue).
+import type { z } from 'zod';
 import type { User } from '../src/security/auth.js';
 import { query } from '../src/core/db.js';
 import * as actions from '../src/problems/actions.js';
 import * as analyses from '../src/problems/analyses.js';
 import * as candidates from '../src/problems/candidates.js';
 import * as changes from '../src/changes/changes.js';
+import * as calendar from '../src/changes/calendar.js';
 import * as cmdb from '../src/cmdb/cmdb.js';
 import * as connectors from '../src/integrations/connectors.js';
 import * as graph from '../src/cmdb/cmdb-graph.js';
@@ -22,7 +24,11 @@ import * as problems from '../src/problems/problems.js';
 import * as improvements from '../src/improvements/improvements.js';
 import * as workItems from '../src/development/work-items.js';
 import * as requests from '../src/requests/requests.js';
+import * as catalogue from '../src/requests/catalogue.js';
+// Standard change and webhook tasks run through hooks that fulfilment.ts provides when it is loaded (the app loads it).
+import '../src/requests/fulfilment.js';
 import * as rules from '../src/automation/rules.js';
+import { processRuleRuns } from '../src/automation/rule-runner.js';
 import { contextStore, currentContext } from '../src/core/context.js';
 import * as reviews from '../src/incidents/post-incident-reviews.js';
 import * as setup from '../src/security/setup.js';
@@ -108,7 +114,7 @@ export async function seedStory(p: People) {
   await shift(chg, 2 * H + 10);
 
   // ---- Monitoring sees checkout fail; the event rule opens the incident ----
-  await events.saveRule(admin, null, { name: 'Critical on business-critical CIs', enabled: true, position: 10, conditions: { min_severity: 'critical', max_ci_criticality: 1 }, impact: 1, urgency: 1, team_id: web!.id, group_by: 'service', group_window_minutes: 60, max_incidents_per_hour: 5, auto_resolve: false, hold_down_minutes: 15 });
+  await events.saveRule(admin, null, events.ruleSchema.parse({ name: 'Critical on business-critical CIs', enabled: true, position: 10, conditions: { min_severity: 'critical', max_ci_criticality: 1 }, impact: 1, urgency: 1, team_id: web!.id, group_by: 'service', group_window_minutes: 60, max_incidents_per_hour: 5, auto_resolve: false, hold_down_minutes: 15 }));
   await events.processEvents('Uptime Kuma', 'Uptime Kuma', [
     { host: 'shop-frontend', check: 'HTTP POST /checkout', severity: 'critical', message: 'Checkout returns 502 (3 of 3 probes)' },
     { host: 'pay-gw01', check: 'TLS handshake', severity: 'major', message: 'handshake failure: unsupported protocol' },
@@ -333,8 +339,8 @@ export async function seedStory(p: People) {
   await query("UPDATE people SET manager_id = $1 WHERE email IN ('maria.svensson@example.com', 'johan.ek@example.com')", [annaPerson]);
   const karin = (await people.createPerson(admin, { name: 'Karin Holm', email: 'karin.holm@example.com', title: 'New hire', department: 'Customer service', manager_id: annaPerson } as any)).id as number;
   const personId = async (email: string) => (await query('SELECT id FROM people WHERE email = $1', [email])).rows[0].id as number;
-  const item = (input: Partial<Parameters<typeof requests.saveRequestItem>[2]> & { name: string; fulfilment_tasks: { title: string; team_id: number | null }[] }) =>
-    requests.saveRequestItem(anna, null, requests.requestItemSchema.parse({ service: webshop, ...input }));
+  const item = (input: Omit<z.input<typeof catalogue.requestItemSchema>, 'service'>) =>
+    catalogue.saveRequestItem(anna, null, catalogue.requestItemSchema.parse({ service: webshop, ...input }));
   const account = await item({
     name: 'New account', description: 'An account for the shop admin and the order system, for a new colleague.',
     form: [{ key: 'full_name', label: 'Full name', type: 'text', required: true }, { key: 'start', label: 'Start date', type: 'date', required: true }, { key: 'role', label: 'Role', type: 'choice', required: true, choices: ['Customer service', 'Content editor', 'Warehouse'] }],
@@ -351,7 +357,7 @@ export async function seedStory(p: People) {
     approval: 'requester_manager', fulfilment_tasks: [{ title: 'Grant the access', team_id: web!.id }, { title: 'Tell the requester', team_id: null }],
   });
   // A new VM is a standard change (part 2 of #44): approved by the service owner, provisioned through the template.
-  const vmTemplate = await changes.saveTemplate(admin, null, changes.templateSchema.parse({
+  const vmTemplate = await calendar.saveTemplate(admin, null, calendar.templateSchema.parse({
     name: 'Provision a webshop VM', max_risk: 'high', description: 'A new VM from the platform image.',
     implementation_plan: 'Run the VM pipeline with the requested size; join it to monitoring.', backout_plan: 'Delete the VM and its DNS record.',
   }));
@@ -371,7 +377,9 @@ export async function seedStory(p: People) {
   for (const t of (await requests.getRequest(erik, done.ref)).tasks) await requests.completeRequestTask(erik, done.ref, t.id, { note: t.position === 1 ? 'Editor role in the CMS.' : '' });
   // A VM: approved by Anna (the Webshop's owner), so its standard change waits to be scheduled.
   const vm = await requests.createRequest(erik, { item_id: newVm.id, requester: { id: await personId('maria.svensson@example.com') }, answers: { size: 'Medium (4 vCPU)', purpose: 'A staging copy of the search service for the spring sale.' }, priority: 3 });
-  await requests.decideRequest(anna, vm.ref, { decision: 'approve', comment: '' });
+  const vmApproved = await requests.decideRequest(anna, vm.ref, { decision: 'approve', comment: '' });
+  // The demo check in CI: the approval made the standard change.
+  if (!vmApproved.tasks.some((t) => t.kind === 'change' && t.change_ref)) throw new Error(`${vm.ref}: no standard change was made for its change task`);
   // Rejected, with the reason.
   const rejected = await requests.createRequest(sara, { item_id: access.id, requester: { id: await personId('johan.ek@example.com') }, answers: { system: db, level: 'Write', why: 'Fix prices directly in the database.' }, priority: 4 });
   await requests.decideRequest(anna, rejected.ref, { decision: 'reject', comment: 'Prices are changed in the shop admin, which keeps the history. Ask for the price editor role there.' });
@@ -416,7 +424,7 @@ export async function seedStory(p: People) {
     actions: [{ type: 'add_comment', text: 'A P1 or P2 is on hold: say what it waits for and when work resumes.' }],
   });
   await incidents.createIncident(sara, { title: 'Order history page is blank', description: 'Johan cannot see his orders in the shop admin.', impact: 3, urgency: 3, caller: { email: 'johan.ek@example.com' } });
-  await rules.processRuleRuns();
+  await processRuleRuns();
 
   // ---- Development work (#165): an optional module, on in the demo; the Web platform team's backlog ----
   await setup.setModules(admin, { development: true }, 'Demo story');

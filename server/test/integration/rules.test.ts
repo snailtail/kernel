@@ -1,18 +1,16 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
-import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { Client, skip, startKernel, type Harness } from './harness.js';
 
 describe('automation rules (#49)', { skip }, () => {
   let k: Harness;
   let admin: Client, pm: Client, analyst: Client, analyst2: Client, viewer: Client;
   let db: typeof import('../../src/core/db.js');
-  let rules: typeof import('../../src/automation/rules.js');
+  let runner: typeof import('../../src/automation/rule-runner.js');
   const ids: Record<string, number> = {};
   let payroll: string, payrollDb: string, hr: any, ops: any, cat: number;
 
-  const run = () => rules.processRuleRuns();
+  const run = () => runner.processRuleRuns();
   const ok = (r: { status: number; body: any }, status = 200) => {
     assert.equal(r.status, status, JSON.stringify(r.body));
     return r.body;
@@ -35,7 +33,7 @@ describe('automation rules (#49)', { skip }, () => {
     k = await startKernel();
     [admin, pm, analyst, analyst2, viewer] = await Promise.all([k.login('admin'), k.login('pm'), k.login('analyst'), k.login('analyst2'), k.login('viewer')]);
     db = await import('../../src/core/db.js');
-    rules = await import('../../src/automation/rules.js');
+    runner = await import('../../src/automation/rule-runner.js');
     for (const u of (await db.query('SELECT id, username FROM users')).rows) ids[u.username] = u.id;
     payroll = ok(await pm.post('/api/cis', { name: 'Payroll', ci_type: 'business_service' }), 201).ref;
     payrollDb = ok(await pm.post('/api/cis', { name: 'payroll-db01', ci_type: 'database' }), 201).ref;
@@ -111,10 +109,10 @@ describe('automation rules (#49)', { skip }, () => {
 
   test('a rule can do no more than an analyst, and a failing action never fails the save', async () => {
     const { PERMISSIONS } = await import('../../src/security/policy.js');
-    assert.equal(rules.RULE_ROLE, 'analyst');
+    assert.equal(runner.RULE_ROLE, 'analyst');
     for (const manage of ['problem.close', 'incident.flag_major', 'rule.manage', 'record.restrict', 'record.redact', 'change.approve'] as const) {
       if (manage === 'record.restrict') continue; // analysts restrict their own records; rules have no action for it
-      assert.ok(!PERMISSIONS[rules.RULE_ROLE].has(manage), manage);
+      assert.ok(!PERMISSIONS[runner.RULE_ROLE].has(manage), manage);
     }
     await enabled(rule({ name: 'Bad assignee', actions: [{ type: 'set_field', field: 'assignee', value: ids.viewer }, { type: 'set_field', field: 'priority', value: 2 }] }));
     const i = ok(await analyst.post('/api/incidents', { title: 'Something broke' }), 201);
@@ -276,8 +274,8 @@ describe('automation rules (#49)', { skip }, () => {
     await db.query(`INSERT INTO incident_activity (incident_id, kind, body, data, channel, created_at)
       SELECT id, 'status', 'The caller says it is still a problem (portal)', '{"from": "resolved", "to": "in_progress", "by_requester": true}', 'portal', now() - interval '8 days' FROM incidents WHERE ref = $1`, [reopened]);
     await backdate('incident_activity', 'incident_id', reopened, 'incidents', 6 * 24 * 60);
-    assert.equal(await rules.scanTimeTriggers(), 2, 'the week-old ones, not the fresh one');
-    assert.equal(await rules.scanTimeTriggers(), 0, 'a second scan queues nothing: once per record and window');
+    assert.equal(await runner.scanTimeTriggers(), 2, 'the week-old ones, not the fresh one');
+    assert.equal(await runner.scanTimeTriggers(), 0, 'a second scan queues nothing: once per record and window');
     await run();
     assert.equal(ok(await analyst.get(`/api/incidents/${old}`)).status, 'closed');
     assert.equal(ok(await analyst.get(`/api/incidents/${fresh}`)).status, 'resolved');
@@ -298,8 +296,8 @@ describe('automation rules (#49)', { skip }, () => {
     const p1 = ok(await analyst2.post('/api/incidents', { title: 'Payroll down', impact: 1, urgency: 1, team_id: hr.id }), 201);
     const p1late = ok(await analyst2.post('/api/incidents', { title: 'Payroll slow', impact: 1, urgency: 1, team_id: hr.id }), 201);
     await db.query("UPDATE incidents SET created_at = now() - interval '20 minutes' WHERE ref = $1", [p1late.ref]);
-    await rules.scanTimeTriggers();
-    await rules.scanTimeTriggers();
+    await runner.scanTimeTriggers();
+    await runner.scanTimeTriggers();
     await run();
     const told = (await db.query("SELECT user_id, ref, summary FROM notifications WHERE event = 'automation' AND ref = ANY($1)", [[p.ref, p1.ref, p1late.ref]])).rows;
     assert.deepEqual(told.filter((t: any) => t.ref === p.ref).map((t: any) => t.user_id), [ids.analyst2], 'the owner, once, for the action due tomorrow only');
@@ -336,16 +334,37 @@ describe('automation rules (#49)', { skip }, () => {
     await disableAll();
   });
 
+  test('the vocabulary is the allowlists the server checks, for the editor and agents (#247)', async () => {
+    const rules = await import('../../src/automation/rules.js');
+    const { INCIDENT_STATUSES } = await import('../../src/incidents/incidents.js');
+    const { REQUEST_STATUSES } = await import('../../src/requests/requests.js');
+    const v = ok(await viewer.get('/api/rules/vocabulary'));
+    assert.deepEqual(v, ok(await analyst.get('/api/rules/vocabulary')));
+    for (const kind of ['incident', 'problem', 'change'] as const) {
+      assert.ok(v.kinds.includes(kind), kind);
+      assert.deepEqual(v.by_kind[kind].condition_fields, rules.CONDITION_FIELDS[kind]);
+      assert.deepEqual(v.by_kind[kind].transitions, rules.TRANSITIONS[kind] ?? {});
+      for (const f of v.by_kind[kind].condition_fields) assert.ok(v.operators[v.field_types[f]]?.length, `${kind}.${f} has operators`);
+    }
+    assert.deepEqual(v.by_kind.incident.statuses, INCIDENT_STATUSES);
+    assert.deepEqual(v.by_kind.request.statuses, REQUEST_STATUSES);
+    assert.deepEqual(v.by_kind.incident.notify_roles, ['assignee', 'team_lead', 'owner']);
+    // What the vocabulary offers is accepted, and what it leaves out is not.
+    const inc = v.by_kind.incident;
+    ok(await pm.post('/api/rules', rule({ trigger: { type: 'field_changed', field: inc.trigger_fields[0] }, conditions: [{ field: 'status', op: v.operators.enum[0], value: inc.statuses[0] }], actions: [{ type: 'set_field', field: 'priority', value: 2 }] })), 201);
+    assert.ok(!inc.settable.includes('classification'));
+    assert.equal((await pm.post('/api/rules', rule({ actions: [{ type: 'set_field', field: 'classification', value: 1 }] }))).status, 400);
+  });
+
   test('agents propose rules over MCP; they never enable one', async () => {
-    const mcp = new McpClient({ name: 'rules-test', version: '1' });
     const token = await k.tokenFor('pm');
-    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${token}` } } }));
+    const mcp = await k.mcp({ token });
     const call = async (name: string, args: Record<string, unknown>) => {
-      const res: any = await mcp.callTool({ name, arguments: args });
+      const res: any = await mcp.raw(name, args);
       return { isError: !!res.isError, data: res.isError ? res.content[0].text : JSON.parse(res.content[0].text) };
     };
-    const tools = (await mcp.listTools()).tools.map((t) => t.name);
-    for (const t of ['list_rules', 'get_rule', 'dry_run_rule', 'propose_rule']) assert.ok(tools.includes(t), t);
+    const tools = await mcp.tools();
+    for (const t of ['list_rules', 'get_rule', 'get_rule_vocabulary', 'dry_run_rule', 'propose_rule']) assert.ok(tools.includes(t), t);
     assert.ok(!tools.some((t) => /enable|save_rule/.test(t)), 'no tool enables or writes a rule');
     const draft = { name: 'Agent idea', kind: 'incident', trigger: { type: 'status_changed', to: 'on_hold' }, conditions: [{ field: 'priority', op: 'lt', value: 3 }], actions: [{ type: 'add_comment', text: 'High priority on hold: check the reason' }] };
     const dry = await call('dry_run_rule', { rule: draft });

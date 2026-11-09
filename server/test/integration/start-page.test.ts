@@ -1,7 +1,5 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
-import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { skip, startKernel, type Client, type Harness } from './harness.js';
 
 const ok = (r: { status: number; body: unknown }) => assert.ok(r.status >= 200 && r.status < 300, `${r.status} ${JSON.stringify(r.body)}`);
@@ -72,12 +70,10 @@ describe('a personal start page and default process (#171)', { skip }, () => {
 
   test('the dashboard and its KPIs need the general read permission; MCP whoami returns the focus', async () => {
     ok(await viewer.get('/api/dashboard'));
-    const mcp = new McpClient({ name: 'start', version: '1' });
-    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
-    const me = JSON.parse(((await mcp.callTool({ name: 'whoami', arguments: {} })).content as { text: string }[])[0].text);
+    const mcp = await k.mcp('analyst');
+    const me = await mcp.call('whoami', {});
     assert.deepEqual([me.home, me.default_new], ['incidents', 'incident']);
-    const dash = JSON.parse(((await mcp.callTool({ name: 'get_dashboard', arguments: {} })).content as { text: string }[])[0].text);
+    const dash = await mcp.call('get_dashboard', {});
     assert.ok(dash.kpis && dash.by_status, 'backlog and KPIs');
-    await mcp.close();
   });
 });

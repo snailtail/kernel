@@ -8,6 +8,7 @@
 // acknowledged, which is the incident's first response for its SLA.
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
+import { instant } from '../core/fields.js';
 import { audienceOf, BROADEST, mayCopyText } from '../security/audience.js';
 import { audit } from '../security/audit.js';
 import type { User } from '../security/auth.js';
@@ -25,6 +26,7 @@ import { loadCalendar } from '../reporting/sla.js';
 import { standardSignature } from '../notifications/webhooks.js';
 import { absoluteUrl } from '../core/url.js';
 import { tokenHash } from '../core/hash.js';
+import { REF_DIGITS, refPattern } from '../records/records.js';
 
 export const KINDS = ['pagerduty', 'opsgenie', 'grafana_oncall', 'webhook', 'rotation'] as const;
 type Kind = (typeof KINDS)[number];
@@ -80,7 +82,7 @@ export const rotationSchema = z.object({
   timezone: z.string().refine((tz) => { try { new Intl.DateTimeFormat('en', { timeZone: tz }); return true; } catch { return false; } }, 'Unknown time zone').default('Europe/Stockholm'),
   starts_on: z.iso.date().optional(),
 });
-export const overrideSchema = z.object({ user_id: z.number().int(), starts_at: z.iso.datetime({ offset: true }), ends_at: z.iso.datetime({ offset: true }), reason: z.string().trim().max(500).default('') });
+export const overrideSchema = z.object({ user_id: z.number().int(), starts_at: instant, ends_at: instant, reason: z.string().trim().max(500).default('') });
 
 const PUBLIC = 'id, team_id, kind, config, rule, private_allow, enabled, created_at, updated_at, secret IS NOT NULL AS has_secret, inbound_token_hash IS NOT NULL AS has_inbound_token';
 
@@ -555,7 +557,7 @@ export async function pagesFor(incidentId: number) {
 
 // ---- Inbound: the tool says who acknowledged -----------------------------------------------------
 
-const REF = /\bINC\d{6}\b/gi;
+const REF = new RegExp(`\\bINC${REF_DIGITS}\\b`, 'gi');
 const BULK_KEY = /\bbulk:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
 const ACK = new Set(['incident.acknowledged', 'acknowledge', 'acknowledged', 'ack']);
 const RESOLVE = new Set(['incident.resolved', 'resolve', 'resolved', 'close', 'closed', 'ok']);
@@ -567,7 +569,7 @@ const RESOLVE = new Set(['incident.resolved', 'resolve', 'resolved', 'close', 'c
  */
 export function parseInbound(body: any): { refs: string[]; bulk: string | null; action: 'acknowledge' | 'resolve'; by: string } | null {
   const explicit = [body?.ref, body?.alert?.alias, body?.alert_uid, body?.event?.data?.incident_key, body?.dedup_key].filter((x) => typeof x === 'string');
-  const found = [...explicit, ...(JSON.stringify(body ?? {}).match(REF) ?? [])].map((r) => r.toUpperCase()).filter((r) => /^INC\d{6}$/.test(r));
+  const found = [...explicit, ...(JSON.stringify(body ?? {}).match(REF) ?? [])].map((r) => r.toUpperCase()).filter((r) => refPattern('INC').test(r));
   const refs = [...new Set(found)];
   // A bulk page (#125) is known to the tool by its key.
   const bulk = [...explicit, ...(JSON.stringify(body ?? {}).match(BULK_KEY) ?? [])].find((x) => new RegExp(`^${BULK_KEY.source}$`, 'i').test(x))?.toLowerCase() ?? null;

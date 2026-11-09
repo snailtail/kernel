@@ -11,7 +11,7 @@ import { badRequest, conflict, notFound } from '../core/errors.js';
 import { logIncident } from '../incidents/incident-log.js';
 import { authorize, can } from '../security/policy.js';
 import { logProblem, registerProblemExtra } from '../problems/problems.js';
-import { recordUrl, registerRecordType, type RecordType } from '../records/records.js';
+import { recordUrl, refPattern, registerRecordType, type RecordType } from '../records/records.js';
 
 export const ARTICLE_TYPES = ['how_to', 'troubleshooting', 'known_error', 'faq'] as const;
 export const AUDIENCES = ['internal', 'end_users'] as const;
@@ -52,7 +52,7 @@ const withUrl = <T extends { ref: string }>(a: T) => ({ ...a, type: 'article', u
 const seesDrafts = (user: User) => can(user.role, 'article.write');
 
 async function nextRef(db: Db) {
-  const { rows } = await db.query("SELECT 'KB' || lpad(nextval('article_ref_seq')::text, 6, '0') AS ref");
+  const { rows } = await db.query("SELECT kernel_ref('KB', nextval('article_ref_seq')) AS ref");
   return rows[0].ref as string;
 }
 
@@ -340,7 +340,7 @@ export async function incidentArticles(incidentId: number) {
 const ARTICLE_TYPE: RecordType = {
   type: 'article',
   prefix: 'KB',
-  pattern: /^KB\d{6}$/,
+  pattern: refPattern('KB'),
   readAction: 'article.read',
   uiPath: (ref) => `/knowledge/${ref}`,
   get: getArticle,

@@ -24,6 +24,7 @@ import { resolvePerson } from '../people/people.js';
 import { authorize } from '../security/policy.js';
 import { clip } from '../core/text.js';
 import { sha256Hex } from '../core/hash.js';
+import { REF_DIGITS } from '../records/records.js';
 
 /** What a mailbox does with new mail; part of the connector's settings. */
 export const mailboxTargetSchema = z.object({
@@ -125,7 +126,7 @@ async function answeredRef(m: ParsedMail) {
     );
     if (rows[0]) return rows[0].ref as string;
   }
-  return m.subject?.match(/\[((?:INC|PRB|CHG)\d{6,})\]/i)?.[1].toUpperCase() ?? '';
+  return m.subject?.match(new RegExp(`\\[((?:INC|PRB|CHG)${REF_DIGITS})\\]`, 'i'))?.[1].toUpperCase() ?? '';
 }
 
 /** Whether the sender takes part in the incident: its caller or an affected person, its assignee, or its team. */

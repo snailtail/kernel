@@ -2,6 +2,7 @@
 // changes settings, it never duplicates SLAs, calendars or sources – and every step can be skipped. Demo data is
 // recorded in demo_records so it can be removed in one action, and it is refused once real data exists.
 import { z } from 'zod';
+import { longText } from '../core/fields.js';
 import type { User } from './auth.js';
 import { audit } from './audit.js';
 import { createChange, logChange } from '../changes/changes.js';
@@ -196,7 +197,7 @@ export const templateSchema = z.object({
   name: z.string().trim().min(1).max(100),
   fields: z.object({
     title: z.string().max(300).optional(),
-    description: z.string().max(20000).optional(),
+    description: longText.optional(),
     impact: z.number().int().min(1).max(3).optional(),
     urgency: z.number().int().min(1).max(3).optional(),
     category_id: z.number().int().nullable().optional(),

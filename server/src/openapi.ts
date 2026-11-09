@@ -1,6 +1,7 @@
 // OpenAPI 3.1 description of the REST API, generated from the zod schemas the routes validate with.
 // A test checks that every registered /api route is listed here.
 import { z } from 'zod';
+import { longText } from './core/fields.js';
 import * as actions from './problems/actions.js';
 import * as cmdb from './cmdb/cmdb.js';
 import { MODULE_TAGS, moduleEnabled } from './core/modules.js';
@@ -15,12 +16,14 @@ import * as reviewsMod from './incidents/post-incident-reviews.js';
 import * as oc from './people/oncall.js';
 import * as events from './events/events.js';
 import * as ch from './changes/changes.js';
+import * as calendar from './changes/calendar.js';
 import * as imp from './improvements/improvements.js';
 import * as sp from './development/sprints.js';
 import * as wi from './development/work-items.js';
 import * as mirror from './development/mirror.js';
 import * as itsm from './development/itsm.js';
 import * as rq from './requests/requests.js';
+import * as catalogue from './requests/catalogue.js';
 import * as portal from './requests/portal.js';
 import * as slaMod from './reporting/sla.js';
 import * as notif from './notifications/notifications.js';
@@ -48,6 +51,7 @@ import { searchSchema } from './records/generic.js';
 import * as analyses from './problems/analyses.js';
 import * as candidates from './problems/candidates.js';
 import * as config from './problems/candidate-config.js';
+import * as detection from './problems/candidate-detection.js';
 import * as integrations from './integrations/integrations.js';
 import * as problems from './problems/problems.js';
 import * as reports from './reporting/reports.js';
@@ -111,7 +115,7 @@ export const OPERATIONS: Op[] = [
   { method: 'patch', path: '/api/problems/:ref', tag: 'Problems', summary: 'Update problem fields', body: problems.updateProblemSchema },
   { method: 'post', path: '/api/problems/:ref/transition', tag: 'Problems', summary: 'Change status (with the fields the target status requires)', body: problems.transitionSchema },
   { method: 'put', path: '/api/problems/:ref/assessment', tag: 'Problems', summary: 'Error control assessment and decision for a known error', body: problems.assessmentSchema },
-  { method: 'post', path: '/api/problems/:ref/comments', tag: 'Problems', summary: 'Add a work note', body: z.object({ body: z.string().max(20000) }) },
+  { method: 'post', path: '/api/problems/:ref/comments', tag: 'Problems', summary: 'Add a work note', body: z.object({ body: longText }) },
   { method: 'post', path: '/api/problems/:ref/links', tag: 'Problems', summary: 'Link an incident, event, change or problem', body: problems.linkSchema },
   { method: 'delete', path: '/api/problems/:ref/links/:id', tag: 'Problems', summary: 'Remove a link' },
   { method: 'post', path: '/api/problems/:ref/duplicate', tag: 'Problems', summary: 'Close as duplicate of another problem (managers)', body: z.object({ of: z.string() }) },
@@ -250,6 +254,7 @@ export const OPERATIONS: Op[] = [
   { method: 'post', path: '/api/rules', tag: 'Automation rules', summary: 'Write a rule; it starts disabled (managers)', body: rulesMod.ruleSchema },
   { method: 'post', path: '/api/rules/proposals', tag: 'Automation rules', summary: 'Propose a rule: it lands disabled, marked as proposed, for a manager to enable', body: rulesMod.ruleSchema },
   { method: 'post', path: '/api/rules/dry-run', tag: 'Automation rules', summary: "Which records updated in the last 30 days a rule's conditions match (only those you can see); no action runs", body: rulesMod.dryRunSchema },
+  { method: 'get', path: '/api/rules/vocabulary', tag: 'Automation rules', summary: 'What a rule may say, per kind: statuses, sources, the fields a condition reads and a trigger watches, what a rule may set, who it may notify, the moves it may make, and the operators per field type' },
   { method: 'get', path: '/api/rules/:id', tag: 'Automation rules', summary: 'A rule in a plain sentence, with its latest runs and what each action did' },
   { method: 'put', path: '/api/rules/:id', tag: 'Automation rules', summary: 'Change a rule (managers); audited with before and after', body: rulesMod.ruleSchema },
   { method: 'put', path: '/api/rules/:id/enabled', tag: 'Automation rules', summary: 'Enable or disable a rule; only a person signed in to Kernel enables one, never a token or an agent', body: rulesMod.enableSchema },
@@ -344,7 +349,7 @@ export const OPERATIONS: Op[] = [
   { method: 'put', path: '/api/calendars/:id', tag: 'Service levels', summary: 'Update a calendar', body: slaMod.calendarSchema },
   { method: 'get', path: '/api/service-catalogue', tag: 'Service levels', summary: 'Services with SLA, support hours and how to get help' },
   { method: 'get', path: '/api/changes', tag: 'Changes', summary: 'List changes (open by default)', query: ch.listChangesSchema },
-  { method: 'get', path: '/api/changes/schedule', tag: 'Changes', summary: 'Change schedule: planned changes, freezes and collisions', query: ch.scheduleSchema },
+  { method: 'get', path: '/api/changes/schedule', tag: 'Changes', summary: 'Change schedule: planned changes, freezes and collisions', query: calendar.scheduleSchema },
   { method: 'post', path: '/api/changes', tag: 'Changes', summary: 'Request a change (standard changes from a template); supports Idempotency-Key', body: ch.createChangeSchema },
   { method: 'post', path: '/api/changes/register', tag: 'Changes', summary: 'Register a standard change carried out by automation (deployment pipelines); token with ingest scope or an integration account', body: ch.registerSchema },
   { method: 'get', path: '/api/changes/:ref', tag: 'Changes', summary: 'A change with risk, approvals, affected CIs and services, collisions, freezes and related incidents' },
@@ -357,10 +362,10 @@ export const OPERATIONS: Op[] = [
   { method: 'delete', path: '/api/changes/:ref/cis/:ci', tag: 'Changes', summary: 'Unlink a CI or service' },
   { method: 'post', path: '/api/problems/:ref/change', tag: 'Changes', summary: 'Raise a change for the fix of a problem (prefilled, linked)' },
   { method: 'get', path: '/api/change-templates', tag: 'Changes', summary: 'Standard change templates' },
-  { method: 'post', path: '/api/change-templates', tag: 'Changes', summary: 'Create a standard change template (change authority)', body: ch.templateSchema },
-  { method: 'put', path: '/api/change-templates/:id', tag: 'Changes', summary: 'Update a template', body: ch.templateSchema },
+  { method: 'post', path: '/api/change-templates', tag: 'Changes', summary: 'Create a standard change template (change authority)', body: calendar.templateSchema },
+  { method: 'put', path: '/api/change-templates/:id', tag: 'Changes', summary: 'Update a template', body: calendar.templateSchema },
   { method: 'get', path: '/api/change-freezes', tag: 'Changes', summary: 'Change freezes' },
-  { method: 'post', path: '/api/change-freezes', tag: 'Changes', summary: 'Add a change freeze (change authority)', body: ch.freezeSchema },
+  { method: 'post', path: '/api/change-freezes', tag: 'Changes', summary: 'Add a change freeze (change authority)', body: calendar.freezeSchema },
   { method: 'delete', path: '/api/change-freezes/:id', tag: 'Changes', summary: 'Remove a change freeze' },
   { method: 'get', path: '/api/work-items', tag: 'Work items', summary: 'The backlog: open epics, stories, bugs and tasks in rank order per team, or filtered by status, type, team, assignee, label or epic', query: wi.listWorkItemsSchema },
   { method: 'post', path: '/api/work-items', tag: 'Work items', summary: 'Add an epic, story, bug or task to the bottom of a backlog; a child starts as narrow as its parent. Supports Idempotency-Key', body: wi.createWorkItemSchema },
@@ -399,11 +404,11 @@ export const OPERATIONS: Op[] = [
   { method: 'post', path: '/api/improvements/:ref/links', tag: 'Improvements', summary: 'Link a change, problem, action (by id), incident, review or document that carries it out', body: imp.improvementLinkSchema },
   { method: 'delete', path: '/api/improvements/:ref/links/:id', tag: 'Improvements', summary: 'Remove a link' },
   { method: 'post', path: '/api/problems/:ref/improvement', tag: 'Improvements', summary: 'Lessons learned → improvement, from a resolved or closed problem', body: imp.fromProblemSchema },
-  { method: 'get', path: '/api/request-items', tag: 'Service requests', summary: 'The request catalogue: items per service with their form, approval, fulfilment tasks and SLA', query: rq.listItemsSchema },
+  { method: 'get', path: '/api/request-items', tag: 'Service requests', summary: 'The request catalogue: items per service with their form, approval, fulfilment tasks and SLA', query: catalogue.listItemsSchema },
   { method: 'get', path: '/api/request-items/options', tag: 'Service requests', summary: 'For the catalogue editor (managers): standard change templates and JSON webhooks that tasks can use' },
   { method: 'get', path: '/api/request-items/:id', tag: 'Service requests', summary: 'One catalogue item' },
-  { method: 'post', path: '/api/request-items', tag: 'Service requests', summary: 'Add a catalogue item (managers): a form of at most 10 fields, an approval and ordered fulfilment tasks', body: rq.requestItemSchema },
-  { method: 'put', path: '/api/request-items/:id', tag: 'Service requests', summary: 'Change a catalogue item (managers); kept in the audit trail', body: rq.requestItemSchema },
+  { method: 'post', path: '/api/request-items', tag: 'Service requests', summary: 'Add a catalogue item (managers): a form of at most 10 fields, an approval and ordered fulfilment tasks', body: catalogue.requestItemSchema },
+  { method: 'put', path: '/api/request-items/:id', tag: 'Service requests', summary: 'Change a catalogue item (managers); kept in the audit trail', body: catalogue.requestItemSchema },
   { method: 'get', path: '/api/requests', tag: 'Service requests', summary: 'Service requests (open by default); task=mine|my_teams for the work waiting on you', query: rq.listRequestsSchema },
   { method: 'post', path: '/api/requests', tag: 'Service requests', summary: 'Submit a request for a person: the answers are checked against the item\'s form. Supports Idempotency-Key', body: rq.createRequestSchema },
   { method: 'get', path: '/api/requests/:ref', tag: 'Service requests', summary: 'A request with its answers, approval, tasks in order, SLA clock, history and next steps' },
@@ -507,7 +512,7 @@ export const OPERATIONS: Op[] = [
 
   { method: 'post', path: '/api/integrations/records', tag: 'Integrations', summary: 'Report incidents/events from other systems (idempotent; optional problem_ref links them)', body: integrations.ingestSchema },
   { method: 'get', path: '/api/candidates', tag: 'Problem candidates', summary: 'Problem candidates with their rule, reason and evidence, and the rules', query: candidates.listQuerySchema },
-  { method: 'put', path: '/api/candidates/rules/:rule', tag: 'Problem candidates', summary: 'Turn a rule on or off or change its thresholds (managers)', body: candidates.ruleUpdateSchema },
+  { method: 'put', path: '/api/candidates/rules/:rule', tag: 'Problem candidates', summary: 'Turn a rule on or off or change its thresholds (managers)', body: detection.ruleUpdateSchema },
   { method: 'get', path: '/api/candidates/draft', tag: 'Problem candidates', summary: 'The problem a candidate suggests, prefilled from its evidence', query: z.object({ key: z.string() }) },
   { method: 'post', path: '/api/candidates/create', tag: 'Problem candidates', summary: 'Log a problem from a candidate (by key, prefilled) or from records', body: ids.extend({ problem: candidates.problemOverridesSchema.optional() }) },
   { method: 'post', path: '/api/candidates/link', tag: 'Problem candidates', summary: 'Link a candidate or its records to a problem', body: ids.extend({ ref: z.string() }) },

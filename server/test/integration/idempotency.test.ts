@@ -1,7 +1,5 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
-import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { Client, skip, startKernel, type Harness } from './harness.js';
 
 describe('Idempotency-Key (#77)', { skip }, () => {
@@ -60,12 +58,10 @@ describe('Idempotency-Key (#77)', { skip }, () => {
   });
 
   test('MCP create tools accept an idempotency key', async () => {
-    const mcp = new McpClient({ name: 'idem', version: '1' });
-    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${k.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await k.tokenFor('analyst')}` } } }));
-    const call = async () => JSON.parse(((await mcp.callTool({ name: 'create_problem', arguments: { title: 'MCP once', idempotency_key: 'mcp-1' } })) as any).content[0].text);
+    const mcp = await k.mcp('analyst');
+    const call = () => mcp.call('create_problem', { title: 'MCP once', idempotency_key: 'mcp-1' });
     const a = await call();
     const b = await call();
     assert.equal(a.ref, b.ref);
-    await mcp.close();
   });
 });
