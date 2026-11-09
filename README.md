@@ -99,7 +99,9 @@ only update the source records it created.
 
 **Connectors and the push contract**: administrators add pull connectors under Administration → Connectors (OP5
 Monitor: hosts, services and host groups become CIs, current HARD problems become alerts that clear when fixed and
-open no incident during scheduled downtime, see [docs/connectors/op5.md](docs/connectors/op5.md); Kubernetes: cluster, nodes,
+open no incident during scheduled downtime, see [docs/connectors/op5.md](docs/connectors/op5.md); VMware vCenter:
+datacenters, clusters, ESXi hosts, VMs and optionally datastores, joined to Kubernetes nodes by BIOS UUID, see
+[docs/connectors/vcenter.md](docs/connectors/vcenter.md); Kubernetes: cluster, nodes,
 namespaces and workloads with a read-only ServiceAccount, see
 [docs/connectors/kubernetes.md](docs/connectors/kubernetes.md)). Credentials are encrypted and never shown again, runs
 never overlap, and every run is logged. A connector reaches only the private addresses it lists (e.g. the OP5 server

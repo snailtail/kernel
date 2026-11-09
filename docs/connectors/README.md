@@ -1,7 +1,7 @@
 # Connectors and the CI lifecycle
 
 Kernel's CMDB is fed by sources: pull connectors that Kernel runs on a schedule ([OP5 Monitor](op5.md),
-[Kubernetes](kubernetes.md)), and anything that pushes with `POST /api/cmdb/ci-batch` or the MCP tool `sync_ci_batch`.
+[VMware vCenter](vcenter.md), [Kubernetes](kubernetes.md)), and anything that pushes with `POST /api/cmdb/ci-batch` or the MCP tool `sync_ci_batch`.
 Both go through the same sync, so they share reconciliation, missing detection and the lifecycle below. A connector
 only fetches and maps; scheduling, credentials, reconciliation and the run log belong to the framework
 (`server/src/integrations/connectors.ts`).

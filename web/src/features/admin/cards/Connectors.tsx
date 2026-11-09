@@ -79,6 +79,7 @@ export function ConnectorsCard() {
 /** Defaults for a new connector of each type. */
 const NEW: Record<string, { source_system: string; config: Record<string, any> }> = {
   op5: { source_system: 'OP5', config: { default_ci_type: 'virtual_machine', environment: 'prod', sync_events: true, hostgroups_as_services: false, custom_variables: [] } },
+  vcenter: { source_system: 'vCenter', config: { environment: 'prod', include_datastores: false, tags: true } },
   kubernetes: { source_system: 'Kubernetes', config: { node_ci_type: 'virtual_machine', environment: 'prod', sync_events: false } },
   imap: { source_system: '', config: { port: 993, security: 'tls', folder: 'INBOX' } },
   msgraph: { source_system: '', config: { folder: 'inbox' } },
@@ -92,6 +93,7 @@ function ConnectorEditor({ connector: c, types, onClose, onDone }: { connector: 
     schedule_minutes: c.schedule_minutes ?? 60, retire_after_days: c.retire_after_days ?? 14, enabled: c.enabled ?? true, insecure_http: cfg.insecure_http ?? false, ca_pem: cfg.ca_pem ?? '',
     exclude_namespaces: (cfg.exclude_namespaces ?? ['kube-system', 'kube-public', 'kube-node-lease']).join(', '), cluster_name: cfg.cluster_name ?? '', node_ci_type: cfg.node_ci_type ?? 'virtual_machine', owner_label: cfg.owner_label ?? '', console_url: cfg.console_url ?? '',
     hostgroups_as_services: cfg.hostgroups_as_services ?? false, custom_variables: ((cfg.custom_variables ?? []) as string[]).join(', '),
+    include_datastores: cfg.include_datastores ?? false, tags: cfg.tags ?? true, vcenter_uuid: cfg.vcenter_uuid ?? '',
     // Mailboxes (#48)
     host: cfg.host ?? '', port: cfg.port ?? 993, security: cfg.security ?? 'tls', folder: cfg.folder ?? (type === 'msgraph' ? 'inbox' : 'INBOX'), processed_folder: cfg.processed_folder ?? '',
     trusted_authserv_id: cfg.trusted_authserv_id ?? '', team_id: cfg.team_id ?? null as number | null, impact: cfg.impact ?? 3, urgency: cfg.urgency ?? 3,
@@ -102,11 +104,13 @@ function ConnectorEditor({ connector: c, types, onClose, onDone }: { connector: 
   const k8s = form.type === 'kubernetes';
   const mail = MAILBOX.includes(form.type);
   const graph = form.type === 'msgraph';
+  const vcenter = form.type === 'vcenter';
   const submit = async () => {
     const shared = { base_url: form.base_url, environment: form.environment, sync_events: form.sync_events, ca_pem: form.ca_pem.trim() };
     const target = { folder: form.folder, processed_folder: form.processed_folder.trim(), trusted_authserv_id: form.trusted_authserv_id.trim(), team_id: form.team_id, impact: Number(form.impact), urgency: Number(form.urgency) };
     const config = graph ? { ...target, tenant_id: form.tenant_id.trim(), mailbox: form.mailbox.trim() }
       : mail ? { ...target, host: form.host.trim(), port: Number(form.port), security: form.security, ca_pem: form.ca_pem.trim() }
+      : vcenter ? { base_url: form.base_url, environment: form.environment, ca_pem: form.ca_pem.trim(), insecure_http: form.insecure_http, include_datastores: form.include_datastores, tags: form.tags, vcenter_uuid: form.vcenter_uuid.trim() }
       : k8s
       ? { ...shared, cluster_name: form.cluster_name, node_ci_type: form.node_ci_type, owner_label: form.owner_label.trim(), console_url: form.console_url.trim(), exclude_namespaces: form.exclude_namespaces.split(/[\s,]+/).filter(Boolean) }
       : { ...shared, default_ci_type: form.default_ci_type, insecure_http: form.insecure_http, hostgroups_as_services: form.hostgroups_as_services, custom_variables: form.custom_variables.split(/[\s,]+/).map((v) => v.replace(/^_/, '')).filter(Boolean) };
@@ -155,6 +159,17 @@ function ConnectorEditor({ connector: c, types, onClose, onDone }: { connector: 
           <label>Impact<select value={form.impact} onChange={(e) => setForm({ ...form, impact: Number(e.target.value) })}><option value={1}>1 High</option><option value={2}>2 Medium</option><option value={3}>3 Low</option></select></label>
           <label>Urgency<select value={form.urgency} onChange={(e) => setForm({ ...form, urgency: Number(e.target.value) })}><option value={1}>1 High</option><option value={2}>2 Medium</option><option value={3}>3 Low</option></select></label>
         </>
+      ) : vcenter ? (
+        <>
+          <p className="hint-box full">Kernel reads datacenters, clusters, ESXi hosts and VMs through the vSphere REST API with a read-only user, in a session it closes after each run. VMs carry their BIOS UUID, so they join the Kubernetes nodes that run on them. <strong>Test</strong> says whether vCenter accepts the user.</p>
+          <SetupText type="vcenter" params={{ include_datastores: String(form.include_datastores) }} summary="A read-only vCenter user" />
+          <label className="full">URL<input required type="url" placeholder="https://vcenter.example.com" value={form.base_url} onChange={(e) => setForm({ ...form, base_url: e.target.value })} /></label>
+          <label>Username<input autoComplete="off" placeholder={unchanged || 'kernel@vsphere.local'} required={!c.id} value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} /></label>
+          <label>Password<input type="password" autoComplete="new-password" placeholder={unchanged} required={!c.id} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></label>
+          <label className="full">vCenter instance UUID <span className="muted small">(optional, for links straight to each object; see the setup text)</span><input placeholder="5f1c2d3e-4a5b-6c7d-8e9f-0a1b2c3d4e5f" value={form.vcenter_uuid} onChange={(e) => setForm({ ...form, vcenter_uuid: e.target.value })} /></label>
+          <label className="check full"><input type="checkbox" checked={form.include_datastores} onChange={(e) => setForm({ ...form, include_datastores: e.target.checked })} /> Datastores as storage CIs that VMs depend on</label>
+          <label className="check full"><input type="checkbox" checked={form.tags} onChange={(e) => setForm({ ...form, tags: e.target.checked })} /> vSphere tags as tags <span className="muted small">(category=name)</span></label>
+        </>
       ) : k8s ? (
         <>
           <p className="hint-box full">Kernel reads the cluster with a read-only ServiceAccount: list on nodes, namespaces and workloads, never Secrets, ConfigMaps or pods. Apply the manifest below, then paste the API server, its CA and the token. <strong>Test</strong> then shows per kind whether the token may read it.</p>
@@ -194,7 +209,7 @@ function ConnectorEditor({ connector: c, types, onClose, onDone }: { connector: 
           <label className="full">Dashboard link <span className="muted small">(optional, with {'{cluster}'}, {'{kind}'}, {'{namespace}'} and {'{name}'})</span><input placeholder="https://rancher.example.com/c/{cluster}/explorer/{kind}/{namespace}/{name}" value={form.console_url} onChange={(e) => setForm({ ...form, console_url: e.target.value })} /></label>
         </>
       )}
-      {!mail && <label className="check"><input type="checkbox" checked={form.sync_events} onChange={(e) => setForm({ ...form, sync_events: e.target.checked })} /> {k8s ? 'Warning events (crash loops, out of memory, scheduling) as alerts' : 'Also fetch current HARD problems as alerts (scheduled downtime opens no incident)'}</label>}
+      {!mail && !vcenter && <label className="check"><input type="checkbox" checked={form.sync_events} onChange={(e) => setForm({ ...form, sync_events: e.target.checked })} /> {k8s ? 'Warning events (crash loops, out of memory, scheduling) as alerts' : 'Also fetch current HARD problems as alerts (scheduled downtime opens no incident)'}</label>}
       <label className="check"><input type="checkbox" checked={form.enabled} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} /> Enabled</label>
     </FormModal>
   );
