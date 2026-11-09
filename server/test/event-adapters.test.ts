@@ -39,6 +39,7 @@ test('OP5: problem and recovery; acknowledgements ignored; strict types', () => 
   const p = adapt('op5', fixture('op5-problem'));
   assert.deepEqual([p[0].host, p[0].check, p[0].severity], ['mail01', 'SMTP queue', 'critical']);
   assert.equal(adapt('op5', fixture('op5-recovery'))[0].severity, 'clear');
+  assert.equal(adapt('op5', { ...fixture('op5-problem'), state: 'UNKNOWN' })[0].severity, 'major', 'the same mapping as the OP5 connector (#19)');
   assert.deepEqual(adapt('op5', { ...fixture('op5-problem'), notification_type: 'ACKNOWLEDGEMENT' }), []);
   assert.throws(() => adapt('op5', { ...fixture('op5-problem'), state: 'ON FIRE' }), /Not a valid op5 payload/);
   assert.throws(() => adapt('op5', { ...fixture('op5-problem'), timestamp: 'yesterday' }), /Not a valid op5 payload/);

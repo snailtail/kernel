@@ -127,7 +127,7 @@ describe('Kubernetes connector (#24)', { skip }, () => {
     assert.doesNotMatch(without, /"events"/);
     assert.match(rbacManifest({ cluster_name: 'x\nkind: ClusterRoleBinding' }), /^# Kernel: read-only access to xkind: ClusterRoleBinding\./, 'the name cannot break out of the comment');
     assert.equal((await analyst.get('/api/connectors/types/kubernetes/setup')).status, 403);
-    assert.equal((await admin.get('/api/connectors/types/op5/setup')).status, 404);
+    assert.equal((await admin.get('/api/connectors/types/imap/setup')).status, 404);
     assert.equal((await admin.get('/api/connectors/types/__proto__/setup')).status, 404);
     // The docs carry the same manifest, so the two cannot drift apart.
     const docs = readFileSync(new URL('../../../docs/connectors/kubernetes.md', import.meta.url), 'utf8');
