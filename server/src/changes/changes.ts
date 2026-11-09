@@ -78,7 +78,7 @@ export const transitionChangeSchema = z.object({
   /** Schedule into a freeze anyway (change authority only), with the reason recorded. */
   override_freeze_reason: z.string().trim().max(1000).optional(),
 });
-export const voteSchema = z.object({ decision: z.enum(['approve', 'reject']), comment: z.string().trim().max(5000).default('') });
+export const voteSchema = z.object({ decision: z.enum(['approve', 'reject']), comment: longText.trim().default('') });
 export const listChangesSchema = z.object({
   q: z.string().trim().max(200).optional(),
   status: z.union([z.enum(CHANGE_STATUSES), z.literal('open'), z.literal('all')]).default('open'),

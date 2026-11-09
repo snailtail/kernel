@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { title } from '../core/fields.js';
 import { requireReason } from '../security/audit.js';
 import { requireUser } from '../security/auth.js';
 import * as status from '../status/status.js';
@@ -35,7 +36,7 @@ export async function statusRoutes(app: FastifyInstance) {
   app.put<Ref>('/api/status/:ref/follow', async (req) => subs.followService(requireUser(req), req.params.ref, z.object({ follow: z.boolean() }).parse(req.body).follow));
   app.put('/api/admin/status-page', async (req) => {
     const user = requireUser(req);
-    const body = z.object({ public_enabled: z.boolean(), title: z.string().trim().min(1).max(100), reason: z.string().max(1000).optional() }).parse(req.body);
+    const body = z.object({ public_enabled: z.boolean(), title, reason: z.string().max(1000).optional() }).parse(req.body);
     return status.savePageSettings(user, { public_enabled: body.public_enabled, title: body.title }, requireReason(body.reason));
   });
 

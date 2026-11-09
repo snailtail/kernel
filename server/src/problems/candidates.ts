@@ -2,6 +2,7 @@
 // reported by external analysis, and turning a candidate into a problem. Finding them is in candidate-detection.ts.
 // Candidates are computed on read; only rule settings, decisions and reported candidates are stored.
 import { z } from 'zod';
+import { longText, title } from '../core/fields.js';
 import type { User } from '../security/auth.js';
 import { audit, requireReason } from '../security/audit.js';
 import { audienceOf, BROADEST, copyText, mayCopyText, titleAudience, type Audience } from '../security/audience.js';
@@ -98,7 +99,7 @@ export const reportSchema = z.object({
   source: z.string().trim().min(1).max(100),
   /** The reporter's own id for this finding: reporting it again updates it instead of adding another. */
   external_key: z.string().trim().min(1).max(200),
-  title: z.string().trim().min(3).max(200),
+  title,
   /** Why this is worth a problem, in a sentence or two. */
   reason: z.string().trim().min(3).max(2000),
   ci_ref: z.string().trim().max(30).optional(),
@@ -114,7 +115,7 @@ export const reportSchema = z.object({
       occurred_at: z.string().datetime({ offset: true }).optional(),
       url: httpUrl.optional(),
     })).max(200).default([]),
-    notes: z.string().max(10000).default(''),
+    notes: longText.default(''),
   }).prefault({}),
 });
 /** The stored evidence, as JSON, is capped too: many long items together must not grow a row without limit. */

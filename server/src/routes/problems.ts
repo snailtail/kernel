@@ -33,7 +33,7 @@ export async function problemRoutes(app: FastifyInstance) {
 
   app.get('/api/problems/similar', async (req) => {
     const user = requireUser(req, 'problem.read');
-    const q = z.object({ text: z.string().max(5000), exclude: z.string().max(20).optional(), limit: z.coerce.number().int().min(1).max(20).default(5) }).parse(req.query);
+    const q = z.object({ text: longText, exclude: z.string().max(20).optional(), limit: z.coerce.number().int().min(1).max(20).default(5) }).parse(req.query);
     return problems.findSimilar(user, q.text, q.exclude, q.limit);
   });
 

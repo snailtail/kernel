@@ -16,3 +16,11 @@ test('long text and instants are not written by hand outside core/fields.ts', ()
     .map(rel);
   assert.deepEqual(offenders, [], 'import longText or instant from core/fields.ts');
 });
+
+// The deviating limits from #242 follow the shared rules (#255): no short text limits or hand-written titles beside them.
+test('text limits of 5000/10000 and hand-written titles are not added beside the shared rules', () => {
+  const offenders = files(SRC)
+    .filter((f) => rel(f) !== 'core/fields.ts' && /z\.string\(\)(\.trim\(\))?\.max\((5000|10000)\)|title: z\.string\(\)\.trim\(\)/.test(readFileSync(f, 'utf8')))
+    .map(rel);
+  assert.deepEqual(offenders, [], 'use longText or title from core/fields.ts');
+});

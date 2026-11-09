@@ -66,7 +66,7 @@ export const updateImprovementSchema = z.object(fields).partial();
 export const transitionImprovementSchema = z.object({
   to: z.enum(IMPROVEMENT_STATUSES),
   /** Required for done (what it brought), unless it is already written down. */
-  benefit: z.string().trim().max(20000).optional(),
+  benefit: longText.optional(),
   /** Required to reject. */
   reason: z.string().trim().max(2000).optional(),
 });

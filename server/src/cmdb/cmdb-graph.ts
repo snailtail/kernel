@@ -2,6 +2,7 @@
 // the type says which way an outage propagates. Connectors own the relationships they discover (source_system) and
 // only they replace them; manual relationships survive every sync.
 import { z } from 'zod';
+import { longText } from '../core/fields.js';
 import type { User } from '../security/auth.js';
 import { audit } from '../security/audit.js';
 import { getCi, loadCi, logCi, registerCiExtra } from './cmdb.js';
@@ -275,7 +276,7 @@ export const rulesSchema = z.object({ match: z.enum(['all', 'any']).default('all
 export const groupSchema = z.object({
   name: z.string().trim().min(1).max(100),
   purpose: z.enum(['service', 'flow', 'billing', 'monitoring', 'maintenance', 'other']).default('other'),
-  description: z.string().max(5000).default(''),
+  description: longText.default(''),
   rules: rulesSchema.default({ match: 'all', conditions: [] }),
 });
 

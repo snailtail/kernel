@@ -8,6 +8,7 @@
 import { randomBytes } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { longText } from '../core/fields.js';
 import { forPortal, PORTAL_REOPEN_DAYS } from '../security/audience.js';
 import { audit } from '../security/audit.js';
 import { config } from '../core/config.js';
@@ -186,7 +187,7 @@ export const AFFECTED = {
 
 export const reportSchema = z.object({
   service: z.string().trim().max(30).nullable().default(null),
-  what: z.string().trim().min(5, 'Tell us a little more about what is happening').max(5000),
+  what: z.string().trim().min(5, 'Tell us a little more about what is happening').max(20000),
   affected: z.enum(['me', 'some', 'many']),
 });
 
@@ -211,7 +212,7 @@ export async function reportProblem(person: PortalPerson, input: z.infer<typeof 
 
 // ---- Adding information, confirming ----------------------------------------------------------------------------
 
-export const messageSchema = z.object({ body: z.string().trim().min(1, 'Write something first').max(5000) });
+export const messageSchema = z.object({ body: z.string().trim().min(1, 'Write something first').max(20000) });
 
 type Own = { kind: 'incident' | 'request'; id: number; ref: string; title: string; status: string; team_id: number | null; assignee_id: number | null };
 
@@ -252,7 +253,7 @@ export async function addInformation(person: PortalPerson, ref: string, body: st
   return ticket(person, ref);
 }
 
-export const confirmSchema = z.object({ works: z.boolean(), body: z.string().trim().max(5000).default('') });
+export const confirmSchema = z.object({ works: z.boolean(), body: longText.trim().default('') });
 
 /**
  * On a solved problem report: "It works" closes it, "Still a problem" reopens it (within PORTAL_REOPEN_DAYS of being
