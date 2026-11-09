@@ -17,6 +17,7 @@ export function AnalysisEditor({ problem: p, analysis, editable, onChange }: { p
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const dirty = JSON.stringify(data) !== JSON.stringify(analysis.data) || conclusion !== analysis.conclusion || title !== analysis.title;
+  const titleMissing = !title.trim();
 
   // Warn before leaving the page with unsaved analysis work.
   useEffect(() => {
@@ -78,10 +79,11 @@ export function AnalysisEditor({ problem: p, analysis, editable, onChange }: { p
   return (
     <div className="analysis">
       <div className="analysis-head">
-        {editable ? <input className="analysis-title" value={title} onChange={(e) => setTitle(e.target.value)} aria-label="Analysis title" /> : <h3>{title}</h3>}
+        {editable ? <input className="analysis-title" required value={title} onChange={(e) => setTitle(e.target.value)} aria-label="Analysis title" aria-invalid={titleMissing} aria-describedby={titleMissing ? `analysis-title-hint-${analysis.id}` : undefined} /> : <h3>{title}</h3>}
         <span className="tag">{TECHNIQUE_LABEL[analysis.technique]}</span>
         <span className="muted small">Updated by {analysis.updated_by} {relativeTime(analysis.updated_at)}</span>
       </div>
+      {editable && titleMissing && <p id={`analysis-title-hint-${analysis.id}`} className="muted small">Give the analysis a title to save it.</p>}
       {analysis.proposed_via_mcp && (
         <div className="proposed">
           <span><strong>Proposed via MCP.</strong> An AI agent wrote or changed this analysis; review it before relying on it.</span>
@@ -101,7 +103,7 @@ export function AnalysisEditor({ problem: p, analysis, editable, onChange }: { p
           <strong>{conflict.changed_by ?? 'Someone'} saved this analysis while you were editing.</strong>
           <div className="actions">
             <button className="btn" onClick={loadTheirs}>Discard mine, load theirs</button>
-            <button className="btn danger" onClick={() => save(conflict.current?.updated_at).catch(() => {})}>Overwrite with mine</button>
+            <button className="btn danger" disabled={titleMissing} onClick={() => save(conflict.current?.updated_at).catch(() => {})}>Overwrite with mine</button>
           </div>
         </div>
       )}
@@ -111,7 +113,7 @@ export function AnalysisEditor({ problem: p, analysis, editable, onChange }: { p
           <button className="btn" disabled={!conclusion.trim()} onClick={useAsRootCause} title="Append the conclusion to the problem's root cause">
             Use as root cause
           </button>
-          <button className="btn primary" disabled={!dirty || saving || !!conflict} onClick={() => save().catch(() => {})}>{saving ? 'Saving…' : dirty ? 'Save analysis' : 'Saved'}</button>
+          <button className="btn primary" disabled={!dirty || saving || !!conflict || titleMissing} onClick={() => save().catch(() => {})}>{saving ? 'Saving…' : dirty ? 'Save analysis' : 'Saved'}</button>
         </div>
       )}
     </div>
