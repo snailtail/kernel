@@ -13,7 +13,7 @@ function mockOp5() {
     const q = decodeURIComponent(new URL(req.url!, 'http://x').searchParams.get('query') ?? '');
     res.setHeader('Content-Type', 'application/json');
     if (req.url!.startsWith('/api/filter/count')) return res.end(JSON.stringify({ count: state.hosts.length }));
-    res.end(JSON.stringify(q.startsWith('[hosts]') ? state.hosts : state.problems));
+    res.end(JSON.stringify(q.startsWith('[hosts]') ? state.hosts : q.startsWith('[services]') ? state.problems : []));
   });
   return { state, server, listen: () => new Promise<number>((r) => server.listen(0, '127.0.0.1', () => r((server.address() as any).port))) };
 }
@@ -110,8 +110,9 @@ describe('connector framework and push contract (#18)', { skip }, () => {
     assert.equal(run.status, 'succeeded', JSON.stringify(run));
     const db01 = (await analyst.get('/api/cis?q=db01')).body[0];
     assert.equal(db01.source_systems[0], 'OP5');
+    const disk = (await analyst.get('/api/cis?q=Disk')).body[0];
     const alert = (await analyst.get('/api/alerts?q=Disk')).body[0];
-    assert.deepEqual([alert.ci_ref, alert.severity, alert.source], [db01.ref, 'critical', 'OP5 prod']);
+    assert.deepEqual([alert.ci_ref, alert.severity, alert.source], [disk.ref, 'critical', 'OP5 prod'], 'on the service CI');
     op5.state.problems = [];
     await admin.post(`/api/connectors/${c.id}/run`, {});
     assert.equal((await analyst.get('/api/alerts?status=all&q=Disk')).body[0].status, 'closed', 'the problem is gone, so the alert clears');
@@ -127,7 +128,7 @@ describe('connector framework and push contract (#18)', { skip }, () => {
     assert.equal((await db.query("SELECT max(missed_syncs)::int AS m FROM ci_sources WHERE source_system = 'OP5'")).rows[0].m, 0, 'a failed run marks nothing missed');
     op5.state.fail = false;
     const runs = (await admin.get(`/api/connectors/${c.id}/runs`)).body;
-    assert.ok(runs.length >= 4 && runs[0].status === 'failed' && runs.some((r: any) => r.counts.created + r.counts.matched === 2));
+    assert.ok(runs.length >= 4 && runs[0].status === 'failed' && runs.some((r: any) => r.counts.created + r.counts.matched === 3));
   });
 
   test('a connector owns its source system', async () => {

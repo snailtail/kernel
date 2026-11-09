@@ -4,6 +4,7 @@
 // - runs never overlap (a lease per connector) and every run is logged with counts and errors;
 // - a full snapshot that failed or shrank implausibly never marks CIs missing.
 import { KUBERNETES } from './connector-kubernetes.js';
+import { OP5 } from './connector-op5.js';
 import { IMAP, MSGRAPH } from './connector-mailbox.js';
 import { z } from 'zod';
 import type { User } from '../security/auth.js';
@@ -141,55 +142,6 @@ export interface ConnectorType {
     warnings?: string[];
   }>;
 }
-
-const OP5_STATE: Record<number, NormalisedEvent['severity']> = { 1: 'warning', 2: 'critical', 3: 'minor' };
-
-/** OP5 Monitor (and Naemon/Livestatus REST): hosts become CIs, services with problems become events. */
-const OP5: ConnectorType = {
-  label: 'OP5 Monitor',
-  config: z.object({
-    base_url: z.string().url().refine((u) => /^https?:\/\//.test(u), 'http(s) only'),
-    /** Plain HTTP sends the credentials in clear text: only for a lab, and only when explicitly chosen. */
-    insecure_http: z.boolean().default(false),
-    /** A CA certificate (PEM) to trust for this connector only, e.g. an internal company CA. */
-    ca_pem: z.string().max(20_000).regex(/^-----BEGIN CERTIFICATE-----[\s\S]+-----END CERTIFICATE-----\s*$/, 'Paste a PEM certificate').optional().or(z.literal('')),
-    default_ci_type: z.string().max(50).default('virtual_machine'),
-    environment: z.enum(['prod', 'test', 'dev', 'other']).default('prod'),
-    sync_events: z.boolean().default(true),
-  }),
-  secret: z.object({ username: z.string().min(1).max(200), password: z.string().min(1).max(500) }),
-  test: async (ctx) => {
-    const hosts = await ctx.fetchJson('/api/filter/count?query=' + encodeURIComponent('[hosts] all') + '&format=json');
-    return `Connected: ${hosts.count ?? hosts} hosts`;
-  },
-  fetch: async (ctx) => {
-    const base = ctx.config.base_url.replace(/\/$/, '');
-    const hosts: any[] = await ctx.fetchJson('/api/filter/query?query=' + encodeURIComponent('[hosts] all') + '&columns=name,address,alias&limit=50000&format=json');
-    const cis = hosts.map((h) => ({
-      source_id: String(h.name),
-      source_url: `${base}/monitor/index.php/extinfo/details?host=${encodeURIComponent(h.name)}`,
-      name: String(h.name).slice(0, 200),
-      ci_type: ctx.config.default_ci_type,
-      environment: ctx.config.environment,
-      attributes: { ip: h.address ?? '', ...(String(h.name).includes('.') ? { fqdn: h.name } : {}) },
-    }));
-    let events: NormalisedEvent[] | undefined;
-    if (ctx.config.sync_events) {
-      const problems: any[] = await ctx.fetchJson(
-        '/api/filter/query?query=' + encodeURIComponent('[services] state != 0 and has_been_checked = 1') + '&columns=host.name,description,state,plugin_output,last_state_change&limit=50000&format=json',
-      );
-      events = problems.map((p) => ({
-        host: p['host.name'] ?? p.host?.name,
-        ci_source_id: p['host.name'] ?? p.host?.name,
-        check: String(p.description).slice(0, 200),
-        severity: OP5_STATE[p.state] ?? 'minor',
-        message: String(p.plugin_output ?? '').slice(0, 2000),
-        occurred_at: p.last_state_change ? new Date(p.last_state_change * 1000).toISOString() : undefined,
-      }));
-    }
-    return { cis, events };
-  },
-};
 
 export const CONNECTOR_TYPES: Record<string, ConnectorType> = { op5: OP5, kubernetes: KUBERNETES, imap: IMAP, msgraph: MSGRAPH };
 

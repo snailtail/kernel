@@ -106,7 +106,8 @@ const op5Schema = z.object({
   timestamp: z.number().int().positive(),
   host_address: z.string().max(255).optional(),
 });
-const OP5_SEVERITY = { OK: 'clear', UP: 'clear', WARNING: 'warning', UNKNOWN: 'minor', CRITICAL: 'critical', DOWN: 'critical', UNREACHABLE: 'major' } as const;
+/** OP5 states as severities, for the push adapter and the OP5 connector (#19) alike. */
+export const OP5_SEVERITY = { OK: 'clear', UP: 'clear', WARNING: 'warning', UNKNOWN: 'major', CRITICAL: 'critical', DOWN: 'critical', UNREACHABLE: 'major' } as const;
 
 /** Parses a payload of the given kind into normalised events. Throws 400 on anything that does not fit. */
 export function adapt(kind: Kind, body: unknown): NormalisedEvent[] {

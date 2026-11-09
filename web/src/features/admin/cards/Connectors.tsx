@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import { api } from '../../../api/client';
 import { formatDate, relativeTime } from '../../../format';
 import { useApi } from '../../../hooks';
@@ -78,7 +78,7 @@ export function ConnectorsCard() {
 
 /** Defaults for a new connector of each type. */
 const NEW: Record<string, { source_system: string; config: Record<string, any> }> = {
-  op5: { source_system: 'OP5', config: { default_ci_type: 'virtual_machine', environment: 'prod', sync_events: true } },
+  op5: { source_system: 'OP5', config: { default_ci_type: 'virtual_machine', environment: 'prod', sync_events: true, hostgroups_as_services: false, custom_variables: [] } },
   kubernetes: { source_system: 'Kubernetes', config: { node_ci_type: 'virtual_machine', environment: 'prod', sync_events: false } },
   imap: { source_system: '', config: { port: 993, security: 'tls', folder: 'INBOX' } },
   msgraph: { source_system: '', config: { folder: 'inbox' } },
@@ -91,6 +91,7 @@ function ConnectorEditor({ connector: c, types, onClose, onDone }: { connector: 
     environment: cfg.environment ?? 'prod', sync_events: cfg.sync_events ?? type === 'op5', username: '', password: '', token: '', private_allow: (c.private_allow ?? []).join(', '),
     schedule_minutes: c.schedule_minutes ?? 60, retire_after_days: c.retire_after_days ?? 14, enabled: c.enabled ?? true, insecure_http: cfg.insecure_http ?? false, ca_pem: cfg.ca_pem ?? '',
     exclude_namespaces: (cfg.exclude_namespaces ?? ['kube-system', 'kube-public', 'kube-node-lease']).join(', '), cluster_name: cfg.cluster_name ?? '', node_ci_type: cfg.node_ci_type ?? 'virtual_machine', owner_label: cfg.owner_label ?? '', console_url: cfg.console_url ?? '',
+    hostgroups_as_services: cfg.hostgroups_as_services ?? false, custom_variables: ((cfg.custom_variables ?? []) as string[]).join(', '),
     // Mailboxes (#48)
     host: cfg.host ?? '', port: cfg.port ?? 993, security: cfg.security ?? 'tls', folder: cfg.folder ?? (type === 'msgraph' ? 'inbox' : 'INBOX'), processed_folder: cfg.processed_folder ?? '',
     trusted_authserv_id: cfg.trusted_authserv_id ?? '', team_id: cfg.team_id ?? null as number | null, impact: cfg.impact ?? 3, urgency: cfg.urgency ?? 3,
@@ -108,7 +109,7 @@ function ConnectorEditor({ connector: c, types, onClose, onDone }: { connector: 
       : mail ? { ...target, host: form.host.trim(), port: Number(form.port), security: form.security, ca_pem: form.ca_pem.trim() }
       : k8s
       ? { ...shared, cluster_name: form.cluster_name, node_ci_type: form.node_ci_type, owner_label: form.owner_label.trim(), console_url: form.console_url.trim(), exclude_namespaces: form.exclude_namespaces.split(/[\s,]+/).filter(Boolean) }
-      : { ...shared, default_ci_type: form.default_ci_type, insecure_http: form.insecure_http };
+      : { ...shared, default_ci_type: form.default_ci_type, insecure_http: form.insecure_http, hostgroups_as_services: form.hostgroups_as_services, custom_variables: form.custom_variables.split(/[\s,]+/).map((v) => v.replace(/^_/, '')).filter(Boolean) };
     const secret = graph ? (form.client_id || form.client_secret ? { client_id: form.client_id.trim(), client_secret: form.client_secret } : null)
       : k8s ? (form.token ? { token: form.token.trim() } : null) : form.username || form.password ? { username: form.username, password: form.password } : null;
     const body = {
@@ -157,7 +158,9 @@ function ConnectorEditor({ connector: c, types, onClose, onDone }: { connector: 
       ) : k8s ? (
         <>
           <p className="hint-box full">Kernel reads the cluster with a read-only ServiceAccount: list on nodes, namespaces and workloads, never Secrets, ConfigMaps or pods. Apply the manifest below, then paste the API server, its CA and the token. <strong>Test</strong> then shows per kind whether the token may read it.</p>
-          <RbacManifest clusterName={form.cluster_name} events={form.sync_events} />
+          <SetupText type="kubernetes" params={{ cluster_name: form.cluster_name, sync_events: String(form.sync_events) }} summary="Read-only access for the cluster (kubectl apply -f kernel-reader.yaml)">
+            <p className="muted small">Token: <span className="mono">kubectl -n kernel get secret kernel-reader-token -o jsonpath='{'{.data.token}'}' | base64 -d</span>. CA: the same with <span className="mono">{'{.data.ca\\.crt}'}</span>.</p>
+          </SetupText>
           <label className="full">API server<input required type="url" placeholder="https://k8s.example.com:6443" value={form.base_url} onChange={(e) => setForm({ ...form, base_url: e.target.value })} /></label>
           <label className="full">ServiceAccount token<input type="password" autoComplete="new-password" placeholder={unchanged} required={!c.id} value={form.token} onChange={(e) => setForm({ ...form, token: e.target.value })} /></label>
           <label>Cluster name<input required maxLength={100} placeholder="prod-aks-1" value={form.cluster_name} onChange={(e) => setForm({ ...form, cluster_name: e.target.value })} /></label>
@@ -165,10 +168,14 @@ function ConnectorEditor({ connector: c, types, onClose, onDone }: { connector: 
         </>
       ) : (
         <>
+          <p className="hint-box full">Kernel reads hosts, their services and host groups through the OP5 HTTP API with a read-only user, and never sends commands. Create the user as below, then fill in the URL and its password. <strong>Test</strong> says whether OP5 accepts it.</p>
+          <SetupText type="op5" params={{ hostgroups_as_services: String(form.hostgroups_as_services) }} summary="A read-only OP5 user" />
           <label className="full">URL<input required type="url" placeholder="https://op5.example.com" value={form.base_url} onChange={(e) => setForm({ ...form, base_url: e.target.value })} /></label>
           <label>Username<input autoComplete="off" placeholder={unchanged} required={!c.id} value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} /></label>
           <label>Password<input type="password" autoComplete="new-password" placeholder={unchanged} required={!c.id} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></label>
-          <label>New CIs as<input value={form.default_ci_type} onChange={(e) => setForm({ ...form, default_ci_type: e.target.value })} /></label>
+          <label>New hosts as<input value={form.default_ci_type} onChange={(e) => setForm({ ...form, default_ci_type: e.target.value })} /></label>
+          <label>Custom variables to keep <span className="muted small">(as tags, besides CI_ID and OWNER)</span><input placeholder="TEAM, LOCATION" value={form.custom_variables} onChange={(e) => setForm({ ...form, custom_variables: e.target.value })} /></label>
+          <label className="check full"><input type="checkbox" checked={form.hostgroups_as_services} onChange={(e) => setForm({ ...form, hostgroups_as_services: e.target.checked })} /> Host groups as technical services <span className="muted small">(otherwise only a tag on each host)</span></label>
         </>
       )}
       {!mail && <label>Source system <span className="muted small">(owned by this connector)</span><input required value={form.source_system} onChange={(e) => setForm({ ...form, source_system: e.target.value })} /></label>}
@@ -187,27 +194,28 @@ function ConnectorEditor({ connector: c, types, onClose, onDone }: { connector: 
           <label className="full">Dashboard link <span className="muted small">(optional, with {'{cluster}'}, {'{kind}'}, {'{namespace}'} and {'{name}'})</span><input placeholder="https://rancher.example.com/c/{cluster}/explorer/{kind}/{namespace}/{name}" value={form.console_url} onChange={(e) => setForm({ ...form, console_url: e.target.value })} /></label>
         </>
       )}
-      {!mail && <label className="check"><input type="checkbox" checked={form.sync_events} onChange={(e) => setForm({ ...form, sync_events: e.target.checked })} /> {k8s ? 'Warning events (crash loops, out of memory, scheduling) as alerts' : 'Also fetch current problems as alerts'}</label>}
+      {!mail && <label className="check"><input type="checkbox" checked={form.sync_events} onChange={(e) => setForm({ ...form, sync_events: e.target.checked })} /> {k8s ? 'Warning events (crash loops, out of memory, scheduling) as alerts' : 'Also fetch current HARD problems as alerts (scheduled downtime opens no incident)'}</label>}
       <label className="check"><input type="checkbox" checked={form.enabled} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} /> Enabled</label>
     </FormModal>
   );
 }
 
-/** The least-privilege manifest for the settings in the form, ready to copy (#112). */
-function RbacManifest({ clusterName, events }: { clusterName: string; events: boolean }) {
+/** A type's setup text for the settings in the form, ready to copy: the Kubernetes manifest (#112), the OP5 user (#19). */
+function SetupText({ type, params, summary, children }: { type: string; params: Record<string, string>; summary: string; children?: ReactNode }) {
   const [text, setText] = useState('');
+  const query = new URLSearchParams(params).toString();
   useEffect(() => {
     const t = setTimeout(() => {
-      api.get<{ text: string }>(`/api/connectors/types/kubernetes/setup?${new URLSearchParams({ cluster_name: clusterName, sync_events: String(events) })}`).then((r) => setText(r.text)).catch(() => setText(''));
+      api.get<{ text: string }>(`/api/connectors/types/${type}/setup?${query}`).then((r) => setText(r.text)).catch(() => setText(''));
     }, 300);
     return () => clearTimeout(t);
-  }, [clusterName, events]);
+  }, [type, query]);
   if (!text) return null;
   return (
     <details className="full">
-      <summary>Read-only access for the cluster (kubectl apply -f kernel-reader.yaml)</summary>
+      <summary>{summary}</summary>
       <CopyBlock text={text} />
-      <p className="muted small">Token: <span className="mono">kubectl -n kernel get secret kernel-reader-token -o jsonpath='{'{.data.token}'}' | base64 -d</span>. CA: the same with <span className="mono">{'{.data.ca\\.crt}'}</span>.</p>
+      {children}
     </details>
   );
 }
