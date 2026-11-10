@@ -21,6 +21,15 @@ export function runtimeUrl() {
 // this module: every statement goes through query() or tx(), which tell the database who is asking (#53).
 const rawPool = new pg.Pool({ connectionString: runtimeUrl() });
 
+// Every statement sent on a runtime connection, transactions included, so tests can guard how many a path makes (#260).
+let statements = 0;
+rawPool.on('connect', (client) => {
+  const send = client.query.bind(client) as (...args: unknown[]) => unknown;
+  client.query = ((...args: unknown[]) => (statements++, send(...args))) as typeof client.query;
+});
+/** Statements sent so far by this process; a test takes the difference around a call. */
+export const statementCount = () => statements;
+
 /** The settings that tell the database who is asking, in this order: the viewer string, then its parts. */
 export const VIEWER_SETTINGS = ['kernel.viewer', 'kernel.uid', 'kernel.teams', 'kernel.scoped'];
 
