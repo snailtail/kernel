@@ -7,9 +7,11 @@ describe('bulk actions on lists (#110)', { skip }, () => {
   let admin: Client, pm: Client, analyst: Client, viewer: Client;
   const ids: Record<string, number> = {};
   let team: any;
+  let statementCount: () => number;
 
   before(async () => {
     k = await startKernel();
+    ({ statementCount } = await import('../../src/core/db.js'));
     [admin, pm, analyst, viewer] = await Promise.all([k.login('admin'), k.login('pm'), k.login('analyst'), k.login('viewer')]);
     for (const u of (await ownerQuery('SELECT id, username FROM users')).rows) ids[u.username] = u.id;
     team = (await admin.post('/api/teams', { name: 'Network' })).body;
@@ -78,12 +80,12 @@ describe('bulk actions on lists (#110)', { skip }, () => {
     const assigned = async (user: number) => (await ownerQuery("SELECT ref, title, summary, url FROM notifications WHERE user_id = $1 AND event = 'assigned' ORDER BY id", [user])).rows;
     const before = (await assigned(ids.pm)).length;
     // The single path, to compare with: each edit also returns the full record.
-    let t = performance.now();
+    let n = statementCount();
     for (const ref of refs.slice(0, 10)) assert.equal((await admin.patch(`/api/incidents/${ref}`, { urgency: 2 })).status, 200);
-    const single = (performance.now() - t) / 10;
-    t = performance.now();
+    const single = (statementCount() - n) / 10;
+    n = statementCount();
     const done = (await admin.post('/api/incidents/bulk', { ids: refs, operation: { op: 'assign', assignee_id: ids.pm } })).body;
-    const perRecord = (performance.now() - t) / 100;
+    const perRecord = (statementCount() - n) / 100;
     assert.equal(done.summary.changed, 100);
     const got = (await assigned(ids.pm)).slice(before);
     assert.equal(got.length, 1, 'one notification, not a hundred');
@@ -93,8 +95,8 @@ describe('bulk actions on lists (#110)', { skip }, () => {
     // One record is told as usual.
     await admin.post('/api/incidents/bulk', { ids: refs.slice(0, 1), operation: { op: 'assign', assignee_id: ids.analyst } });
     assert.equal((await assigned(ids.analyst)).at(-1).ref, refs[0]);
-    // Under 50 ms per record on a local database; elsewhere (a database over a tunnel), well under a single edit.
-    assert.ok(perRecord < 50 || perRecord < single * 0.6, `bulk ${perRecord.toFixed(0)} ms per record, single edits ${single.toFixed(0)} ms`);
+    // Statements, not milliseconds, so load cannot fail it (#260): about a third of a single edit's today.
+    assert.ok(perRecord < single / 2, `bulk ${perRecord} statements per record, single edits ${single}`);
   });
 
   test('outcomes per record: skipped when missing, failed with the rule that stopped it', async () => {
